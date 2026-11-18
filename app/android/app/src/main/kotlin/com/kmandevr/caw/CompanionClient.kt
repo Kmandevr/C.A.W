@@ -28,6 +28,12 @@ class AndroidPackageFacts(private val pm: PackageManager) : PackageFacts {
     override fun holdsPermission(pkg: String, permission: String): Boolean =
         pm.checkPermission(permission, pkg) == PackageManager.PERMISSION_GRANTED
 
+    override fun uidOf(pkg: String): Int? = try {
+        pm.getPackageUid(pkg, 0)
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    }
+
     override fun hasCertificateSha256(uid: Int, sha256: ByteArray): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             pm.hasSigningCertificate(uid, sha256, PackageManager.CERT_INPUT_SHA256)

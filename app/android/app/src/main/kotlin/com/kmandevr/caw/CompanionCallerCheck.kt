@@ -11,6 +11,9 @@ interface PackageFacts {
     /** Whether [pkg] holds [permission] (PackageManager.checkPermission). */
     fun holdsPermission(pkg: String, permission: String): Boolean
 
+    /** PackageManager.getPackageUid(pkg, 0): the uid [pkg] runs as now, or null when it isn't installed. */
+    fun uidOf(pkg: String): Int?
+
     /** API 28+: PackageManager.hasSigningCertificate(uid, sha256, CERT_INPUT_SHA256). */
     fun hasCertificateSha256(uid: Int, sha256: ByteArray): Boolean
 
@@ -82,7 +85,10 @@ object CompanionCallerCheck {
         }
         val signers = facts.currentSignerSha256(expectedPackage)
         val current = signers != null && signers.size == 1 && signers[0].contentEquals(pinnedSha256)
-        val system = sdkInt < API_SIGNING_CERTIFICATE || facts.hasCertificateSha256(sendingUid, pinnedSha256)
+        // API 26 and 27 have no uid-bound check: the signer was read by package name, so the package must still run
+        // as the sender's uid after the read (a package replaced in between gets a new uid).
+        val system = if (sdkInt < API_SIGNING_CERTIFICATE) facts.uidOf(expectedPackage) == sendingUid
+            else facts.hasCertificateSha256(sendingUid, pinnedSha256)
         return if (current && system) Verdict.ALLOWED else Verdict.WRONG_SIGNER
     }
 
