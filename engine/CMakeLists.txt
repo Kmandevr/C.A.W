@@ -137,6 +137,11 @@ if(CAW_TSAN)
   add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
   add_link_options(-fsanitize=thread)
 endif()
+# A sanitizer build of the engine's test components links the sanitizer runtime: let the pre-load scan allow it
+# as a dependency, so the sanitizer and TSan CI jobs can scan those components (never set in a shipped build).
+if(CAW_SANITIZE OR CAW_TSAN)
+  add_compile_definitions(CAW_SCAN_ALLOW_SANITIZER)
+endif()
 # Link-time optimisation (speed phase 1, docs/engine-performance.md): every engine target in an optimised
 # configuration (Release, RelWithDebInfo: Android Gradle's release, MinSizeRel), when the toolchain supports it.
 # Debug and sanitizer builds stay without it. Set here, so it reaches only this directory's targets (the app's
@@ -202,7 +207,7 @@ target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp
-  src/scan/declarations.cpp src/scan/policy.cpp src/scan/sha256.cpp src/scan/scan_file.cpp)
+  src/scan/declarations.cpp src/scan/policy.cpp src/scan/sha256.cpp src/scan/scan_file.cpp src/scan/syscall_sites.cpp)
 # fx-dynamics begin: the Dynamics and Drive effects
 # Audio assets, clips, the sampler and audio input (WP-J); miniaudio's decoders compiled privately (static).
 target_sources(caw_core PRIVATE src/asset_store.cpp src/time_stretch.cpp src/audio_clips.cpp src/audio_input.cpp
@@ -343,7 +348,7 @@ target_include_directories(caw_cli PRIVATE src)
     "CAW_TEST_STARTER_PATH=\"$<TARGET_FILE:caw_test_starter_bass>\""
     "CAW_TEST_DECLARED_PATH=\"$<TARGET_FILE:caw_test_declared>\""
     "CAW_TEST_LIBCAW_PATH=\"$<TARGET_FILE:caw_engine>\"")
-  target_sources(caw_tests PRIVATE tests/scan_test.cpp tests/scan_load_test.cpp tests/scan_bypass_test.cpp)  # the pre-load scan (1.0.7)
+  target_sources(caw_tests PRIVATE tests/scan_test.cpp tests/scan_load_test.cpp tests/scan_bypass_test.cpp tests/scan_syscall_test.cpp)  # the pre-load scan (1.0.7)
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)

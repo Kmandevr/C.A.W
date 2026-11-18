@@ -95,6 +95,18 @@ TEST(scan_bypass_non_system_dependencies_and_search_paths_block) {
     s = plain();
     s.needed = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "liblog.so", "libc++_shared.so"};
     CHECK(componentVerdict(scanBinary(buildElf(s))) == Verdict::Clean);
+    // The sanitizer runtime counts as a system library only in a sanitizer build of the engine, so the sanitizer
+    // and TSan CI jobs can scan their instrumented components.
+    s = plain();
+    s.needed = {"libc.so.6", "libasan.so.8"};
+    r = scanBinary(buildElf(s));
+#ifdef CAW_SCAN_ALLOW_SANITIZER
+    CHECK(!find(r, Capability::LoadCode, FindingKind::Dependency, "libasan"));
+    CHECK(componentVerdict(r) == Verdict::Clean);
+#else
+    CHECK(find(r, Capability::LoadCode, FindingKind::Dependency, "libasan"));
+    CHECK(componentVerdict(r) == Verdict::Blocked);
+#endif
     PeSpec pe;
     pe.imports = {{"KERNEL32.dll", {"GetCurrentThreadId"}}, {"payload.dll", {"Run"}},
                   {"api-ms-win-crt-runtime-l1-1-0.dll", {"_initterm"}}, {"VCRUNTIME140.dll", {"memcpy"}}};
@@ -106,14 +118,16 @@ TEST(scan_bypass_non_system_dependencies_and_search_paths_block) {
     CHECK(componentVerdict(r) == Verdict::Blocked);
 }
 
-// 3. syscall() reaches any system call by number (connect, execve).
-TEST(scan_bypass_the_syscall_function_is_certain) {
+// 3. syscall() reaches any system call by number (connect, execve). An imported syscall that this fixture never
+// calls is a notice; a real call to it is analysed per site in scan_syscall_test.cpp (futex passes, anything else
+// blocks). An x86-64 component that calls it stays strict (certain) whatever the number.
+TEST(scan_bypass_the_syscall_function_without_a_call_is_a_notice) {
     ElfSpec s = plain();
     s.imports = {"syscall"};
     const Report r = scanBinary(buildElf(s));
     const Finding* f = find(r, Capability::Packed, FindingKind::Import, "syscall");
-    CHECK(f && f->strength == Strength::Certain);
-    CHECK(componentVerdict(r) == Verdict::Blocked);
+    CHECK(f && f->strength == Strength::Hint);
+    CHECK(componentVerdict(r) != Verdict::Blocked);
 }
 
 // 4. svc with any immediate is a system call on Linux; 5. the loader maps whole pages, so bytes beside the
