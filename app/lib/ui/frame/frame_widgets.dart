@@ -220,6 +220,10 @@ class SectionRail extends StatelessWidget {
       );
 }
 
+/// Left-handed layout (Settings › Appearance and feel › Layout and sizes, #244): a bar's children in mirrored order,
+/// so Play and Record sit under the left thumb.
+List<Widget> handed(bool leftHanded, List<Widget> children) => leftHanded ? children.reversed.toList() : children;
+
 /// Play, stop, record and undo within thumb reach, with Automate and the on-screen keys (which slide up above it).
 /// A sideways drag on it scrubs the playhead (one bar per 48 px).
 class BottomTransport extends StatefulWidget {
@@ -300,7 +304,7 @@ class _BottomTransportState extends State<BottomTransport> {
         height: (widget.compact ? 40 : 50) + widget.inset.bottom,
         padding: EdgeInsets.fromLTRB(6 + widget.inset.left, 0, 6 + widget.inset.right, widget.inset.bottom),
         decoration: _barDecoration(top: true),
-        child: Row(children: [
+        child: Row(children: handed(s.settings.leftHanded, [
           Pressable(child: IconButton(
             key: const ValueKey('transport-undo'),
             tooltip: 'Undo (Ctrl+Z)',
@@ -371,7 +375,7 @@ class _BottomTransportState extends State<BottomTransport> {
           const SizedBox(width: 4),
           // Record plays a USB keyboard or the on-screen keys, and records the armed audio tracks (audio_record.dart).
           RecordButton(midi: widget.midi, state: s, constraints: small),
-        ]),
+        ])),
       ),
     );
     if (midi == null) return bar;

@@ -7,6 +7,7 @@
 #include "audio_input.h"
 #include "block_fifo.h"
 #include "engine.h"
+#include "output_safety.h"
 
 namespace caw {
 
@@ -73,6 +74,13 @@ public:
         processNs_ = 0;
         return v;
     }
+    // Of the callback's time, the output safety stage's (API 35), since the last take.
+    int64_t takeSafetyNs() noexcept {
+        const int64_t v = safetyNs_;
+        safetyNs_ = 0;
+        return v;
+    }
+    const OutputSafety& outputSafety() const noexcept { return safety_; }
 
     // Fills `frames` interleaved stereo frames of `out` from the engine. Returns the frames the engine rendered
     // (more or fewer than `frames` through the FIFO), for Engine::reportLoad. `input(m, channels)` gives the
@@ -92,6 +100,16 @@ public:
                 processNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
             } else {
                 e.process(l, r, m);
+            }
+            // The live output's mono check and safety limiter (API 35), here and never in a render; timed apart
+            // in the Benchmark's live run (its "master" part there).
+            const int safety = e.outputSafety();
+            if (timeProcess_ && safety != 0) [[unlikely]] {
+                const auto t0 = std::chrono::steady_clock::now();
+                safety_.process(l, r, m, safety, e.sampleRate());
+                safetyNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+            } else {
+                safety_.process(l, r, m, safety, e.sampleRate());
             }
             live.afterCallback(l, r, m);  // the latency ping
             rendered += m;
@@ -120,7 +138,8 @@ public:
 private:
     BlockFifo<kBlock> fifo_;
     bool useFifo_ = true, varying_ = false, timeProcess_ = false;
-    int64_t processNs_ = 0;
+    int64_t processNs_ = 0, safetyNs_ = 0;
+    OutputSafety safety_;
     int latency_ = 0, meanHold_ = 0;
     float l_[kChunk] = {}, r_[kChunk] = {};
 };

@@ -844,6 +844,11 @@ class Engine implements TempoEngine {
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
 
+  /// The live output's last stage (API 35, #244), in the device callback only (renders and exports never run it):
+  /// [limiter], a gentle safety limiter that keeps what plays under -1 dBFS, and [mono], both sides as their mean.
+  void setOutputSafety({required bool limiter, required bool mono}) =>
+      _b.setOutputSafety(_handle, (limiter ? 1 : 0) | (mono ? 2 : 0));
+
   /// Sound quality (CAW_QUALITY_*: 0 Eco, 1 Normal, 2 High): what the built-ins spend on oversampling, unison
   /// copies, reverb density and display updates.
   void setQuality(int quality) => _b.setQuality(_handle, quality);

@@ -444,7 +444,24 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     widget.state.revealStartRequests.addListener(_revealStart);
     _hScroll.addListener(_onHScroll);
     widget.state.onFrozenEdit = _frozenEdit;
+    // Remember zoom per project (#244): the app reads and restores the view through these hooks.
+    widget.state..readArrangeView = _arrangeView..applyArrangeView = _restoreArrangeView;
+    if (widget.state.savedArrangeView case final v?) _restoreArrangeView(v);
   }
+
+  /// The view now, for Remember zoom per project (#244): the zoom, the step at the left edge, the tracks' scroll.
+  ArrangeView? _arrangeView() => !_hScroll.hasClients ? null : (zoom: zoom, left: _hScroll.positions.last.pixels / _stepW,
+      top: _drag.vScroll.hasClients ? _drag.vScroll.positions.last.pixels : 0.0);
+
+  /// Puts a remembered view back once the lanes are laid out.
+  void _restoreArrangeView(ArrangeView v) => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_hScroll.hasClients) return;
+        _setZoom(v.zoom.clamp(minZoom, maxZoom).toDouble(), leftStep: v.left);
+        if (_drag.vScroll.hasClients) {
+          final p = _drag.vScroll.positions.last;
+          p.jumpTo(v.top.clamp(0.0, p.maxScrollExtent).toDouble());
+        }
+      });
 
   bool _asking = false;
 
@@ -627,6 +644,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   @override
   void dispose() {
     if (widget.state.onFrozenEdit == _frozenEdit) widget.state.onFrozenEdit = null;
+    widget.state.rememberArrangeView();  // #244: the view is kept as the arranger closes
+    if (widget.state.readArrangeView == _arrangeView) widget.state..readArrangeView = null..applyArrangeView = null;
     widget.state.tick.removeListener(_followPlayhead);
     widget.state.revealStartRequests.removeListener(_revealStart);
     _router?.unregister(Area.arranger, _keys);

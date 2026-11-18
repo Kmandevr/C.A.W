@@ -364,11 +364,15 @@ void main() {
     });
 
     keyTest('Settings: rows by arrows, Space toggles, Right turns a switch on and Left off', (tester) async {
-      await pumpApp(tester, SettingsSectionBody(section: SettingsSection.keys, deps: SettingsDeps(settings: s.settings)));
+      await pumpApp(tester, SettingsSectionBody(section: SettingsSection.app, deps: SettingsDeps(settings: s.settings)));
+      // Vim keys are under Keys and shortcuts' More fold (#244).
+      await tester.ensureVisible(find.byKey(const ValueKey('more-keys')));
+      await tester.tap(find.byKey(const ValueKey('more-keys')));
+      await tester.pumpAndSettle();
       await key(tester, LogicalKeyboardKey.tab);
       expect(KeyArea.focused?.area, Area.settings);
       // Down to the Vim keys switch.
-      for (var i = 0; i < 10 && focusedLabel() != 'Vim keys everywhere'; i++) {
+      for (var i = 0; i < 80 && focusedLabel() != 'Vim keys everywhere'; i++) {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }
       expect(focusedLabel(), 'Vim keys everywhere');

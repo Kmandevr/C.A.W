@@ -1,4 +1,6 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
+import 'output_watch.dart';
+import 'track_defaults.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -94,7 +96,13 @@ class AppState extends ChangeNotifier implements StressHost {
     _density = this.settings.density;
     _lookRevision = this.settings.lookRevision;
     this.settings.addListener(_settingsChanged);
+    outputWatch = OutputWatch(this);
+    addListener(outputWatch.update);
+    foreground.addListener(outputWatch.update);
   }
+
+  /// Pause when unplugged and Keep the screen awake (#244, output_watch.dart).
+  late final OutputWatch outputWatch;
 
   late bool _light;
   late PerformanceMode _performanceMode;
@@ -105,6 +113,7 @@ class AppState extends ChangeNotifier implements StressHost {
   void _settingsChanged() {
     _docChanged(); // the swap timing and the voice budget are in the engine JSON
     applyAudioSettings();
+    outputWatch.update();
     final nextMode = settings.performanceMode;
     final nextDensity = settings.density;
     final nextLook = settings.lookRevision;
@@ -250,6 +259,7 @@ class AppState extends ChangeNotifier implements StressHost {
   AudioBuffer? _buffer;
   bool? _bufferRecording;
   String? _deviceChoice, _clickChoice;
+  (bool, bool)? _safetyChoice;
 
   /// Sends the sound quality, the device's choice (device, callback size, exclusive mode), the click's sound and the
   /// buffer mode to the engine when they (or whether a recording runs) changed. A device choice reopens a running
@@ -272,6 +282,12 @@ class AppState extends ChangeNotifier implements StressHost {
     if (_clickChoice != click) {
       _clickChoice = click;
       e.setMetronomeSound(settings.clickVolume, settings.clickSound.index);
+    }
+    // The live output's safety limiter and mono check (API 35, #244): never in an export.
+    final safety = (settings.safetyLimiter, settings.monoCheck);
+    if (_safetyChoice != safety) {
+      _safetyChoice = safety;
+      e.setOutputSafety(limiter: settings.safetyLimiter, mono: settings.monoCheck);
     }
     final rec = recording ?? _bufferRecording ?? false;
     if (_buffer != settings.audioBuffer || _bufferRecording != rec) {
@@ -662,6 +678,7 @@ class AppState extends ChangeNotifier implements StressHost {
   void dispose() {
     _disposed = true;
     settings.removeListener(_settingsChanged);
+    outputWatch.dispose();
     final pressureSubscription = _resourcePressureSubscription;
     _resourcePressureSubscription = null;
     if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
@@ -698,6 +715,7 @@ class AppState extends ChangeNotifier implements StressHost {
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
     meterTimeline.push(MeterReading(now, meters, layerMeters));
+    outputWatch.poll(now, playing: meters.playing);  // a removed output, where the platform sends no event (#244)
     if (settings.bufferTuning && e.audioOn && meters.playing && now - _tuneReadUs > 1000000) _tuneBuffer(e, now);
     if (e.audioOn && now - _latencyReadUs > 3000000) {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
@@ -1447,6 +1465,25 @@ class AppState extends ChangeNotifier implements StressHost {
     notifyListeners();
   }
 
+  /// Remember zoom per project (#244): the arranger hands its view out through [readArrangeView] and takes one
+  /// back through [applyArrangeView] (both null while no arranger is built). The view is kept in the settings by
+  /// project id, never in the project file, so it is no edit and no undo step.
+  ArrangeView? Function()? readArrangeView;
+  void Function(ArrangeView view)? applyArrangeView;
+
+  /// Keeps the arrangement's view for the open project (Settings.rememberZoom on): on leaving a project, going to
+  /// the background, and when the arranger closes.
+  void rememberArrangeView() {
+    if (!settings.rememberZoom) return;
+    final view = readArrangeView?.call();
+    if (view == null || settings.projectViews[project.id] == view) return;
+    settings.rememberProjectView(project.id, view);
+    unawaited(settings.save());
+  }
+
+  /// The open project's remembered view, while Remember zoom per project is on.
+  ArrangeView? get savedArrangeView => settings.rememberZoom ? settings.projectViews[project.id] : null;
+
   /// Whether the app is in front (the lifecycle's last word): the microphone is released behind it unless a
   /// recording runs (`AudioRecorder`).
   final foreground = ValueNotifier<bool>(true);
@@ -1463,6 +1500,7 @@ class AppState extends ChangeNotifier implements StressHost {
     // and its load history is forgotten, going away and coming back (the engine sheds again if it must).
     e.clearOverload();
     if (!foreground) {
+      rememberArrangeView();
       flush();
       if (!meters.playing) e.stopAudio();
     } else if (!e.audioOn || !e.audioStatus().running) {
@@ -2101,7 +2139,7 @@ class AppState extends ChangeNotifier implements StressHost {
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: 'Layer ${project.layers.length + 1}',
-      color: project.layers.length % LayerDoc.trackColors,
+      color: newTrackColor(NewTrackKind.midi),
       lengthSteps: project.stepsPerBar,
       volume: 1, // 0 dB (owner, 2026-11-10)
     ));
@@ -2331,7 +2369,7 @@ class AppState extends ChangeNotifier implements StressHost {
   /// (REAPER, UG 5.13.5).
   void addFolder({String? parentId}) {
     final parent = parentId == null ? null : project.layers.where((l) => l.id == parentId && l.isFolder).firstOrNull;
-    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % LayerDoc.trackColors,
+    final folder = LayerDoc(id: newId('l'), name: 'Group', color: newTrackColor(NewTrackKind.folder),
         parentId: parent?.id, isFolder: true, busEnabled: true);
     var at = project.layers.length;
     if (parent != null) {
@@ -2361,6 +2399,7 @@ class AppState extends ChangeNotifier implements StressHost {
   Future<List<ProjectSummary>> listProjects() async => await _storage?.list() ?? const [];
 
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
+    rememberArrangeView();  // the project being left keeps its zoom and scroll (#244)
     if (saveCurrent) await flush();
     engine?.stop();
     pausedStep = null;
@@ -2410,6 +2449,7 @@ class AppState extends ChangeNotifier implements StressHost {
     await _storage?.setLastOpened(p.id);
     await flush();
     notifyListeners();
+    if (savedArrangeView case final view?) applyArrangeView?.call(view);
     await _syncNow();
     unawaited(prepareNativeComponents());
     // Linked sample files first (their paths on this device), then what is still missing (sample_use.dart).

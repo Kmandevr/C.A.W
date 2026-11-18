@@ -367,7 +367,7 @@ class _ShellState extends State<Shell> {
   /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
   /// Selected), not on every app-state change.
   Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
-      s.project.name, LiveMidi.current, AutomationWriter.current, s.project.loopsRange);
+      s.project.name, LiveMidi.current, AutomationWriter.current, s.project.loopsRange, s.settings.leftHanded);
 
   Widget? _banner() {
     final error = s.engineError ?? s.audioError ?? s.openError;
@@ -387,8 +387,9 @@ class _ShellState extends State<Shell> {
     );
   }
 
-  /// Desktop and tablets: the rail, the transport bar and the docking panels.
-  Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
+  /// Desktop and tablets: the rail, the transport bar and the docking panels; left-handed (#244), the rail on the
+  /// right.
+  Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: handed(s.settings.leftHanded, [
         Selected(
           select: () => sectionOfPanel(_dock.keyPanel),
           builder: (_) => SectionRail(
@@ -442,7 +443,7 @@ class _ShellState extends State<Shell> {
                   child: BackgroundHintFeedback(child: LiveKeysPanel(midi: m, state: s)))),
           ]),
         ),
-      ]);
+      ]));
 
   /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
   /// bottom (both hide while the keyboard is open); landscape has a narrow rail on the left with the project and More,
@@ -478,6 +479,7 @@ class _ShellState extends State<Shell> {
       Positioned(top: 0, left: 0, right: 0, child: Center(child: BarsHandle(sections: _sections))),
     ]);
     if (landscape) {
+      final lefty = s.settings.leftHanded;
       final small = IconButton.styleFrom(iconSize: 18, visualDensity: VisualDensity.compact,
           minimumSize: const Size(34, 34), padding: const EdgeInsets.all(6));
       return Theme(
@@ -486,10 +488,12 @@ class _ShellState extends State<Shell> {
           visualDensity: VisualDensity.compact,
           iconButtonTheme: IconButtonThemeData(style: small.merge(Theme.of(context).iconButtonTheme.style)),
         ),
-        child: Row(children: [
-          Selected(select: () => (_sections.current, pad, s.project.name), builder: (_) => SectionRail(
+        // Left-handed (#244): the rail on the right, the screen's side insets swapped with it.
+        child: Row(children: handed(lefty, [
+          Selected(select: () => (_sections.current, pad, s.project.name, lefty), builder: (_) => SectionRail(
             compact: true,
-            inset: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
+            inset: lefty ? EdgeInsets.only(right: pad.right, top: pad.top, bottom: pad.bottom)
+                : EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
             current: _sections.current,
             onSelect: _sections.show,
             top: Tooltip(
@@ -505,13 +509,15 @@ class _ShellState extends State<Shell> {
             child: Column(children: [
               SizedBox(height: pad.top),
               ?_banner(),
-              Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right), child: body)),
+              Expanded(child: Padding(padding: lefty ? EdgeInsets.only(left: pad.left) : EdgeInsets.only(right: pad.right),
+                  child: body)),
               if (!keyboard)
                 Selected(select: () => (_transportLook(), pad), builder: (_) => BottomTransport(
                   state: s,
                   midi: LiveMidi.current,
                   compact: true,
-                  inset: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
+                  inset: lefty ? EdgeInsets.only(left: pad.left, bottom: pad.bottom)
+                      : EdgeInsets.only(right: pad.right, bottom: pad.bottom),
                   extras: [
                     _BpmButton(state: s),
                     const SizedBox(width: 8),
@@ -521,7 +527,7 @@ class _ShellState extends State<Shell> {
                 )),
             ]),
           ),
-        ]),
+        ])),
       );
     }
     final status = Selected(select: () => (s.project, s.project.name, s.project.bpm),
@@ -775,7 +781,9 @@ class _TransportBar extends StatelessWidget {
           ),
           RecordButton(midi: LiveMidi.current, state: state),
         ];
-        return Row(children: [
+        // Left-handed (#244): mirrored, Play and Record on the left.
+        final lefty = state.settings.leftHanded;
+        return Row(children: handed(lefty, [
           const CrowLogo(size: 30),
           const SizedBox(width: 8),
           name(
@@ -793,11 +801,11 @@ class _TransportBar extends StatelessWidget {
             ),
           ),
           if (narrow)
-            Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: true,
-                child: Row(mainAxisSize: MainAxisSize.min, children: tail)))
+            Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: !lefty,
+                child: Row(mainAxisSize: MainAxisSize.min, children: handed(lefty, tail))))
           else
             ...tail,
-        ]);
+        ]));
       }),
     );
   }

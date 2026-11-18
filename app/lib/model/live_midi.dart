@@ -441,7 +441,7 @@ class LiveMidi extends ChangeNotifier {
     if (!recording || from == null) return;
     // Notes begun in the pre-roll (before the record point, on the first pass) are heard, not recorded.
     if (pass == 0 && start < from - 1e-9) return;
-    // Written earlier by the recording offset, for the delay between a note and hearing it (Settings › Recording).
+    // Written earlier by the MIDI note offset, for the delay between a note and hearing it (Settings › Sound › Latency).
     final early = recordOffsetSteps;
     taken.add(TakenNote(start - early, math.max(0.25, end - start), pitch, vel, pass));
   }

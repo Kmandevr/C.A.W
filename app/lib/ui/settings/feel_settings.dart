@@ -1,11 +1,12 @@
-// Settings › Feel: motion, edit animations (style and kinds), haptics and their strength, the quick actions bar and
-// how long-press menus open.
+// Settings › Appearance and feel's Motion card (motion, edit animations, their kinds, the startup animation) and
+// Haptics and menus card (haptics and their strength, long-press menus, the quick actions bar) (#244).
 import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import 'settings_deps.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
 class FeelSettings extends StatelessWidget {
@@ -16,6 +17,7 @@ class FeelSettings extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = deps.settings;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SettingsCardView(card: SettingsCard.motion, rows: [
       settingChoice<MotionLevel>('feel.motion', s.motion,
           const [(MotionLevel.full, 'Full'), (MotionLevel.reduced, 'Reduced'), (MotionLevel.off, 'Off')],
           (v) => s.update((x) => x.motion = v),
@@ -27,8 +29,6 @@ class FeelSettings extends StatelessWidget {
                   MotionLevel.reduced => 'Fades only: nothing slides, grows or springs',
                   MotionLevel.off => 'Only what helps: drag ghosts, snapping and press feedback',
                 }),
-      settingSwitch('feel.startupAnimation', s.fullStartupAnimation, (v) => s.update((x) => x.fullStartupAnimation = v),
-          icon: Icons.play_circle_outline),
       settingChoice<EditMotionStyle>('feel.editStyle', s.editMotionStyle,
           [for (final v in EditMotionStyle.values) (v, v.label)],
           s.motion == MotionLevel.off ? null : (v) => s.update((x) => x.editMotionStyle = v),
@@ -38,12 +38,17 @@ class FeelSettings extends StatelessWidget {
               : s.editMotionStyle == EditMotionStyle.subtle
                   ? 'Subtle: short, quiet eases'
                   : 'Playful: a little longer, with a small overshoot'),
+      ], more: [
       for (final k in EditMotionKind.values)
         settingSwitch('feel.edit.${k.name}', s.editMotionKinds.contains(k),
             s.motion == MotionLevel.off
                 ? null
                 : (v) => s.update((x) => x.editMotionKinds = v ? {...x.editMotionKinds, k} : ({...x.editMotionKinds}..remove(k))),
             icon: Icons.animation_outlined),
+      settingSwitch('feel.startupAnimation', s.fullStartupAnimation, (v) => s.update((x) => x.fullStartupAnimation = v),
+          icon: Icons.play_circle_outline),
+      ]),
+      SettingsCardView(card: SettingsCard.touch, rows: [
       settingSwitch('feel.haptics', s.haptics, (v) => s.update((x) => x.haptics = v), icon: Icons.vibration),
       SettingRow(
         id: 'feel.hapticStrength',
@@ -66,12 +71,14 @@ class FeelSettings extends StatelessWidget {
           ),
         ),
       ),
-      settingSwitch('feel.quickActions', s.quickActions, (v) => s.update((x) => x.quickActions = v),
-          icon: Icons.touch_app),
       settingChoice<LongPressMenuStyle>('feel.longPress', s.longPressMenu,
           const [(LongPressMenuStyle.list, 'List'), (LongPressMenuStyle.ring, 'Ring')],
           (v) => s.update((x) => x.longPressMenu = v),
           icon: Icons.radio_button_checked),
+      ], more: [
+      settingSwitch('feel.quickActions', s.quickActions, (v) => s.update((x) => x.quickActions = v),
+          icon: Icons.touch_app),
+      ]),
     ]);
   }
 }

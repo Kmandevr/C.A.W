@@ -1,6 +1,7 @@
 // "Record just works" (owner, 2026-11-17): Record with nothing armed arms the selected track when it can take the
 // input there is (a MIDI keyboard, else the microphone), else makes a track for it (a MIDI track with the default
 // synth, or an audio track), then counts in and records as before.
+import 'track_defaults.dart';
 import 'app_state.dart';
 import 'audio_edit.dart';
 import 'audio_record.dart';
@@ -12,7 +13,7 @@ import 'project.dart';
 typedef RecordPlan = ({LayerDoc layer, bool audio, bool created});
 
 /// The instrument a track Record makes for a MIDI keyboard plays.
-const kRecordTrackInstrument = 'org.caw.synth.flagship';
+const kRecordTrackInstrument = 'org.caw.synth.flagship'; // Settings.newTrackInstrument's default (#244)
 
 extension RecordStart on AppState {
   /// Whether Record has an armed track to record: an armed audio track (a MIDI track is armed by Record itself).
@@ -25,9 +26,11 @@ extension RecordStart on AppState {
     final sel = project.layers.where((l) => l.id == selectedLayerId && !l.isFolder).firstOrNull;
     if (keyboard) {
       if (sel != null && !sel.isAudio) return (layer: sel, audio: false, created: false);
-      final track = LayerDoc(id: newId('l'), name: 'MIDI ${project.layers.length + 1}',
-          color: project.layers.length % LayerDoc.trackColors, parentId: sel?.parentId,
-          lengthSteps: project.stepsPerBar, volume: 1, instrument: ComponentUseDoc(kRecordTrackInstrument));
+      // Settings › Editing › New tracks (#244): its instrument (Flagship unless changed), name and colour.
+      final instrument = newMidiTrackInstrument();
+      final track = LayerDoc(id: newId('l'), name: newTrackName('MIDI ${project.layers.length + 1}', instrumentId: instrument?.id),
+          color: newTrackColor(NewTrackKind.midi), parentId: sel?.parentId,
+          lengthSteps: project.stepsPerBar, volume: 1, instrument: instrument);
       final at = sel == null ? project.layers.length : project.layers.indexOf(sel) + 1;
       endUndoStep();
       editProject((p) => p.layers.insert(at.clamp(0, p.layers.length), track));

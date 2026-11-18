@@ -1,5 +1,5 @@
-// Settings › Performance: the performance profile, Lightweight on overload, the frame rate, the Benchmark, and the
-// engine's hardware profile and plan.
+// Settings › App › Performance (#244): the performance profile, the frame rate, keeping the screen awake, the
+// Benchmark, Lightweight on overload, and the engine's hardware profile and plan.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import '../benchmark/benchmark_screen.dart';
 import '../frame_rate.dart';
 import '../theme.dart';
 import 'settings_deps.dart';
+import 'settings_registry.dart';
 import 'settings_widgets.dart';
 
 class PerformanceSettings extends StatelessWidget {
@@ -19,18 +20,27 @@ class PerformanceSettings extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = deps.settings;
     final hw = deps.engineProfile, plan = deps.executionPlan;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return SettingsCardView(card: SettingsCard.performance, rows: [
       settingDropdown<PerformanceMode>('performance.profile', s.performanceMode,
           [for (final m in PerformanceMode.values) (m, m.label)], (v) => s.update((x) => x
             ..performanceMode = v
             ..lightBySelf = false),
           icon: Icons.speed, subtitle: s.performanceMode.description),
-      settingSwitch('performance.lightAuto', s.lightAuto, (v) => s.update((x) => x.lightAuto = v),
-          icon: Icons.auto_mode, subtitle: 'Keeps the interface responsive while reducing the voice budget'),
       FrameRateRow(settings: s, controller: FrameRateController.current),
+      settingChoice<KeepAwake>('performance.keepAwake', s.keepAwake, [for (final k in KeepAwake.values) (k, k.label)],
+          (v) => s.update((x) => x.keepAwake = v),
+          icon: Icons.light_mode_outlined,
+          subtitle: switch (s.keepAwake) {
+            KeepAwake.off => 'The screen sleeps as the system sets',
+            KeepAwake.playing => 'The screen stays on while playing or recording',
+            KeepAwake.always => 'The screen stays on while C.A.W is in front',
+          }),
       Builder(
           builder: (context) => settingAction('performance.benchmark',
               icon: Icons.insights, iconColor: Neon.violet, onTap: () => showBenchmark(context, host: deps.state))),
+    ], more: [
+      settingSwitch('performance.lightAuto', s.lightAuto, (v) => s.update((x) => x.lightAuto = v),
+          icon: Icons.auto_mode, subtitle: 'Keeps the interface responsive while reducing the voice budget'),
       settingAction('performance.hardware',
           icon: Icons.memory, iconColor: Neon.green,
           subtitle: hw == null

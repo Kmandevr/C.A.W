@@ -445,6 +445,14 @@ void main() {
         await c.tester.tap(find.text(sec.title).first);
         await _settle(c.tester);
       }
+      // Every card's More fold open (#244), so its rarer rows are checked too.
+      for (final card in sec.cards) {
+        final more = find.byKey(ValueKey('more-${card.name}'));
+        if (more.evaluate().isEmpty) continue;
+        await c.tester.ensureVisible(more.first);
+        await c.tester.tap(more.first);
+        await _settle(c.tester);
+      }
       await c.shot('');
       await c.end('');
     });

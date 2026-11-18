@@ -463,7 +463,7 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     if (a->owner->muteOutput.load(std::memory_order_relaxed)) std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
     if (stress)
         stress->record(used, budget, static_cast<int32_t>(frames), stress->coreDue() ? callbackCore() : -1,
-                       a->render.takeProcessNs());
+                       a->render.takeProcessNs(), a->render.takeSafetyNs());
 }
 
 // The capture device's callback: its frames into the bridge, nothing else.

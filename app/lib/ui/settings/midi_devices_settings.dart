@@ -1,5 +1,5 @@
-// Settings › MIDI and input, devices: every MIDI device with an activity light and an on/off switch, the in-app
-// Bluetooth scan (Android), MPE and bend range, and the controller mappings made with "Learn MIDI CC".
+// Settings › Sound › MIDI and controllers' device rows: every MIDI device with an activity light and an on/off switch,
+// the in-app Bluetooth scan (Android), MPE and bend range, and the controller mappings made with "Learn MIDI CC".
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,9 +15,15 @@ import 'settings_deps.dart';
 import 'settings_widgets.dart';
 import '../pointer_input.dart';
 
+/// The device rows' ids, in their order.
+const midiDeviceRows = ['midi.devices', 'midi.bluetooth', 'midi.mpe', 'midi.bendRange', 'midi.mappings'];
+
 class MidiDevicesSettings extends StatelessWidget {
-  const MidiDevicesSettings({super.key, required this.deps});
+  const MidiDevicesSettings({super.key, required this.deps, required this.only});
   final SettingsDeps deps;
+
+  /// The rows shown ([midiDeviceRows] ids), so a card holds the ones it groups (#244).
+  final Set<String> only;
 
   @override
   Widget build(BuildContext context) {
@@ -25,8 +31,9 @@ class MidiDevicesSettings extends StatelessWidget {
     final s = deps.settings;
     final input = midi?.input;
     Widget page() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          settingHeading('Devices'),
-          if (midi == null || input == null)
+          if (!only.contains('midi.devices'))
+            const SizedBox.shrink()
+          else if (midi == null || input == null)
             settingAction('midi.devices', icon: Icons.usb, subtitle: 'This platform reads no MIDI devices yet; the on-screen keys play')
           else if (midi.ports.isEmpty)
             settingAction('midi.devices', icon: Icons.usb, subtitle: input.bluetooth == null
@@ -36,20 +43,24 @@ class MidiDevicesSettings extends StatelessWidget {
             SettingRow(id: 'midi.devices', child: Column(children: [
               for (final p in midi.ports) _DeviceRow(port: p, midi: midi, settings: s),
             ])),
-          if (input?.bluetooth case final bt?)
+          if (!only.contains('midi.bluetooth'))
+            const SizedBox.shrink()
+          else if (input?.bluetooth case final bt?)
             _BluetoothScan(bluetooth: bt)
           else
             settingAction('midi.bluetooth', icon: Icons.bluetooth_disabled,
-                subtitle: 'Pair a Bluetooth MIDI device in the system\'s Bluetooth settings; it then shows above'),
-          settingSwitch('midi.mpe', s.midiMpe, (v) => s.update((x) => x.midiMpe = v),
+                subtitle: 'Pair a Bluetooth MIDI device in the system\'s Bluetooth settings; it then shows under MIDI devices'),
+          if (only.contains('midi.mpe')) settingSwitch('midi.mpe', s.midiMpe, (v) => s.update((x) => x.midiMpe = v),
               icon: Icons.blur_on,
               subtitle: s.midiMpe
                   ? 'Channel 1 is the master; channels 2 to 16 each bend and press one note'
                   : 'Off: pitch bend and pressure move every note on their channel'),
-          settingDropdown<int>('midi.bendRange', s.midiBendRange,
+          if (only.contains('midi.bendRange')) settingDropdown<int>('midi.bendRange', s.midiBendRange,
               [for (final r in const [1, 2, 3, 5, 7, 12, 24, 48]) (r, '±$r')], (v) => s.update((x) => x.midiBendRange = v),
               icon: Icons.swap_vert),
-          if (midi == null)
+          if (!only.contains('midi.mappings'))
+            const SizedBox.shrink()
+          else if (midi == null)
             settingAction('midi.mappings', icon: Icons.tune, subtitle: 'None yet')
           else
             _Mappings(midi: midi),
@@ -231,7 +242,7 @@ class _Mappings extends StatelessWidget {
         }
 
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          settingHeading('Controller mappings'),
+          if (maps.isNotEmpty) settingHeading('Controller mappings'),
           if (maps.isEmpty)
             settingAction('midi.mappings', icon: Icons.tune,
                 subtitle: 'None yet: ${PointerInput.hold} a knob, choose Learn MIDI CC, and move a control on your device')

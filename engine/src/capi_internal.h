@@ -15,24 +15,30 @@
 // Preallocated by the run before it is installed; the callback only stores into it (no allocation, no lock).
 struct CawStressStats {
     static constexpr int64_t kCoreEvery = 64;  // callbacks between reads of the callback's core
-    explicit CawStressStats(size_t capacity) : loads(capacity), times(capacity), deviceIo(capacity), frames(capacity) {}
+    explicit CawStressStats(size_t capacity) : loads(capacity), times(capacity), deviceIo(capacity), safety(capacity), frames(capacity) {}
     std::vector<float> loads;    // per callback: its share of its own budget
     std::vector<float> times;    // per callback: microseconds
     std::vector<float> deviceIo; // per callback: microseconds outside Engine::process (the FIFO, the input bridge)
+    std::vector<float> safety;   // per callback: microseconds in the live output's safety stage (API 35)
     std::vector<int32_t> frames; // per callback: its size (devices may vary it)
     std::atomic<int64_t> written{0}, overBudget{0}, usedNs{0}, budgetNs{0}, framesSum{0}, deviceIoNs{0};
     std::atomic<int32_t> core{-1};  // the core the callback last ran on when read (-1: unknown)
     // Whether this callback should read its core: the first, then every kCoreEvery-th.
     bool coreDue() const noexcept { return written.load(std::memory_order_relaxed) % kCoreEvery == 0; }
-    // `processNs`: of usedSeconds, the time in Engine::process (the rest is the callback's device I/O).
-    void record(double usedSeconds, double budgetSeconds, int32_t callbackFrames, int32_t cpu, int64_t processNs = -1) noexcept {
+    // `processNs`: of usedSeconds, the time in Engine::process; `safetyNs` the live output's mono check and
+    // safety limiter (output_safety.h); the rest is the callback's device I/O.
+    void record(double usedSeconds, double budgetSeconds, int32_t callbackFrames, int32_t cpu, int64_t processNs = -1,
+                int64_t safetyNs = 0) noexcept {
         const int64_t at = written.load(std::memory_order_relaxed);
         const int64_t usedNs1 = static_cast<int64_t>(usedSeconds * 1e9);
-        const int64_t io = processNs < 0 ? 0 : usedNs1 > processNs ? usedNs1 - processNs : 0;
+        const int64_t outside = processNs < 0 ? 0 : usedNs1 > processNs ? usedNs1 - processNs : 0;
+        const int64_t safe = safetyNs < 0 ? 0 : safetyNs < outside ? safetyNs : outside;
+        const int64_t io = outside - safe;
         if (at < static_cast<int64_t>(loads.size())) {
             loads[static_cast<size_t>(at)] = static_cast<float>(budgetSeconds > 0 ? usedSeconds / budgetSeconds : 0.0);
             times[static_cast<size_t>(at)] = static_cast<float>(usedSeconds * 1e6);
             deviceIo[static_cast<size_t>(at)] = static_cast<float>(1e-3 * static_cast<double>(io));
+            safety[static_cast<size_t>(at)] = static_cast<float>(1e-3 * static_cast<double>(safe));
             frames[static_cast<size_t>(at)] = callbackFrames;
         }
         deviceIoNs.fetch_add(io, std::memory_order_relaxed);

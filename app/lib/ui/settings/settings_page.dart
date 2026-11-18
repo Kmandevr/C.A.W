@@ -1,5 +1,6 @@
-// Settings: a searchable list of sections (icon, title, a line of current values) that opens each section's page;
-// side by side on a wide window. A search result opens its page scrolled to the setting, which flashes.
+// Settings: a searchable list of five sections (icon, title, a line of current values) that opens each section's page
+// of grouped glass cards (#244); side by side on a wide window. A search result opens its page scrolled to the setting,
+// its card's More fold open, and the row flashes.
 import 'package:flutter/material.dart';
 
 import '../../engine/execution.dart';
@@ -16,14 +17,11 @@ import 'about_settings.dart';
 import 'audio_settings.dart';
 import 'code_settings.dart';
 import 'editing_settings.dart';
-import 'export_settings.dart';
 import 'feel_settings.dart';
 import 'keys_settings.dart';
 import 'look_settings.dart';
-import 'midi_settings.dart';
 import 'performance_settings.dart';
 import 'projects_settings.dart';
-import 'recording_settings.dart';
 import 'settings_deps.dart';
 import 'settings_registry.dart';
 import 'settings_widgets.dart';
@@ -44,7 +42,7 @@ class SettingsPage extends StatefulWidget {
   /// Opens the key bindings editor; null hides its row (no key router above).
   final Future<void> Function(BuildContext context)? onEditKeys;
 
-  /// The section shown first in the two-pane layout (Audio when null).
+  /// The section shown first in the two-pane layout (Sound when null).
   final SettingsSection? initial;
 
   @override
@@ -53,7 +51,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _search = TextEditingController();
-  late SettingsSection _open = widget.initial ?? SettingsSection.audio;
+  late SettingsSection _open = widget.initial ?? SettingsSection.sound;
   String? _highlight;
   int _jump = 0; // a new jump to the same setting flashes it again
 
@@ -257,18 +255,19 @@ class SettingsSectionBody extends StatelessWidget {
             key: ValueKey('section-page-${section.name}'),
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 32),
             child: switch (section) {
-              SettingsSection.audio => AudioSettings(deps: deps),
-              SettingsSection.midi => MidiSettings(deps: deps),
-              SettingsSection.recording => RecordingSettings(deps: deps),
+              SettingsSection.sound => SoundSettings(deps: deps),
               SettingsSection.editing => EditingSettings(deps: deps),
-              SettingsSection.code => CodeSettings(deps: deps),
-              SettingsSection.look => LookSettings(deps: deps),
-              SettingsSection.feel => FeelSettings(deps: deps),
-              SettingsSection.performance => PerformanceSettings(deps: deps),
+              SettingsSection.appearance => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  LookSettings(deps: deps),
+                  FeelSettings(deps: deps),
+                ]),
               SettingsSection.projects => ProjectsSettings(deps: deps),
-              SettingsSection.export => ExportSettings(deps: deps),
-              SettingsSection.keys => KeysSettings(deps: deps),
-              SettingsSection.about => AboutSettings(deps: deps),
+              SettingsSection.app => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  PerformanceSettings(deps: deps),
+                  CodeSettings(deps: deps),
+                  KeysSettings(deps: deps),
+                  AboutSettings(deps: deps),
+                ]),
             },
           ),
         )),

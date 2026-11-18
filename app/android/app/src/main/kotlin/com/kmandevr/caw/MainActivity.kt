@@ -170,6 +170,8 @@ class MainActivity : FlutterActivity() {
         val route = AudioRoute(applicationContext)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_EVENT_CHANNEL).setStreamHandler(route)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_METHOD_CHANNEL).setMethodCallHandler(route)
+        // Headphones unplugged, for Settings › Sound › Pause when unplugged (#244).
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/audio_noisy").setStreamHandler(AudioNoisy(applicationContext))
         val bluetooth = BluetoothMidi(this)
         bluetoothMidi = bluetooth
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, BLUETOOTH_EVENT_CHANNEL).setStreamHandler(bluetooth)

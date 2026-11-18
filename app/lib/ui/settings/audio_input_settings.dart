@@ -1,5 +1,6 @@
-// Settings › Audio's input part: audio input on or off (the microphone permission first), the input device and its
-// channels, the recording latency (measured with a warned noise ping, or typed in), punch in/out and the take format.
+// Settings › Sound's input rows: audio input on or off (the microphone permission first), the input device and its
+// channels, the recording latency (measured with a warned noise ping, or the audio take offset typed in), punch in/out
+// and the take format; each card shows the ones it holds ([AudioInputSettings.only], #244).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -13,9 +14,18 @@ import '../theme.dart';
 import 'settings_widgets.dart';
 import '../panel_motion.dart';
 
+/// The input rows' ids, in the order they show.
+const audioInputRows = ['audio.input', 'audio.inputDevice', 'audio.inputChannels', 'audio.latency', 'audio.latencyOffset',
+    'audio.punch', 'audio.recordFormat'];
+const allAudioInputRows = {'audio.input', 'audio.inputDevice', 'audio.inputChannels', 'audio.latency',
+    'audio.latencyOffset', 'audio.punch', 'audio.recordFormat'};
+
 class AudioInputSettings extends StatefulWidget {
-  const AudioInputSettings({super.key, required this.recorder});
+  const AudioInputSettings({super.key, required this.recorder, this.only = allAudioInputRows});
   final AudioRecorder recorder;
+
+  /// The rows this one shows ([audioInputRows] ids), in their order; every one by default.
+  final Set<String> only;
 
   @override
   State<AudioInputSettings> createState() => _AudioInputSettingsState();
@@ -71,6 +81,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
   @override
   void initState() {
     super.initState();
+    if (!widget.only.contains('audio.inputDevice')) return;  // only the device row lists the inputs
     unawaited(_readInputs().catchError((Object _) {}));
     _routeSub = r.state.latency.route.changes.listen((_) => unawaited(_readInputs().catchError((Object _) {})));
     // The list opens the backend: off the UI isolate.
@@ -142,7 +153,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
     final controller = TextEditingController(
         text: r.prefs.latencyOverride < 0 ? '' : r.latency.ms.toStringAsFixed(1));
     final v = await showDialog<String>(context: context, animationStyle: dialogAnimation(context), builder: (context) => AlertDialog(
-      title: const Text('Recording offset'),
+      title: const Text('Audio take offset'),
       content: TextField(key: const ValueKey('latency-offset-field'), controller: controller, autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(suffixText: 'ms', helperText: 'Empty: the measured latency, else the device\'s')),
@@ -168,16 +179,15 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
     final current = saved != null ? key(saved) : '';
     final lat = r.latency;
     final source = switch (lat.source) { 'override' => 'typed in', 'measured' => 'measured', _ => 'the device\'s estimate' };
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      settingHeading('Input and recording'),
-      settingSwitch('audio.input', p.enabled, _toggle, icon: Icons.mic_none,
+    final rows = <String, Widget>{
+      'audio.input': settingSwitch('audio.input', p.enabled, _toggle, icon: Icons.mic_none,
           subtitle: r.micBusy.value
               ? 'Microphone in use by another app: tried again when it is free'
               : r.inputOpen
                   ? 'On: the microphone is open for the armed and monitoring tracks'
                   : p.enabled ? 'On: the microphone opens only while a track is armed or monitoring'
                       : 'Off: arming a track turns it on'),
-      if (_inputs.isNotEmpty) _platformInput() else settingDropdown<String>('audio.inputDevice', current, [
+      'audio.inputDevice': _inputs.isNotEmpty ? _platformInput() : settingDropdown<String>('audio.inputDevice', current, [
         ('', 'System default'),
         for (final d in list)
           if (d.name.isNotEmpty) (key(d), '${d.name.length > 25 ? '${d.name.substring(0, 24)}…' : d.name}'
@@ -188,9 +198,9 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
       }, icon: Icons.settings_input_component,
           subtitle: _devices == null ? 'Where audio tracks record from'
               : 'Android routes its default to the built-in or a headset or USB microphone by itself'),
-      settingChoice<int>('audio.inputChannels', p.channels.clamp(1, 2) == p.channels ? p.channels : 2,
+      'audio.inputChannels': settingChoice<int>('audio.inputChannels', p.channels.clamp(1, 2) == p.channels ? p.channels : 2,
           [(1, 'Mono'), (2, 'Stereo')], (v) => r.chooseInput(channels: v), icon: Icons.surround_sound_outlined),
-      settingAction('audio.latency', icon: Icons.av_timer,
+      'audio.latency': settingAction('audio.latency', icon: Icons.av_timer,
           subtitle: _pinging ? 'Listening…'
               : 'Now ${lat.ms.toStringAsFixed(1)} ms ($source)'
                   '${_ping != null && !_ping!.reliable ? ' · the last measurement was unreliable' : ''}',
@@ -198,41 +208,49 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
               child: _pinging
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Measure'))),
-      settingAction('audio.latencyOffset', icon: Icons.tune,
+      'audio.latencyOffset': settingAction('audio.latencyOffset', icon: Icons.tune,
           subtitle: p.latencyOverride < 0 ? 'Not set: the measured or device latency is used'
               : '${lat.ms.toStringAsFixed(1)} ms, typed in (tap to change or clear)',
           onTap: _typeOffset),
-      settingChoice<PunchMode>('audio.punch', p.punch, const [
+      'audio.punch': settingChoice<PunchMode>('audio.punch', p.punch, const [
         (PunchMode.off, 'Off'), (PunchMode.loop, 'Loop range'), (PunchMode.selection, 'Selection'),
       ], (v) {
         p.punch = v;
         unawaited(p.save());
         setState(() {});
       }, icon: Icons.content_cut),
-      settingChoice<int>('audio.recordFormat', p.bits, const [(32, '32-bit float'), (24, '24-bit')], (v) {
-        p.bits = v;
-        unawaited(p.save());
-        setState(() {});
-      }, icon: Icons.save_alt),
-      Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 8), child: Text(
-          'Takes are saved in the project\'s folder; a take cut short by a crash is offered back when the project opens.',
-          style: const TextStyle(color: Neon.dim, fontSize: 11))),
+      'audio.recordFormat': Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        settingChoice<int>('audio.recordFormat', p.bits, const [(32, '32-bit float'), (24, '24-bit')], (v) {
+          p.bits = v;
+          unawaited(p.save());
+          setState(() {});
+        }, icon: Icons.save_alt),
+        Padding(padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), child: Text(
+            'Takes are saved in the project\'s folder; a take cut short by a crash is offered back when the project opens.',
+            style: const TextStyle(color: Neon.dim, fontSize: 11))),
+      ]),
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final id in audioInputRows) if (widget.only.contains(id)) rows[id]!,
     ]);
   });
 }
 
 /// The same rows, unavailable: shown where no recorder runs (no sound engine), so search still finds them.
 class AudioInputSettingsOff extends StatelessWidget {
-  const AudioInputSettingsOff({super.key});
+  const AudioInputSettingsOff({super.key, this.only = allAudioInputRows});
+  final Set<String> only;
+
+  static const _icons = {
+    'audio.input': Icons.mic_none, 'audio.inputDevice': Icons.settings_input_component,
+    'audio.inputChannels': Icons.surround_sound_outlined, 'audio.latency': Icons.av_timer,
+    'audio.latencyOffset': Icons.tune, 'audio.punch': Icons.content_cut, 'audio.recordFormat': Icons.save_alt,
+  };
 
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        settingHeading('Input and recording'),
-        for (final (id, icon) in const [
-          ('audio.input', Icons.mic_none), ('audio.inputDevice', Icons.settings_input_component),
-          ('audio.inputChannels', Icons.surround_sound_outlined), ('audio.latency', Icons.av_timer),
-          ('audio.latencyOffset', Icons.tune), ('audio.punch', Icons.content_cut), ('audio.recordFormat', Icons.save_alt),
-        ])
-          settingAction(id, icon: icon, iconColor: Neon.dim, subtitle: 'Needs the sound engine, which is not running here'),
+        for (final id in audioInputRows)
+          if (only.contains(id))
+            settingAction(id, icon: _icons[id], iconColor: Neon.dim, subtitle: 'Needs the sound engine, which is not running here'),
       ]);
 }
