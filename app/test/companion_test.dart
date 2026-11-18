@@ -1,5 +1,6 @@
 // The companion app's link and adapters (docs/companion-protocol.md) against fake links: absent, a timeout, another
-// protocol version, the known-bad override and a relay round trip; the Android link's checks; the build flavours.
+// protocol version, the known-bad override and a relay round trip; update.open's channel; the Android link's checks; the build
+// flavours.
 import 'dart:convert';
 import 'dart:io';
 
@@ -214,6 +215,51 @@ void main() {
       expect(out.started, isTrue);
       expect(installer.installs, 0);
       expect(await CompanionUpdateInstaller(link, installer).canInstall(), isTrue);
+    });
+
+    test('update.open carries the channel: {} on Stable, the name otherwise, the build on Every change only', () {
+      expect(updateOpenBody(UpdateChannel.stable, build: 'abcdef123456'), isEmpty);
+      expect(updateOpenBody(UpdateChannel.beta, build: 'abcdef123456'), {'channel': 'beta'});
+      expect(updateOpenBody(UpdateChannel.everyChange, build: 'ABCDEF123456'), {'channel': 'every', 'build': 'abcdef123456'});
+      expect(updateOpenBody(UpdateChannel.everyChange), {'channel': 'every'}); // a local build knows no commit
+      expect(updateOpenBody(UpdateChannel.everyChange, build: 'not hex'), {'channel': 'every'});
+      expect(UpdateChannel.values.map(companionChannelWire), ['stable', 'beta', 'every']);
+    });
+
+    test('the installer sends the current channel and reads why nothing installed', () async {
+      Future<(UpdateOutcome, Map<String, Object?>)> open(UpdateChannel channel, CompanionReply reply) async {
+        final link = _FakeLink(answers: {CompanionKind.updateOpen: reply});
+        final installer = _Installer();
+        final out = await CompanionUpdateInstaller(link, installer, channel: () => channel, build: () => '0123456789ab')
+            .install(File('x.apk'), AssetKind.apk);
+        expect(installer.installs, 0);
+        return (out, link.sent.single.$2);
+      }
+
+      var (out, sent) = await open(UpdateChannel.everyChange,
+          const CompanionReply(CompanionOutcome.ok, body: {'started': true, 'release': 'Every change (abcdef123456)'}));
+      expect(sent, {'channel': 'every', 'build': '0123456789ab'});
+      expect(out.started, isTrue);
+      (out, sent) = await open(UpdateChannel.stable,
+          const CompanionReply(CompanionOutcome.ok, body: {'started': false, 'reason': 'older', 'release': 'v1.0.6'}));
+      expect(sent, isEmpty);
+      expect(out.started, isFalse);
+      expect(out.message, contains('v1.0.6, older than this build'));
+      (out, _) = await open(UpdateChannel.beta,
+          const CompanionReply(CompanionOutcome.ok, body: {'started': false, 'reason': 'up_to_date', 'release': null}));
+      expect(out.message, 'The companion app found nothing newer on Beta.');
+      // A companion from before channels: `{}` reads as started, a channel's name as bad_request.
+      (out, _) = await open(UpdateChannel.stable, const CompanionReply(CompanionOutcome.ok));
+      expect(out.started, isTrue);
+      (out, _) = await open(UpdateChannel.beta, const CompanionReply(CompanionOutcome.badRequest));
+      expect(out.message, contains('too old to install from Beta'));
+    });
+
+    test('by default the channel is the running update service\'s', () async {
+      final link = _FakeLink(answers: {CompanionKind.updateOpen: const CompanionReply(CompanionOutcome.ok)});
+      expect(UpdateService.running, isNull);
+      await CompanionUpdateInstaller(link, _Installer()).install(File('x.apk'), AssetKind.apk);
+      expect(link.sent.single.$2, isEmpty); // no service: Stable
     });
 
     test('a refusal is an error, not a silent fallback', () async {
