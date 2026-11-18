@@ -42,13 +42,20 @@ class ScriptedPings extends FakeAudioIo {
 }
 
 class FakeBluetoothSettings implements BluetoothSettings {
-  int opened = 0;
+  int opened = 0, developer = 0;
+  DeveloperOptions answer = DeveloperOptions.opened;
   @override
   bool get canOpen => true;
   @override
   Future<bool> open() async {
     opened++;
     return true;
+  }
+
+  @override
+  Future<DeveloperOptions> openDeveloperOptions() async {
+    developer++;
+    return answer;
   }
 }
 
@@ -322,6 +329,33 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('latency-bluetooth-settings')));
       await tester.pump();
       expect(bt.opened, 1);
+      s.dispose();
+    });
+
+    testWidgets('Bluetooth\'s best quality: the user\'s own switches, Developer options or how to turn them on',
+        (tester) async {
+      await pump(tester);
+      expect(find.byKey(const ValueKey('latency-beat')), findsOneWidget, reason: 'the visual beat (#241)');
+      expect(find.byKey(const ValueKey('latency-breakdown')), findsOneWidget);
+      expect(find.textContaining('system 20 ms (timestamps, buffer included)'), findsOneWidget);
+      expect(find.textContaining('offset +180 ms (preset)'), findsOneWidget);
+      expect(find.byKey(const ValueKey('latency-bluetooth-quality')), findsNothing);
+      await tester.ensureVisible(find.byKey(const ValueKey('latency-bluetooth-quality-toggle')));
+      await tester.tap(find.byKey(const ValueKey('latency-bluetooth-quality-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.text('Get the best Bluetooth quality'), findsOneWidget);
+      expect(find.textContaining('No app can change it'), findsOneWidget, reason: 'never claims to change the codec');
+      await tester.ensureVisible(find.byKey(const ValueKey('latency-bluetooth-developer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('latency-bluetooth-developer')));
+      await tester.pump();
+      expect((bt.developer, bt.opened), (1, 0), reason: 'opened: nothing else');
+      bt.answer = DeveloperOptions.off;
+      await tester.tap(find.byKey(const ValueKey('latency-bluetooth-developer')));
+      await tester.pump();
+      expect((bt.developer, bt.opened), (2, 1), reason: 'off: the Bluetooth settings instead');
+      expect(find.textContaining('tap Build number seven times'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 10));
       s.dispose();
     });
 

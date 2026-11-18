@@ -269,6 +269,8 @@ class _FitBluetooth implements BluetoothSettings {
   bool get canOpen => true;
   @override
   Future<bool> open() async => true;
+  @override
+  Future<DeveloperOptions> openDeveloperOptions() async => DeveloperOptions.opened;
 }
 
 class _Relay implements RelayHttp {
