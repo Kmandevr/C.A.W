@@ -16,10 +16,12 @@
 #include <vector>
 
 #include "audio_clips.h"
+#include "builtin_components.h"
 #include "builtin_flagship.h"
 #include "caw/instrument.hpp"
 #include "component_chain.h"
 #include "engine.h"
+#include "fx_merged.h"
 #include "graph.h"
 #include "mix_pool.h"
 #include "project.h"
@@ -122,8 +124,12 @@ double heldNotes(const std::vector<std::pair<std::string, double>>& values, int 
 // and tones, never silent, so nothing sleeps) in the engine's 64-frame chain blocks, at its defaults and with its
 // heavier options, the best of 3 runs; microseconds of CPU per second of audio (10000 = 1% of a core).
 double effectCost(const char* id, const std::vector<std::pair<std::string, double>>& values, double seconds) {
-    Engine e(kRate);
-    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+    static const ModuleRegistry registry = [] {
+        ModuleRegistry r;
+        registerBuiltinComponents(r);
+        return r;
+    }();
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry, id, values);  // a merged device: `variant`'s class
     if (!p || !p->activate(kRate, 64)) return 0.0;
     const ModuleDescriptor& d = p->descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
@@ -198,6 +204,11 @@ void effectsCost(double seconds) {
         {"utility, bass mono, DC block", "org.caw.utility", {{"bass_mono", 1}, {"dc_block", 1}, {"width", 1.3}}},
         {"chorus (existing, for scale)", "org.caw.chorus", {}},
         {"ping-pong delay (existing)", "org.caw.delay.pingpong", {}},
+        // FX consolidation: each merged variant against the old id it replaces (the cost must not rise).
+        {"pitch shifter (old id), a fifth up", "org.caw.pitchshift", {{"semitones", 7}}},
+        {"Pitch/Shift: Pitch, a fifth up", "org.caw.shift", {{"variant", 0}, {"semitones", 7}}},
+        {"frequency shifter (old id), 100 Hz", "org.caw.freqshift", {{"shift", 100}}},
+        {"Pitch/Shift: Frequency, 100 Hz", "org.caw.shift", {{"variant", 1}, {"shift", 100}}},
     };
     std::printf("effects: microseconds of CPU per second of stereo audio, 64-frame blocks (10000 = 1%% of a core)\n");
     for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));

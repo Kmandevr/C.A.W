@@ -2,6 +2,7 @@
 #include "builtin_fx_racks.h"
 
 #include "builtin_fx_racks_internal.h"
+#include "fx_merged.h"
 
 #include <algorithm>
 #include <cstring>
@@ -23,7 +24,12 @@ std::string rackStructure(const ComponentSpec& spec) {
     // The `_fx` values, by slot name, in the order the spec gives them (the slot names make it order-free below).
     std::vector<std::pair<std::string, long long>> slots;
     for (const auto& [name, value] : spec.params) {
-        if (name.size() < 4 || name.compare(name.size() - 3, 3, "_fx") != 0 || name.find('.') != std::string::npos) continue;
+        // A slot's `_fx`, and a merged child's `<slot>.variant` (a different variant is a different child too).
+        const bool variant = name.size() > 8 && name.compare(name.size() - 8, 8, ".variant") == 0 &&
+                             name.find('.') == name.size() - 8;
+        if (!variant &&
+            (name.size() < 4 || name.compare(name.size() - 3, 3, "_fx") != 0 || name.find('.') != std::string::npos))
+            continue;
         const long long v = std::isfinite(value) ? static_cast<long long>(value + 0.5) : 0;
         bool found = false;
         for (auto& s : slots)
@@ -177,7 +183,11 @@ bool RackBase::configure(const ModuleRegistry& registry, const std::vector<std::
         else if (isRackId(found->id)) why = "can't hold a rack (racks don't nest)";
         else if (!plainStereoEffect(*found) && !ComponentChain::isKeyedEffect(*found)) why = "can only hold a stereo effect";
         if (why.empty()) {
-            slots_[s].processor = registry.create(found->id);
+            // A merged device takes its variant from `<slot>.variant` (fx_merged.h).
+            std::vector<std::pair<std::string, double>> own;
+            for (const auto& [name, value] : params)
+                if (name == L.slots[s].name + "." + std::string(fx::kVariantParam)) own.assign(1, {std::string(fx::kVariantParam), value});
+            slots_[s].processor = createComponent(registry, found->id, own);
             if (!slots_[s].processor) why = "could not create its effect";
         }
         if (!why.empty()) {

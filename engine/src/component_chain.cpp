@@ -10,6 +10,7 @@
 
 #include "audio_clips.h"
 #include "builtin_fx_racks.h"
+#include "fx_merged.h"
 #include "json.h"
 #include "mod_route.h"
 #include "route_math.h"
@@ -297,7 +298,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         if (kind == Kind::NoteEffects)
             for (uint32_t k = 0; k < d->portCount; ++k)
                 e->noteEvents = e->noteEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
-        e->processor = registry.create(spec.id);
+        e->processor = createComponent(registry, spec.id, spec.params);  // a merged device: its variant's class
         chain->foreign_ = chain->foreign_ || registry.isLoadedComponent(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
@@ -314,8 +315,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
                 error = "native component " + quoted(spec.id) + ": " + why;
                 return nullptr;
             }
-            e->structure = rackStructure(spec);
         }
+        e->structure = componentStructure(spec);  // a rack's children, a merged device's variant
         const ModuleDescriptor& own = e->processor->descriptor();  // lives as long as the processor
         const uint32_t count = own.parameterCount;
         e->resolvers.resize(count);
@@ -343,6 +344,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             if (k < 0 && spec.lenient) continue;  // a rebuild dropped the parameter
             // A rack's value for a child its slot no longer holds (`s2.cutoff` after s2 changed): left over, ignored.
             if (k < 0 && !e->structure.empty() && name.find('.') != std::string::npos) continue;
+            // A merged device's value for another variant (`semitones` after Pitch became Frequency): left over too.
+            if (k < 0 && isOtherVariantParameter(spec.id, name)) continue;
             if (k < 0) {
                 error = "native component " + quoted(spec.id) + " has no parameter " + quoted(name);
                 return nullptr;
@@ -398,7 +401,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
 bool ComponentChain::sameComponents(const std::vector<ComponentSpec>& specs, double sampleRate) const noexcept {
     if (specs.size() != entries_.size() || sampleRate != sampleRate_) return false;
     for (std::size_t i = 0; i < specs.size(); ++i)
-        if (specs[i].id != entries_[i]->id || rackStructure(specs[i]) != entries_[i]->structure) return false;
+        if (specs[i].id != entries_[i]->id || componentStructure(specs[i]) != entries_[i]->structure) return false;
     return true;
 }
 
@@ -446,6 +449,9 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
     const int k = parameterIndex(e, parameterId);
     if (k < 0) return false;
     const double v = constrainParameter(e.processor->descriptor().parameters[k], value);
+    // A merged device's `variant` is structural: another one is a rebuild (a project update), never a value.
+    if (parameterId == fx::kVariantParam && !e.structure.empty() && fromBits(e.held[k].load(std::memory_order_relaxed)) != v)
+        return false;
     e.held[k].store(toBits(v), std::memory_order_relaxed);
     e.touches[k].fetch_add(1, std::memory_order_release);  // after the value: the audio thread reads it after this
     e.generation.fetch_add(1, std::memory_order_release);

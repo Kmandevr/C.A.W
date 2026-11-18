@@ -12,6 +12,8 @@
 #include "builtin_fx_filters.h"
 // fx-filters end
 #include "builtin_fx_racks.h"  // fx-racks
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "json.h"
 
 namespace caw {
@@ -282,6 +284,9 @@ const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     // fx-racks begin
     if (isRackId(componentId)) return rackPresets(componentId);
     // fx-racks end
+    // The merged devices (fx_merged.h): their old effects' presets, migrated (looked up last, by a merged id only).
+    if (fx::findMergedDevice(componentId))
+        if (const auto* p = fx::mergedPresets(componentId)) return *p;
     return kNone;
 }
 

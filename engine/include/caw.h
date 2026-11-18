@@ -147,8 +147,17 @@ extern "C" {
    The file is held open from the scan to the load. A component may need only system libraries.
    caw_engine_load_component_ex (flags: CAW_LOAD_LEGACY_GRACE with the trusted file's SHA-256) and
    caw_engine_scan_component (the scan as JSON for the trust sheet). The load and reload JSON gain "sha256",
-   "scan_verdict" and "grace_applied". */
-#define CAW_API_VERSION 37
+   "scan_verdict" and "grace_applied".
+   38 (2026-11-18, 1.0.8): merged effect devices (FX consolidation). One id per family whose reserved parameter
+   "variant" (a choice, set by hand: not automatable, modulatable or MIDI-mappable) picks the class that runs, each
+   variant with its own parameters, latency and tail; a changed "variant" rebuilds the chain, crossfaded, and
+   caw_engine_set_component_param refuses one (send it in the project). caw_engine_components lists a merged
+   device with its first variant's descriptor plus "variants" (every variant's descriptor, in order) and its old
+   effects' presets, migrated. The first is org.caw.shift (Pitch/Shift: "Pitch" was org.caw.pitchshift,
+   "Frequency" org.caw.freqshift). A project naming an old id plays the merged device (its lanes and links
+   follow), and caw_migrate_component turns an entry into its merged form for the app's document. The old ids
+   still load. */
+#define CAW_API_VERSION 38
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -560,6 +569,16 @@ CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_lev
    and, when it names a "preset", that preset's values under its own params (an unknown preset: "ok": false).
    Needs no engine; free with caw_free. The engine migrates a project it is given too. */
 CAW_API char* caw_migrate_instrument(const char* entry_json);
+
+/* Merged effect devices (API version 38): for an effect entry {"id": ..., "params": {...}, "preset": ...} returns
+   {"ok": true, "migrated": bool, "id", "params": {...}, "renamed": {old: new}, "dropped": [old...],
+   "keeps_state": bool}. An old id becomes its merged device (its "variant" set, parameters moved); an FX rack's or
+   multiband rack's children that are old ids become theirs ("<slot>_fx", "<slot>.variant", "<slot>.<param>" and
+   the routes' destinations). Move an automation lane or modulation link on a "renamed" parameter to its new name
+   and drop one on a "dropped" parameter; any other keeps its target. "keeps_state" false: drop the entry's saved
+   state. A "preset" (the entry's own id's) is applied first, the entry's own params winning. Another entry comes
+   back with "migrated": false. Needs no engine; free with caw_free. The engine migrates a project it is given too. */
+CAW_API char* caw_migrate_component(const char* entry_json);
 
 /* Drums (API version 11; docs/engine.md "Drums"). Pure functions: no engine needed; free each result with caw_free.
    caw_drums_info: the instrument's layout as JSON: {"ok", "banks", "pads_per_bank", "pads", "parameters", "globals",

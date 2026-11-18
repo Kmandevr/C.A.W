@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "builtin_fx_creative.h"
+#include "fx_merged.h"
 #include "component_chain.h"
 
 // Original code (C.A.W. is Apache-2.0). The technique is the time-domain pitch shifter by delay-line modulation
@@ -48,7 +49,7 @@ const ModuleDescriptor& pitchDescriptor() {
 double grainFrames(double ms, double sr) noexcept { return std::floor(clampTo(ms, 10.0, kMaxGrainMs) * 0.001 * sr); }
 uint32_t latencyOf(double grain) noexcept { return static_cast<uint32_t>(std::floor(grain * 0.5)) + 1; }
 
-class PitchShift final : public EffectBase, public VariableLatency {
+class PitchShift : public EffectBase, public VariableLatency {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return pitchDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
@@ -148,6 +149,11 @@ private:
 };
 
 }  // namespace
+
+const ModuleDescriptor& pitchShiftDescriptor() { return pitchDescriptor(); }
+ModuleProcessor* makePitchShiftAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<PitchShift>(variant);
+}
 
 void registerPitchShift(ModuleRegistry& registry) { registry.add(pitchDescriptor(), &creative::make<PitchShift>); }
 

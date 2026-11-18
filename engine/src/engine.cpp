@@ -1,5 +1,7 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "audio_clips.h"
 
 #include "presets.h"
@@ -1212,6 +1214,12 @@ std::string Engine::nativeComponentsJson() {
         std::string one = moduleDescriptorJson(*d);
         std::string head = first ? "{\"builtin\":true," : ",{\"builtin\":true,";
         if (!builtinPresets(d->id).empty()) head += "\"presets\":" + builtinPresetsJson(d->id) + ",";
+        if (const fx::MergedDevice* m = fx::findMergedDevice(d->id)) {  // every variant's own descriptor
+            head += "\"variants\":[";
+            for (size_t v = 0; v < m->variants.size(); ++v)
+                head += (v ? "," : "") + moduleDescriptorJson(m->variants[v].descriptor());
+            head += "],";
+        }
         json += head + one.substr(1);
         first = false;
     }
@@ -1277,6 +1285,13 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 ++it;
             }
         }
+        return setProjectImpl(migrated, offline);
+    }
+    // The effects merged into one device each (FX consolidation, 1.0.8, fx_migrate.h): an old id plays its merged
+    // device's variant with its values moved, in every component list and rack, and its lanes and links follow.
+    if (fx::hasLegacyEffects(p)) {
+        ProjectSpec migrated = p;
+        fx::migrateLegacyEffects(migrated);
         return setProjectImpl(migrated, offline);
     }
     std::lock_guard<std::mutex> lock(ctl_);

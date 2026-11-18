@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -131,9 +132,23 @@ inline ModuleDescriptor withCpu(ModuleDescriptor d, CpuClass cpu) {
 //   depend on the block size either;
 // - display: about 60 times a second fillDisplay() writes the effect's floats, which a UI reads through
 //   readDisplay() (caw/display.hpp); input and output peaks since the last publish are counted here.
+//
+// Optional ports (FX consolidation): extra stereo outputs (a filter's low and high, a utility's mid and side, a
+// transient designer's transient and sustain, dry and wet) and inputs a built-in may offer beside its main ones. They
+// are not in its ModuleDescriptor (hosts, the SDK and the native ABI never see them): optionalPorts() names them, a
+// host gives one a buffer only when something connects to it, and the effect checks the pointer once per run()
+// (optionalOut/optionalIn: null while unconnected), so an unconnected port costs one compare a run and changes
+// nothing heard. A real "sidechain" input stays a descriptor port where one exists (compressor, gate, ducker).
+struct OptionalPort {
+    std::string_view id;  // "low", "mid", "dry"...
+    std::string_view name;
+    bool input = false;   // false: an output the effect writes; true: an input it reads
+};
+
 class EffectBase : public ModuleProcessor {
 public:
     static constexpr uint32_t kControlFrames = 16;
+    static constexpr uint32_t kMaxOptionalPorts = 4;
 
     bool activate(double sampleRate, uint32_t maxFrames) noexcept override;
     void reset() noexcept override;
@@ -146,7 +161,23 @@ public:
     bool processPorts(const ProcessBlock& b) noexcept override;
     uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return display_.read(out, max); }
 
+    // The optional ports this effect offers (none by default; at most kMaxOptionalPorts), in a fixed order.
+    virtual std::span<const OptionalPort> optionalPorts() const noexcept { return {}; }
+    // Connects optional port `index` to a stereo buffer of at least the block's frames, indexed from the block's
+    // first frame (left and right both null disconnects it). An output is written for every frame of each block
+    // while connected (silence while asleep); an input is read. Call it between blocks, never during process().
+    // False for a port the effect doesn't offer.
+    bool connectOptionalPort(uint32_t index, float* left, float* right) noexcept;
+
 protected:
+    // Inside run(): connected optional output `index`'s frames from run()'s first one, or null (unconnected). Read
+    // it once per run(), not per sample.
+    float* optionalOutLeft(uint32_t index) const noexcept { return optL_[index] ? optL_[index] + runAt_ : nullptr; }
+    float* optionalOutRight(uint32_t index) const noexcept { return optR_[index] ? optR_[index] + runAt_ : nullptr; }
+    // Inside run(): connected optional input `index`'s frames from run()'s first one, or null.
+    const float* optionalInLeft(uint32_t index) const noexcept { return optL_[index] ? optL_[index] + runAt_ : nullptr; }
+    const float* optionalInRight(uint32_t index) const noexcept { return optR_[index] ? optR_[index] + runAt_ : nullptr; }
+
     // Control thread, at activate: allocate (delay lines, tables). False refuses the instance.
     virtual bool prepare(double sampleRate, uint32_t maxFrames) noexcept = 0;
     // Audio thread: the knobs at frame `at` of the block (param()).
@@ -197,12 +228,17 @@ protected:
     float outPeakDb() const noexcept { return static_cast<float>(lib::gainToDb(outPeak_)); }
 
 private:
+    void zeroOptionalOutputs(uint32_t from, uint32_t to) noexcept;  // frames [from, to) of the block, asleep
+
     const AudioProcessBlock* block_ = nullptr;
     bool keyed_ = false;                          // the descriptor has a "sidechain" input (activate)
     const float* keyL_ = nullptr;                 // this block's key (processPorts), else null
     const float* keyR_ = nullptr;
     EventInput keyNotes_{};
     uint32_t runAt_ = 0;                          // the frame of the block run() starts at
+    float* optL_[kMaxOptionalPorts] = {};         // connected optional ports (connectOptionalPort), else null
+    float* optR_[kMaxOptionalPorts] = {};
+    bool optOutputs_ = false;                     // an optional output is connected (zeroed while asleep)
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (activate)
     bool skipPublish_ = false;                   // Eco publishes every other display tick (30 a second)
     double rate_ = 48000.0, tempo_ = 120.0;
