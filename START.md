@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `71824af72c9f2b2c44db915e2d08a807463301ab` on the default branch at 2026-11-18T03:44:26Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `c1155d61f623787fa1796677bd04216ef0b4ed15` on the default branch at 2026-11-18T09:26:30Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`71824af`).
+1. The commit this file was generated from (`c1155d6`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -293,7 +293,7 @@ The repository currently includes:
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
 - Track mixer controls, master output level and stereo peak meters.
-- Engine diagnostics (Settings › About and beta): scope/spectrum inspection and meters.
+- Engine diagnostics (Settings › App › About): scope/spectrum inspection and meters.
 - MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
 - Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
 - Portable .caw project import/export (packages with their dependencies; old .cawproj files import), project-local folders, tags, saved searches and restore points.
