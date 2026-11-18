@@ -1,5 +1,6 @@
 // C API implementation (everything except the audio device, which lives in engine/platform).
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -77,7 +78,7 @@ char* caw_engine_set_project(CawEngine* e, const char* json) try {
 namespace {
 // Load and reload share their checks and their JSON result.
 char* loadComponent(CawEngine* e, const char* library_path, const char* expected_component_id, int32_t trust_level,
-                    bool reload, uint32_t flags = 0) try {
+                    bool reload, uint32_t flags = 0, const char* legacy_sha256 = nullptr) try {
     using namespace caw;
     if (!e || !e->engine || !library_path || !expected_component_id)
         return dup("{\"ok\":false,\"error\":\"missing engine, library path or component ID\",\"errorCode\":3}");
@@ -91,10 +92,19 @@ char* loadComponent(CawEngine* e, const char* library_path, const char* expected
     }
     if (flags & ~static_cast<uint32_t>(CAW_LOAD_LEGACY_GRACE))
         return dup("{\"ok\":false,\"error\":\"unknown load flags\",\"errorCode\":3}");
+    // The grace names the exact file: 64 hex digits of its SHA-256.
+    std::string graceHash;
+    if (flags & static_cast<uint32_t>(CAW_LOAD_LEGACY_GRACE)) {
+        graceHash = legacy_sha256 ? legacy_sha256 : "";
+        bool hex = graceHash.size() == 64;
+        for (const char c : graceHash) hex = hex && std::isxdigit(static_cast<unsigned char>(c));
+        if (!hex)
+            return dup("{\"ok\":false,\"error\":\"the legacy grace needs the SHA-256 of the file trusted before 1.0.7\","
+                       "\"errorCode\":3}");
+    }
     const ModuleLoadResult result =
         reload ? e->engine->reloadNativeComponent(library_path, expected_component_id, trust)
-               : e->engine->loadNativeComponent(library_path, expected_component_id, trust,
-                                                (flags & static_cast<uint32_t>(CAW_LOAD_LEGACY_GRACE)) != 0);
+               : e->engine->loadNativeComponent(library_path, expected_component_id, trust, graceHash);
     return dup(std::string("{\"ok\":") + (result.success ? "true" : "false") +
                ",\"componentId\":\"" + jsonEscape(result.componentId) +
                "\",\"error\":\"" + jsonEscape(result.message) +
@@ -115,8 +125,8 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path, const ch
 }
 
 char* caw_engine_load_component_ex(CawEngine* e, const char* library_path, const char* expected_component_id,
-                                   int32_t trust_level, uint32_t flags) {
-    return loadComponent(e, library_path, expected_component_id, trust_level, false, flags);
+                                   int32_t trust_level, uint32_t flags, const char* legacy_sha256) {
+    return loadComponent(e, library_path, expected_component_id, trust_level, false, flags, legacy_sha256);
 }
 
 char* caw_engine_scan_component(CawEngine*, const char* library_path, const char* expected_component_id,

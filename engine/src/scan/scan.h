@@ -49,6 +49,7 @@ enum class FindingKind : uint8_t {
     Malformed,      // the file could not be read as what it claims to be, or passed a limit
     Unsupported,    // not an ELF64 little-endian or PE32+ file
     Declarations,   // the embedded capability declarations are invalid, duplicated or tampered with
+    Dependency,     // a library it needs that is not a system library, or a library search path (RPATH/RUNPATH)
 };
 const char* findingKindId(FindingKind k) noexcept;
 

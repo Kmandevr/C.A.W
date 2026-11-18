@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "policy.h"
 #include "scan.h"
@@ -15,7 +16,7 @@ namespace caw::scan {
 struct FileScan {
     bool ok = false;
     std::string error;          // why the file could not be read
-    std::string sha256;         // of the whole file
+    std::string sha256;         // of the whole file (empty for one past the size cap)
     uint64_t size = 0;
     bool cached = false;        // the report came from the cache (the same bytes were scanned before)
     // The report, with a Declarations finding added when the manifest beside the file disagrees with it.
@@ -27,7 +28,11 @@ struct FileScan {
 // Reads and scans `path` (UTF-8). With `expectedId`, a caw-component.json in the same folder whose component
 // id is that id must declare exactly what the binary embeds (otherwise: tampering, which blocks).
 // Off the audio thread only: it reads the whole file.
+// Only a regular file is read, and no more than 256 MiB + 1 bytes of it (a larger file is malformed, unhashed).
 FileScan scanFile(const std::string& path, std::string_view expectedId = {});
+// The same for bytes the caller read itself (the loader reads them from the handle it then loads from);
+// `path` names the file for the manifest check. `tooLarge`: the file has more bytes than these.
+FileScan scanBytes(const std::string& path, std::vector<uint8_t> bytes, bool tooLarge, std::string_view expectedId = {});
 
 // The cache: forget every report (tests), and how many files were actually parsed so far.
 void clearScanCache();

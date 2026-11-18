@@ -1,5 +1,6 @@
 // The pre-load scan on real files: the engine's built test components and starter pass, the loader refuses a
 // blocked file before opening it, the legacy grace, the verdict cache by SHA-256, tampering, and the C API JSON.
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -170,14 +171,32 @@ TEST(scan_the_loader_refuses_a_blocked_file_before_opening_it_and_grace_lets_it_
     CHECK(json.find(R"("scan_verdict":"blocked")") != std::string::npos);
     // The same file with the legacy grace: the scan lets it through as a warning (the system loader then refuses
     // this fixture, which is no loadable library).
+    // The grace is for the exact file the user trusted: its SHA-256 (any case).
+    std::string sha = scanFile(path).sha256;
+    for (char& c : sha) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     char* graced = caw_engine_load_component_ex(engine, path.c_str(), "org.caw.tests.blocked", CAW_NATIVE_TRUST_TRUSTED,
-                                                CAW_LOAD_LEGACY_GRACE);
+                                                CAW_LOAD_LEGACY_GRACE, sha.c_str());
     json = graced ? graced : "";
     caw_free(graced);
     CHECK(json.find(R"("errorCode":11)") == std::string::npos);
     CHECK(json.find(R"("scan_verdict":"warning")") != std::string::npos);
     CHECK(json.find(R"("grace_applied":true)") != std::string::npos);
-    char* badFlags = caw_engine_load_component_ex(engine, path.c_str(), "org.caw.tests.blocked", CAW_NATIVE_TRUST_TRUSTED, 0x80);
+    // No hash: an invalid argument. Another file's hash: refused.
+    char* noHash = caw_engine_load_component_ex(engine, path.c_str(), "org.caw.tests.blocked", CAW_NATIVE_TRUST_TRUSTED,
+                                                CAW_LOAD_LEGACY_GRACE, nullptr);
+    json = noHash ? noHash : "";
+    caw_free(noHash);
+    CHECK(json.find(R"("errorCode":3)") != std::string::npos);
+    const std::string other(64, 'a');
+    char* wrongHash = caw_engine_load_component_ex(engine, path.c_str(), "org.caw.tests.blocked",
+                                                   CAW_NATIVE_TRUST_TRUSTED, CAW_LOAD_LEGACY_GRACE, other.c_str());
+    json = wrongHash ? wrongHash : "";
+    caw_free(wrongHash);
+    CHECK(json.find(R"("errorCode":11)") != std::string::npos);
+    CHECK(json.find(R"("grace_applied":true)") == std::string::npos);
+    CHECK(json.find("differs") != std::string::npos);
+    char* badFlags = caw_engine_load_component_ex(engine, path.c_str(), "org.caw.tests.blocked", CAW_NATIVE_TRUST_TRUSTED,
+                                                  0x80, nullptr);
     json = badFlags ? badFlags : "";
     caw_free(badFlags);
     CHECK(json.find(R"("errorCode":3)") != std::string::npos);

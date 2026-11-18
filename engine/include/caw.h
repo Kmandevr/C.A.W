@@ -144,8 +144,10 @@ extern "C" {
    37 (2026-11-18, 1.0.7): the pre-load scan. Every native component file is scanned before it is opened
    (imports, system calls, writable code, packers, strings, its embedded capability declarations), its verdict
    cached by SHA-256; a blocked verdict refuses the load with errorCode 11 and a message naming the capability.
-   caw_engine_load_component_ex (flags: CAW_LOAD_LEGACY_GRACE) and caw_engine_scan_component (the scan as JSON
-   for the trust sheet). The load and reload JSON gain "sha256", "scan_verdict" and "grace_applied". */
+   The file is held open from the scan to the load. A component may need only system libraries.
+   caw_engine_load_component_ex (flags: CAW_LOAD_LEGACY_GRACE with the trusted file's SHA-256) and
+   caw_engine_scan_component (the scan as JSON for the trust sheet). The load and reload JSON gain "sha256",
+   "scan_verdict" and "grace_applied". */
 #define CAW_API_VERSION 37
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
@@ -257,15 +259,19 @@ CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
    opens it; a component that uses a capability it does not declare (its caw-component.json "capabilities", built
    into the binary) is refused with errorCode 11 (CAW_LOAD_ERROR_SCAN_BLOCKED) and a message naming it.
    CAW_LOAD_LEGACY_GRACE: the user trusted this exact file before 1.0.7 and it carries no declarations (a build
-   from before them), so its undeclared capabilities load as warnings this once; it never excuses a malformed
-   file, invalid or tampered declarations, or a file that carries declarations. The app passes it only for a
-   file whose SHA-256 it trusted before 1.0.7; a rebuild has a new hash and gets none. */
+   from before them), so its undeclared capabilities load as warnings; it never excuses a malformed file, a
+   dependency that is not a system library, invalid or tampered declarations, or a file that carries
+   declarations. With the flag, legacy_sha256 must be the SHA-256 (64 hex digits) the app recorded for the file
+   when the user trusted it: errorCode 3 without it, and errorCode 11 when the file's own hash differs (a rebuild
+   or another file gets no grace). Without the flag legacy_sha256 is ignored (may be NULL). */
 enum { CAW_LOAD_LEGACY_GRACE = 1u };
 enum { CAW_LOAD_ERROR_SCAN_BLOCKED = 11 };
 CAW_API char* caw_engine_load_component_ex(CawEngine* e, const char* library_path,
-                                           const char* expected_component_id, int32_t trust_level, uint32_t flags);
+                                           const char* expected_component_id, int32_t trust_level, uint32_t flags,
+                                           const char* legacy_sha256);
 /* Scans a file without opening it, as the loader would (e may be NULL). expected_component_id (may be NULL)
-   checks a caw-component.json beside the file against the declarations built in. flags: CAW_LOAD_LEGACY_GRACE,
+   checks a caw-component.json beside the file against the declarations built in. flags: CAW_LOAD_LEGACY_GRACE
+   (a preview: the grace as if the hash matched; compare "sha256" with the recorded one),
    and CAW_SCAN_PLUGIN to weigh it as a CLAP/VST3 plug-in (findings warn at most). Returns JSON (free with
    caw_free): {"ok","sha256","size","format" ("elf64","pe32+","unknown"),"arch","host" ("component","plugin"),
    "verdict" ("clean","notice","warning","blocked"),"reason","grace_applied","cached","manifest_checked",

@@ -28,7 +28,12 @@ public:
 }  // namespace
 
 // Starts a thread (never called by the tests): the binary imports thread creation, which it declares.
-extern "C" void caw_tests_declared_worker() {
+// Exported, so no linker drops it as unreferenced (MSVC's and clang-cl's /OPT:REF did).
+#if defined(_WIN32)
+extern "C" __declspec(dllexport) void caw_tests_declared_worker() {
+#else
+extern "C" __attribute__((visibility("default"))) void caw_tests_declared_worker() {
+#endif
     std::thread t([] {});
     t.join();
 }

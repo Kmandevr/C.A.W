@@ -42,7 +42,24 @@ struct ElfSpec {
     std::vector<std::pair<std::string, Bytes>> extraSections;  // named allocated data sections
     uint64_t initArrayBytes = 16;
     std::string data;  // raw bytes in the read-only part (strings)
+    std::vector<std::string> needed{"libc.so"};  // DT_NEEDED
+    std::string runpath;                          // DT_RUNPATH, when not empty
+    // Imports after the symbols DT_HASH counts, reached only through Android packed relocations
+    // (DT_ANDROID_RELA, "APS2"), which the fixture writes when this is not empty.
+    std::vector<std::string> hiddenImports;
 };
+
+inline void putSleb(Bytes& b, int64_t v) {
+    for (;;) {
+        const uint8_t byte = uint8_t(v & 0x7f);
+        v >>= 7;
+        if ((v == 0 && !(byte & 0x40)) || (v == -1 && (byte & 0x40))) {
+            b.push_back(byte);
+            return;
+        }
+        b.push_back(byte | 0x80);
+    }
+}
 
 // Offsets the robustness tests poke at.
 struct ElfLayout {
@@ -56,14 +73,35 @@ inline Bytes buildElf(const ElfSpec& s, ElfLayout* layout = nullptr) {
     std::vector<uint32_t> names;
     std::vector<std::string> symbols = s.imports;
     symbols.insert(symbols.end(), s.exports.begin(), s.exports.end());
+    const size_t countedSymbols = symbols.size() + 1;
+    symbols.insert(symbols.end(), s.hiddenImports.begin(), s.hiddenImports.end());
     for (const std::string& n : symbols) {
         names.push_back(uint32_t(dynstr.size()));
         dynstr += n;
         dynstr.push_back('\0');
     }
-    const uint32_t neededName = uint32_t(dynstr.size());
-    dynstr += "libc.so";
+    std::vector<uint32_t> neededNames;
+    for (const std::string& n : s.needed) {
+        neededNames.push_back(uint32_t(dynstr.size()));
+        dynstr += n;
+        dynstr.push_back('\0');
+    }
+    const uint32_t runpathName = uint32_t(dynstr.size());
+    dynstr += s.runpath;
     dynstr.push_back('\0');
+    // Packed relocations: one group, each with its own offset delta and info (symbol << 32 | type 1).
+    Bytes packed;
+    if (!s.hiddenImports.empty()) {
+        packed = {'A', 'P', 'S', '2'};
+        putSleb(packed, int64_t(s.hiddenImports.size()));
+        putSleb(packed, 0x1000);
+        putSleb(packed, int64_t(s.hiddenImports.size()));
+        putSleb(packed, 0);  // flags: nothing grouped, no addend
+        for (size_t i = 0; i < s.hiddenImports.size(); ++i) {
+            putSleb(packed, 8);
+            putSleb(packed, int64_t((uint64_t(countedSymbols + i) << 32) | 1));
+        }
+    }
     const size_t phoff = 64, phnum = 3;
     const size_t dynstrOff = align(phoff + phnum * 56, 8);
     const size_t dynsymOff = align(dynstrOff + dynstr.size(), 8);
@@ -71,9 +109,12 @@ inline Bytes buildElf(const ElfSpec& s, ElfLayout* layout = nullptr) {
     const size_t hashOff = dynsymOff + symCount * 24;
     const size_t hashSize = 8 + 4 + 4 * symCount;
     const size_t dynOff = align(hashOff + hashSize, 8);
-    const size_t dynCount = 7;
+    std::vector<std::pair<int64_t, int64_t>> dyn;
+    for (uint32_t n : neededNames) dyn.push_back({1, n});
+    const size_t dynCount = dyn.size() + 6 + (s.runpath.empty() ? 0 : 1) + (packed.empty() ? 0 : 2);
     const size_t dataOff = dynOff + dynCount * 16;
-    size_t at = dataOff + s.data.size();
+    const size_t packedOff = align(dataOff + s.data.size(), 8);
+    size_t at = packedOff + packed.size();
     std::vector<size_t> extraOff;
     for (const auto& [name, bytes] : s.extraSections) {
         at = align(at, 8);
@@ -111,25 +152,30 @@ inline Bytes buildElf(const ElfSpec& s, ElfLayout* layout = nullptr) {
     putBytes(b, dynstrOff, dynstr.data(), dynstr.size());
     for (size_t i = 0; i < symbols.size(); ++i) {
         const size_t p = dynsymOff + (i + 1) * 24;
-        const bool imported = i < s.imports.size();
+        const bool imported = i < s.imports.size() || i >= s.imports.size() + s.exports.size();
         put32(b, p, names[i]);
         b[p + 4] = 0x12;  // GLOBAL FUNC
         put16(b, p + 6, imported ? 0 : 1);
         put64(b, p + 8, imported ? 0 : codeOff);
     }
     put32(b, hashOff, 1);
-    put32(b, hashOff + 4, uint32_t(symCount));
-    const int64_t dyn[dynCount][2] = {{1, neededName},
-                                      {5, int64_t(dynstrOff)},
-                                      {10, int64_t(dynstr.size())},
-                                      {6, int64_t(dynsymOff)},
-                                      {4, int64_t(hashOff)},
-                                      {27, int64_t(s.initArrayBytes)},
-                                      {0, 0}};
-    for (size_t i = 0; i < dynCount; ++i) {
-        put64(b, dynOff + i * 16, uint64_t(dyn[i][0]));
-        put64(b, dynOff + i * 16 + 8, uint64_t(dyn[i][1]));
+    put32(b, hashOff + 4, uint32_t(countedSymbols));
+    dyn.push_back({5, int64_t(dynstrOff)});
+    dyn.push_back({10, int64_t(dynstr.size())});
+    if (!s.runpath.empty()) dyn.push_back({29, runpathName});
+    dyn.push_back({6, int64_t(dynsymOff)});
+    dyn.push_back({4, int64_t(hashOff)});
+    dyn.push_back({27, int64_t(s.initArrayBytes)});
+    if (!packed.empty()) {
+        dyn.push_back({0x60000011, int64_t(packedOff)});
+        dyn.push_back({0x60000012, int64_t(packed.size())});
     }
+    dyn.push_back({0, 0});
+    for (size_t i = 0; i < dynCount; ++i) {
+        put64(b, dynOff + i * 16, uint64_t(dyn[i].first));
+        put64(b, dynOff + i * 16 + 8, uint64_t(dyn[i].second));
+    }
+    putBytes(b, packedOff, packed.data(), packed.size());
     putBytes(b, dataOff, s.data.data(), s.data.size());
     for (size_t i = 0; i < s.extraSections.size(); ++i)
         putBytes(b, extraOff[i], s.extraSections[i].second.data(), s.extraSections[i].second.size());

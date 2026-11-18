@@ -111,7 +111,10 @@ constexpr Rule kImports[] = {
     {"pthread_create", C::BackgroundThreads, S, false}, {"thrd_create", C::BackgroundThreads, S, false},
     {"CreateThread", C::BackgroundThreads, S, false}, {"_beginthread", C::BackgroundThreads, S, false},
     {"_beginthreadex", C::BackgroundThreads, S, false}, {"_Thrd_create", C::BackgroundThreads, S, false},
-    {"_Thrd_start", C::BackgroundThreads, S, false},
+    {"_Thrd_start", C::BackgroundThreads, S, false}, {"CreateThreadpoolWork", C::BackgroundThreads, S, false},
+    {"SubmitThreadpoolWork", C::BackgroundThreads, S, false}, {"TrySubmitThreadpoolCallback", C::BackgroundThreads, S, false},
+    {"CreateThreadpoolTimer", C::BackgroundThreads, S, false}, {"QueueUserWorkItem", C::BackgroundThreads, S, false},
+    {"CreateTimerQueueTimer", C::BackgroundThreads, S, false},
     // Keyboard, clipboard, screen (and the Windows registry, with them in the plan's list)
     {"SetWindowsHookEx", C::InputSpying, S, false}, {"GetAsyncKeyState", C::InputSpying, S, false},
     {"GetKeyboardState", C::InputSpying, S, false}, {"RegisterRawInputDevices", C::InputSpying, S, false},
@@ -153,8 +156,24 @@ constexpr Rule kImports[] = {
     {"SetFileAttributes", C::WriteFiles, S, false}, {"_wremove", C::WriteFiles, S, false},
     {"_unlink", C::WriteFiles, S, false}, {"_wunlink", C::WriteFiles, S, false}, {"_wrename", C::WriteFiles, S, false},
     {"_mkdir", C::WriteFiles, S, false}, {"_wmkdir", C::WriteFiles, S, false},
-    // syscall(): any system call by number, past the import table. The C++ runtime uses it for futexes.
-    {"syscall", C::Packed, H, true},
+    // syscall(): any system call by number (connect, execve, ...) past the import table. A statically linked
+    // C++ runtime may use it for futexes; it still has to be declared (as packed).
+    {"syscall", C::Packed, S, false},
+    // Threads, loaders and files below libc's usual names.
+    {"clone", C::BackgroundThreads, S, false}, {"clone3", C::BackgroundThreads, S, false},
+    {"_r_debug", C::LoadCode, S, false}, {"_dl_debug_state", C::LoadCode, S, false},
+    // The unwinder (libunwind, libgcc) walks the loaded libraries through this on every exception.
+    {"dl_iterate_phdr", C::LoadCode, H, true},
+    // ntdll (Zw* names are folded to Nt*): files, sockets (AFD through NtDeviceIoControlFile), threads, code.
+    {"NtCreateFile", C::ReadFiles, S, false}, {"NtOpenFile", C::ReadFiles, S, false},
+    {"NtReadFile", C::ReadFiles, S, false}, {"NtQueryDirectoryFile", C::ReadFiles, S, false},
+    {"NtWriteFile", C::WriteFiles, S, false}, {"NtDeleteFile", C::WriteFiles, S, false},
+    {"NtSetInformationFile", C::WriteFiles, S, false}, {"NtDeviceIoControlFile", C::Internet, S, false},
+    {"NtCreateThread", C::BackgroundThreads, S, false}, {"NtCreateThreadEx", C::BackgroundThreads, S, false},
+    {"RtlCreateUserThread", C::BackgroundThreads, S, false}, {"NtCreateSection", C::MakeCode, H, false},
+    {"NtMapViewOfSection", C::MakeCode, H, false}, {"NtWriteVirtualMemory", C::StartPrograms, S, false},
+    {"NtReadVirtualMemory", C::StartPrograms, S, false}, {"NtOpenProcess", C::StartPrograms, S, false},
+    {"LdrGetDllHandle", C::LoadCode, S, false},
 };
 
 // Name prefixes (encryption libraries' families).
@@ -239,6 +258,11 @@ private:
 };
 
 const Rule* findImport(std::string_view name, bool pe) {
+    std::string folded;
+    if (pe && name.substr(0, 2) == "Zw") {
+        folded = "Nt" + std::string(name.substr(2));
+        name = folded;
+    }
     for (const Rule& r : kImports)
         if (name == r.name) return &r;
     if (pe && name.size() > 1 && (name.back() == 'A' || name.back() == 'W')) {
@@ -275,11 +299,84 @@ const Rule* findMangled(std::string_view name) {
     return nullptr;
 }
 
+// Libraries a component may need: the system's C and C++ runtimes and libraries that come with the operating
+// system (never ones a downloaded component could bring along). ELF sonames exactly; PE DLLs by name, plus the
+// API-set prefixes. Anything else, and any RPATH/RUNPATH, is a dependency the scan has not seen.
+constexpr const char* kSystemElf[] = {
+    "libc.so", "libc.so.6", "libm.so", "libm.so.6", "libdl.so", "libdl.so.2", "libpthread.so.0", "librt.so.1",
+    "libstdc++.so.6", "libgcc_s.so.1", "libc++_shared.so", "libc++.so.1", "libc++abi.so.1", "libatomic.so.1",
+    "libmvec.so.1", "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1", "liblog.so", "libandroid.so",
+    "libaaudio.so", "libOpenSLES.so", "libmediandk.so", "libnativewindow.so", "libz.so"};
+constexpr const char* kSystemPe[] = {
+    "kernel32.dll", "kernelbase.dll", "ntdll.dll", "user32.dll", "gdi32.dll", "advapi32.dll", "ole32.dll",
+    "oleaut32.dll", "shell32.dll", "shlwapi.dll", "comdlg32.dll", "comctl32.dll", "winmm.dll", "avrt.dll",
+    "powrprof.dll", "version.dll", "imm32.dll", "uxtheme.dll", "dwmapi.dll", "setupapi.dll", "cfgmgr32.dll",
+    "psapi.dll", "dbghelp.dll", "userenv.dll", "secur32.dll", "crypt32.dll", "bcrypt.dll", "ncrypt.dll",
+    "rpcrt4.dll", "ws2_32.dll", "wsock32.dll", "mswsock.dll", "winhttp.dll", "wininet.dll", "urlmon.dll",
+    "dnsapi.dll", "iphlpapi.dll", "opengl32.dll", "dxgi.dll", "d3d11.dll", "d3d12.dll", "mmdevapi.dll",
+    "ksuser.dll", "msvcrt.dll", "ucrtbase.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll",
+    "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "concrt140.dll", "vcomp140.dll"};
+
+bool systemLibrary(const std::string& name, bool pe) {
+    if (!pe) {
+        for (const char* s : kSystemElf)
+            if (name == s) return true;
+        return false;
+    }
+    const std::string l = lower(name);
+    if (l.rfind("api-ms-win-", 0) == 0 || l.rfind("ext-ms-win-", 0) == 0) return true;
+    for (const char* s : kSystemPe)
+        if (l == s) return true;
+    return false;
+}
+
+// DLLs whose every function is the internet: an import from them by ordinal is internet too.
+bool internetDll(const std::string& l) {
+    return l == "ws2_32.dll" || l == "wsock32.dll" || l == "wininet.dll" || l == "winhttp.dll" || l == "urlmon.dll" ||
+           l == "dnsapi.dll";
+}
+
+bool fileOpen(const std::string& n) {
+    return n == "fopen" || n == "fopen64" || n == "freopen" || n == "freopen64" || n == "_wfopen" ||
+           n == "fopen_s" || n == "_wfopen_s" || n == "_open" || n == "_wopen" || n == "_wsopen_s" || n == "_sopen_s" ||
+           (n.substr(0, 2) == "_Z" && n.find("basic_filebuf") != std::string::npos && n.find("4open") != std::string::npos);
+}
+bool fileWrite(const std::string& n) {
+    return n == "fwrite" || n == "fputs" || n == "fputc" || n == "fprintf" || n == "vfprintf" || n == "fputws" ||
+           n == "fwprintf" || n == "_write" || n == "fflush" ||
+           (n.substr(0, 2) == "_Z" && (n.find("basic_ofstream") != std::string::npos ||
+                                       n.find("basic_fstream") != std::string::npos || n.find("_ZNSo") == 0 ||
+                                       n.find("basic_ostream") != std::string::npos));
+}
+
 void classifyImports(const Parsed& p, Findings& f) {
     const bool pe = p.format == Format::Pe32Plus;
+    std::string opened, written;
+    for (const Import& im : p.imports) {
+        if (opened.empty() && fileOpen(im.name)) opened = im.name;
+        if (written.empty() && fileWrite(im.name)) written = im.name;
+        if (im.name.substr(0, 2) == "_Z" &&
+            (im.name.find("basic_ofstream") != std::string::npos || im.name.find("basic_fstream") != std::string::npos))
+            f.rule(kWrite, FindingKind::Import, im.name);
+    }
+    // A file opened and something written: the open's mode can't be seen, so it may be a write.
+    if (!opened.empty() && !written.empty()) f.rule(kWrite, FindingKind::Import, opened + " + " + written);
+    for (const std::string& path : p.searchPaths)
+        f.add(C::LoadCode, FindingKind::Dependency, "library search path " + path, S, Severity::Warning);
+    for (const std::string& library : p.libraries)
+        if (!systemLibrary(library, pe))
+            f.add(C::LoadCode, FindingKind::Dependency, "needs " + library + ", which is not a system library", S,
+                  Severity::Warning);
     for (const Import& im : p.imports) {
         const std::string evidence = pe ? im.library + "!" + (im.name.empty() ? "#ordinal" : im.name) : im.name;
-        if (im.name.empty()) continue;  // an ordinal: its library is classified below
+        if (im.name.empty()) {
+            // By ordinal: the name is hidden. From an internet DLL it is the internet; from another it hides which
+            // function it is.
+            if (internetDll(im.library)) f.add(C::Internet, FindingKind::Import, evidence, S, Severity::Warning);
+            else f.add(C::Packed, FindingKind::Import, im.library + " by ordinal (the function is hidden)", Strength::Hint,
+                       Severity::Warning);
+            continue;
+        }
         if (pe && (im.name == "__std_fs_remove" || im.name == "__std_fs_rename" ||
                    im.name.rfind("__std_fs_create_directory", 0) == 0 || im.name.rfind("__std_fs_copy_file", 0) == 0)) {
             f.rule(kWrite, FindingKind::Import, evidence);
@@ -299,26 +396,32 @@ void classifyImports(const Parsed& p, Findings& f) {
 
 void scanSyscalls(const ByteReader& r, const Parsed& p, Findings& f) {
     if (p.arch == "aarch64" && p.format == Format::Elf64) {
-        // svc #0, the Linux system call: fixed-width instructions, so an aligned match is code.
+        // svc, the system call: fixed-width instructions, so an aligned match in what the loader maps executable
+        // (the executable segments rounded out to 64 KiB) is code.
         uint64_t first = 0, count = 0;
         for (const FileRange& s : p.execSegments) {
             for (uint64_t at = (s.offset + 3) & ~uint64_t(3); at + 4 <= s.offset + s.size; at += 4) {
                 uint32_t v = 0;
                 r.u32(at, v);
-                if (v == 0xD4000001u && count++ == 0) first = at;
+                // SVC #imm16 is 0xD4000001 | imm16 << 5 (Arm A64 encoding, from memory; not re-read from Arm's manual):
+                // any immediate, since the kernel ignores it.
+                if ((v & 0xFFE0001Fu) == 0xD4000001u && count++ == 0) first = at;
             }
         }
         if (count)
             f.add(C::Packed, FindingKind::Syscall,
-                  "svc #0 at file offset " + hex(first) + " (" + std::to_string(count) + " in all)", S, Severity::Warning);
+                  "svc at file offset " + hex(first) + " (" + std::to_string(count) + " in all)", S, Severity::Warning);
     } else if (p.arch == "x86_64") {
-        // syscall (0F 05): variable-length code, so a byte match is only a hint; one after a mov of a system
-        // call number into eax/rax (B8 imm32, 48 C7 C0 imm32) starting 5 to 12 bytes before is a stronger one.
+        // syscall (0F 05) and int 0x80 (CD 80) in what the loader maps executable. Variable-length code, so a lone
+        // byte match is a hint (large honest libraries hold a few by chance); one after a mov of a system call
+        // number into eax/rax (B8 imm32, 48 C7 C0 imm32) starting 5 to 12 bytes before is how a system call is made,
+        // and is certain (measured 2026-11-18: glibc has hundreds, libstdc++, libcaw, caw_tests and every starter
+        // none).
         uint64_t first = 0, count = 0, strongFirst = 0, strong = 0;
-        for (const FileRange& s : p.execCode) {
+        for (const FileRange& s : p.execSegments) {
             const uint8_t* b = r.data() + s.offset;
             for (uint64_t i = 1; i < s.size; ++i) {
-                if (b[i - 1] != 0x0F || b[i] != 0x05) continue;
+                if (!((b[i - 1] == 0x0F && b[i] == 0x05) || (b[i - 1] == 0xCD && b[i] == 0x80))) continue;
                 const uint64_t at = s.offset + i - 1;
                 if (count++ == 0) first = at;
                 bool mov = false;
@@ -331,11 +434,11 @@ void scanSyscalls(const ByteReader& r, const Parsed& p, Findings& f) {
         }
         if (strong)
             f.add(C::Packed, FindingKind::Syscall,
-                  "syscall after a system call number at file offset " + hex(strongFirst) + " (" +
-                      std::to_string(strong) + " in all)", Strength::Hint, Severity::Warning);
+                  "system call after a call number at file offset " + hex(strongFirst) + " (" +
+                      std::to_string(strong) + " in all)", S, Severity::Warning);
         else if (count)
             f.add(C::Packed, FindingKind::Syscall,
-                  "syscall bytes at file offset " + hex(first) + " (" + std::to_string(count) + " in all)",
+                  "system call bytes at file offset " + hex(first) + " (" + std::to_string(count) + " in all)",
                   Strength::Hint, Severity::Notice);
     }
 }
@@ -542,6 +645,7 @@ const char* findingKindId(FindingKind k) noexcept {
         case FindingKind::Malformed: return "malformed";
         case FindingKind::Unsupported: return "unsupported";
         case FindingKind::Declarations: return "declarations";
+        case FindingKind::Dependency: return "dependency";
     }
     return "unknown";
 }

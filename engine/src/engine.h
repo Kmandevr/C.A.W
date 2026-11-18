@@ -83,9 +83,9 @@ public:
     std::string setProjectOffline(const ProjectSpec& p);
     std::string setProjectJson(std::string_view json);
     // Native components are loaded only after an explicit per-component trust decision.
-    // legacyGrace: CAW_LOAD_LEGACY_GRACE (the pre-load scan's grace for a component trusted before 1.0.7).
+    // legacySha256: CAW_LOAD_LEGACY_GRACE's file hash (the pre-load scan's grace for the file trusted before 1.0.7).
     ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust,
-                                         bool legacyGrace = false);
+                                         const std::string& legacySha256 = {});
     bool unloadNativeComponent(const std::string& id);
     // A rebuild of a loaded component (a new file): it replaces the old build, and every chain that
     // uses it is rebuilt with the new one, crossfaded, keeping each instance's values, bypass and

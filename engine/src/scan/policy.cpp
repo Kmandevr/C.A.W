@@ -27,7 +27,7 @@ Decision decide(const Report& report, const PolicyInput& input) {
         Weighed w{f, f.severity, (declared & capabilityBit(f.capability)) != 0, false};
         if (input.host == Host::Component) {
             const bool fatal = f.kind == FindingKind::Malformed || f.kind == FindingKind::Unsupported ||
-                               f.kind == FindingKind::Declarations;
+                               f.kind == FindingKind::Declarations || f.kind == FindingKind::Dependency;
             if (fatal) {
                 w.severity = Severity::Warning;
                 w.blocks = true;

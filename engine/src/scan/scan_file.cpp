@@ -31,25 +31,29 @@ uint64_t& scanCounter() {
     return n;
 }
 
-// The whole file up to the cap (kept), hashed to its end either way. False if it cannot be read.
-bool readHashed(const std::string& path, uint64_t cap, std::vector<uint8_t>& bytes, std::string& sha, uint64_t& size,
-                bool& tooLarge, std::string& error) {
+// A regular file's bytes, read up to cap + 1 (so a file past the cap is known without reading it all, and a
+// device or pipe is never read). False if it is not a regular file or cannot be read.
+bool readCapped(const std::string& path, uint64_t cap, std::vector<uint8_t>& bytes, bool& tooLarge, std::string& error) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(utf8Path(path), ec)) {
+        error = ec ? "the file could not be opened" : "it is not a regular file";
+        return false;
+    }
     std::FILE* f = openFile(utf8Path(path), "rb");
     if (!f) {
         error = "the file could not be opened";
         return false;
     }
-    Sha256 hash;
     std::vector<uint8_t> chunk(1 << 16);
-    size = 0;
     tooLarge = false;
     for (;;) {
         const size_t got = std::fread(chunk.data(), 1, chunk.size(), f);
         if (got == 0) break;
-        hash.update(chunk.data(), got);
-        size += got;
-        if (size > cap) tooLarge = true;
-        if (!tooLarge) bytes.insert(bytes.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(got));
+        bytes.insert(bytes.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(got));
+        if (bytes.size() > cap) {
+            tooLarge = true;
+            break;
+        }
     }
     const bool failed = std::ferror(f) != 0;
     std::fclose(f);
@@ -57,8 +61,6 @@ bool readHashed(const std::string& path, uint64_t cap, std::vector<uint8_t>& byt
         error = "the file could not be read";
         return false;
     }
-    if (tooLarge) bytes.clear();
-    sha = toHex(hash.digest());
     return true;
 }
 
@@ -100,34 +102,47 @@ uint64_t scansRun() {
 }
 
 FileScan scanFile(const std::string& path, std::string_view expectedId) {
-    FileScan out;
-    const Limits limits;
     std::vector<uint8_t> bytes;
     bool tooLarge = false;
-    if (!readHashed(path, limits.maxFileBytes, bytes, out.sha256, out.size, tooLarge, out.error)) return out;
-    out.ok = true;
-    std::shared_ptr<const Report> report;
-    {
-        std::lock_guard<std::mutex> lock(cacheMutex());
-        const auto it = cache().find(out.sha256);
-        if (it != cache().end()) report = it->second;
+    std::string error;
+    if (!readCapped(path, Limits{}.maxFileBytes, bytes, tooLarge, error)) {
+        FileScan out;
+        out.error = error;
+        return out;
     }
-    out.cached = report != nullptr;
-    if (!report) {
+    return scanBytes(path, std::move(bytes), tooLarge, expectedId);
+}
+
+FileScan scanBytes(const std::string& path, std::vector<uint8_t> bytes, bool tooLarge, std::string_view expectedId) {
+    FileScan out;
+    const Limits limits;
+    if (bytes.size() > limits.maxFileBytes) tooLarge = true;
+    out.ok = true;
+    out.size = bytes.size();
+    std::shared_ptr<const Report> report;
+    if (tooLarge) {
+        // Not hashed or cached: only its first 256 MiB were read.
         Report fresh;
-        if (tooLarge) {
-            fresh.malformed = true;
-            fresh.findings.push_back({Capability::Packed, FindingKind::Malformed,
-                                      "the file is larger than the scan reads (256 MiB)", Strength::Certain,
-                                      Severity::Warning});
-        } else {
-            fresh = scanBinary(bytes, limits);
-        }
+        fresh.malformed = true;
+        fresh.findings.push_back({Capability::Packed, FindingKind::Malformed,
+                                  "the file is larger than the scan reads (256 MiB)", Strength::Certain,
+                                  Severity::Warning});
         report = std::make_shared<const Report>(std::move(fresh));
-        std::lock_guard<std::mutex> lock(cacheMutex());
-        ++scanCounter();
-        if (cache().size() >= kMaxCachedReports) cache().clear();
-        cache().emplace(out.sha256, report);
+    } else {
+        out.sha256 = sha256Hex(bytes);
+        {
+            std::lock_guard<std::mutex> lock(cacheMutex());
+            const auto it = cache().find(out.sha256);
+            if (it != cache().end()) report = it->second;
+        }
+        out.cached = report != nullptr;
+        if (!report) {
+            report = std::make_shared<const Report>(scanBinary(bytes, limits));
+            std::lock_guard<std::mutex> lock(cacheMutex());
+            ++scanCounter();
+            if (cache().size() >= kMaxCachedReports) cache().clear();
+            cache().emplace(out.sha256, report);
+        }
     }
     out.report = report;
 

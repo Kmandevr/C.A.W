@@ -1137,9 +1137,9 @@ std::string Engine::setProjectJson(std::string_view json) {
 }
 
 ModuleLoadResult Engine::loadNativeComponent(
-    const std::string& path, const std::string& expectedId, NativeModuleTrust trust, bool legacyGrace) {
+    const std::string& path, const std::string& expectedId, NativeModuleTrust trust, const std::string& legacySha256) {
     std::lock_guard<std::mutex> lock(ctl_);
-    return nativeModules_.loadSharedLibrary(path, expectedId, trust, false, legacyGrace);
+    return nativeModules_.loadSharedLibrary(path, expectedId, trust, false, legacySha256);
 }
 
 ModuleLoadResult Engine::reloadNativeComponent(

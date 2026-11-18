@@ -27,10 +27,12 @@ struct Parsed {
     std::string arch = "other";
     std::vector<Import> imports;
     std::vector<std::string> libraries;  // DT_NEEDED names, PE import DLLs (lowercase)
+    std::vector<std::string> searchPaths;  // ELF DT_RPATH / DT_RUNPATH
     std::vector<std::string> exports;    // ELF only: defined global dynamic symbols worth a look
     bool componentEntry = false;
     std::vector<FileRange> execCode;     // executable code: sections where named, else segments
-    std::vector<FileRange> execSegments; // what the loader maps executable (ELF PT_LOAD with PF_X; PE as execCode)
+    std::vector<FileRange> execSegments; // what the loader maps executable: ELF PT_LOADs with PF_X rounded out to
+                                         // 64 KiB pages; PE executable sections
     std::vector<FileRange> dataSections; // named non-executable sections with file bytes
     std::vector<std::string> sectionNames;
     std::vector<std::string> writableExecutable;  // names of W+X sections or segments

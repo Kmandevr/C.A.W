@@ -343,7 +343,7 @@ target_include_directories(caw_cli PRIVATE src)
     "CAW_TEST_STARTER_PATH=\"$<TARGET_FILE:caw_test_starter_bass>\""
     "CAW_TEST_DECLARED_PATH=\"$<TARGET_FILE:caw_test_declared>\""
     "CAW_TEST_LIBCAW_PATH=\"$<TARGET_FILE:caw_engine>\"")
-  target_sources(caw_tests PRIVATE tests/scan_test.cpp tests/scan_load_test.cpp)  # the pre-load scan (1.0.7)
+  target_sources(caw_tests PRIVATE tests/scan_test.cpp tests/scan_load_test.cpp tests/scan_bypass_test.cpp)  # the pre-load scan (1.0.7)
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)

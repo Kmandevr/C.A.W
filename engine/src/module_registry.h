@@ -55,6 +55,7 @@ struct ModuleLoadResult {
 };
 
 struct NativeLibrary;
+struct ComponentFile;  // a component file held open from the scan to the load
 struct LoadedComponent;  // a component's C table plus the engine-owned copy of its descriptor
 
 struct ModuleRegistration {
@@ -81,10 +82,12 @@ public:
     // instances made before keep the old library loaded until they are destroyed. A rebuild must have a
     // new file name: the system loader returns the already-loaded library for the same path.
     // Before the library is opened (opening runs its constructors) the file is scanned (src/scan/, the verdict
-    // cached by SHA-256): a blocked verdict refuses the load (ScanBlocked); warnings load. `legacyGrace` is the
-    // app's CAW_LOAD_LEGACY_GRACE for a component trusted before 1.0.7 (scan/policy.h).
+    // cached by SHA-256): a blocked verdict refuses the load (ScanBlocked); warnings load. The scan reads the open
+    // file the loader then loads from (Linux /proc/self/fd/N, Android ANDROID_DLEXT_USE_LIBRARY_FD, Windows a
+    // handle that denies writers), so the file can't be swapped in between. `legacySha256` is the app's
+    // CAW_LOAD_LEGACY_GRACE: the SHA-256 (hex) of the file the user trusted before 1.0.7; another file is refused.
     ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust,
-                                       bool replace = false, bool legacyGrace = false);
+                                       bool replace = false, std::string_view legacySha256 = {});
     // A dynamic library cannot unload while a created processor still holds it.
     bool unload(std::string_view id);
 
@@ -110,7 +113,8 @@ public:
 
 private:
     // Opens a scanned library and registers its component (the rest of loadSharedLibrary).
-    ModuleLoadResult openScanned(const std::string& path, std::string_view expectedId, bool replace);
+    ModuleLoadResult openScanned(const std::string& path, ComponentFile& file, std::string_view expectedId,
+                                 bool replace);
     std::vector<ModuleRegistration> registrations_;
 };
 

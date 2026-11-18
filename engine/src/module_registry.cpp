@@ -1,6 +1,7 @@
 // Native module registry: static factories, and components loaded through the C interface (caw_component.h).
 #include "module_registry.h"
 
+#include <cctype>
 #include <charconv>
 #include <cstring>
 #include <deque>
@@ -15,6 +16,12 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+#ifdef __ANDROID__
+#include <android/dlext.h>
 #endif
 
 #include "caw_component.h"
@@ -24,11 +31,84 @@
 
 namespace caw {
 
+// A component file opened once: the scan reads its bytes from this handle and the system loader loads the same
+// file through it, so the file can't be swapped between the scan and the load. Regular files only.
+struct ComponentFile {
+#ifdef _WIN32
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    ~ComponentFile() {
+        if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+    }
+#else
+    int fd = -1;
+    ~ComponentFile() {
+        if (fd >= 0) close(fd);
+    }
+#endif
+
+    // Opens the file; on Windows no one else may write, rename or delete it while it is open.
+    bool open(const std::string& path, std::string& error) {
+#ifdef _WIN32
+        const std::filesystem::path nativePath = std::filesystem::u8path(path);
+        handle = CreateFileW(nativePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            error = "the file could not be opened (Windows error " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        if (GetFileType(handle) != FILE_TYPE_DISK) {
+            error = "it is not a regular file";
+            return false;
+        }
+#else
+        fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            error = "the file could not be opened";
+            return false;
+        }
+        struct stat st {};
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            error = "it is not a regular file";
+            return false;
+        }
+#endif
+        return true;
+    }
+
+    // Its bytes up to cap + 1 (more: tooLarge).
+    bool read(uint64_t cap, std::vector<uint8_t>& bytes, bool& tooLarge, std::string& error) {
+        std::vector<uint8_t> chunk(1 << 16);
+        tooLarge = false;
+        for (;;) {
+#ifdef _WIN32
+            DWORD got = 0;
+            if (!ReadFile(handle, chunk.data(), static_cast<DWORD>(chunk.size()), &got, nullptr)) {
+                error = "the file could not be read";
+                return false;
+            }
+#else
+            const ssize_t got = ::read(fd, chunk.data(), chunk.size());
+            if (got < 0) {
+                error = "the file could not be read";
+                return false;
+            }
+#endif
+            if (got == 0) return true;
+            bytes.insert(bytes.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(got));
+            if (bytes.size() > cap) {
+                tooLarge = true;
+                return true;
+            }
+        }
+    }
+};
+
 struct NativeLibrary {
 #ifdef _WIN32
     HMODULE handle = nullptr;
 #else
     void* handle = nullptr;
+    int fd = -1;  // the scanned file, kept open while loaded (Linux loads it as /proc/self/fd/N)
 #endif
 
     ~NativeLibrary() {
@@ -36,20 +116,54 @@ struct NativeLibrary {
         if (handle) FreeLibrary(handle);
 #else
         if (handle) dlclose(handle);
+#if defined(__linux__) && !defined(__ANDROID__)
+        // glibc may keep a library loaded after dlclose (a C++ library with unique symbols is never unloaded).
+        // Its name, /proc/self/fd/N, then stays taken: closing N would let the next component's descriptor get
+        // the same number, and dlopen would hand back this library by name. Keep N open while it stays loaded.
+        if (handle && fd >= 0) {
+            const std::string byDescriptor = "/proc/self/fd/" + std::to_string(fd);
+            if (void* still = dlopen(byDescriptor.c_str(), RTLD_NOW | RTLD_NOLOAD)) {
+                dlclose(still);
+                return;
+            }
+        }
+#endif
+        if (fd >= 0) close(fd);
 #endif
     }
 
-    bool open(const std::string& path, std::string& error) {
+    // Loads the scanned file through its open handle.
+    bool open(const std::string& path, ComponentFile& file, std::string& error) {
 #ifdef _WIN32
+        // The handle stays open (no writer, renamer or deleter allowed) while the loader maps the file. The
+        // component's own dependencies come only from the application folder and System32 (never the current
+        // folder or PATH); the scan allows only system ones.
         const std::filesystem::path nativePath = std::filesystem::u8path(path);
-        handle = LoadLibraryW(nativePath.c_str());
+        handle = LoadLibraryExW(nativePath.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!handle) {
             error = "LoadLibrary failed with Windows error " + std::to_string(GetLastError());
             return false;
         }
 #else
+        fd = file.fd;
+        file.fd = -1;
         dlerror();
-        handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+#if defined(__ANDROID__)
+        // bionic maps the library from the descriptor (ANDROID_DLEXT_USE_LIBRARY_FD, android/dlext.h, API 21+);
+        // the path names it.
+        android_dlextinfo info{};
+        info.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
+        info.library_fd = fd;
+        handle = android_dlopen_ext(path.c_str(), RTLD_NOW | RTLD_LOCAL, &info);
+#elif defined(__linux__)
+        // glibc opens /proc/self/fd/N: the inode the scan read, whatever the path names now. The descriptor stays
+        // open while the library is loaded, so the name is never reused for another file meanwhile.
+        const std::string byDescriptor = "/proc/self/fd/" + std::to_string(fd);
+        handle = dlopen(byDescriptor.c_str(), RTLD_NOW | RTLD_LOCAL);
+#else
+        (void)file;
+        handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);  // no descriptor loading here (Mach-O is refused anyway)
+#endif
         if (!handle) {
             const char* detail = dlerror();
             error = detail ? detail : "dlopen failed";
@@ -438,7 +552,8 @@ bool ModuleRegistry::addInternal(const ModuleDescriptor& descriptor, ModuleFacto
 }
 
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
-    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace, bool legacyGrace) {
+    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace,
+    std::string_view legacySha256) {
     if (trust == NativeModuleTrust::Blocked)
         return {false, ModuleLoadError::Blocked, std::string(expectedId), "Native component is blocked by the user's trust setting."};
     if (trust == NativeModuleTrust::Isolated)
@@ -450,11 +565,28 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         return {false, ModuleLoadError::InvalidArgument, {}, "A component path and expected stable component ID are required."};
 
     try {
-        // The pre-load scan, before anything of the file runs (the system loader runs its constructors).
-        const scan::FileScan scanned = scan::scanFile(path, expectedId);
-        if (!scanned.ok)
+        // The pre-load scan, before anything of the file runs (the system loader runs its constructors), on the
+        // bytes of the very handle the loader then loads from.
+        ComponentFile file;
+        std::vector<uint8_t> bytes;
+        bool tooLarge = false;
+        std::string readError;
+        if (!file.open(path, readError) || !file.read(scan::Limits{}.maxFileBytes, bytes, tooLarge, readError))
             return {false, ModuleLoadError::LoadFailed, std::string(expectedId),
-                    "The pre-load scan could not read the file: " + scanned.error + "."};
+                    "The pre-load scan could not read the file: " + readError + "."};
+        const scan::FileScan scanned = scan::scanBytes(path, std::move(bytes), tooLarge, expectedId);
+        // The legacy grace is for one exact file: the one whose hash the user trusted before 1.0.7.
+        bool legacyGrace = false;
+        if (!legacySha256.empty()) {
+            std::string expected(legacySha256);
+            for (char& c : expected) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (scanned.sha256.empty() || expected != scanned.sha256)
+                return {false, ModuleLoadError::ScanBlocked, std::string(expectedId),
+                        "The legacy grace is for the file trusted before 1.0.7, and this file is not it (its SHA-256 "
+                        "differs). Rebuild the component with this version of C.A.W.",
+                        scanned.sha256, "blocked", false};
+            legacyGrace = true;
+        }
         const scan::Decision decision =
             scan::decide(*scanned.report, {scan::Host::Component, legacyGrace});
         ModuleLoadResult scanResult{false, ModuleLoadError::ScanBlocked, std::string(expectedId), decision.reason,
@@ -466,17 +598,18 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
             r.graceApplied = scanResult.graceApplied;
             return r;
         };
-        return withScan(openScanned(path, expectedId, replace));
+        return withScan(openScanned(path, file, expectedId, replace));
     } catch (const std::bad_alloc&) {
         return {false, ModuleLoadError::LoadFailed, std::string(expectedId), "Out of memory while loading the component."};
     }
 }
 
-ModuleLoadResult ModuleRegistry::openScanned(const std::string& path, std::string_view expectedId, bool replace) {
+ModuleLoadResult ModuleRegistry::openScanned(const std::string& path, ComponentFile& file, std::string_view expectedId,
+                                             bool replace) {
     try {
         auto library = std::make_shared<NativeLibrary>();
         std::string loadError;
-        if (!library->open(path, loadError))
+        if (!library->open(path, file, loadError))
             return {false, ModuleLoadError::LoadFailed, std::string(expectedId), std::move(loadError)};
 
         const auto entry = library->resolve<CawGetComponentV3Fn>(CAW_COMPONENT_ENTRY_SYMBOL);

@@ -13,7 +13,10 @@ constexpr uint32_t kExecute = 0x20000000, kWrite = 0x80000000;
 struct Section {
     std::string name;
     uint32_t vsize = 0, va = 0, rawSize = 0, rawPtr = 0, flags = 0;
+    uint64_t fileBacked = 0;  // the bytes the loader maps from the file: raw size, at most the aligned virtual size
 };
+
+bool powerOfTwo(uint32_t v) { return v != 0 && (v & (v - 1)) == 0; }
 
 std::string lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -41,9 +44,9 @@ private:
         for (const Section& s : sections_) {
             if (rva < s.va) continue;
             const uint64_t into = rva - s.va;
-            if (into >= s.rawSize || length > s.rawSize - into) continue;
+            if (into >= s.fileBacked || length > s.fileBacked - into) continue;
             offset = uint64_t(s.rawPtr) + into;
-            end = uint64_t(s.rawPtr) + s.rawSize;
+            end = uint64_t(s.rawPtr) + s.fileBacked;
             return true;
         }
         if (rva < sizeOfHeaders_ && length <= sizeOfHeaders_ - rva && r_.has(rva, length)) {
@@ -72,6 +75,14 @@ private:
         opt_ = coff + 20;
         if (optionalSize < 112 || !r_.has(opt_, optionalSize)) return bad("the PE optional header is cut short");
         r_.u64(opt_ + 24, imageBase_);
+        uint32_t sectionAlignment = 0, fileAlignment = 0;
+        r_.u32(opt_ + 32, sectionAlignment);
+        r_.u32(opt_ + 36, fileAlignment);
+        // The loader's own rules (PE format): FileAlignment a power of two from 512 to 64 KiB, SectionAlignment a
+        // power of two at least that, and equal to it when below a page.
+        if (!powerOfTwo(fileAlignment) || fileAlignment < 512 || fileAlignment > 65536 || !powerOfTwo(sectionAlignment) ||
+            sectionAlignment < fileAlignment || (sectionAlignment < 4096 && sectionAlignment != fileAlignment))
+            return bad("the PE section or file alignment is not one Windows loads");
         r_.u32(opt_ + 60, sizeOfHeaders_);
         uint32_t directories = 0;
         r_.u32(opt_ + 108, directories);
@@ -80,6 +91,7 @@ private:
         if (count > 96) return bad("more PE sections than Windows loads");
         const uint64_t table = opt_ + optionalSize;
         if (!r_.has(table, uint64_t(count) * 40)) return bad("the PE section table lies outside the file");
+        uint64_t nextVa = sizeOfHeaders_;
         for (uint32_t i = 0; i < count; ++i) {
             const uint64_t at = table + uint64_t(i) * 40;
             Section s;
@@ -95,8 +107,17 @@ private:
             r_.u32(at + 20, s.rawPtr);
             r_.u32(at + 36, s.flags);
             if (s.rawSize > 0 && !r_.has(s.rawPtr, s.rawSize)) return bad("a PE section lies outside the file");
-            // The loader maps at most the virtual size of a section's raw bytes; the rest is file padding.
-            const uint64_t mapped = s.vsize > 0 ? std::min(s.vsize, s.rawSize) : s.rawSize;
+            // Windows rounds a raw pointer down to 512 bytes, so an unaligned one maps other bytes than it names.
+            if (s.rawSize > 0 && (s.rawPtr & 0x1ff)) return bad("a PE section's file offset is not 512-byte aligned");
+            // Sections in ascending address order, aligned and not overlapping, as the loader maps them; each maps
+            // its raw bytes up to its virtual size rounded up to the section alignment (the rest is zeros).
+            const uint64_t span = (uint64_t(s.vsize > 0 ? s.vsize : s.rawSize) + sectionAlignment - 1) /
+                                  sectionAlignment * sectionAlignment;
+            if (s.va % sectionAlignment != 0) return bad("a PE section is not aligned to the section alignment");
+            if (s.va < nextVa) return bad("PE sections overlap or are out of order");
+            nextVa = uint64_t(s.va) + span;
+            s.fileBacked = std::min<uint64_t>(s.rawSize, span);
+            const uint64_t mapped = s.fileBacked;
             if (mapped > 0 && (s.flags & kExecute)) {
                 out_.execCode.push_back({s.rawPtr, mapped, s.name});
                 out_.execSegments.push_back({s.rawPtr, mapped, s.name});

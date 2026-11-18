@@ -113,7 +113,7 @@ TEST(scan_elf_imports_fall_into_their_capabilities) {
     const Finding* mp = find(r, Capability::MakeCode, FindingKind::Import, "mprotect");
     CHECK(mp && mp->strength == Strength::Hint);
     const Finding* sc = find(r, Capability::Packed, FindingKind::Import, "syscall");
-    CHECK(sc && sc->severity == Severity::Notice && sc->strength == Strength::Hint);
+    CHECK(sc && sc->severity == Severity::Warning && sc->strength == Strength::Certain);
     const Finding* op = exact(r, "open");
     CHECK(op && op->strength == Strength::Hint);
     const Finding* fo = find(r, Capability::ReadFiles, FindingKind::Import, "fopen");
@@ -236,14 +236,14 @@ TEST(scan_the_canonical_form_round_trips) {
     CHECK_EQ(back[0].reason, list[0].reason);
 }
 
-TEST(scan_aarch64_svc_blocks_and_x86_syscall_only_hints) {
+TEST(scan_aarch64_svc_and_an_x86_system_call_block_and_lone_bytes_only_hint) {
     ElfSpec arm;
     arm.machine = 183;
     arm.code = {0x1f, 0x20, 0x03, 0xd5, 0x01, 0x00, 0x00, 0xd4, 0xc0, 0x03, 0x5f, 0xd6, 0, 0, 0, 0};  // nop; svc #0; ret
     arm.extraSections = {{"caw_caps", declarationBytes(kEmptyDeclarations)}};
     const Report a = scan(buildElf(arm));
     CHECK_EQ(a.arch, std::string("aarch64"));
-    const Finding* svc = find(a, Capability::Packed, FindingKind::Syscall, "svc #0");
+    const Finding* svc = find(a, Capability::Packed, FindingKind::Syscall, "svc at");
     CHECK(svc && svc->strength == Strength::Certain);
     CHECK(componentVerdict(a) == Verdict::Blocked);
     // Misaligned, the same bytes are data.
@@ -254,9 +254,9 @@ TEST(scan_aarch64_svc_blocks_and_x86_syscall_only_hints) {
     x86.extraSections = {{"caw_caps", declarationBytes(kEmptyDeclarations)}};
     x86.code = {0xb8, 0x3b, 0, 0, 0, 0x0f, 0x05, 0xc3};  // mov eax, 59; syscall; ret
     const Report x = scan(buildElf(x86));
-    const Finding* strong = find(x, Capability::Packed, FindingKind::Syscall, "system call number");
-    CHECK(strong && strong->strength == Strength::Hint && strong->severity == Severity::Warning);
-    CHECK(componentVerdict(x) == Verdict::Warning);
+    const Finding* strong = find(x, Capability::Packed, FindingKind::Syscall, "call number");
+    CHECK(strong && strong->strength == Strength::Certain && strong->severity == Severity::Warning);
+    CHECK(componentVerdict(x) == Verdict::Blocked);
     x86.code = {0x90, 0x0f, 0x05, 0xc3};
     const Report w = scan(buildElf(x86));
     const Finding* weak = find(w, Capability::Packed, FindingKind::Syscall);
