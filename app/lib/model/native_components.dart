@@ -15,7 +15,15 @@ import 'atomic_file.dart';
 
 /// Loads a built library into the engine (Engine.loadNativeComponent); a function, so tests can stand in for it.
 typedef NativeLoad = Future<NativeComponentLoadResult> Function(
-    {required String artifactPath, required String expectedComponentId, required NativeComponentTrust trust, bool reload});
+    {required String artifactPath,
+    required String expectedComponentId,
+    required NativeComponentTrust trust,
+    bool reload,
+    String? legacyGraceSha256});
+
+/// The pre-load scan of a built library (Engine.scanNativeComponent); a function, so tests can stand in for it.
+typedef NativeScan = Future<ComponentScan> Function(String artifactPath,
+    {String? expectedComponentId, String? legacyGraceSha256});
 
 /// The manager for this device, or null where the app has no in-app compiler. Its files are app-private.
 Future<NativeComponentManager?> deviceNativeComponentManager(Engine engine, ProjectStorage storage) async {
@@ -26,12 +34,15 @@ Future<NativeComponentManager?> deviceNativeComponentManager(Engine engine, Proj
   await trust.load();
   final service = CppComponentBuildService(storage);
   final builder = CppSourceBuilder(compiler);
-  return NativeComponentManager(
+  final manager = NativeComponentManager(
     trust: trust,
     cacheFile: File('${dir.path}/native-builds.json'),
     build: (project, component) => service.buildInApp(project: project, component: component, builder: builder),
     load: engine.loadNativeComponent,
+    scan: engine.scanNativeComponent,
   );
+  await manager.migrateLegacyTrust();
+  return manager;
 }
 
 /// What [NativeComponentManager.prepare] found for each of the project's components.
@@ -41,6 +52,7 @@ class NativeComponentsStatus {
   final List<String> blocked = [];                // the user blocked this code
   final Map<String, CppBuildResult> buildFailed = {};
   final Map<String, String> loadFailed = {};
+  final Set<String> graceApplied = {};            // loaded under legacy grace: built before 1.0.7, warn until rebuilt
 
   bool get ready => needsTrust.isEmpty && buildFailed.isEmpty && loadFailed.isEmpty;
 }
@@ -49,9 +61,12 @@ class NativeComponentsStatus {
 /// is reused while its sources are unchanged (cached by source fingerprint), so opening a project doesn't
 /// rebuild everything. A component already loaded from other sources is reloaded (it switches while playing).
 class NativeComponentManager {
-  NativeComponentManager({required this.trust, required this.build, required this.load, required this.cacheFile});
+  NativeComponentManager({required this.trust, required this.build, required this.load, required this.cacheFile, this.scan});
 
   final NativeTrustStore trust;
+
+  /// The pre-load scan, for the trust sheet; null where there is none (tests).
+  final NativeScan? scan;
   /// Builds one of [project]'s components (it saves the project and materializes the sources first).
   final Future<CppBuildResult> Function(ProjectDoc project, CppComponentDoc component) build;
   final NativeLoad load;
@@ -136,10 +151,13 @@ class NativeComponentManager {
         await _writeCache(cache);
       }
       final reload = _engineHas.contains(id);
-      final libraryKey =
-          isImportedBuild(artifact) ? importedLibraryKey(await NativeTrustStore.libraryFingerprint(artifact)) : null;
-      final loaded = await load(artifactPath: artifact, expectedComponentId: id, trust: choice, reload: reload);
+      // Hashed only when it is needed: a packaged build's trust key, or a component with builds trusted before 1.0.7.
+      final sha = isImportedBuild(artifact) || trust.hasLegacy(id) ? await NativeTrustStore.libraryFingerprint(artifact) : null;
+      final libraryKey = isImportedBuild(artifact) ? importedLibraryKey(sha!) : null;
+      final loaded = await load(artifactPath: artifact, expectedComponentId: id, trust: choice, reload: reload,
+          legacyGraceSha256: sha == null ? null : trust.legacyTrusted(id, sha));
       if (loaded.ok) {
+        if (loaded.graceApplied) status.graceApplied.add(id);
         _engineHas.add(id);
         _loadedFingerprint[id] = fingerprint;
         _loadedArtifact[id] = artifact;
@@ -155,6 +173,39 @@ class NativeComponentManager {
     }
     if (done > 0) onProgress?.call(done);
     return status;
+  }
+
+  /// Once, on the first start of 1.0.7 or later over an older store: every build the user trusted then (this
+  /// device's builds of trusted sources, and packaged builds trusted as files) is recorded by its SHA-256, so it
+  /// keeps loading with legacy grace until it is rebuilt (owner, 2026-11-18).
+  Future<void> migrateLegacyTrust() async {
+    if (!trust.needsLegacyMigration) return;
+    final builds = <(String, String)>[];
+    for (final MapEntry(key: id, value: map) in (await _readCache()).entries) {
+      for (final MapEntry(key: fingerprint, value: path) in map.entries) {
+        if (trust.decide(id, fingerprint) != NativeComponentTrust.trusted) continue;
+        try {
+          final sha = await NativeTrustStore.libraryFingerprint(path);
+          if (isImportedBuild(path) && trust.decide(id, importedLibraryKey(sha)) != NativeComponentTrust.trusted) continue;
+          builds.add((id, sha));
+        } on FileSystemException {
+          // Gone: a rebuild follows, under the scan's rules.
+        }
+      }
+    }
+    trust.finishLegacyMigration(builds);
+    await trust.save();
+  }
+
+  /// The pre-load scan of [component]'s build on this device for its current sources, with legacy grace when the
+  /// user trusted that exact build before 1.0.7; null when there is no build yet or no scan here.
+  Future<ComponentScan?> scanBuild(CppComponentDoc component) async {
+    final s = scan;
+    final path = await builtArtifact(component);
+    if (s == null || path == null) return null;
+    final sha = await NativeTrustStore.libraryFingerprint(path);
+    return s(path, expectedComponentId: component.componentId,
+        legacyGraceSha256: trust.legacyTrusted(component.componentId, sha));
   }
 
   /// The trust store's key for a built library that came in a package: its own fingerprint, apart from its sources'.

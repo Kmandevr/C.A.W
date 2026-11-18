@@ -13,20 +13,36 @@ import 'atomic_file.dart';
 class NativeTrustStore {
   NativeTrustStore(this.file);
 
-  /// App-private JSON: {"authored": {id: [source fingerprint, ...]}, "choices": {id: {fingerprint: "trusted"|"blocked"}}}.
+  /// App-private JSON: {"authored": {id: [source fingerprint, ...]}, "choices": {id: {fingerprint: "trusted"|"blocked"}},
+  /// "scan": 1, "legacy": {id: [library SHA-256, ...]}}. "scan" marks a store written by 1.0.7 or later (the
+  /// pre-load scan); "legacy" holds the exact builds the user trusted before it, which load with legacy grace.
   final File file;
   final Map<String, Set<String>> _authored = {};
   final Map<String, Map<String, NativeComponentTrust>> _choices = {};
+  final Map<String, Set<String>> _legacy = {};
+  bool _needsLegacyMigration = false;
 
   static const _maxAuthoredPerComponent = 64;
+  static const _scanFormat = 1;
+
+  /// The store was written by an app from before the pre-load scan (1.0.7: no "scan" marker): what it trusts was
+  /// trusted then. The manager records those builds' hashes once ([finishLegacyMigration]); until then [save]
+  /// keeps the store unmarked, so nothing is lost if the app stops first.
+  bool get needsLegacyMigration => _needsLegacyMigration;
 
   Future<void> load() async {
     _authored.clear();
     _choices.clear();
-    if (!await file.exists()) return;
+    _legacy.clear();
+    _needsLegacyMigration = false;
+    if (!await file.exists()) return; // a new install: nothing was trusted before 1.0.7
     try {
       final j = jsonDecode(await file.readAsString());
       if (j is! Map) return;
+      _needsLegacyMigration = !j.containsKey('scan');
+      (j['legacy'] as Map? ?? const {}).forEach((id, list) {
+        if (id is String && list is List) _legacy[id] = list.whereType<String>().where(_isSha256).toSet();
+      });
       (j['authored'] as Map? ?? const {}).forEach((id, list) {
         if (id is String && list is List) _authored[id] = list.whereType<String>().toSet();
       });
@@ -39,9 +55,14 @@ class NativeTrustStore {
         };
       });
     } on FormatException {
-      // A damaged store asks again rather than trusting anything.
+      // A damaged store asks again rather than trusting anything (and grants no grace).
+    } on TypeError {
+      // As damaged.
     }
   }
+
+  static final _sha = RegExp(r'^[0-9a-f]{64}$');
+  static bool _isSha256(String s) => _sha.hasMatch(s);
 
   Future<void> save() async {
     await file.parent.create(recursive: true);
@@ -51,6 +72,8 @@ class NativeTrustStore {
         for (final e in _choices.entries)
           e.key: {for (final c in e.value.entries) c.key: c.value == NativeComponentTrust.trusted ? 'trusted' : 'blocked'},
       },
+      if (!_needsLegacyMigration) 'scan': _scanFormat,
+      if (_legacy.isNotEmpty) 'legacy': {for (final e in _legacy.entries) e.key: e.value.toList()},
     }), flush: false); // never a half-written store
   }
 
@@ -95,6 +118,31 @@ class NativeTrustStore {
     _choices.putIfAbsent(componentId, () => {})[fingerprint] = trust;
   }
 
-  /// "Change in its settings": forgets every choice for the component, so it asks again.
-  void forget(String componentId) => _choices.remove(componentId);
+  /// "Change in its settings": forgets every choice for the component, so it asks again (and its grace: a build
+  /// trusted again is trusted now, under the scan's rules).
+  void forget(String componentId) {
+    _choices.remove(componentId);
+    _legacy.remove(componentId);
+  }
+
+  /// Records [builds] (component id, library SHA-256) as trusted before 1.0.7 and marks the store as migrated.
+  /// Only while [needsLegacyMigration]: a build trusted from 1.0.7 on never gets grace.
+  void finishLegacyMigration(Iterable<(String, String)> builds) {
+    if (!_needsLegacyMigration) return;
+    for (final (id, sha) in builds) {
+      final hash = sha.toLowerCase();
+      if (_isSha256(hash)) _legacy.putIfAbsent(id, () => {}).add(hash);
+    }
+    _needsLegacyMigration = false;
+  }
+
+  /// Whether any build of [componentId] was trusted before 1.0.7.
+  bool hasLegacy(String componentId) => _legacy[componentId]?.isNotEmpty ?? false;
+
+  /// [sha256] when this exact build of [componentId] was trusted before 1.0.7 (it loads with legacy grace), else
+  /// null. A rebuild has a new hash, so it never matches.
+  String? legacyTrusted(String componentId, String sha256) {
+    final hash = sha256.toLowerCase();
+    return (_legacy[componentId]?.contains(hash) ?? false) ? hash : null;
+  }
 }

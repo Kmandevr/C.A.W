@@ -12,7 +12,10 @@ import '../model/tempo_map.dart' show TempoEngine, TempoPoint, TimeSignature;
 import 'audio_bindings.dart';
 import 'bindings.dart';
 import 'component_info.dart';
+import 'component_scan.dart';
 import 'execution.dart';
+
+export 'component_scan.dart';
 
 /// Explicit, per-component native-code trust. There is intentionally no implicit Trusted default.
 enum NativeComponentTrust {
@@ -30,6 +33,9 @@ class NativeComponentLoadResult {
     this.componentId = '',
     this.error = '',
     this.errorCode = 0,
+    this.sha256 = '',
+    this.scanVerdict = '',
+    this.graceApplied = false,
   });
 
   final bool ok;
@@ -37,11 +43,22 @@ class NativeComponentLoadResult {
   final String error;
   final int errorCode;
 
+  /// The loaded file's SHA-256, the pre-load scan's verdict, and whether legacy grace let it load (API 37).
+  final String sha256;
+  final String scanVerdict;
+  final bool graceApplied;
+
+  /// The pre-load scan refused it (errorCode 11): [error] names each capability it uses without declaring.
+  bool get scanBlocked => errorCode == cawLoadErrorScanBlocked;
+
   static NativeComponentLoadResult fromJson(Map<String, dynamic> json) => NativeComponentLoadResult(
         ok: json['ok'] == true,
         componentId: (json['componentId'] as String?) ?? '',
         error: (json['error'] as String?) ?? '',
         errorCode: (json['errorCode'] as num?)?.toInt() ?? 0,
+        sha256: json['sha256'] is String ? json['sha256'] as String : '',
+        scanVerdict: json['scan_verdict'] is String ? json['scan_verdict'] as String : '',
+        graceApplied: json['grace_applied'] == true,
       );
 }
 
@@ -470,11 +487,16 @@ class Engine implements TempoEngine {
   ///
   /// With [reload], the artifact is a rebuild of a component already loaded (a new file): every chain using it
   /// switches to the new build while playing, crossfaded, keeping its values and, if the new build takes it, state.
+  ///
+  /// [legacyGraceSha256]: the SHA-256 of this exact file as the user trusted it before 1.0.7 (NativeTrustStore
+  /// .legacyTrusted); it loads with CAW_LOAD_LEGACY_GRACE, its undeclared capabilities warning instead of
+  /// blocking. Null for everything else. A reload never gets grace (the engine's reload takes no flags).
   Future<NativeComponentLoadResult> loadNativeComponent({
     required String artifactPath,
     required String expectedComponentId,
     required NativeComponentTrust trust,
     bool reload = false,
+    String? legacyGraceSha256,
   }) {
     if (_disposed) return Future.error(StateError('engine is disposed'));
     if (Platform.isIOS) {
@@ -491,7 +513,8 @@ class Engine implements TempoEngine {
     final trustValue = trust.nativeValue;
     _queue = _queue.then((_) async {
       try {
-        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue, reload);
+        final text = await _loadComponentOffThread(
+            engineAddress, artifactPath, expectedComponentId, trustValue, reload, reload ? null : legacyGraceSha256);
         done.complete(NativeComponentLoadResult.fromJson(jsonDecode(text) as Map<String, dynamic>));
       } catch (error, stack) {
         done.completeError(error, stack);
@@ -502,6 +525,11 @@ class Engine implements TempoEngine {
     });
     return done.future;
   }
+
+  /// The pre-load scan of [artifactPath] without loading it (for the trust sheet), off the UI isolate.
+  /// [legacyGraceSha256] as for [loadNativeComponent]: the verdict then says what a load with grace would do.
+  Future<ComponentScan> scanNativeComponent(String artifactPath, {String? expectedComponentId, String? legacyGraceSha256}) =>
+      scanComponentFile(artifactPath, expectedComponentId: expectedComponentId, legacyGraceSha256: legacyGraceSha256);
 
   /// Returns false when the component is not loaded or a live processor still retains its library.
   Future<bool> unloadNativeComponent(String componentId) {
@@ -1162,14 +1190,19 @@ class RenderJob {
 
 // Isolate.run sends its closure's whole captured context to the new isolate. These top-level
 // helpers keep that context to sendable values only (the Engine method's Completer is not).
-Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust, bool reload) =>
+Future<String> _loadComponentOffThread(
+        int engineAddress, String artifactPath, String componentId, int trust, bool reload, String? graceSha256) =>
     Isolate.run(() {
       final bindings = Bindings.instance;
       final engine = Pointer<Void>.fromAddress(engineAddress);
       final path = artifactPath.toNativeUtf8();
       final id = componentId.toNativeUtf8();
       try {
-        final result = (reload ? bindings.reloadComponent : bindings.loadComponent)(engine, path, id, trust);
+        final result = reload
+            ? bindings.reloadComponent(engine, path, id, trust)
+            : graceSha256 != null
+                ? _loadWithLegacyGrace(bindings, engine, path, id, trust, graceSha256)
+                : bindings.loadComponent(engine, path, id, trust);
         if (result == nullptr) throw StateError('native component loader returned no result');
         try {
           return result.toDartString();
@@ -1179,6 +1212,34 @@ Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, S
       } finally {
         calloc.free(path);
         calloc.free(id);
+      }
+    });
+
+// The one place that asks the engine for legacy grace. [sha256] is the file's hash as the user trusted it; the
+// engine checks the file itself, and (from its security fix) is to take this hash too and refuse grace on a
+// mismatch: the call changes here only.
+Pointer<Utf8> _loadWithLegacyGrace(
+        Bindings b, Pointer<Void> engine, Pointer<Utf8> path, Pointer<Utf8> id, int trust, String sha256) =>
+    b.loadComponentEx(engine, path, id, trust, cawLoadLegacyGrace);
+
+/// The pre-load scan of a file as the engine's loader would see it, nothing loaded (no engine needed), on a
+/// background isolate. Needs the engine library (API 37).
+Future<ComponentScan> scanComponentFile(String artifactPath, {String? expectedComponentId, String? legacyGraceSha256}) =>
+    Isolate.run(() {
+      final b = Bindings.instance;
+      final path = artifactPath.toNativeUtf8();
+      final id = expectedComponentId?.toNativeUtf8() ?? nullptr;
+      try {
+        final r = b.scanComponent(nullptr, path, id, legacyGraceSha256 != null ? cawLoadLegacyGrace : 0);
+        if (r == nullptr) return const ComponentScan(ok: false, error: 'the scan returned no result');
+        try {
+          return ComponentScan.fromJsonText(r.toDartString());
+        } finally {
+          b.free(r);
+        }
+      } finally {
+        calloc.free(path);
+        if (id != nullptr) calloc.free(id);
       }
     });
 

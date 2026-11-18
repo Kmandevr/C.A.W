@@ -90,7 +90,7 @@ void main() {
         trust: NativeTrustStore(File('${tmp.path}/trust.json')),
         cacheFile: File('${tmp.path}/native-builds.json'),
         build: (_, _) async => const CppBuildResult(success: false, exitCode: 1, output: 'not in tests', diagnostics: []),
-        load: ({required artifactPath, required expectedComponentId, required trust, reload = false}) async =>
+        load: ({required artifactPath, required expectedComponentId, required trust, reload = false, legacyGraceSha256}) async =>
             const NativeComponentLoadResult(ok: false, error: 'not in tests'),
       );
 
@@ -266,7 +266,7 @@ void main() {
         builds++;
         return const CppBuildResult(success: false, exitCode: 1, output: '', diagnostics: []);
       },
-      load: ({required artifactPath, required expectedComponentId, required trust, reload = false}) async {
+      load: ({required artifactPath, required expectedComponentId, required trust, reload = false, legacyGraceSha256}) async {
         loaded.add(artifactPath);
         return const NativeComponentLoadResult(ok: true);
       },
