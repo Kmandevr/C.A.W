@@ -1,0 +1,73 @@
+---
+title: Companion protocol
+summary: How C.A.W talks to its companion app on Android (1.0.7, #239): a bound Messenger service, the ten message kinds and their bodies, version 1, size limits, timeouts, the caller check both ways and the fallback when the companion is absent; a proposal, the companion itself not built.
+updated: 2026-11-18
+---
+
+# Companion protocol
+
+**[Proposal]** (architect design, 2026-11-18, for release 1.0.7, #239). Why there is a companion at all is in the [plug-in hosting plan](plugin-hosting-plan.md#least-privilege-and-the-companion-app). The companion app is not built. Where its code lives, its screens, the known-bad list's source and signing key, and the Play listings wait for the owner (that plan's open questions). The main app's side is groundwork: with no companion installed, everything takes today's in-app path.
+
+## Transport
+- **A bound `Service` with a `Messenger`,** like the main app's `:compiler` service. The main app binds with an explicit component, sends one `Message` per request with `replyTo` set, and gets one `Message` back.
+- **Names [Assumption]**, until the owner settles them: the package `com.kmandevr.caw.companion` and the service `com.kmandevr.caw.companion.CompanionService`. They are kept in one place on each side.
+- **The permission:** `com.kmandevr.caw.permission.COMPANION`, `protectionLevel="signature"`. It is declared with `<permission>` and asked for with `<uses-permission>` in **both** manifests. The companion's service requires it (`android:permission`). Declaring it in both means it exists whichever app installs first.
+- **`<queries>`:** the main app names the companion package so it can see and bind it. The companion needs none to answer, because an app that binds a service is visible to that service's app.
+- **No `sharedUserId`,** which would merge the two apps' permissions again.
+
+## Message schema
+- `what`: the kind, as a number (below). The reply carries the same `what`.
+- The `Bundle` (`Message.data`):
+  - `v` (int): the protocol version, **1**;
+  - `id` (int): chosen by the sender, echoed in the reply; a reply with another `id` is dropped;
+  - `body` (string): JSON, an object, **at most 64 KiB** (65,536 bytes of UTF-8). A bigger or unreadable body is refused before anything else is read;
+  - in a reply only, `status` (string): `ok`, `unsupported`, `bad_request`, `refused`, `busy` (rate-limited) or `error`.
+- **Never a URL or an HTTP method from the caller.** Every request the companion makes goes to a host and path it fixes itself, so a plug-in in the main app can't use it to send data anywhere.
+- **Unknown kind or a higher `v`:** the reply is `unsupported`, with `v` set to the highest version the replier speaks. The main app treats a reply with a higher `v` the same way.
+
+## Kinds
+
+| `what` | Kind | Request body | Reply body |
+|---|---|---|---|
+| 1 | `hello` | `{}` | `{"app": version, "kinds": [names]}` |
+| 2 | `update.status` | `{}` | `{"state": "idle"\|"checking"\|"downloading"\|"ready", "offer": label or null}` |
+| 3 | `update.check` | `{"channel": "stable"\|"beta"\|"everyChange"}` | `{"releases": [...]}`, GitHub's release shape, notes trimmed to fit |
+| 4 | `update.open` | `{}` | `{}`: the companion shows its update screen; nothing installs without the user's tap there |
+| 5 | `telemetry.report` | `{"report": object}` (the existing report schema) | a relay answer |
+| 6 | `telemetry.get` | `{"receipt": hex}` | a relay answer |
+| 7 | `telemetry.delete` | `{"items": [{"receipt", "deleteKey"}]}`, at most 100 | a relay answer |
+| 8 | `feedback.post` | `{"feedback": object}` (the existing feedback schema) | a relay answer |
+| 9 | `trust.query` | `{"component": id, "sha256": hex}` | `{"verdict": "bad"\|"unknown", "reason": text}` |
+| 10 | `knownbad.version` | `{}` | `{"version": int}` |
+
+- **A relay answer** is `{"status": int, "body": text, "retryAfter": seconds}`: the relay's own HTTP status and answer, so the main app's telemetry code reads it exactly as it reads the relay today (`RelayResponse`). `status` 0 means the companion couldn't reach the relay.
+- **Releases from the companion** are read by the same defensive parser as GitHub's answer (`parseGitHubReleases`): asset URLs must still be this repository's release downloads, so a companion that lied couldn't point a download elsewhere.
+- **Known-bad wins.** A `bad` verdict blocks a component whatever the local trust choice says. `unknown` leaves the local choice in charge.
+
+## Timeouts
+- **Bind:** 3 s. A bind that fails or takes longer counts as `absent`.
+- **Request:** 10 s, or **25 s** for the relay kinds (5 to 8), whose relay request may take 20 s itself.
+- **Idle:** the main app unbinds 30 s after its last answer, so the companion isn't kept running.
+
+## The caller check
+Run on **every message**, on both sides: the companion checks each request, and the main app checks each reply. `Binder.getCallingUid` and `checkCallingPermission` don't work inside a `Messenger`'s `Handler`, because the message is handled after the binder call has returned; `Message.sendingUid` carries the sender instead.
+1. `Message.sendingUid` maps (`PackageManager.getPackagesForUid`) to **exactly one** package, the expected one.
+2. That package holds `com.kmandevr.caw.permission.COMPANION` (`PackageManager.checkPermission`).
+3. Its signing certificate is C.A.W's own: `hasSigningCertificate(uid, sha256, CERT_INPUT_SHA256)` on API 28+, `checkSignatures(myUid, uid)` on API 26 and 27. The SHA-256 is read from the app's own signature at run time, so no key or digest is written into the source.
+
+A message that fails is dropped without an answer. The logic is kept pure, so the companion reuses it.
+
+**The companion still doesn't trust the main app.** A signature proves the caller is C.A.W, not that no plug-in has taken it over, so the companion also validates each body against its kind, rate-limits each kind, and asks the user in its own screen before anything installs, uploads or deletes.
+
+## When the companion is absent
+- The main app's link reports `absent` when the package isn't installed or visible, the bind fails or the bind times out. It asks once per run (`hello`), when something first needs the companion.
+- **Absent or `unsupported`:** today's in-app path runs: the GitHub update check and installer, the relay over HTTPS, the local trust store.
+- **A timeout** on a read (`update.status`, `update.check`, `trust.query`, `knownbad.version`) falls back the same way. A timeout on a request that sends or changes something (`update.open` and the relay kinds) is not retried in-app, because the companion may have sent it already: telemetry treats it as a try that may have arrived, as it treats a relay timeout today.
+- Builds other than Android (Windows, Linux, tests) have no companion link and always take the in-app path.
+
+## Platform facts
+- **[Fact]** `protectionLevel="signature"`: granted only to an app signed with the same certificate as the app that declared it, without asking the user. The system doesn't let several packages declare the same permission name unless they are all signed with the same certificate (developer.android.com, `<permission>` element, read 2026-11-18). So both apps can declare it, as long as one key signs both.
+- **[Fact]** Package visibility: an app targeting Android 11 (API 30) or higher sees other apps filtered, and that includes starting or binding another app's service; `<queries>` widens it. Any app that starts or binds a service in your app is visible to you automatically (developer.android.com, package visibility and "visible automatically", read 2026-11-18).
+- **[Fact]** `Message.sendingUid`: added in **API 21**, "the uid that sent the message", valid only for messages posted by a `Messenger`, otherwise -1 (developer.android.com, `android.os.Message`, read 2026-11-18). The main app's minimum is API 26.
+- **[Fact]** `PackageManager.hasSigningCertificate(uid, cert, CERT_INPUT_SHA256)` and `CERT_INPUT_SHA256` were added in API 28; `checkSignatures(int, int)` in API 5, "useful … when doing the check in an IPC, where the UID is the only identity available". `PackageManager.checkPermission(perm, package)` returns the permission's stored state (developer.android.com, `PackageManager`, read 2026-11-18).
+- **[Fact]** Google Play's `REQUEST_INSTALL_PACKAGES` policy permits it only where installing is the app's core purpose (web browsing or search, communication with attachments, file sharing or management, enterprise device management, backup and restore, device migration), and states its concern as "apps that self update using any method other than Google Play's update mechanism" (support.google.com, Play Console answer 12085295, read 2026-11-18). Hence the `play` flavour carries neither install permission.
