@@ -32,11 +32,13 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - { name: Linux x64, os: ubuntu-24.04, flags: "" }
-          - { name: Linux Arm64, os: ubuntu-24.04-arm, flags: "" }
+          # jobs: compile jobs at once. `--parallel` alone is unlimited with Makefiles, and the sanitizer build
+          # (ASan/UBSan, Debug) then runs the runner out of memory mid-build ("lost communication", 2026-11-17/18).
+          - { name: Linux x64, os: ubuntu-24.04, flags: "", jobs: 4 }
+          - { name: Linux Arm64, os: ubuntu-24.04-arm, flags: "", jobs: 4 }
           # clang-cl (Visual Studio's ClangCL toolset, MSVC ABI): the shipped Windows engine's compiler (2026-11-13).
-          - { name: Windows x64 clang-cl, os: windows-2025, flags: "-T ClangCL" }
-          - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug" }
+          - { name: Windows x64 clang-cl, os: windows-2025, flags: "-T ClangCL", jobs: 4 }
+          - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug", jobs: 2 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +67,7 @@ jobs:
           cmake --version
           cmake -S engine -B engine/build ${{ matrix.flags }}
       - name: Build
-        run: cmake --build engine/build --config Release --parallel
+        run: cmake --build engine/build --config Release --parallel ${{ matrix.jobs }}
       - name: Test
         run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
 

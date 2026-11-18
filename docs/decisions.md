@@ -17,6 +17,15 @@ updated: 2026-11-18
 **Decision:** on Android the Audio page's output and input drop-downs offer the devices `AudioManager.getDevices` lists, named by type plus the product name for display. The settings keep `android:<type>:<product name>[#n]`, because an `AudioDeviceInfo` id is given per connection ([Assumption] from the API's description of ids as identifying a device while it is connected; not checked on a primary page). The app sends the engine `aaudio:<id>` with the id the device has now, and AAudio's `setDeviceId` opens it (miniaudio 0.11.25 passes `ma_device_id.aaudio`). A chosen device that is not connected plays or records on the default, the page says so, and the app opens it again when it reconnects. A stream that runs on another device than the one chosen, because Android routed it elsewhere or miniaudio reopened the default after a disconnect, shows in the status as a fallback.
 **Why:** the owner wants a DAW's device choice: the speaker while Bluetooth is connected, a chosen microphone. miniaudio lists only the default on AAudio, and the platform's list was already read for latency.
 **Open, for a phone run:** whether Android honours a chosen speaker while Bluetooth is connected. The status's `routed_device_id` and fallback will show it either way.
+## 2026-11-18: 1.0.6 is the usability release; security moves to 1.0.7 (owner)
+
+**Decision (owner, 2026-11-18):** 1.0.6-alpha.1 contains:
+- real device selection (#242);
+- the tap-along and loopback latency fix;
+- smooth continuous zoom;
+- the settings reorganisation with its new settings (#244).
+
+Plug-in security and the companion app (#239) move to 1.0.7, and every later batch moves up by one: FX consolidation 1.0.8, the rest of the FX 1.0.9, and so on to notation in 1.0.13.
 
 ## 2026-11-18: The companion app ships updater and trust first, in the AutoStacc look (owner, #239)
 
