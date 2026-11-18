@@ -415,7 +415,7 @@ void main() {
           trust: trust,
           cacheFile: File('${dir.path}/builds.json'),
           build: (_, _) => throw UnimplementedError(),
-          load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false}) =>
+          load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false, String? legacyGraceSha256}) =>
               throw UnimplementedError());
       final sections = SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
       await tester.pumpWidget(app(Scaffold(body: SectionScope(controller: sections, child: BuildSection(state: state)))));

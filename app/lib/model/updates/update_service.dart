@@ -480,6 +480,9 @@ class UpdateService extends ChangeNotifier {
     if (asset.size > UpdateFetcher.maxDownloadBytes) {
       return const UpdateOutcome('The download is larger than allowed (300 MB).');
     }
+    // The companion fetches, checks and installs an APK itself: nothing is downloaded twice.
+    final handed = await installer.handOff(kind);
+    if (handed != null) return handed;
     if (kind == AssetKind.apk && !await installer.canInstall()) {
       return const UpdateOutcome('Allow C.A.W to install apps in Android\'s settings, then press Update again.',
           needsPermission: true);

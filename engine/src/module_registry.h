@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "module.h"
@@ -33,16 +34,28 @@ enum class ModuleLoadError : uint8_t {
     InvalidDescriptor,
     ComponentIdMismatch,
     DuplicateId,
+    ScanBlocked,         // the pre-load scan refused the file before it was opened (src/scan/, message says why)
 };
 
 struct ModuleLoadResult {
+    ModuleLoadResult() = default;
+    ModuleLoadResult(bool ok, ModuleLoadError code, std::string id, std::string text, std::string sha = {},
+                     std::string verdict = {}, bool grace = false)
+        : success(ok), error(code), componentId(std::move(id)), message(std::move(text)), sha256(std::move(sha)),
+          scanVerdict(std::move(verdict)), graceApplied(grace) {}
     bool success = false;
     ModuleLoadError error = ModuleLoadError::None;
     std::string componentId;
     std::string message;
+    // The pre-load scan of the file (set once it ran): its SHA-256, its verdict ("clean", "notice", "warning",
+    // "blocked"), and whether the legacy grace turned a block into warnings.
+    std::string sha256;
+    std::string scanVerdict;
+    bool graceApplied = false;
 };
 
 struct NativeLibrary;
+struct ComponentFile;  // a component file held open from the scan to the load
 struct LoadedComponent;  // a component's C table plus the engine-owned copy of its descriptor
 
 struct ModuleRegistration {
@@ -68,8 +81,13 @@ public:
     // With `replace`, a component already loaded under the id is replaced by the new build (a rebuild):
     // instances made before keep the old library loaded until they are destroyed. A rebuild must have a
     // new file name: the system loader returns the already-loaded library for the same path.
+    // Before the library is opened (opening runs its constructors) the file is scanned (src/scan/, the verdict
+    // cached by SHA-256): a blocked verdict refuses the load (ScanBlocked); warnings load. The scan reads the open
+    // file the loader then loads from (Linux /proc/self/fd/N, Android ANDROID_DLEXT_USE_LIBRARY_FD, Windows a
+    // handle that denies writers), so the file can't be swapped in between. `legacySha256` is the app's
+    // CAW_LOAD_LEGACY_GRACE: the SHA-256 (hex) of the file the user trusted before 1.0.7; another file is refused.
     ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust,
-                                       bool replace = false);
+                                       bool replace = false, std::string_view legacySha256 = {});
     // A dynamic library cannot unload while a created processor still holds it.
     bool unload(std::string_view id);
 
@@ -94,6 +112,9 @@ public:
     std::size_t size() const noexcept { return registrations_.size(); }
 
 private:
+    // Opens a scanned library and registers its component (the rest of loadSharedLibrary).
+    ModuleLoadResult openScanned(const std::string& path, ComponentFile& file, std::string_view expectedId,
+                                 bool replace);
     std::vector<ModuleRegistration> registrations_;
 };
 

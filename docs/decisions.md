@@ -6,6 +6,26 @@ updated: 2026-11-18
 
 # Decisions
 
+## 2026-11-18: The Hub goes into use with 1.1.0; APKs are installed by hand until then (owner)
+
+**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.1.0. Until then the owner installs APKs by hand.
+
+## 2026-11-18: Declared capabilities: strict default, embedded in the binary, older components warned until rebuilt (owner, architect)
+
+**Decision:**
+- **Strict default (owner):** with nothing declared, a C.A.W component may use only the host API, maths, memory and the C++ runtime. Anything more, background threads and reading or writing files included, is declared with a plain reason, or the component is blocked; there is no Trusted override for undeclared use. CLAP and VST3 binaries can't declare, so their findings only warn.
+- **Where (architect):** in the component's `caw-component.json` (`capabilities`: id, reason, and for `internet` its sites), embedded by the build in an allocated data section of the binary (`caw_caps` on ELF, `.cawcap` on PE) that the scan reads without loading it. So the declaration is covered by the binary's SHA-256, which the trust store and the Hub's lists key on, and can't be swapped on its own. The component ABI and descriptor are unchanged. Ids are the scan's list (`internet`, not `network`).
+- **Older components (owner):** a component trusted before 1.0.7, with no declaration, keeps loading with its findings shown as warnings until it is rebuilt or updated; then an undeclared use blocks it.
+- **The scan's rules (Claude, 2026-11-18; [engine](engine.md#pre-load-scan)):** blocking is on for C.A.W components. What the C++ runtime itself pulls in is no finding (`__cxa_*`, `operator new`, pthread mutexes, once, keys and condition variables, stdio and locale calls, `std::filesystem::path`'s text members); `open`, `open64`, `openat`, `__open_2` and `syscall`, which static libstdc++ imports for `std::random_device` and futexes, are hints that never block (a determined author could hide behind them; the hub's review and reputation lists are the backstop). `fopen`, file streams, `std::filesystem` operations, `pthread_create` and `std::thread` are certain. Registry imports count as input spying, `ptrace` and cross-process calls as starting programs. Mach-O, ELF32 and PE32 are refused.
+- **Declaring (owner):** a "Needs" form in the component's settings in the C++ Builder: a capability from a picker, its reason on one line and, for Internet, its sites; it writes the manifest.
+
+## 2026-11-18: The Hub switches update channels and shows download notifications; scan findings go in the trust sheet (owner)
+
+**Decision (owner):**
+- **Update channels:** the Hub installs C.A.W updates from the channel the user chose in C.A.W (Stable, Beta, Every change), not only Stable. C.A.W tells the Hub the channel in its install request; an older C.A.W that sends none gets Stable. Downgrades stay refused.
+- **Notifications:** the Hub runs long downloads as a foreground service with a progress notification, so Android doesn't stop them.
+- **Scan findings:** what the pre-load scan finds in a plug-in is listed in the existing Isolated / Trusted / Blocked sheet, one row per finding with a plain sentence and a "Why might it need this?" fold; a blocked C.A.W component says why and offers no Trusted.
+
 ## 2026-11-18: General mixer routing in the engine and the model, silent in 1.0.7; renders need only be repeatable (owner)
 
 **Decision (owner):** the mixer's routes become general (a track's output to any bus or straight to the master, sends to any bus or track, feedback sends, sidechain keys from any track), built in the engine and the app's model and shipped silently in 1.0.7: no screens until the 1.1.0 visual router's look is designed ("Engine only for now"). Claude's choices within it, following the architect's review:

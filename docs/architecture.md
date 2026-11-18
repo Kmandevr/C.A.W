@@ -9,7 +9,7 @@ covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, engine/CMakeL
 
 The technical plan for the owner's brief (the vision is tracked privately). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). The build order is planned privately. Why each choice was made: [decisions](decisions.md).
 
-**[Fact, 2026-11-13]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.0.6-alpha.1 now. Each release adds its entry to the repository's `CHANGELOG.md` first, bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
+**[Fact, 2026-11-13]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.0.7-alpha.1 now. Each release adds its entry to the repository's `CHANGELOG.md` first, bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
@@ -95,7 +95,7 @@ JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, d
  audio callback (audio thread) ◄── mix graph: tracks, buses, master ◄─┘   (+ 20 ms crossfade on a change)
 ```
 
-- **Trust, not a sandbox:** a component is in-process code. A third-party binary loads only with the user's per-item trust choice (Blocked, Isolated, Trusted; [decisions](decisions.md)); Isolated waits for a separate-process host. Project input (patterns, project JSON, audio and MIDI files) is parsed with explicit limits.
+- **Trust, not a sandbox:** a component is in-process code. A third-party binary loads only with the user's per-item trust choice (Blocked, Isolated, Trusted; [decisions](decisions.md)); Isolated waits for a separate-process host. Before any library is opened, the engine's pre-load scan looks at its bytes and refuses a component that uses a capability it does not declare ([engine](engine.md#pre-load-scan)); a static scan stops the obvious, not code built to evade it. Project input (patterns, project JSON, audio and MIDI files) is parsed with explicit limits.
 - **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Chains, patterns and tables arrive through the command queue, and what they replace is freed off the audio thread.
 - **Fixed blocks at the device (2026-11-12, the owner's idea):** a playback device's callback, whatever its size, takes frames from a preallocated FIFO that renders whole 64-frame engine blocks, so the engine sees the same blocks on every route as in an export; what it holds back (under a block) is in the reported output latency ([engine](engine.md), "Fixed engine blocks at the device").
 - **Block processing:** components run blocks of up to 64 frames.

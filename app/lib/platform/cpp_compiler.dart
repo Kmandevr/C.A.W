@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
 
+import '../model/capabilities.dart';
 import '../model/cpp_component.dart';
 import 'cpp_build.dart';
 
@@ -92,12 +93,16 @@ class SerialCppCompiler implements CppCompiler {
 
 /// What `caw-component.json` says about a build (the same manifest the CMake helper reads).
 class CppComponentManifest {
-  const CppComponentManifest({required this.id, required this.sources, this.includeDirectories = const [], this.definitions = const []});
+  const CppComponentManifest({required this.id, required this.sources, this.includeDirectories = const [],
+    this.definitions = const [], this.capabilities = const []});
 
   final String id;
   final List<String> sources;
   final List<String> includeDirectories;
   final List<String> definitions;
+
+  /// What it declares it needs ("capabilities"), checked as CMake checks them; built into the library.
+  final List<CapabilityDeclaration> capabilities;
 
   static final _idPattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]*$');
   static final _definitionPattern = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*(=[^\s"]*)?$');
@@ -131,6 +136,7 @@ class CppComponentManifest {
       sources: sources,
       includeDirectories: paths('includeDirectories'),
       definitions: (definitions as List?)?.cast<String>() ?? const [],
+      capabilities: Capabilities.parse(j['capabilities'], present: j.containsKey('capabilities')),
     );
   }
 }
@@ -150,6 +156,7 @@ class CppSourceBuilder {
     required CppComponentManifest manifest,
     required String output,
     bool optimize = true,
+    List<String> generated = const [],
   }) {
     return [
       ..._compileFlags(toolchain, sourceDirectory, manifest),
@@ -158,6 +165,7 @@ class CppSourceBuilder {
       '-shared',
       '-static-libstdc++',
       for (final source in manifest.sources) '$sourceDirectory/$source',
+      ...generated,
       '-o',
       output,
     ];
@@ -239,8 +247,12 @@ class CppSourceBuilder {
     }
     await Directory(outputDirectory).create(recursive: true);
     final output = '$outputDirectory/${manifest.id}-${DateTime.now().microsecondsSinceEpoch}.so';
+    // Every component carries its declarations (an empty list when it declares none), as caw_add_component
+    // builds them: the scan tells a build from before 1.0.7 (no section) from one that needs nothing.
+    final caps = await writeCapabilitiesSource(sourceDirectory, manifest);
     final run = await compiler.run(arguments(
-        toolchain: toolchain, sourceDirectory: sourceDirectory, manifest: manifest, output: output, optimize: optimize));
+        toolchain: toolchain, sourceDirectory: sourceDirectory, manifest: manifest, output: output, optimize: optimize,
+        generated: [caps]));
     // Paths in diagnostics read as the project's own (src/main.cpp), not the private workspace.
     final text = run.output.replaceAll('$sourceDirectory/', '');
     final diagnostics = parseCppBuildDiagnostics(text);
@@ -260,6 +272,15 @@ class CppSourceBuilder {
     }
     await _removeOlderBuilds(outputDirectory, manifest.id, keep: output);
     return CppBuildResult(success: true, exitCode: 0, output: text, diagnostics: diagnostics, artifactPath: output);
+  }
+
+  /// Writes `<target>_capabilities.cpp` (Capabilities.generatedSource) into the workspace's `.caw-build` folder
+  /// (the workspace is written fresh for each build) and returns its path.
+  static Future<String> writeCapabilitiesSource(String sourceDirectory, CppComponentManifest manifest) async {
+    final file = File('$sourceDirectory/.caw-build/${Capabilities.targetName(manifest.id)}_capabilities.cpp');
+    await file.parent.create(recursive: true);
+    await file.writeAsString(Capabilities.generatedSource(manifest.capabilities), flush: true);
+    return file.path;
   }
 
   // Older builds of the component: the newest one before this stays (it may still be playing while this loads).

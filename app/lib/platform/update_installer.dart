@@ -45,6 +45,10 @@ abstract class UpdateInstaller implements InstalledBuild {
   /// Installs [file]; [silent] asks for no prompt where [silentPossible] (automatic updates only).
   Future<UpdateOutcome> install(File file, AssetKind kind, {bool silent = false});
 
+  /// An installer that downloads and installs a [kind] update itself (the companion) answers here, before C.A.W
+  /// downloads anything; null means C.A.W downloads the file and calls [install] as usual.
+  Future<UpdateOutcome?> handOff(AssetKind kind) async => null;
+
   /// Android: the installed APK (`ApplicationInfo.sourceDir`), which a small update is rebuilt from; null where
   /// there is none or it is split into several APKs.
   @override

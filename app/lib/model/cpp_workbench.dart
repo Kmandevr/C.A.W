@@ -10,6 +10,7 @@ import '../engine/component_info.dart';
 import '../engine/engine.dart';
 import '../platform/cpp_build.dart';
 import '../platform/cpp_compiler.dart';
+import 'capabilities.dart';
 import 'app_state.dart';
 import 'cpp_starters.dart';
 import 'arrange_fx.dart';
@@ -362,6 +363,55 @@ class CppWorkbench extends ChangeNotifier {
     _saveTimer = Timer(saveDelay, () => unawaited(save()));
     _checkTimer?.cancel();
     _checkTimer = Timer(checkDelay, () => unawaited(check()));
+  }
+
+  // ---------- Needs (the manifest's declared capabilities) ----------
+
+  /// What caw-component.json declares the component needs; empty when nothing is declared or the list is invalid
+  /// ([needsProblem] then says why).
+  List<CapabilityDeclaration> get needs {
+    try {
+      return Capabilities.ofManifest(texts['caw-component.json'] ?? '');
+    } on FormatException {
+      return const [];
+    }
+  }
+
+  /// Why the manifest's capabilities can't be read (the build would refuse them), or null.
+  String? get needsProblem {
+    try {
+      Capabilities.ofManifest(texts['caw-component.json'] ?? '');
+      return null;
+    } on FormatException catch (e) {
+      return e.message;
+    }
+  }
+
+  /// Writes [list] as caw-component.json's "capabilities" (the Needs form): one change, so the editor's undo takes
+  /// it back in one step. False when the manifest isn't a JSON object or [list] breaks the rules.
+  bool setNeeds(List<CapabilityDeclaration> list) {
+    final before = texts['caw-component.json'];
+    if (before == null) return false;
+    final String after;
+    try {
+      Capabilities.parse([for (final d in list) d.toJson()]);
+      after = Capabilities.writeToManifest(before, list);
+    } on FormatException {
+      return false;
+    }
+    if (after == before) return true;
+    texts['caw-component.json'] = after;
+    revision++; // the editor replaces the file's text as one undoable change
+    _dirty = true;
+    _editGeneration++;
+    codeRevision++;
+    if (phase == CppBuildPhase.built || phase == CppBuildPhase.failed) phase = CppBuildPhase.idle;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(saveDelay, () => unawaited(save()));
+    _checkTimer?.cancel();
+    _checkTimer = Timer(checkDelay, () => unawaited(check()));
+    notifyListeners();
+    return true;
   }
 
   /// Whether a check is waiting for typing to pause.

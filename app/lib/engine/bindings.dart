@@ -4,7 +4,14 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 36;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 37;  // must equal CAW_API_VERSION in engine/include/caw.h
+
+/// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
+const int cawLoadLegacyGrace = 1;
+const int cawScanPlugin = 2;
+
+/// The load error code of a component the pre-load scan blocked (CAW_LOAD_ERROR_SCAN_BLOCKED).
+const int cawLoadErrorScanBlocked = 11;
 
 /// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
 final class CawNoteFxStatsStruct extends Struct {
@@ -255,6 +262,13 @@ class Bindings {
         reloadComponent = lib.lookupFunction<
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_reload_component'),
+        loadComponentEx = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32, Uint32, Pointer<Utf8>),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int, Pointer<Utf8>)>(
+            'caw_engine_load_component_ex'),
+        scanComponent = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Uint32),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_scan_component'),
         unloadComponent = lib.lookupFunction<
             Int32 Function(Pointer<Void>, Pointer<Utf8>),
             int Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_unload_component'),
@@ -499,6 +513,11 @@ class Bindings {
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) loadComponent;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) reloadComponent;
+  /// caw_engine_load_component_ex (API 37): a load with flags ([cawLoadLegacyGrace], which needs the trusted file's
+  /// SHA-256 as the last argument; the engine refuses grace when the file's hash differs).
+  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int, Pointer<Utf8>) loadComponentEx;
+  /// caw_engine_scan_component (API 37): the pre-load scan as JSON, nothing loaded (the engine may be null).
+  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) scanComponent;
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final Pointer<Utf8> Function(Pointer<Void>) components;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double) setComponentParam;

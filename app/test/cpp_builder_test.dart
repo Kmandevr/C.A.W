@@ -275,7 +275,7 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
           File(path).writeAsStringSync('ELF');
           return CppBuildResult(success: true, exitCode: 0, output: '', diagnostics: const [], artifactPath: path);
         },
-        load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false}) async {
+        load: ({required artifactPath, required expectedComponentId, required trust, bool reload = false, String? legacyGraceSha256}) async {
           loads.add('$expectedComponentId ${trust.name}');
           return NativeComponentLoadResult(ok: true, componentId: expectedComponentId);
         },

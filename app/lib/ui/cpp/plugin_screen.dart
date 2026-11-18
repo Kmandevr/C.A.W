@@ -10,7 +10,9 @@ import '../../model/cpp_workbench.dart';
 import '../../model/plugin_export.dart';
 import '../../model/plugin_pipeline.dart';
 import '../haptics.dart';
+import '../capability_text.dart';
 import '../theme.dart';
+import 'needs_form.dart';
 import 'plugin_export_screen.dart';
 import 'sample_pack_screen.dart';
 import 'test_suite_screen.dart';
@@ -200,6 +202,13 @@ class PluginScreenState extends State<PluginScreen> {
             actions: _actions(s.kind, p, s.kind == p.nextStep),
             detail: _detail(s.kind, p),
           ),
+        // What the component declares it needs beyond sound, maths and memory (docs/native-module-sdk.md).
+        ToolCard(
+          key: const ValueKey('plugin-needs'),
+          title: CapabilityText.needsTitle,
+          color: Neon.line,
+          child: NeedsForm(workbench: w),
+        ),
         const Padding(
           padding: EdgeInsets.only(top: 2),
           child: Text('Ctrl+B builds, Ctrl+T opens the tests, Ctrl+E the export, Ctrl+Enter does the next step; Esc closes.',

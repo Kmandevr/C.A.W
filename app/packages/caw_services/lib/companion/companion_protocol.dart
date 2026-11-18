@@ -1,6 +1,8 @@
 // The companion protocol's constants and body checks (docs/companion-protocol.md, version 1), shared by C.A.W and
-// the companion app: the message kinds, the reply statuses, the 64 KiB body limit and the timeouts.
+// the companion app: the message kinds, the reply statuses, the 64 KiB body limit, the timeouts and update.open's body.
 import 'dart:convert';
+
+import '../updates/releases.dart';
 
 /// The protocol version this build speaks. A message with a higher `v` is answered `unsupported`.
 const int companionProtocolVersion = 1;
@@ -94,3 +96,42 @@ Map<String, Object?>? decodeCompanionBody(Object? text) {
 
 /// A component fingerprint as `trust.query` takes it: 64 lower-case hex digits.
 bool isFingerprint(Object? v) => v is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(v);
+
+/// An update channel's name in `update.open` (`stable`, `beta`, `every`).
+String companionChannelWire(UpdateChannel c) => switch (c) {
+      UpdateChannel.stable => 'stable',
+      UpdateChannel.beta => 'beta',
+      UpdateChannel.everyChange => 'every',
+    };
+
+final _build = RegExp(r'^[0-9a-f]{7,40}$');
+
+/// `update.open`'s body for [channel]: `{}` on Stable (what a companion from before channels takes), else the
+/// channel's name, and on Every change the running [build] (the short commit, when this build knows it), which the
+/// companion compares with the rolling build's `Build:` line as the in-app check does.
+Map<String, Object?> updateOpenBody(UpdateChannel channel, {String build = ''}) {
+  if (channel == UpdateChannel.stable) return const {};
+  final b = build.toLowerCase();
+  return {
+    'channel': companionChannelWire(channel),
+    if (channel == UpdateChannel.everyChange && _build.hasMatch(b)) 'build': b,
+  };
+}
+
+/// Why the companion's `update.open` installed nothing (its reply's `reason`).
+enum UpdateOpenSkip { upToDate, older, unverifiable, other }
+
+/// `update.open`'s `ok` reply read: whether a download started, the release it names and, when none started, why.
+/// A reply without `started` (a companion from before channels) counts as started.
+({bool started, String? release, UpdateOpenSkip? skip}) readUpdateOpenReply(Map<String, Object?> body) {
+  final release = body['release'] is String ? body['release'] as String : null;
+  final shown = release != null && release.length <= 100 ? release : null;
+  if (body['started'] != false) return (started: true, release: shown, skip: null);
+  final skip = switch (body['reason']) {
+    'up_to_date' => UpdateOpenSkip.upToDate,
+    'older' => UpdateOpenSkip.older,
+    'unverifiable' => UpdateOpenSkip.unverifiable,
+    _ => UpdateOpenSkip.other,
+  };
+  return (started: false, release: shown, skip: skip);
+}

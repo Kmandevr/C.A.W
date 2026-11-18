@@ -6,6 +6,9 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: 1.0.7-alpha.1 prepared (the safety release: the pre-load scan, declared needs, the trust sheet; silent: general routing and the Hub link); the Hub goes into use with 1.1.0 ([decisions](decisions.md)).
+- 2026-11-18: the pre-load scan (engine, C API 37, `caw scan`): every native component is scanned before it loads and blocked on an undeclared capability; declarations embedded in the binary; the Hub's update channels and a single download of an update ([decisions](decisions.md), PR #254).
+- 2026-11-18: 1.0.7 started: the Hub's channels and download notifications, the pre-load scan and its findings in the trust sheet decided ([decisions](decisions.md)).
 - 2026-11-18: general mixer routing (engine and model, silent for 1.0.7) and the Hub's package and pinned certificate decided ([decisions](decisions.md)); #251 filed (the music video's switches erase manual work).
 - 2026-11-18: the public [roadmap](roadmap.md) adds macOS, Google Play and the AutoStacc store and cloud library (owner).
 - 2026-11-18: Issues are bug-only here (owner): feature and plan issues copied to the private tracker and closed with a note, the task template removed, the `tasks` skill covers both trackers ([decisions](decisions.md)).
