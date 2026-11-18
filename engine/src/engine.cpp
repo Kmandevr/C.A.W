@@ -210,6 +210,8 @@ struct Engine::DelayLine {
 // stops writing goes quiet a chunk later. The soft clip and DC block on the return are the reader's.
 struct FeedbackRing {
     static constexpr int kSize = 2 * kBlock;
+    static_assert((kSize & (kSize - 1)) == 0, "the ring's frames are masked: its size must be a power of two");
+    static constexpr double kUnlimited = 16.0;  // without its limiter, a return is held to +/-16 (+24 dBFS)
     float l[kSize] = {}, r[kSize] = {};
     bool limiter = true;
     double pole = 0.9987;              // the DC block's (about 10 Hz)
@@ -2216,8 +2218,9 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
                 warnings["project"].push_back("layer '" + *n.id + "': its send into track '" + *track->id + "' arrives " +
                                               std::to_string(n.raw - track->inst) +
                                               " frames after that track's instrument (its latency isn't compensated there)");
+            // A feedback send's DC block is tuned to the rate: a new rate rebuilds its table.
             sig += std::to_string(r.dest) + ":" + std::to_string(r.key) + ":" + std::to_string(delays.back()) +
-                   (r.feedback ? (r.limiter ? ":f" : ":F") : "") + ";";
+                   (r.feedback ? (r.limiter ? ":f" : ":F") + std::to_string(ctlSr_) : "") + ";";
         }
         if (sig != ls.routesSig) {
             Cmd c;
@@ -3486,7 +3489,7 @@ void Engine::applyCommands() noexcept {
                         // A route that stays keeps its gain, its tap (a change of tap then fades as SetSendLevel's
                         // does) and, unless stale, its delay's recent input. A route that now goes elsewhere starts
                         // from silence: its old line holds the old destination's audio.
-                        const bool stays = was && was->dest == r.dest && was->key == r.key;
+                        const bool stays = was && was->dest == r.dest && was->key == r.key && was->feedback == r.feedback;
                         if (!stays) s.routeGain[k] = 0.0;
                         if (stays && s.routeGain[k] > 0.0) r.tapPre = was->tapPre;
                         if (r.delay && stays && !s.routesStale) r.delay->takeHistory(was->delay);
@@ -3867,6 +3870,10 @@ void Engine::endPlayback() noexcept {
     }
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
+        // Feedback sends stop with the song (a stopped preview never brings back a loop held since the stop).
+        if (s.sends)
+            for (int j = 0; j < s.sends->count; ++j)
+                if (s.sends->routes[j].ring) s.sends->routes[j].ring->clear();
         s.delayStale = true;  // the next play starts from silence, as an export does, not the song's last frames
         s.routesStale = true;
         if (s.inserts) {
@@ -4745,6 +4752,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
     }
     // A feedback send's frames on the route clock in its ring: written every chunk the slot runs (zeros unless it
     // sounds), and read kBlock frames later by its destination, which never reads these frames this chunk.
+    assert(m <= kBlock);  // a ring holds two chunks: the source's and the reader's frames never meet
     const int64_t ringAt = routeFrame_;
     auto ringWrite = [&](const SendTable::Route& r, bool sound) noexcept {
         FeedbackRing& f = *r.ring;
@@ -4840,6 +4848,7 @@ bool Engine::pullRoutes(Slot& d, int m) noexcept {
             // from kBlock before on the route clock (-kBlock is +kBlock in a ring of 2 kBlock), zeroed once read,
             // then its DC block and soft clip.
             FeedbackRing& f = *r.ring;
+            assert(m <= kBlock);
             if (!received) {
                 std::fill_n(d.recvL, m, 0.0f);
                 std::fill_n(d.recvR, m, 0.0f);
@@ -4853,9 +4862,14 @@ bool Engine::pullRoutes(Slot& d, int m) noexcept {
                     double yl = xl - f.xl + f.pole * f.yl, yr = xr - f.xr + f.pole * f.yr;
                     yl = yl == yl ? yl : 0.0;  // never: its input is finite (routeSample)
                     yr = yr == yr ? yr : 0.0;
+                    if (std::fabs(yl) < 1e-20) yl = 0.0;  // its decay on silence never sits on subnormals
+                    if (std::fabs(yr) < 1e-20) yr = 0.0;
                     f.xl = xl; f.yl = yl; f.xr = xr; f.yr = yr;
                     xl = feedbackClip(yl);
                     xr = feedbackClip(yr);
+                } else {  // no limiter: a loop above unity still stops at +/-kUnlimited, never near FLT_MAX
+                    xl = std::clamp(xl, -FeedbackRing::kUnlimited, FeedbackRing::kUnlimited);
+                    xr = std::clamp(xr, -FeedbackRing::kUnlimited, FeedbackRing::kUnlimited);
                 }
                 d.recvL[i] = routeAdd(d.recvL[i], routeSample(xl));
                 d.recvR[i] = routeAdd(d.recvR[i], routeSample(xr));
