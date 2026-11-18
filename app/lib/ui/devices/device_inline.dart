@@ -18,6 +18,8 @@ import 'kit/param_watch.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/presets.dart';
+import 'kit/device_footer.dart';
+import 'kit/device_header.dart';
 
 /// Whether [target]'s device has a plugin UI the FX stack shows inline (built-ins with a custom editor, once their
 /// descriptor is known); others keep the knob card.
@@ -26,16 +28,27 @@ bool hasInlineDevice(DeviceTarget target) {
   return id != null && info != null && DeviceEditors.custom(id, info) != null;
 }
 
-/// A device's plugin UI inline in the FX stack (owner, 2026-11-10: "Show the UI right in the FX tab"): the faceplate
-/// header (drag handle [leading], family badge, name, preset, then the stack's [actions]: ⤢, bypass, remove), the
-/// hero at a compact height and the main controls ([DeviceEditorEntry.inline], else its first section laid out
-/// compact). It has its own repaint boundary, and its motion and live display run only while it is on screen.
+/// A device's plugin UI inline in the FX stack (owner, 2026-11-10: "Show the UI right in the FX tab"). Open, it has
+/// the device shell's header ([DeviceHeader]: drag handle [leading], power, name, preset bar, A/B, ear, ⋯, then the
+/// stack's [actions]), the hero at a compact height and the main controls ([DeviceEditorEntry.inline], else its
+/// first section laid out compact), and the footer ([DeviceFooter]). Collapsed ([open] false), one row: power, name,
+/// a tiny live visual and Mix. [onOpenChanged] adds the row's chevron. It has its own repaint boundary, and its
+/// motion and live display run only while it is on screen.
 class DeviceInline extends StatefulWidget {
   const DeviceInline({super.key, required this.target, this.leading, this.actions = const [], this.onTitle,
-    this.titleKey, this.onMenu, this.selected = false, this.glow, this.onSelect, this.matrix, this.nested = false});
+    this.titleKey, this.onMenu, this.selected = false, this.glow, this.onSelect, this.matrix, this.nested = false,
+    this.open = true, this.onOpenChanged, this.powerKey, this.presetKey, this.rowActions});
   final DeviceTarget target;
   final Widget? leading;
   final List<Widget> actions;
+
+  /// Shown open (the header, the device, the footer) or as its collapsed row.
+  final bool open;
+  final ValueChanged<bool>? onOpenChanged;
+  final Key? powerKey, presetKey;
+
+  /// The collapsed row's actions (default: [actions]).
+  final List<Widget>? rowActions;
 
   /// A tap on the name (the stack opens the device full screen).
   final VoidCallback? onTitle;
@@ -117,9 +130,16 @@ class _DeviceInlineState extends State<DeviceInline> {
               border: Border.all(color: widget.selected ? glow : color.withValues(alpha: 0.25),
                 width: widget.selected ? 1.6 : 1),
               boxShadow: widget.selected ? [BoxShadow(color: glow.withValues(alpha: 0.35), blurRadius: 10)] : null),
-            child: GlassPanel(radius: 12, tint: color, child: Column(
+            child: GlassPanel(radius: 12, tint: color, child: DeviceGrow(
+              child: !widget.open && !widget.nested ? _row(context, color, style, key) : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-                _header(context, color, second, style, key),
+                if (widget.nested) _header(context, color, second, style, key)
+                else DeviceHeader(
+                  target: t, color: color, style: style, leading: widget.leading, titleKey: widget.titleKey,
+                  onTitle: widget.onTitle, onMenu: widget.onMenu, powerKey: widget.powerKey,
+                  presetKey: widget.presetKey ?? ValueKey('fx-presets-$key'), subtitle: style?.label ?? 'Built-in',
+                  nameSize: 12,
+                  actions: [...widget.actions, if (widget.onOpenChanged != null) _chevron(true, key)]),
                 Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
                   color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8),
                   second.withValues(alpha: 0.0)])))),
@@ -129,11 +149,58 @@ class _DeviceInlineState extends State<DeviceInline> {
                   opacity: t.bypass ? 0.55 : 1,
                   child: KeyedSubtree(key: ValueKey('fx-inline-body-$key'),
                     child: entry.inline?.call(context) ?? entry.sections(t).first.builder(context))),
-              ])),
+                if (!widget.nested) const DeviceFooter(),
+              ]))),
           )),
         ),
       )),
     )));
+  }
+
+  Widget _chevron(bool open, String key) => SizedBox(width: 36, height: 36, child: IconButton(
+    key: ValueKey('fx-fold-$key'),
+    tooltip: open ? 'Collapse ${t.label}' : 'Open ${t.label}',
+    padding: EdgeInsets.zero,
+    iconSize: 20,
+    color: Neon.dim,
+    onPressed: () {
+      DeviceFeel.tap();
+      widget.onOpenChanged?.call(!open);
+    },
+    icon: AnimatedRotation(turns: open ? 0.5 : 0, duration: Motion.fade(Motion.small, Motion.of(context)),
+      child: const Icon(Icons.expand_more))));
+
+  /// The collapsed row: power, the name in the family's colour, a tiny live visual, Mix, the row's actions and the
+  /// chevron. A tap on the name opens the row (the full screen is ⤢).
+  Widget _row(BuildContext context, Color color, DeviceStyle? style, String key) {
+    final mix = mixParam(t.info);
+    return GestureDetector(
+      key: ValueKey('fx-row-$key'),
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
+      onSecondaryTapUp: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
+      child: SizedBox(height: 46, child: LayoutBuilder(builder: (context, box) => Row(children: [
+        widget.leading ?? const SizedBox(width: 6),
+        DevicePowerButton(target: t, powerKey: widget.powerKey),
+        Expanded(child: InkWell(
+          key: widget.titleKey,
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => widget.onOpenChanged?.call(true),
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Column(
+            mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(t.label, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: t.bypass ? Neon.dim : color)),
+            Text(DevicePresets.label(t), maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 9, color: Neon.dim)),
+          ])),
+        )),
+        const DeviceMiniVisual(),
+        if (mix != null) FooterKnob(param: mix, label: 'MIX', size: 20, showLabel: box.maxWidth >= 400, where: 'row'),
+        const SizedBox(width: 4),
+        ...(widget.rowActions ?? widget.actions),
+        if (widget.onOpenChanged != null) _chevron(false, key),
+      ]))),
+    );
   }
 
   Widget _header(BuildContext context, Color color, Color second, DeviceStyle? style, String key) => GestureDetector(
@@ -172,6 +239,20 @@ class _DeviceInlineState extends State<DeviceInline> {
     ]);
     })),
   );
+}
+
+/// Grows and shrinks to its child through the motion tokens (an FX chain row opening); with motion off it snaps (an
+/// AnimatedSize with no duration re-dirties itself in its own layout).
+class DeviceGrow extends StatelessWidget {
+  const DeviceGrow({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = Motion.fade(Motion.standard, Motion.of(context));
+    if (d == Duration.zero) return child;
+    return AnimatedSize(duration: d, curve: Curves.easeOutCubic, alignment: Alignment.topCenter, child: child);
+  }
 }
 
 /// Runs [child]'s tickers, motion and live display polling only while some part of it is inside every scrolling

@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
-import '../../model/device_target.dart';
 import '../../model/mod_matrix.dart';
 import '../../model/modulation.dart';
 import '../arrange/knob.dart' show Taper;
@@ -17,13 +16,12 @@ import '../widgets.dart' show LiveIsland, ResetOnDoubleTap;
 import 'device_scope.dart';
 import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
-import 'midi_learn.dart';
+import 'knob_menu.dart';
 import '../arrange/automate_control.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
 import 'visuals/mod_sheet.dart';
-import '../panel_motion.dart';
 
 /// [p]'s knob travel (its descriptor's curve).
 Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.exponential);
@@ -39,12 +37,19 @@ Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.ex
 /// route's amount, two fingers on the knob do the same, and a long-press opens its Modulation sheet with a big
 /// slider per route. Without a matrix a long-press types a value. Both offer "Learn MIDI CC" (midi_learn.dart).
 class DeviceKnob extends StatefulWidget {
-  const DeviceKnob(this.paramId, {super.key, this.label, this.size = 40, this.color, this.valueText});
+  const DeviceKnob(this.paramId, {super.key, this.label, this.size = 40, this.color, this.valueText, this.labels = true, this.knobKey});
   final String paramId;
   final String? label;
   final double size;
   final Color? color;
   final String Function(double v)? valueText;
+
+  /// The name and value under the face; without them (the FX chain's rows, the footer) the host shows them, and the
+  /// bubble still shows the value while dragging.
+  final bool labels;
+
+  /// Its key instead of `dknob-<param>` (a second knob of the same parameter: the footer's, a chain row's).
+  final Key? knobKey;
 
   /// The width a knob of [size] takes (room for four rings).
   static double widthFor(double size) => math.max(54, size + 20);
@@ -70,7 +75,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
   final _bubble = OverlayPortalController();
 
   double get _box => widget.size + 18;
-  double get _width => DeviceKnob.widthFor(widget.size);
+  double get _width => widget.labels ? DeviceKnob.widthFor(widget.size) : _box;
   // The track's radius in the painter (the face sits just inside it).
   double get _track => _box / 2 - 9;
 
@@ -98,7 +103,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
       onType: () {
         final t = DeviceScope.of(context).target;
         final p = t.param(widget.paramId);
-        if (p != null && !p.isChoice) _typeValue(context, p, t.value(p.id));
+        if (p != null && !p.isChoice) _menu(context, p, typing: true);
       },
       kind: DeviceScope.of(context).target.param(widget.paramId)?.isChoice ?? false ? KeyParamKind.choice : KeyParamKind.range,
       child: ListenableBuilder(
@@ -212,16 +217,9 @@ class _DeviceKnobState extends State<DeviceKnob> {
       set(stepped ? _nudge(p, now, dir) : taper.value(taper.position(now) + dir * (fine ? 0.002 : 0.01)));
     }
 
-    void longPress() {
-      if (modTarget != null && links.isNotEmpty && routes.isEmpty) {
-        showModLinkSheet(context, app, modTarget, onTypeValue: p.isChoice ? null : () => _typeValue(context, p, t.value(p.id)),
-            extra: AutomateButton(target: t, paramId: p.id));
-      } else if (canMod) {
-        showModulationSheet(context, p.id, onTypeValue: () => _typeValue(context, p, t.value(p.id)));
-      } else if (!p.isChoice) {
-        _typeValue(context, p, value);
-      }
-    }
+    // The hold menu (device shell): type a value, Modulation…, Automate, React to…, MIDI learn, reset.
+    void longPress() => _menu(context, p, modulations: routes.length + links.length, canModulate: canMod,
+        modTarget: modTarget, linksOnly: routes.isEmpty && links.isNotEmpty);
 
     Widget knob({ModSource? offering, bool hovering = false, ModSource? assigning}) {
       final sel = _selected(routes, scope);
@@ -384,10 +382,12 @@ class _DeviceKnobState extends State<DeviceKnob> {
                           projAssigned ? Icons.check_circle : Icons.add_circle_outline, size: 15,
                           color: modulatorColor(app, projAssign.modulatorId))),
                       ]),
-                      Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, color: Neon.dim, height: 1.1)),
-                      Text(text, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: Neon.code(size: 10, color: color).copyWith(height: 1.25)),
+                      if (widget.labels) ...[
+                        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10, color: Neon.dim, height: 1.1)),
+                        Text(text, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: Neon.code(size: 10, color: color).copyWith(height: 1.25)),
+                      ],
                     ]),
                   ),
                 ),
@@ -399,7 +399,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
       );
     }
 
-    final key = ValueKey('dknob-${p.id}');
+    final key = widget.knobKey ?? ValueKey('dknob-${p.id}');
     // A modulator output dropped here links it (#161), as a dropped mod source makes a route.
     Widget takesLinks(Widget child) => modTarget == null ? child : DragTarget<ModSourceRef>(
       onWillAcceptWithDetails: (d) {
@@ -462,58 +462,30 @@ class _DeviceKnobState extends State<DeviceKnob> {
     )));
   }
 
-  Future<void> _typeValue(BuildContext context, ComponentParameterInfo p, double value) async {
+  Future<void> _menu(BuildContext context, ComponentParameterInfo p, {int modulations = 0, bool canModulate = false,
+      ModTarget? modTarget, bool linksOnly = false, bool typing = false}) async {
     final t = DeviceScope.of(context).target;
-    DeviceFeel.tap();
-    final typed = await showDialog<double>(context: context, animationStyle: dialogAnimation(context),
-        builder: (c) => _TypeValueDialog(target: t, param: p, value: value));
-    if (typed != null) t.set(p.id, typed);
-  }
-}
-
-/// A knob's typed value, with Automate and Learn MIDI CC. Its text field lives as long as the dialog does, so it
-/// is still there while the dialog animates out (a pop from Automate, which can close the device page with it).
-class _TypeValueDialog extends StatefulWidget {
-  const _TypeValueDialog({required this.target, required this.param, required this.value});
-  final DeviceTarget target;
-  final ComponentParameterInfo param;
-  final double value;
-
-  @override
-  State<_TypeValueDialog> createState() => _TypeValueDialogState();
-}
-
-class _TypeValueDialogState extends State<_TypeValueDialog> {
-  late final _field = TextEditingController(
-      text: widget.value.toStringAsFixed(widget.param.max - widget.param.min > 20 ? 1 : 3));
-
-  @override
-  void dispose() {
-    _field.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.param, t = widget.target;
-    return AlertDialog(
-      title: Text(p.label, style: const TextStyle(fontSize: 14)),
-      content: TextField(
-        key: const ValueKey('dknob-type'),
-        controller: _field,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-        decoration: InputDecoration(suffixText: p.unit, helperText: '${p.min} .. ${p.max}'),
-        onSubmitted: (s) => Navigator.of(context).pop(double.tryParse(s.trim())),
-      ),
-      actions: [
-        AutomateButton(target: t, paramId: p.id),
-        MidiLearnButton(target: t, paramId: p.id),
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.of(context).pop(double.tryParse(_field.text.trim())),
-            child: const Text('Set')),
-      ],
-    );
+    final app = t.state;
+    final target = modTarget ?? (p.modulatable && !p.isChoice ? ModTarget.ofDevice(t, p.id) : null);
+    final r = await showKnobMenu(context, t, p, modulations: modulations, canModulate: canModulate,
+        canReact: target != null && t is! ModulatorDeviceTarget, typing: typing);
+    if (!context.mounted) return;
+    switch (r) {
+      case KnobValue(:final value):
+        t.set(p.id, value);
+      case KnobModulation():
+        if (linksOnly && target != null) {
+          showModLinkSheet(context, app, target, extra: AutomateButton(target: t, paramId: p.id));
+        } else if (canModulate) {
+          showModulationSheet(context, p.id);
+        } else if (target != null) {
+          showModLinkSheet(context, app, target, extra: AutomateButton(target: t, paramId: p.id));
+        }
+      case KnobReact():
+        await pickReactTo(context, t, p.id);
+      case null:
+        break;
+    }
   }
 }
 

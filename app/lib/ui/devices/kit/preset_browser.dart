@@ -16,20 +16,25 @@ import '../../theme.dart';
 import 'device_style.dart' show spectrumColors;
 import 'feel.dart';
 import 'preset_actions.dart';
+import 'preset_preview.dart';
+import '../../motion.dart';
 import 'presets.dart';
 import '../../../model/mixer_fx.dart' show isMasterLayer;
 
-/// The header's preset button: the current preset's name ("*" once a value changed); a tap opens the browser. While
-/// the current preset is the user's and changed, a save icon beside it saves over it. With [shortcuts] (the full
-/// editor) Ctrl+S does the same on a keyboard, or asks for a name when the preset isn't the user's.
+/// The header's preset bar (device shell): ‹ the current preset's name › and ★. The name shows "*" once a value
+/// changed; a tap on it opens the browser (search first), the arrows step through the presets (one undo step each)
+/// and ★ keeps the current preset in Favourites. While the current preset is the user's and changed, a save icon
+/// beside it saves over it. With [shortcuts] (the full editor) Ctrl+S does the same on a keyboard, or asks for a
+/// name when the preset isn't the user's. Without [bar], only the name button.
 class DevicePresetChip extends StatefulWidget {
   const DevicePresetChip({super.key, required this.target, required this.color, this.maxWidth = 150, this.chipKey,
-    this.shortcuts = false});
+    this.shortcuts = false, this.bar = false});
   final DeviceTarget target;
   final Color color;
   final double maxWidth;
   final Key? chipKey;
   final bool shortcuts;
+  final bool bar;
 
   @override
   State<DevicePresetChip> createState() => _DevicePresetChipState();
@@ -70,14 +75,29 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
       final name = DevicePresets.label(t);
       final quick = DevicePresets.currentUser(t) != null && DevicePresets.modified(t);
       final color = widget.color;
+      final current = widget.bar ? DevicePresets.current(t) : null;
+      final id = t.componentId ?? '';
+      final fav = current != null && t.state.userPresets.isFavourite(current.favouriteKey(id));
+      Widget arrow(int by) => SizedBox(width: 28, height: 34, child: IconButton(
+        key: ValueKey(by < 0 ? 'device-preset-prev' : 'device-preset-next'),
+        tooltip: by < 0 ? 'Previous preset' : 'Next preset',
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        color: Neon.dim,
+        onPressed: () {
+          DeviceFeel.tap();
+          DevicePresets.step(t, by);
+        },
+        icon: Icon(by < 0 ? Icons.chevron_left : Icons.chevron_right)));
       return ConstrainedBox(constraints: BoxConstraints(maxWidth: widget.maxWidth), child: Row(
         mainAxisSize: MainAxisSize.min, children: [
+          if (widget.bar) arrow(-1),
           Flexible(child: Pressable(glow: color, radius: 15, child: InkWell(
             key: widget.chipKey ?? const ValueKey('device-presets'),
             borderRadius: BorderRadius.circular(15),
             onTap: () {
               DeviceFeel.tap();
-              showPresetBrowser(context, t, color);
+              showPresetBrowser(context, t, color, search: widget.bar);
             },
             child: Container(
               height: 30,
@@ -89,10 +109,11 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
                 if (!quick) ...[Icon(Icons.bookmarks_outlined, size: 14, color: color), const SizedBox(width: 5)],
                 Flexible(child: Text(name, key: const ValueKey('device-preset-name'), maxLines: 1,
                   overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-                if (!quick) const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
+                if (!quick && !widget.bar) const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
               ]),
             ),
           ))),
+          if (widget.bar) arrow(1),
           if (quick) Pressable(glow: color, circle: true, child: Tooltip(
             message: 'Save over "${DevicePresets.currentUser(t)!.name}"${widget.shortcuts ? ' (Ctrl+S)' : ''}',
             child: InkResponse(
@@ -100,13 +121,26 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
               radius: 18,
               onTap: () => quickSavePreset(context, t),
               child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
+          if (widget.bar) SizedBox(width: 30, height: 34, child: IconButton(
+            key: const ValueKey('device-preset-fav'),
+            tooltip: current == null ? 'Load a preset to keep it in Favourites'
+                : fav ? 'Remove "${current.name}" from favourites' : 'Add "${current.name}" to favourites',
+            padding: EdgeInsets.zero,
+            iconSize: 19,
+            color: fav ? Neon.yellow : Neon.dim,
+            onPressed: current == null ? null : () {
+              DeviceFeel.tap();
+              t.state.userPresets.setFavourite(current.favouriteKey(id), !fav);
+            },
+            icon: Icon(fav ? Icons.star_rounded : Icons.star_outline_rounded))),
         ]));
     })),
   );
 }
 
-/// The preset browser: a tap loads a preset (one undo step).
-Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color color) {
+/// The preset browser: a tap loads a preset (one undo step); with Preview on, presets play live until Cancel or OK.
+/// [search] puts the cursor in its search field (the header's preset bar).
+Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color color, {bool search = false}) {
   return showModalBottomSheet<void>(
     context: context,
     sheetAnimationStyle: sheetAnimation(context), // in and out at the theme's pace
@@ -114,7 +148,7 @@ Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color 
     isScrollControlled: true,
     backgroundColor: Neon.panel,
     constraints: const BoxConstraints(maxWidth: 560),
-    builder: (context) => _SheetToasts(height: 0.7, child: PresetBrowser(target: target, color: color)),
+    builder: (context) => _SheetToasts(height: 0.7, child: PresetBrowser(target: target, color: color, search: search)),
   );
 }
 
@@ -166,9 +200,12 @@ class _Tag extends _Filter {
 }
 
 class PresetBrowser extends StatefulWidget {
-  const PresetBrowser({super.key, required this.target, required this.color});
+  const PresetBrowser({super.key, required this.target, required this.color, this.search = false});
   final DeviceTarget target;
   final Color color;
+
+  /// Focus the search field when it opens.
+  final bool search;
 
   @override
   State<PresetBrowser> createState() => _PresetBrowserState();
@@ -178,8 +215,39 @@ class _PresetBrowserState extends State<PresetBrowser> {
   _Filter _filter = const _All();
   String _query = '';
 
+  /// The live preview while Preview is on (preset_preview.dart).
+  PresetPreview? _preview;
+
   DeviceTarget get t => widget.target;
   UserPresetStore get store => t.state.userPresets;
+
+  @override
+  void dispose() {
+    // Closed with Preview still on (Back, a swipe, a tap outside): as Cancel.
+    _preview?.cancel();
+    super.dispose();
+  }
+
+  void _setPreview(bool on) {
+    DeviceFeel.tap();
+    setState(() {
+      if (on) {
+        _preview ??= PresetPreview.start(t);
+      } else {
+        _preview?.cancel();
+        _preview = null;
+      }
+    });
+  }
+
+  void _endPreview({required bool keep}) {
+    final p = _preview;
+    if (p == null) return;
+    DeviceFeel.tap();
+    keep ? p.keep() : p.cancel();
+    _preview = null;
+    Navigator.of(context).maybePop();
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -262,6 +330,8 @@ class _PresetBrowserState extends State<PresetBrowser> {
         ]),
         onTap: () {
           DeviceFeel.tap();
+          final preview = _preview;
+          if (preview != null) return setState(() => preview.apply(p));  // plays live; the sheet stays
           DevicePresets.apply(t, p);
           Navigator.of(context).maybePop();
         },
@@ -302,6 +372,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
       ])),
       Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 6), child: SizedBox(height: 38, child: TextField(
         key: const ValueKey('preset-search'),
+        autofocus: widget.search,
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
           isDense: true,
@@ -311,6 +382,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
           contentPadding: const EdgeInsets.symmetric(vertical: 8)),
         onChanged: (v) => setState(() => _query = v),
       ))),
+      _previewBar(color),
       SizedBox(height: 40, child: ListView(scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12), children: [
           chip('All', const _All()),
@@ -335,6 +407,44 @@ class _PresetBrowserState extends State<PresetBrowser> {
               for (final p in shownFactory) row(p),
             ])),
     ]));
+  }
+
+  /// Preview: a switch; while on, what it loops and Cancel and OK.
+  Widget _previewBar(Color color) {
+    final on = _preview != null;
+    final range = on ? null : PresetPreview.rangeFor(t);
+    final what = t.state.project.loopsRange ? 'the loop' : range == null ? 'the song'
+        : (t.state.timeSelectionStart != null && t.state.timeSelectionStart != t.state.timeSelectionEnd)
+            ? 'the selection' : 'the clip on ${t.layer?.name ?? 'this track'}';
+    return Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 4), child: SizedBox(height: 40, child: Row(children: [
+      FilterChip(
+        key: const ValueKey('preset-preview'),
+        avatar: Icon(on ? Icons.graphic_eq : Icons.play_arrow_rounded, size: 16, color: on ? color : Neon.dim),
+        label: Text('Preview', style: TextStyle(fontSize: 12, color: on ? Neon.text : null)),
+        selected: on,
+        showCheckmark: false,
+        selectedColor: color.withValues(alpha: 0.25),
+        visualDensity: VisualDensity.compact,
+        tooltip: 'Loops playback; a tapped preset plays at once',
+        onSelected: _setPreview),
+      const SizedBox(width: 8),
+      Expanded(child: AnimatedSwitcher(
+        duration: Motion.fade(Motion.small, Motion.of(context)),
+        child: on
+            ? Row(key: const ValueKey('preset-preview-on'), children: [
+                const Expanded(child: Text('Tap presets to hear them', maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: Neon.dim))),
+                TextButton(key: const ValueKey('preset-preview-cancel'), onPressed: () => _endPreview(keep: false),
+                  child: const Text('Cancel')),
+                FilledButton(key: const ValueKey('preset-preview-ok'),
+                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact,
+                    backgroundColor: color.withValues(alpha: 0.85), foregroundColor: Neon.bg),
+                  onPressed: () => _endPreview(keep: true), child: const Text('OK')),
+              ])
+            : Text('Loops $what while you try presets', key: const ValueKey('preset-preview-off'), maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Neon.dim)),
+      )),
+    ])));
   }
 
   Future<void> _more(BuildContext context, String v) async {
