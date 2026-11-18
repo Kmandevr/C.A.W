@@ -6,6 +6,7 @@ updated: 2026-11-18
 
 # Log
 
+- 2026-11-18: frame-cost pass for 120 Hz (#235, branch `smooth-zoom`): playing in Arrange was already cheap on the UI thread (2.3 builds, 4.9 paints a frame); a selection or edit rebuilt every track header and clip, now only those whose inputs changed (`AppState.docGen`; 31,740 → 18,453 builds for 20 selections in the shell, a clip selection 3,759 → 1,619); telemetry's slow-frame measure (`totalSpan` against the budget) likely overcounts, an open question ([performance](performance.md#frames-at-120-hz-while-playing-and-editing-2026-11-18-235)).
 - 2026-11-18: smooth zoom (branch `smooth-zoom`, the owner on 1.0.5-alpha.2: "stretching and then jumping"): the cause was the time pinch drawing the lanes through a sideways `Transform` (text stretched) and laying them out at its end or past 0.6×/1.6× (the jump), and glides scrolling a frame after their zoom; every zoom now lays out at its zoom each frame and scrolls in that frame, with only the zoom's listeners building again (262 widgets a pinch frame on the bench project, was 1,096 for a layout per move), fading grid and ruler levels, and level-cached note previews (`test/smooth_zoom_test.dart`; [app](app.md), Arrange zoom; [performance](performance.md#frames-at-240-hz-2026-11-12)).
 - 2026-11-18: v1.0.5-alpha.2 published (PR #243, the #241 hotfix).
 - 2026-11-18: hotfix 1.0.5-alpha.2 prepared (#241): version, changelog; companion app decisions recorded (#239).

@@ -972,6 +972,10 @@ class AppState extends ChangeNotifier implements StressHost {
 
   void _docChanged() => _docGen++;
 
+  /// Bumped by every edit, value move and engine sync of the project (never by a selection, the transport or
+  /// meters): screens keep parts built from the project (Arrange's track headers and clips) while it stays the same.
+  int get docGen => _docGen;
+
   /// The engine JSON of a live drag step: the project with [text] as module [moduleId]'s source.
   @visibleForTesting
   String liveEngineJson(String moduleId, String text) {

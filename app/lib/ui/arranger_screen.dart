@@ -15,6 +15,7 @@ import '../model/comping.dart';
 import '../model/audio_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/arrange_markers.dart';
+import '../model/audio_record.dart' show AudioRecorder;
 import '../model/clip_automation.dart';
 import '../model/clip_loop_edit.dart';
 import '../model/freeze.dart';
@@ -415,6 +416,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
   /// zoom moves on.
   int _buildGen = 0;
 
+  /// Bumped by every settings change (the theme, the clips' look): with the project's [AppState.docGen], what the
+  /// headers and clips are built from (#235).
+  int _settingsGen = 0;
+  void _settingsChanged() => _settingsGen++;
+
   final _keys = FocusNode(debugLabel: 'arranger keys', skipTraversal: true);
   KeyRouterState? _router;
 
@@ -437,6 +443,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
       widget.state.tick.addListener(_followPlayhead);
       old.state.revealStartRequests.removeListener(_revealStart);
       widget.state.revealStartRequests.addListener(_revealStart);
+      old.state.settings.removeListener(_settingsChanged);
+      widget.state.settings.addListener(_settingsChanged);
     }
   }
 
@@ -445,6 +453,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     super.initState();
     widget.state.tick.addListener(_followPlayhead);
     widget.state.revealStartRequests.addListener(_revealStart);
+    widget.state.settings.addListener(_settingsChanged);
     _hScroll.addListener(_onHScroll);
     widget.state.onFrozenEdit = _frozenEdit;
   }
@@ -632,6 +641,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
     if (widget.state.onFrozenEdit == _frozenEdit) widget.state.onFrozenEdit = null;
     widget.state.tick.removeListener(_followPlayhead);
     widget.state.revealStartRequests.removeListener(_revealStart);
+    widget.state.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.arranger, _keys);
     _keys.dispose();
     _marquee.dispose();
@@ -1803,7 +1813,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             opacity: (tempoH / tempoLaneHeight(_phone)).clamp(0.0, 1.0), child: TempoLaneHeader(state: s))),
         ])),
         for (final layer in layers) row('h', layer, [
-          glideRow(layer, (h) => _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer,
+          // A header builds again only when what it shows can have changed (#235): the project (any edit moves
+          // [AppState.docGen]), its selection or focus, its place and size, or a recording starting or stopping; a
+          // selection elsewhere or a transport change leaves it as built.
+          glideRow(layer, (h) => Selected(select: () => (s.docGen, _settingsGen, p, layer, s.selectedLayerId == layer.id,
+              layer.id == focusId, h, pinned ? TrackCollapse.normal : _rowCollapse(layer), p.layers.indexOf(layer),
+              s.folderDepth(layer), headW, _phone, pinned, drag, AudioRecorder.current),
+            builder: (context) => _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer,
             index: p.layers.indexOf(layer),
             taps: _headerTaps,
             drag: drag, onTrackDrag: drag == null ? null : (phase, at) => _trackDrag(layer, phase, at),
@@ -1821,7 +1837,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
             onFx: () => callbacks.onFx(layer),
             onMenu: (at) => callbacks.onMenu(layer, at),
             onResize: pinned ? null : (dy) => _rowResize(layer, dy),
-            onResizeEnd: _rowResizeEnd)),
+            onResizeEnd: _rowResizeEnd))),
           // The track's take lanes (#209, comping), then its automation lanes (REAPER's envelope lanes, UG 18.16).
           if (!pinned) takesReveal(layer, takesOpen(layer) ? TakeLaneHeaders(key: ValueKey('take-headers-${layer.id}'),
               state: s, layer: layer, indent: folderIndent(s.folderDepth(layer))) : null),
@@ -1882,7 +1898,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
                   ])),
             for (final layer in layers) row('l', layer, [
               glideRow(layer, (h) => zoomed((stepW) => _TimelineLane(key: drag?.laneKey(layer.id), state: s,
-                layer: layer, width: widthAt(stepW), stepW: stepW, zoom: _stepWN, gen: gen, trackHeight: h,
+                layer: layer, width: widthAt(stepW), stepW: stepW, zoom: _stepWN, gen: gen,
+                look: (s.docGen, _settingsGen, p), trackHeight: h,
                 selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
                 thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin))),
               if (!pinned) takesReveal(layer, takesOpen(layer) ? zoomed((stepW) =>
@@ -2408,7 +2425,8 @@ double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
 class _TimelineLane extends StatefulWidget {
   const _TimelineLane({super.key, required this.state, required this.layer, required this.width,
-    required this.stepW, required this.zoom, required this.gen, required this.trackHeight, required this.selectedIds,
+    required this.stepW, required this.zoom, required this.gen, required this.look, required this.trackHeight,
+    required this.selectedIds,
     required this.callbacks, this.drag, this.thin = false});
   final AppState state;
   final LayerDoc layer;
@@ -2417,9 +2435,12 @@ class _TimelineLane extends StatefulWidget {
   /// The pixels per step as they change, for the clips, which lay out at it without being built again.
   final ValueListenable<double> zoom;
 
-  /// The arranger's build this lane comes from: a new one builds the clips anew, a zoom alone (the same build) only
-  /// places them again.
+  /// The arranger's build this lane comes from (a zoom alone keeps it).
   final int gen;
+
+  /// What the clips are built from besides their own fields: the project's edits and the settings. A clip keeps its
+  /// widget across builds of the arranger while this, its selection, colour and size stay the same (#235).
+  final Object look;
 
   /// A thin row: its clips are bars (also while it glides there).
   final bool thin;
@@ -2457,18 +2478,18 @@ class _TimelineLaneState extends State<_TimelineLane> {
     if (_window() != _shownWindow) setState(() {});
   }
 
-  // The clip widgets this lane built, by clip id: the scale they were placed at (pixels per step, row height, window
-  // origin), the slot and the clip inside it (#241). A build that only the lane itself asked for (the window moved
-  // on, a drawn clip, a leaving one) reuses them, so a window move builds only the clips coming into view; a zoom
-  // places the same clips again (the slot, not the clip, is built); a new build of the arranger, a new row height or
-  // a dependency change builds them anew.
-  final Map<String, (Object, Widget, Widget)> _clipWidgets = {};
+  // The clip widgets this lane built, by clip id: where they were placed (pixels per step, row height and window
+  // origin; the clip's rectangle), what the clip was built from, the slot and the clip inside it (#241, #235). A
+  // build reuses the slot while the place and the clip's inputs stay, so a window move builds only the clips coming
+  // into view and a selection only the clips it changes; a zoom places the same clips again (the slot, not the clip,
+  // is built). A new row height or a dependency change builds them all anew.
+  final Map<String, (Object, Rect, Object, Widget, Widget)> _clipWidgets = {};
 
   @override
   void didUpdateWidget(_TimelineLane old) {
     super.didUpdateWidget(old);
-    if (old.gen != widget.gen || old.trackHeight != widget.trackHeight || old.thin != widget.thin ||
-        old.zoom != widget.zoom) {
+    if (old.trackHeight != widget.trackHeight || old.thin != widget.thin || old.zoom != widget.zoom ||
+        old.drag != widget.drag || old.state != widget.state) {
       _clipWidgets.clear();
     }
   }
@@ -2713,16 +2734,20 @@ class _TimelineLaneState extends State<_TimelineLane> {
         _seen[clip.id] = (rect.shift(Offset(win.originStep * stepW, 0)), clipColor, state.clipName(clip));
         // The window's origin is in the scale: a new origin or zoom places the clips again without a glide.
         final scale = (stepW, trackHeight, win.originStep);
+        final selected = widget.selectedIds.contains(clip.id);
+        final inputs = (widget.look, clip, selected, clipColor, rect.height, layer.instrument?.id,
+            state.project.module(clip.patternId)?.source);
         final had = _clipWidgets[clip.id];
-        if (had != null && had.$1 == scale) return had.$2;
+        final appear = appearing.contains(clip.id);
+        if (had != null && !appear && had.$1 == scale && had.$2 == rect && had.$3 == inputs) return had.$4;
         // Its own layer: a clip coming into the window paints, the ones already there don't again. It reads the zoom
         // itself, so a zoom keeps it as built.
-        final child = had?.$3 ?? RepaintBoundary(child: _TimelineClip(state: state, layer: layer, clip: clip,
-            zoom: widget.zoom, drag: widget.drag, height: rect.height, color: clipColor,
-            selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks));
+        final child = had != null && had.$3 == inputs ? had.$5 : RepaintBoundary(child: _TimelineClip(state: state,
+            layer: layer, clip: clip, zoom: widget.zoom, drag: widget.drag, height: rect.height, color: clipColor,
+            selected: selected, callbacks: widget.callbacks));
         final built = ClipSlot(key: ValueKey('clip-slot-${clip.id}'), id: clip.id, rect: rect, scale: scale,
-          appear: appearing.contains(clip.id), child: child);
-        _clipWidgets[clip.id] = (scale, built, child);
+          appear: appear, child: child);
+        _clipWidgets[clip.id] = (scale, rect, inputs, built, child);
         return built;
       }(),
       for (final MapEntry(key: id, value: (rect, leftColor, name)) in _leaving.entries)
@@ -2734,8 +2759,9 @@ class _TimelineLaneState extends State<_TimelineLane> {
       for (final clip in layer.audioClips)
         if (keep(clip.id, clip.startSteps, clip.startSteps + clip.spanSteps(state.project.tempo))) () {
         final scale = (stepW, trackHeight, win.originStep);
+        final inputs = (widget.look, clip, widget.selectedIds.contains(clip.id), audioClipColor(state, layer, clip));
         final had = _clipWidgets['audio:${clip.id}'];
-        if (had != null && had.$1 == scale) return had.$2;
+        if (had != null && had.$1 == scale && had.$3 == inputs) return had.$4;
         final built = Positioned(left: win.x(clip.startSteps, stepW), top: _clipInset(trackHeight),
           width: math.max(12.0, clip.spanSteps(state.project.tempo) * stepW),
           height: trackHeight - 2 * _clipInset(trackHeight),
@@ -2744,7 +2770,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
             color: audioClipColor(state, layer, clip), selected: widget.selectedIds.contains(clip.id),
             selectMode: widget.callbacks.selectMode, guides: widget.callbacks.guides,
             onOpen: () => widget.callbacks.onAudioOpen?.call(layer))));
-        _clipWidgets['audio:${clip.id}'] = (scale, built, built);
+        _clipWidgets['audio:${clip.id}'] = (scale, Rect.zero, inputs, built, built);
         return built;
       }(),
       ])),
