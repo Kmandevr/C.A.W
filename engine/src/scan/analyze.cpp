@@ -15,6 +15,7 @@
 #include "declarations.h"
 #include "parsed.h"
 #include "scan.h"
+#include "syscall_sites.h"
 
 namespace caw::scan {
 
@@ -97,7 +98,10 @@ constexpr Rule kImports[] = {
     {"LoadPackagedLibrary", C::LoadCode, S, false}, {"LdrLoadDll", C::LoadCode, S, false},
     {"GetProcAddress", C::LoadCode, S, false}, {"LdrGetProcedureAddress", C::LoadCode, S, false},
     // Making memory executable
-    {"mprotect", C::MakeCode, H, false}, {"pkey_mprotect", C::MakeCode, S, false}, {"memfd_create", C::MakeCode, H, false},
+    {"mprotect", C::MakeCode, H, false}, {"pkey_mprotect", C::MakeCode, S, false},
+    // memfd_create: every NDK static build imports it (libc++abi), and executing from the memfd still needs
+    // mmap + mprotect or dlopen, which are counted, so on its own it is a notice.
+    {"memfd_create", C::MakeCode, H, true},
     {"VirtualProtect", C::MakeCode, H, false}, {"VirtualAlloc", C::MakeCode, H, false},
     {"VirtualAlloc2", C::MakeCode, H, false}, {"NtProtectVirtualMemory", C::MakeCode, S, false},
     {"NtAllocateVirtualMemory", C::MakeCode, H, false},
@@ -317,10 +321,24 @@ constexpr const char* kSystemPe[] = {
     "ksuser.dll", "msvcrt.dll", "ucrtbase.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll",
     "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "concrt140.dll", "vcomp140.dll"};
 
+#ifdef CAW_SCAN_ALLOW_SANITIZER
+// The sanitizer runtimes a CAW_SANITIZE / CAW_TSAN build of the engine's own test components links. Allowed only
+// in such a build (never in a shipped one), so the sanitizer and TSan CI jobs scan their components.
+bool sanitizerLibrary(const std::string& name) {
+    for (const char* s : {"libasan.so", "libubsan.so", "libtsan.so", "liblsan.so", "libhwasan.so",
+                          "libclang_rt.asan", "libclang_rt.ubsan", "libclang_rt.tsan", "libclang_rt.hwasan"})
+        if (name.rfind(s, 0) == 0) return true;
+    return false;
+}
+#endif
+
 bool systemLibrary(const std::string& name, bool pe) {
     if (!pe) {
         for (const char* s : kSystemElf)
             if (name == s) return true;
+#ifdef CAW_SCAN_ALLOW_SANITIZER
+        if (sanitizerLibrary(name)) return true;
+#endif
         return false;
     }
     const std::string l = lower(name);
@@ -349,7 +367,7 @@ bool fileWrite(const std::string& n) {
                                        n.find("basic_ostream") != std::string::npos));
 }
 
-void classifyImports(const Parsed& p, Findings& f) {
+void classifyImports(const Parsed& p, Findings& f, const SyscallUse* syscallUse) {
     const bool pe = p.format == Format::Pe32Plus;
     std::string opened, written;
     for (const Import& im : p.imports) {
@@ -369,6 +387,15 @@ void classifyImports(const Parsed& p, Findings& f) {
                   Severity::Warning);
     for (const Import& im : p.imports) {
         const std::string evidence = pe ? im.library + "!" + (im.name.empty() ? "#ordinal" : im.name) : im.name;
+        if (!pe && im.name == "syscall" && syscallUse) {
+            // Certain unless every call passes a number only the C++ runtime uses (syscall_sites.h).
+            if (syscallUse->runtimeOnly)
+                f.add(C::Packed, FindingKind::Import, "syscall (" + syscallUse->detail + ")", Strength::Hint,
+                      Severity::Notice);
+            else
+                f.add(C::Packed, FindingKind::Import, "syscall: " + syscallUse->detail, S, Severity::Warning);
+            continue;
+        }
         if (im.name.empty()) {
             // By ordinal: the name is hidden. From an internet DLL it is the internet; from another it hides which
             // function it is.
@@ -693,7 +720,18 @@ Report scanBinary(std::span<const uint8_t> bytes, const Limits& limits) {
     report.tlsCallbacks = p.tlsCallbacks;
     report.componentEntry = p.componentEntry;
     // A malformed file still gets the byte-level checks on what parsed: they only read checked ranges.
-    classifyImports(p, f);
+    SyscallUse syscallUse;
+    const bool importsSyscall = p.format == Format::Elf64 &&
+                                std::any_of(p.imports.begin(), p.imports.end(),
+                                            [](const Import& im) { return im.name == "syscall"; });
+    if (importsSyscall) {
+        syscallUse = analyzeSyscallCalls(r, p, budget);
+        if (budget.left == 0 && p.malformed.empty()) {
+            report.malformed = true;
+            f.add(C::Packed, FindingKind::Malformed, "the scan's work budget ran out", S, Severity::Warning);
+        }
+    }
+    classifyImports(p, f, importsSyscall ? &syscallUse : nullptr);
     scanSyscalls(r, p, f);
     scanSections(r, p, f);
     scanStrings(r, limits, f);

@@ -2,6 +2,7 @@
 // The dynamic table and program headers are what the loader uses, so imports come from them; section
 // headers (which a stripped file may lack) add names and the exact code ranges.
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,7 @@ private:
         r_.u16(60, shnum_);
         r_.u16(62, shstrndx_);
         out_.arch = machine_ == 183 ? "aarch64" : machine_ == 62 ? "x86_64" : "other";
+        out_.machine = machine_;
         return true;
     }
 
@@ -98,6 +100,7 @@ private:
                 haveLoad_ = true;
                 lastLoadEnd_ = s.vaddr + s.memsz;
             }
+            if (s.type == PT_LOAD) out_.loadSegments.push_back({s.offset, s.vaddr, s.filesz, (s.flags & PF_X) != 0});
             if (s.type == PT_LOAD && (s.flags & PF_X)) {
                 const uint64_t start = s.offset / kLargestPage * kLargestPage;
                 const uint64_t end = std::min<uint64_t>(r_.size(), (s.offset + s.filesz + kLargestPage - 1) / kLargestPage * kLargestPage);
@@ -206,7 +209,9 @@ private:
     }
 
     // The highest symbol index a relocation table uses.
-    bool relocations(uint64_t address, uint64_t size, uint64_t entry, uint64_t& maxSymbol) {
+    using OnRelocation = std::function<void(uint64_t offset, uint32_t type, uint64_t symbol)>;
+
+    bool relocations(uint64_t address, uint64_t size, uint64_t entry, const OnRelocation& each) {
         if (size == 0) return true;
         if (entry != 16 && entry != 24) return bad("a relocation table has an unknown entry size");
         const uint64_t count = size / entry;
@@ -215,16 +220,18 @@ private:
         if (!map(address, size, at)) return bad("a relocation table lies outside the file");
         if (!spend(count)) return false;
         for (uint64_t i = 0; i < count; ++i) {
-            uint64_t info = 0;
+            uint64_t offset = 0, info = 0;
+            r_.u64(at + i * entry, offset);
             r_.u64(at + i * entry + 8, info);
-            maxSymbol = std::max<uint64_t>(maxSymbol, info >> 32);
+            each(offset, uint32_t(info), info >> 32);
         }
         return true;
     }
 
     // Android's packed relocations (DT_ANDROID_REL/RELA, "APS2": SLEB128 groups, as bionic's
-    // packed_reloc_iterator reads them): the highest symbol index they use. Anything inconsistent is malformed.
-    bool androidRelocations(uint64_t address, uint64_t size, bool rela, uint64_t& maxSymbol) {
+    // packed_reloc_iterator reads them; checked 2026-11-18 against llvm-readelf on an NDK r30 build linked with
+    // --pack-dyn-relocs=android: the same 669 offsets, types and symbols). Anything inconsistent is malformed.
+    bool androidRelocations(uint64_t address, uint64_t size, bool rela, const OnRelocation& each) {
         if (size == 0) return true;
         uint64_t at = 0;
         if (size < 4 || !map(address, size, at)) return bad("packed relocations lie outside the file");
@@ -248,30 +255,40 @@ private:
             return true;
         };
         constexpr int64_t kByInfo = 1, kByOffsetDelta = 2, kByAddend = 4, kHasAddend = 8;
-        int64_t count = 0, value = 0;
-        if (!sleb(count) || count < 0 || uint64_t(count) > L_.maxRelocations || !sleb(value))
+        int64_t count = 0, value = 0, offsetValue = 0;
+        if (!sleb(count) || count < 0 || uint64_t(count) > L_.maxRelocations || !sleb(offsetValue))
             return bad("packed relocations have a bad header");
         if (!spend(uint64_t(count))) return false;
-        auto info = [&](int64_t v) { maxSymbol = std::max<uint64_t>(maxSymbol, uint64_t(v) >> 32); };
+        uint64_t offset = uint64_t(offsetValue), groupDelta = 0, groupInfo = 0;
         for (int64_t done = 0; done < count;) {
             int64_t groupSize = 0, flags = 0;
             if (!sleb(groupSize) || groupSize <= 0 || groupSize > count - done || !sleb(flags) || (flags & ~int64_t(15)))
                 return bad("packed relocations have a bad group");
             const bool hasAddend = (flags & kHasAddend) != 0;
             if (hasAddend && !rela) return bad("packed REL relocations with addends");
-            if ((flags & kByOffsetDelta) && !sleb(value)) return bad("packed relocations end early");
+            if (flags & kByOffsetDelta) {
+                if (!sleb(value)) return bad("packed relocations end early");
+                groupDelta = uint64_t(value);
+            }
             if (flags & kByInfo) {
                 if (!sleb(value)) return bad("packed relocations end early");
-                info(value);
+                groupInfo = uint64_t(value);
             }
             if (hasAddend && (flags & kByAddend) && !sleb(value)) return bad("packed relocations end early");
             for (int64_t i = 0; i < groupSize; ++i) {
-                if (!(flags & kByOffsetDelta) && !sleb(value)) return bad("packed relocations end early");
+                if (flags & kByOffsetDelta) {
+                    offset += groupDelta;
+                } else {
+                    if (!sleb(value)) return bad("packed relocations end early");
+                    offset += uint64_t(value);
+                }
+                uint64_t info = groupInfo;
                 if (!(flags & kByInfo)) {
                     if (!sleb(value)) return bad("packed relocations end early");
-                    info(value);
+                    info = uint64_t(value);
                 }
                 if (hasAddend && !(flags & kByAddend) && !sleb(value)) return bad("packed relocations end early");
+                each(offset, uint32_t(info), info >> 32);
             }
             done += groupSize;
         }
@@ -369,16 +386,20 @@ private:
             count = std::max(count, gnuCount);
         }
         uint64_t maxSymbol = 0;
-        if (!relocations(rela, relasz, relaent, maxSymbol) || !relocations(rel, relsz, relent, maxSymbol) ||
-            !relocations(jmprel, pltrelsz, pltrel == static_cast<uint64_t>(DT_REL) ? 16 : 24, maxSymbol) ||
-            !androidRelocations(androidRel, androidRelSize, false, maxSymbol) ||
-            !androidRelocations(androidRela, androidRelaSize, true, maxSymbol))
+        auto everyRelocation = [&](const OnRelocation& each) {
+            return relocations(rela, relasz, relaent, each) && relocations(rel, relsz, relent, each) &&
+                   relocations(jmprel, pltrelsz, pltrel == static_cast<uint64_t>(DT_REL) ? 16 : 24, each) &&
+                   androidRelocations(androidRel, androidRelSize, false, each) &&
+                   androidRelocations(androidRela, androidRelaSize, true, each);
+        };
+        if (!everyRelocation([&](uint64_t, uint32_t, uint64_t symbol) { maxSymbol = std::max(maxSymbol, symbol); }))
             return false;
         if (maxSymbol > 0) count = std::max(count, maxSymbol + 1);
         if (count > L_.maxSymbols) return bad("more dynamic symbols than the scan reads");
         uint64_t symAt = 0;
         if (count > 0 && !map(symtab, count * 24, symAt)) return bad("the dynamic symbols lie outside the file");
         if (!spend(count)) return false;
+        std::vector<uint64_t> syscallSymbols;
         for (uint64_t i = 1; i < count; ++i) {
             const uint64_t at = symAt + i * 24;
             uint32_t nameOffset = 0;
@@ -392,6 +413,7 @@ private:
             std::string symbol;
             if (!name(nameOffset, symbol)) return bad("a symbol's name lies outside the string table");
             if (shndx == 0) {
+                if (symbol == "syscall") syscallSymbols.push_back(i);
                 out_.imports.push_back({std::string(), std::move(symbol)});
             } else if (symbol == "caw_get_component_v3") {
                 out_.componentEntry = true;
@@ -399,6 +421,14 @@ private:
                 if (out_.exports.size() < 64) out_.exports.push_back(std::move(symbol));
             }
         }
+        // Every relocation that names syscall, for the call-site analysis (syscall_sites.cpp).
+        if (!syscallSymbols.empty() &&
+            !everyRelocation([&](uint64_t offset, uint32_t type, uint64_t symbol) {
+                if (out_.syscallRelocations.size() < 4096 &&
+                    std::find(syscallSymbols.begin(), syscallSymbols.end(), symbol) != syscallSymbols.end())
+                    out_.syscallRelocations.push_back({offset, type});
+            }))
+            return false;
         return true;
     }
 

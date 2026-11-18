@@ -22,12 +22,25 @@ struct Import {
     std::string name;     // empty for a PE import by ordinal
 };
 
+struct LoadSegment {
+    uint64_t offset = 0, vaddr = 0, filesz = 0;
+    bool exec = false;
+};
+
+struct Relocation {
+    uint64_t offset = 0;  // the address it writes
+    uint32_t type = 0;
+};
+
 struct Parsed {
     Format format = Format::Unknown;
     std::string arch = "other";
     std::vector<Import> imports;
     std::vector<std::string> libraries;  // DT_NEEDED names, PE import DLLs (lowercase)
     std::vector<std::string> searchPaths;  // ELF DT_RPATH / DT_RUNPATH
+    uint16_t machine = 0;                  // ELF e_machine
+    std::vector<LoadSegment> loadSegments; // ELF PT_LOADs
+    std::vector<Relocation> syscallRelocations;  // ELF relocations naming the imported syscall
     std::vector<std::string> exports;    // ELF only: defined global dynamic symbols worth a look
     bool componentEntry = false;
     std::vector<FileRange> execCode;     // executable code: sections where named, else segments

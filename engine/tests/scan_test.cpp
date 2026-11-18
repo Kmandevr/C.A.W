@@ -112,8 +112,10 @@ TEST(scan_elf_imports_fall_into_their_capabilities) {
     CHECK(!find(r, Capability::ReadFiles, FindingKind::Import, "parent_path"));  // path text only
     const Finding* mp = find(r, Capability::MakeCode, FindingKind::Import, "mprotect");
     CHECK(mp && mp->strength == Strength::Hint);
+    // syscall is imported but this fixture never calls it, so the call-site analysis (scan_syscall_test.cpp)
+    // reports it as a runtime notice; a real call to it is certain there.
     const Finding* sc = find(r, Capability::Packed, FindingKind::Import, "syscall");
-    CHECK(sc && sc->severity == Severity::Warning && sc->strength == Strength::Certain);
+    CHECK(sc && sc->severity == Severity::Notice && sc->strength == Strength::Hint);
     const Finding* op = exact(r, "open");
     CHECK(op && op->strength == Strength::Hint);
     const Finding* fo = find(r, Capability::ReadFiles, FindingKind::Import, "fopen");
