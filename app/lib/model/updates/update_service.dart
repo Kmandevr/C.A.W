@@ -11,11 +11,11 @@ import 'package:flutter/foundation.dart';
 import '../../platform/update_installer.dart';
 import '../../version.dart';
 import '../atomic_file.dart';
-import '../sha256.dart';
-import 'delta_update.dart';
-import 'release_version.dart';
-import 'releases.dart';
-import 'update_fetch.dart';
+import 'package:caw_services/sha256.dart';
+import 'package:caw_services/updates/delta_update.dart';
+import 'package:caw_services/updates/release_version.dart';
+import 'package:caw_services/updates/releases.dart';
+import 'package:caw_services/updates/update_fetch.dart';
 
 /// Where releases are listed. GitHub Releases now; a later AutoStacc distribution is another implementation.
 abstract class UpdateSource {

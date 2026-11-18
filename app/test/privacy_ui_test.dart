@@ -5,9 +5,9 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:caw/model/telemetry/device_probe.dart';
-import 'package:caw/model/telemetry/relay_client.dart';
+import 'package:caw_services/telemetry/relay_client.dart';
 import 'package:caw/model/telemetry/telemetry.dart';
-import 'package:caw/model/telemetry/telemetry_config.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 import 'package:caw/ui/privacy/feedback_sheet.dart';
 import 'package:caw/ui/privacy/my_data_page.dart';
 import 'package:caw/ui/privacy/privacy_pages.dart';

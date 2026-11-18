@@ -45,6 +45,26 @@ android {
         }
     }
 
+    // Two builds of one app (owner, 2026-11-17: "the GitHub build has everything; the Play build follows Play's
+    // rules"), with the same applicationId and key, so either installs over the other. github is today's APK; play
+    // drops the install permissions (src/play/AndroidManifest.xml) and the app hides its self-updater
+    // (lib/platform/distribution.dart), since Google Play does the updating. Build with --flavor github or play.
+    flavorDimensions += "store"
+    productFlavors {
+        create("github") {
+            dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATES", "true")
+        }
+        create("play") {
+            dimension = "store"
+            // MainActivity answers caw/updates with notImplemented: no PackageInstaller code is reachable.
+            buildConfigField("boolean", "SELF_UPDATES", "false")
+        }
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+
     externalNativeBuild {
         cmake {
             path = file("../../../engine/CMakeLists.txt")

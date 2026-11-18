@@ -1,0 +1,7 @@
+<!-- The Play build (docs/companion-protocol.md, Play's REQUEST_INSTALL_PACKAGES policy): Google Play does the updating,
+     so the self-updater's install permissions are removed from the merged manifest; everything else is the main one. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" tools:node="remove" />
+</manifest>

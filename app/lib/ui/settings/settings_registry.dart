@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/settings.dart';
 import '../../model/templates.dart' show templateLabel;
+import '../../platform/distribution.dart';
 import '../../version.dart';
 import '../theme.dart';
 
@@ -394,8 +395,9 @@ const Map<String, String> mergedSettings = {
 /// Settings that exist only on Android (their rows hide elsewhere, so search leaves them out there).
 const androidOnlySettings = {'audio.background', 'audio.bufferTuning'};
 
-/// Whether [e]'s row is on its page on this platform.
-bool settingAvailable(SettingEntry e) => !androidOnlySettings.contains(e.id) || Platform.isAndroid;
+/// Whether [e]'s row is on its page on this platform and build (the Play build has no Updates rows).
+bool settingAvailable(SettingEntry e) =>
+    (!androidOnlySettings.contains(e.id) || Platform.isAndroid) && (selfUpdates || !e.id.startsWith('about.updates'));
 
 /// The entries matching [query], grouped by section in page order.
 Map<SettingsSection, List<SettingEntry>> searchSettings(String query) {

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/telemetry/telemetry.dart';
-import '../../model/telemetry/telemetry_config.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../panel_motion.dart';

@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/native_trust.dart';
-import 'package:caw/model/sha256.dart';
+import 'package:caw_services/sha256.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

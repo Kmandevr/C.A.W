@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
-import '../../model/updates/releases.dart';
+import 'package:caw_services/updates/releases.dart';
 import '../../model/updates/update_service.dart';
 import '../motion.dart';
 import '../theme.dart';

@@ -1,12 +1,12 @@
 ---
 title: Plug-in hosting plan
-summary: Least privilege and the companion app (1.0.6) first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
+summary: Least privilege and the companion app (1.0.7) first, the optional isolation design, the silent staged plan for hosting CLAP/VST3 plug-ins (#212, live in 1.1.0), the verified facts and the owner's open questions; planned, not built.
 updated: 2026-11-18
 ---
 
 # Plug-in hosting plan
 
-**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). Hosting goes live in 1.1.0, and least privilege and the companion app in 1.0.6 (owner, 2026-11-18). The owner reviews the isolation design before step 1.
+**[Proposal]** None of this is built. It is an architect review from 2026-11-17, laid down silently in steps (the owner's groundwork rule, [decisions](decisions.md)). Hosting goes live in 1.1.0, and least privilege and the companion app in 1.0.7 (owner, 2026-11-18). The owner reviews the isolation design before step 1.
 
 **Owner direction (2026-11-18):** least privilege comes first and Isolated is an option the user can choose, not the default ([decisions](decisions.md)). The design for that is [Least privilege and the companion app](#least-privilege-and-the-companion-app).
 
@@ -45,12 +45,12 @@ updated: 2026-11-18
 - location is declared only up to Android 11 (`maxSdkVersion="30"`), and Bluetooth scanning is `neverForLocation`;
 - linked sample folders are granted read-only.
 
-**The companion app** (owner, 2026-11-18: release **1.0.6**, the next one, is given over to it and to this security work; the later batches moved up by one). It has its own package, so its own permissions.
+**The companion app** (owner, 2026-11-18: release **1.0.7** is given over to it and to this security work, after the 1.0.6 usability release; the later batches moved up by one). It has its own package, so its own permissions.
 - **What it holds:** `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` and `INTERNET`, for the self-updater, the update check, telemetry and feedback. Plug-in trust is kept here too (below).
 - **What it grows into:** AutoStacc's secondary hub; the two work as one. It holds every download, the user's whole library and the account, and stores the user's data, sounds and one-shots in the cloud for C.A.W to use. C.A.W reads them through the companion, so the main app still needs no network, and account tokens never live in the process that loads plug-ins.
 - **Private (owner):** its code (a closed-source, private repository, unlike C.A.W's Apache-2.0, [vision](vision.md)) and its data. Nothing in it is shared or exposed.
 - **Admin view (owner):** the telemetry and feedback that C.A.W-Telemetry collects are shown in an admin view inside the companion app, for the owner and the people they trust, to see how the app is used and to find vulnerabilities. When it is built, the C.A.W-Telemetry repository's PLAN.md, privacy policy and access rules change in the same piece of work.
-- **Talking to it:** the main app sends only fixed, structured messages (an update check, a telemetry report in the existing schema, a request for a library file), never arbitrary payloads, so a plug-in can't use it to send data out. It accepts only callers signed with C.A.W's own key, through a custom permission with `protectionLevel="signature"`. It never uses `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
+- **Talking to it** ([companion protocol](companion-protocol.md)): the main app sends only fixed, structured messages (an update check, a telemetry report in the existing schema, a request for a library file), never arbitrary payloads, so a plug-in can't use it to send data out. It accepts only callers signed with C.A.W's own key, checked on every message by uid and signer; whether a custom permission with `protectionLevel="signature"` guards it as well is open (open question 10). It never uses `sharedUserId`, which would merge the two apps' permissions again. The main app needs a `<queries>` entry to find it.
 - **Play builds:** the Play companion carries no install permissions, since Play does the updating.
 - **Windows:** the same split, as a helper process. It only helps if the main process is itself restricted (MSIX with an AppContainer). **[Assumption]** that the Flutter app and local CMake builds work in an AppContainer; to test.
 
@@ -129,7 +129,7 @@ updated: 2026-11-18
 - **Limits:** it stops lazy and obvious malware. Code built to evade it (looking functions up by walking memory, encrypted payloads, harmless-looking imports) gets past, as it does with any static scanner. A false positive must never silently break a legitimate plug-in.
 - **Dependencies:** none needed; a small ELF/PE reader of C.A.W's own is enough. **[Assumption]** LIEF (Apache-2.0) for parsing and YARA (BSD-3-Clause) for signature rules are permissive candidates; check the licences before adopting either.
 
-**[Assumption]** the API names and behaviour above (AMSI, `revokeSelfPermissionsOnKill`, signature permissions, `sharedUserId`) come from platform documentation not re-read this session; check each before building on it.
+**[Assumption]** the API names and behaviour above (AMSI, `revokeSelfPermissionsOnKill`, `sharedUserId`) come from platform documentation not re-read this session; check each before building on it. Signature permissions, `<queries>` and `Message.sendingUid` were checked on 2026-11-18 ([companion protocol](companion-protocol.md#platform-facts)).
 
 ## Silent steps
 1. **1.0.7:** the shared-memory ring (a new isolation folder in the engine sources), with tests across two processes on Linux and Windows CI. Nothing calls it.
@@ -163,5 +163,13 @@ updated: 2026-11-18
 5. Are plug-in GUIs (VST3 editors, CLAP GUI embedding) in scope for 1.1.0?
 6. Which trust a plug-in gets the first time it is seen (already open in [vision](vision.md)).
 7. Which flagging and signing parts to build ([least privilege](#least-privilege-and-the-companion-app)), whether unsigned code may load at all, which findings block for CLAP/VST3, the capability list, and how a warning looks.
-8. **Settled** (owner, 2026-11-18): the companion app and this security work are release 1.0.6, before hosting goes live in 1.1.0; the later batches moved up by one.
+8. **Settled** (owner, 2026-11-18): the companion app and this security work are release 1.0.7, after the 1.0.6 usability release and before hosting goes live in 1.1.0; the later batches moved up by one.
 9. Which trust a never-seen plug-in gets (6): **[Proposal]** Blocked until the user chooses.
+10. **Waiting for the owner before the companion app is built** (the main app's groundwork is in, [companion protocol](companion-protocol.md)):
+    - where the companion's code lives: the owner called it private and closed-source, against this Apache-2.0 repository; also its package and service names (assumed `com.kmandevr.caw.companion` and `.CompanionService`);
+    - its screens, which need the AutoStacc brand (logo, colours, name);
+    - the known-bad list's source and its signing key;
+    - the two Play listings;
+    - whether the companion declares and enforces the signature permission `com.kmandevr.caw.permission.COMPANION`: it stops binds from other keys before a message arrives, but an app that declares the name first blocks the companion's install. The main app no longer declares it, and the per-message signer check is the boundary ([companion protocol](companion-protocol.md#transport));
+    - whether an absent companion or a timeout skips the known-bad list (today's code) or blocks unlisted code, once the list is wired into the loader;
+    - when the main app drops `INTERNET`, `REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` (design point 7: only once the companion is confirmed present).

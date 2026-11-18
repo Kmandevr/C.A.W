@@ -7,7 +7,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../model/telemetry/telemetry.dart';
-import '../../model/telemetry/telemetry_config.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 import '../../platform/save_copy.dart';
 import '../haptics.dart';
 import '../motion.dart';

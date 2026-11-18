@@ -8,6 +8,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../engine/bindings.dart' show cawApiVersion;
+import '../../platform/companion_link.dart';
+import '../companion/companion_relay.dart';
 import '../../engine/execution.dart';
 import '../../ui/frame_rate.dart';
 import '../../version.dart';
@@ -18,14 +20,18 @@ import '../settings.dart';
 import 'peripherals.dart';
 import 'device_probe.dart';
 import 'telemetry.dart';
-import 'telemetry_config.dart';
+import 'package:caw_services/telemetry/relay_client.dart';
+import 'package:caw_services/telemetry/telemetry_config.dart';
 
 /// Starts telemetry for [state]: loads its file next to the settings, then follows the app. [startup] runs from
-/// main()'s first line.
-Future<Telemetry> startAppTelemetry(AppState state, {required Stopwatch startup, Directory? dir}) async {
+/// main()'s first line. Reports and feedback go through [companion] when it is there, else straight to the relay.
+Future<Telemetry> startAppTelemetry(AppState state,
+    {required Stopwatch startup, Directory? dir, CompanionLink? companion}) async {
   final base = dir ?? state.settings.dir;
+  final config = TelemetryConfig.fromEnvironment();
   final t = Telemetry(
-    config: TelemetryConfig.fromEnvironment(),
+    config: config,
+    relay: CompanionRelay(companion ?? CompanionLink.current, RelayClient(config, IoRelayHttp())),
     store: base == null
         ? MemoryTelemetryStore()
         : FileTelemetryStore(File('${base.path}${Platform.pathSeparator}telemetry.json')),
