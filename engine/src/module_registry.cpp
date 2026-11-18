@@ -20,6 +20,7 @@
 #include "caw_component.h"
 #include "component_profile.h"
 #include "json.h"
+#include "scan/scan_file.h"
 
 namespace caw {
 
@@ -437,7 +438,7 @@ bool ModuleRegistry::addInternal(const ModuleDescriptor& descriptor, ModuleFacto
 }
 
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
-    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace) {
+    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace, bool legacyGrace) {
     if (trust == NativeModuleTrust::Blocked)
         return {false, ModuleLoadError::Blocked, std::string(expectedId), "Native component is blocked by the user's trust setting."};
     if (trust == NativeModuleTrust::Isolated)
@@ -448,6 +449,30 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     if (path.empty() || expectedId.empty())
         return {false, ModuleLoadError::InvalidArgument, {}, "A component path and expected stable component ID are required."};
 
+    try {
+        // The pre-load scan, before anything of the file runs (the system loader runs its constructors).
+        const scan::FileScan scanned = scan::scanFile(path, expectedId);
+        if (!scanned.ok)
+            return {false, ModuleLoadError::LoadFailed, std::string(expectedId),
+                    "The pre-load scan could not read the file: " + scanned.error + "."};
+        const scan::Decision decision =
+            scan::decide(*scanned.report, {scan::Host::Component, legacyGrace});
+        ModuleLoadResult scanResult{false, ModuleLoadError::ScanBlocked, std::string(expectedId), decision.reason,
+                                    scanned.sha256, scan::verdictId(decision.verdict), decision.graceApplied};
+        if (decision.verdict == scan::Verdict::Blocked) return scanResult;
+        auto withScan = [&](ModuleLoadResult r) {
+            r.sha256 = scanResult.sha256;
+            r.scanVerdict = scanResult.scanVerdict;
+            r.graceApplied = scanResult.graceApplied;
+            return r;
+        };
+        return withScan(openScanned(path, expectedId, replace));
+    } catch (const std::bad_alloc&) {
+        return {false, ModuleLoadError::LoadFailed, std::string(expectedId), "Out of memory while loading the component."};
+    }
+}
+
+ModuleLoadResult ModuleRegistry::openScanned(const std::string& path, std::string_view expectedId, bool replace) {
     try {
         auto library = std::make_shared<NativeLibrary>();
         std::string loadError;

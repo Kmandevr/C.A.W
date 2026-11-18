@@ -140,8 +140,13 @@ extern "C" {
    "output" (an enabled bus folder, "@master", or "" for its folder's bus), sends "to" a track as well as a bus
    (summed after its instrument, before its inserts), and "feedback" sends (one 64-frame chunk late, the only route
    that may close a loop, with a "limiter" on the return unless false). caw_engine_set_send also moves sends into
-   tracks and feedback sends. No new function; an older project plays as before. */
-#define CAW_API_VERSION 36
+   tracks and feedback sends. No new function; an older project plays as before.
+   37 (2026-11-18, 1.0.7): the pre-load scan. Every native component file is scanned before it is opened
+   (imports, system calls, writable code, packers, strings, its embedded capability declarations), its verdict
+   cached by SHA-256; a blocked verdict refuses the load with errorCode 11 and a message naming the capability.
+   caw_engine_load_component_ex (flags: CAW_LOAD_LEGACY_GRACE) and caw_engine_scan_component (the scan as JSON
+   for the trust sheet). The load and reload JSON gain "sha256", "scan_verdict" and "grace_applied". */
+#define CAW_API_VERSION 37
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -248,6 +253,29 @@ CAW_API char* caw_engine_set_project(CawEngine* e, const char* project_json);
 enum { CAW_NATIVE_TRUST_BLOCKED = 0, CAW_NATIVE_TRUST_ISOLATED = 1, CAW_NATIVE_TRUST_TRUSTED = 2 };
 CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
                                         const char* expected_component_id, int32_t trust_level);
+/* The pre-load scan (API 37, docs/engine.md "Pre-load scan"). caw_engine_load_component scans the file before it
+   opens it; a component that uses a capability it does not declare (its caw-component.json "capabilities", built
+   into the binary) is refused with errorCode 11 (CAW_LOAD_ERROR_SCAN_BLOCKED) and a message naming it.
+   CAW_LOAD_LEGACY_GRACE: the user trusted this exact file before 1.0.7 and it carries no declarations (a build
+   from before them), so its undeclared capabilities load as warnings this once; it never excuses a malformed
+   file, invalid or tampered declarations, or a file that carries declarations. The app passes it only for a
+   file whose SHA-256 it trusted before 1.0.7; a rebuild has a new hash and gets none. */
+enum { CAW_LOAD_LEGACY_GRACE = 1u };
+enum { CAW_LOAD_ERROR_SCAN_BLOCKED = 11 };
+CAW_API char* caw_engine_load_component_ex(CawEngine* e, const char* library_path,
+                                           const char* expected_component_id, int32_t trust_level, uint32_t flags);
+/* Scans a file without opening it, as the loader would (e may be NULL). expected_component_id (may be NULL)
+   checks a caw-component.json beside the file against the declarations built in. flags: CAW_LOAD_LEGACY_GRACE,
+   and CAW_SCAN_PLUGIN to weigh it as a CLAP/VST3 plug-in (findings warn at most). Returns JSON (free with
+   caw_free): {"ok","sha256","size","format" ("elf64","pe32+","unknown"),"arch","host" ("component","plugin"),
+   "verdict" ("clean","notice","warning","blocked"),"reason","grace_applied","cached","manifest_checked",
+   "declarations" ("absent","valid","invalid"),"declared":[{"id","title","reason","sites"}],"blocked_by":[ids],
+   "summary":{"imports","constructors","tls_callbacks","component_entry"},"findings":[{"capability","title",
+   "kind","evidence","strength" ("hint","certain"),"severity" ("notice","warning"),"declared","blocks"}]},
+   or {"ok":false,"error"}. Reads the whole file: call it off the audio thread. */
+enum { CAW_SCAN_PLUGIN = 2u };
+CAW_API char* caw_engine_scan_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                        uint32_t flags);
 CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_id);
 /* A rebuild of a loaded component, from a new file (the same path would return the old library).
    It replaces the old build, and every chain using it switches to it, crossfaded, keeping each

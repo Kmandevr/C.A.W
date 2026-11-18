@@ -1,5 +1,5 @@
 // The caw command-line tool: render projects to WAV, move patterns to and from MIDI files, test C++ components and
-// make sample packs (used by CI and AI agents).
+// make sample packs and scan native libraries before they are loaded (used by CI and AI agents).
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +16,7 @@
 #include "project.h"
 #include "render.h"
 #include "sample_pack.h"
+#include "scan/scan_file.h"
 #include "wav.h"
 
 namespace {
@@ -702,6 +703,48 @@ int samplePack(int argc, char** argv) {
     return caw::parseJson(result, parsed, err) && parsed.boolean("ok", false) ? 0 : 1;
 }
 
+// caw scan: the same scan and verdict the loader uses, as JSON or a few lines.
+int scanCommand(int argc, char** argv) {
+    if (argc < 3) {
+        std::fputs(kUsage, stderr);
+        return 1;
+    }
+    using namespace caw::scan;
+    bool json = false;
+    PolicyInput input;
+    std::string id;
+    for (int i = 3; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--json") json = true;
+        else if (a == "--plugin") input.host = Host::Plugin;
+        else if (a == "--legacy-grace") input.legacyGrace = true;
+        else if (a == "--id" && i + 1 < argc) id = argv[++i];
+        else {
+            std::fprintf(stderr, "unknown option %s\n%s", a.c_str(), kUsage);
+            return 1;
+        }
+    }
+    const FileScan scanned = scanFile(argv[2], id);
+    if (!scanned.ok) {
+        std::fprintf(stderr, "caw scan: %s: %s\n", argv[2], scanned.error.c_str());
+        return 1;
+    }
+    const Decision decision = decide(*scanned.report, input);
+    if (json) {
+        std::printf("%s\n", scanJson(scanned, decision, input).c_str());
+    } else {
+        std::printf("%s: %s\nsha256 %s\n", argv[2], verdictId(decision.verdict), scanned.sha256.c_str());
+        if (!decision.reason.empty()) std::printf("%s\n", decision.reason.c_str());
+        for (const Declaration& d : scanned.report->declarations)
+            std::printf("  declares %s: %s\n", capabilityId(d.capability), d.reason.c_str());
+        for (const Weighed& w : decision.findings)
+            std::printf("  %-7s %-7s %-18s %-12s %s%s\n", w.blocks ? "BLOCKS" : w.severity == Severity::Warning ? "warning" : "notice",
+                        w.finding.strength == Strength::Certain ? "certain" : "hint", capabilityId(w.finding.capability),
+                        findingKindId(w.finding.kind), w.finding.evidence.c_str(), w.declared ? " (declared)" : "");
+    }
+    return decision.verdict == Verdict::Blocked ? 2 : 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fputs(kUsage, stderr);
@@ -712,6 +755,7 @@ int main(int argc, char** argv) {
     if (cmd == "midi") return midi(argc, argv);
     if (cmd == "test-component") return testComponent(argc, argv);
     if (cmd == "sample-pack") return samplePack(argc, argv);
+    if (cmd == "scan") return scanCommand(argc, argv);
     std::fputs(kUsage, stderr);
     return 2;
 }

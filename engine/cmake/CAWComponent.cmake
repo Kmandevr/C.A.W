@@ -1,6 +1,133 @@
 # Defines a C.A.W. component target from a project-local JSON manifest.
 include_guard(GLOBAL)
 
+# The manifest's "capabilities" as the canonical declaration JSON (docs/native-module-sdk.md, "Declaring
+# capabilities"), built into the component as the section caw_caps (ELF) or .cawcap (PE), which the engine's
+# pre-load scan reads. Every component gets the section, an empty list when it declares nothing, so the engine
+# can tell a build from before declarations (no section) from one that declares nothing.
+function(_caw_component_capabilities _json _manifest _target)
+  set(_ids internet read_files write_files start_programs load_code make_code android_system background_threads
+    encryption input_spying packed)
+  set(_entries "")
+  set(_seen "")
+  set(_controls "")
+  foreach(_code RANGE 1 31)
+    string(ASCII ${_code} _char)
+    string(APPEND _controls "${_char}")
+  endforeach()
+  string(ASCII 127 _char)
+  string(APPEND _controls "${_char}")
+  string(JSON _type ERROR_VARIABLE _error TYPE "${_json}" capabilities)
+  if(_error STREQUAL "NOTFOUND")
+    if(NOT _type STREQUAL "ARRAY")
+      message(FATAL_ERROR "\"capabilities\" must be a list in ${_manifest}")
+    endif()
+    string(JSON _count LENGTH "${_json}" capabilities)
+    if(_count GREATER 16)
+      message(FATAL_ERROR "A component declares at most 16 capabilities (${_manifest})")
+    endif()
+    if(_count GREATER 0)
+      math(EXPR _last "${_count} - 1")
+      foreach(_index RANGE 0 ${_last})
+        string(JSON _entry_type TYPE "${_json}" capabilities ${_index})
+        if(NOT _entry_type STREQUAL "OBJECT")
+          message(FATAL_ERROR "Capability ${_index} is not an object in ${_manifest}")
+        endif()
+        string(JSON _keys LENGTH "${_json}" capabilities ${_index})
+        math(EXPR _last_key "${_keys} - 1")
+        foreach(_key_index RANGE 0 ${_last_key})
+          string(JSON _key MEMBER "${_json}" capabilities ${_index} ${_key_index})
+          if(NOT _key MATCHES "^(id|reason|sites)$")
+            message(FATAL_ERROR "Capability ${_index} has the unknown key \"${_key}\" in ${_manifest}")
+          endif()
+        endforeach()
+        string(JSON _id ERROR_VARIABLE _error GET "${_json}" capabilities ${_index} id)
+        if(NOT _error STREQUAL "NOTFOUND" OR NOT _id IN_LIST _ids)
+          message(FATAL_ERROR "Capability ${_index} has a missing or unknown id in ${_manifest} (one of: ${_ids})")
+        endif()
+        if(_id IN_LIST _seen)
+          message(FATAL_ERROR "The capability ${_id} is declared twice in ${_manifest}")
+        endif()
+        list(APPEND _seen "${_id}")
+        string(JSON _reason ERROR_VARIABLE _error GET "${_json}" capabilities ${_index} reason)
+        # CMake counts bytes: an ASCII reason has at most 200, any other at most 800 (200 characters of up to
+        # 4 bytes; the engine counts the characters exactly and refuses more than 200).
+        string(LENGTH "${_reason}" _reason_length)
+        set(_reason_max 800)
+        if(_reason MATCHES "^[ -~]*$")
+          set(_reason_max 200)
+        endif()
+        if(NOT _error STREQUAL "NOTFOUND" OR _reason_length LESS 1 OR _reason_length GREATER _reason_max OR
+           _reason MATCHES "[${_controls}]")
+          message(FATAL_ERROR "The capability ${_id} needs a reason of 1 to 200 characters with no control "
+                              "characters in ${_manifest}")
+        endif()
+        string(REPLACE "\\" "\\\\" _reason "${_reason}")
+        string(REPLACE "\"" "\\\"" _reason "${_reason}")
+        set(_entry "{\"id\":\"${_id}\",\"reason\":\"${_reason}\"")
+        string(JSON _sites_type ERROR_VARIABLE _error TYPE "${_json}" capabilities ${_index} sites)
+        if(_error STREQUAL "NOTFOUND")
+          string(JSON _site_count LENGTH "${_json}" capabilities ${_index} sites)
+          if(NOT _id STREQUAL "internet" OR NOT _sites_type STREQUAL "ARRAY" OR _site_count LESS 1 OR
+             _site_count GREATER 8)
+            message(FATAL_ERROR "Only internet lists sites, 1 to 8 host names (${_manifest})")
+          endif()
+          set(_site_list "")
+          math(EXPR _last_site "${_site_count} - 1")
+          foreach(_site_index RANGE 0 ${_last_site})
+            string(JSON _site GET "${_json}" capabilities ${_index} sites ${_site_index})
+            string(LENGTH "${_site}" _site_length)
+            if(_site_length GREATER 253 OR NOT _site MATCHES
+               "^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+              message(FATAL_ERROR "The site \"${_site}\" is not a lowercase host name (${_manifest})")
+            endif()
+            list(APPEND _site_list "\"${_site}\"")
+          endforeach()
+          list(JOIN _site_list "," _site_text)
+          string(APPEND _entry ",\"sites\":[${_site_text}]")
+        endif()
+        string(APPEND _entry "}")
+        # Appended as text, not as a list item: a reason may hold a ';'.
+        if(NOT _entries STREQUAL "")
+          string(APPEND _entries ",")
+        endif()
+        string(APPEND _entries "${_entry}")
+      endforeach()
+    endif()
+  endif()
+  set(_canonical "{\"format\":\"caw.capabilities\",\"version\":1,\"capabilities\":[${_entries}]}")
+  string(LENGTH "${_canonical}" _canonical_length)
+  if(_canonical_length GREATER 16383)
+    message(FATAL_ERROR "The capability declarations are larger than 16 KiB (${_manifest})")
+  endif()
+
+  # As bytes, so no compiler's source encoding can change them.
+  set(_bin "${CMAKE_CURRENT_BINARY_DIR}/${_target}_capabilities")
+  file(WRITE "${_bin}.json" "${_canonical}")
+  file(READ "${_bin}.json" _hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+  file(CONFIGURE OUTPUT "${_bin}.cpp" CONTENT "// Generated by caw_add_component from ${_manifest}: the component's \
+capability declarations, read by the engine's pre-load scan before the library is loaded.
+#if defined(_MSC_VER)
+#pragma section(\".cawcap\", read)
+extern \"C\" __declspec(allocate(\".cawcap\")) const unsigned char caw_component_capabilities[] = {@_bytes@0};
+#elif defined(_WIN32)
+__attribute__((used, section(\".cawcap\"))) static const unsigned char caw_component_capabilities[] = {@_bytes@0};
+#elif !defined(__APPLE__)
+#if defined(__has_attribute)
+#if __has_attribute(retain)
+__attribute__((retain))
+#endif
+#endif
+__attribute__((used, section(\"caw_caps\"))) static const unsigned char caw_component_capabilities[] = {@_bytes@0};
+#endif
+" @ONLY)
+  target_sources(${_target} PRIVATE "${_bin}.cpp")
+  if(MSVC)
+    target_link_options(${_target} PRIVATE "/INCLUDE:caw_component_capabilities")
+  endif()
+endfunction()
+
 function(caw_add_component)
   cmake_parse_arguments(CAW "" "MANIFEST;TARGET" "" ${ARGN})
   if(CAW_UNPARSED_ARGUMENTS OR NOT CAW_MANIFEST)
@@ -119,9 +246,17 @@ function(caw_add_component)
     target_compile_definitions(${_target} PRIVATE ${_definitions})
   endif()
 
-  file(GENERATE
-    OUTPUT "${CMAKE_BINARY_DIR}/caw-component-artifact-$<CONFIG>.txt"
-    CONTENT "$<TARGET_FILE:${_target}>\n"
-  )
+  _caw_component_capabilities("${_json}" "${_manifest}" "${_target}")
+
+  # The artifact path for the app build service, which builds one component per project; in a build of several
+  # (the engine's tests) the first component's path is the one written.
+  get_property(_artifact_written GLOBAL PROPERTY CAW_COMPONENT_ARTIFACT_WRITTEN)
+  if(NOT _artifact_written)
+    set_property(GLOBAL PROPERTY CAW_COMPONENT_ARTIFACT_WRITTEN ON)
+    file(GENERATE
+      OUTPUT "${CMAKE_BINARY_DIR}/caw-component-artifact-$<CONFIG>.txt"
+      CONTENT "$<TARGET_FILE:${_target}>\n"
+    )
+  endif()
   set(CAW_COMPONENT_TARGET "${_target}" PARENT_SCOPE)
 endfunction()
