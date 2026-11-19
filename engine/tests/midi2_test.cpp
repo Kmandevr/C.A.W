@@ -107,8 +107,10 @@ TEST(midi2_input_queue_merges_continuous_values_under_pressure_by_key) {
     for (uint32_t i = 0; i < kNormalSlots; ++i) CHECK(queue.push(midiEvent(Midi2EventType::NoteOn, 0, 60, 0, 0.5)));
     // Under pressure: each key keeps its latest value. MPE member channels, notes, kinds, controllers, groups and
     // targets are separate keys.
+    double last = 0.0;  // the last round's value as pushed (fast-math may round round/49.0 below 1)
     for (int round = 0; round < 50; ++round) {
         const double v = round / 49.0;
+        last = v;
         CHECK(queue.push(midiEvent(Midi2EventType::PitchBend, 1, 0, 0, v)));
         CHECK(queue.push(midiEvent(Midi2EventType::PitchBend, 2, 0, 0, -v)));
         CHECK(queue.push(midiEvent(Midi2EventType::PolyPressure, 0, 60, 0, v)));
@@ -145,13 +147,13 @@ TEST(midi2_input_queue_merges_continuous_values_under_pressure_by_key) {
         if (count > 0) CHECK(out.seq > lastSeq);
         lastSeq = out.seq;
         ++count;
-        if (out.type == Midi2EventType::PitchBend && out.channel == 1) CHECK_EQ(out.value, 1.0);
-        if (out.type == Midi2EventType::PitchBend && out.channel == 2) CHECK_EQ(out.value, -1.0);
-        if (out.type == Midi2EventType::PolyPressure) CHECK_EQ(out.value, out.note == 60 ? 1.0 : 0.5);
-        if (out.type == Midi2EventType::PerNotePitch) CHECK_EQ(out.value, 0.25);
+        if (out.type == Midi2EventType::PitchBend && out.channel == 1) CHECK_EQ(out.value, last);
+        if (out.type == Midi2EventType::PitchBend && out.channel == 2) CHECK_EQ(out.value, -last);
+        if (out.type == Midi2EventType::PolyPressure) CHECK_EQ(out.value, out.note == 60 ? last : last / 2);
+        if (out.type == Midi2EventType::PerNotePitch) CHECK_EQ(out.value, last / 4);
         if (out.type == Midi2EventType::ControlChange && out.index == 1)
-            CHECK_EQ(out.value, out.group == 2 ? 0.2 : 1.0);
-        if (out.type == Midi2EventType::ControlChange && out.index == 74) CHECK_EQ(out.value, 1.0 / 3);
+            CHECK_EQ(out.value, out.group == 2 ? last / 5 : last);
+        if (out.type == Midi2EventType::ControlChange && out.index == 74) CHECK_EQ(out.value, last / 3);
         CHECK(!(out.type == Midi2EventType::ControlChange && out.index == 64));
     }
     CHECK_EQ(count, 10u);
