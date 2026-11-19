@@ -17,13 +17,17 @@ import 'sampler/sampler_editor.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
-  const DeviceSection(this.id, this.label, this.icon, this.builder, {this.showsSources = false});
+  const DeviceSection(this.id, this.label, this.icon, this.builder, {this.showsSources = false, this.stripAtBottom = false});
   final String id, label;
   final IconData icon;
   final WidgetBuilder builder;
 
   /// The page shows the mod sources' own controls (a source opened from the strip goes there).
   final bool showsSources;
+
+  /// The full editor pins the mod-source strip at the bottom of this page (under the page, above the footer) instead
+  /// of above it, so it stays put while the page swipes.
+  final bool stripAtBottom;
 }
 
 /// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both

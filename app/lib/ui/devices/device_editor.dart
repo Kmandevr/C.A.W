@@ -197,7 +197,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         setState(() => _tab = modTab);
       },
       child: Builder(builder: (context) => _frame(context, title: t.label, color: color, style: style, bypass: true,
-        tabs: sections.length > 1 ? sections : null, tab: tab,
+        tabs: sections.length > 1 ? sections : null, tab: tab, stripAtBottom: sections[tab].stripAtBottom,
         strip: hasMatrix ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const ModSourceStrip(),
           const ModAssignBanner(),
@@ -211,7 +211,8 @@ class _DeviceEditorState extends State<DeviceEditor> {
   }
 
   Widget _frame(BuildContext context, {required String title, required Color color, required Widget body,
-      DeviceStyle? style, bool bypass = false, List<DeviceSection>? tabs, int tab = 0, Widget? strip}) {
+      DeviceStyle? style, bool bypass = false, List<DeviceSection>? tabs, int tab = 0, Widget? strip,
+      bool stripAtBottom = false}) {
     final layer = t.layer;
     final second = style?.secondary ?? color;
     final close = IconButton(key: const ValueKey('device-close'), tooltip: 'Close', iconSize: 20,
@@ -241,11 +242,15 @@ class _DeviceEditorState extends State<DeviceEditor> {
           Expanded(child: _Tab(section: tabs[i], selected: i == tab, color: color, onTap: () => setState(() => _tab = i))),
       ])),
       Container(height: 1, color: Neon.ink.withValues(alpha: 0.06)),
-      ?strip,
+      if (!stripAtBottom) ?strip,
       Expanded(child: AnimatedOpacity(
         duration: Motion.fade(Motion.small, Motion.of(context)),
         opacity: t.bypass ? 0.55 : 1,
         child: body)),
+      if (stripAtBottom && strip != null) DecoratedBox(
+        key: const ValueKey('device-strip-bottom'),
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.ink.withValues(alpha: 0.06)))),
+        child: strip),
       if (bypass) const DeviceFooter(),
     ])));
   }

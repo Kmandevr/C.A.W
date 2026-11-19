@@ -106,7 +106,8 @@ class DevicePresets {
   static DevicePreset? stepFrom(DeviceTarget target, int by) {
     final all = of(target);
     if (all.isEmpty) return null;
-    final now = current(target);
+    // Nothing loaded yet and every value at its default: it stands on Init (the label says so).
+    final now = current(target) ?? (matches(target, const DevicePreset('Init', {})) ? all.first : null);
     final at = now == null ? -1 : all.indexWhere((p) => p.key == now.key);
     if (at < 0) return by > 0 ? all.first : all.last;
     return all[(at + by) % all.length];

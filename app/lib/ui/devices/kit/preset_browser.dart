@@ -67,75 +67,115 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
   }
 
   @override
-  // Its own watch (param_watch.dart): it compares every value with the presets, so a knob step rebuilds the chip,
-  // not the editor around it.
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: t.state.userPresets,
-    builder: (context, _) => Flexible(child: ParamWatch(target: t, builder: (context) {
-      final name = DevicePresets.label(t);
+  // Its own watch (param_watch.dart): the name compares every value with the presets, so a knob step rebuilds the
+  // name and its save icon, not the editor around it; the arrows and the star rebuild only when a preset loads or
+  // the library changes (_PresetChanges), not on a knob step.
+  Widget build(BuildContext context) {
+    final color = widget.color;
+    final id = t.componentId ?? '';
+    // Made afresh when the library changes (a save renames what the chip shows), so the watch rebuilds then too.
+    Widget name() => ParamWatch(target: t, builder: (context) {
+      final label = DevicePresets.label(t);
       final quick = DevicePresets.currentUser(t) != null && DevicePresets.modified(t);
-      final color = widget.color;
-      final current = widget.bar ? DevicePresets.current(t) : null;
-      final id = t.componentId ?? '';
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: Pressable(glow: color, radius: 15, child: InkWell(
+          key: widget.chipKey ?? const ValueKey('device-presets'),
+          borderRadius: BorderRadius.circular(15),
+          onTap: () {
+            DeviceFeel.tap();
+            showPresetBrowser(context, t, color, search: widget.bar);
+          },
+          child: Container(
+            height: 30,
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), color: color.withValues(alpha: 0.1),
+              border: Border.all(color: color.withValues(alpha: 0.45))),
+            // While the save icon shows, the chip's own icons give their room to the name.
+            padding: EdgeInsets.symmetric(horizontal: quick ? 8 : 10),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (!quick) ...[Icon(Icons.bookmarks_outlined, size: 14, color: color), const SizedBox(width: 5)],
+              Flexible(child: Text(label, key: const ValueKey('device-preset-name'), maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
+              if (!quick && !widget.bar) const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
+            ]),
+          ),
+        ))),
+        if (quick) Pressable(glow: color, circle: true, child: Tooltip(
+          message: 'Save over "${DevicePresets.currentUser(t)!.name}"${widget.shortcuts ? ' (Ctrl+S)' : ''}',
+          child: InkResponse(
+            key: const ValueKey('device-preset-quicksave'),
+            radius: 18,
+            onTap: () => quickSavePreset(context, t),
+            child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
+      ]);
+    });
+    Widget arrow(int by) => SizedBox(width: 28, height: 34, child: IconButton(
+      key: ValueKey(by < 0 ? 'device-preset-prev' : 'device-preset-next'),
+      tooltip: by < 0 ? 'Previous preset' : 'Next preset',
+      padding: EdgeInsets.zero,
+      iconSize: 20,
+      color: Neon.dim,
+      onPressed: () {
+        DeviceFeel.tap();
+        DevicePresets.step(t, by);
+      },
+      icon: Icon(by < 0 ? Icons.chevron_left : Icons.chevron_right)));
+    final star = _PresetChanges(target: t, builder: (context) {
+      final current = DevicePresets.current(t);
       final fav = current != null && t.state.userPresets.isFavourite(current.favouriteKey(id));
-      Widget arrow(int by) => SizedBox(width: 28, height: 34, child: IconButton(
-        key: ValueKey(by < 0 ? 'device-preset-prev' : 'device-preset-next'),
-        tooltip: by < 0 ? 'Previous preset' : 'Next preset',
+      return SizedBox(width: 30, height: 34, child: IconButton(
+        key: const ValueKey('device-preset-fav'),
+        tooltip: current == null ? 'Load a preset to keep it in Favourites'
+            : fav ? 'Remove "${current.name}" from favourites' : 'Add "${current.name}" to favourites',
         padding: EdgeInsets.zero,
-        iconSize: 20,
-        color: Neon.dim,
-        onPressed: () {
+        iconSize: 19,
+        color: fav ? Neon.yellow : Neon.dim,
+        onPressed: current == null ? null : () {
           DeviceFeel.tap();
-          DevicePresets.step(t, by);
+          t.state.userPresets.setFavourite(current.favouriteKey(id), !fav);
         },
-        icon: Icon(by < 0 ? Icons.chevron_left : Icons.chevron_right)));
-      return ConstrainedBox(constraints: BoxConstraints(maxWidth: widget.maxWidth), child: Row(
-        mainAxisSize: MainAxisSize.min, children: [
-          if (widget.bar) arrow(-1),
-          Flexible(child: Pressable(glow: color, radius: 15, child: InkWell(
-            key: widget.chipKey ?? const ValueKey('device-presets'),
-            borderRadius: BorderRadius.circular(15),
-            onTap: () {
-              DeviceFeel.tap();
-              showPresetBrowser(context, t, color, search: widget.bar);
-            },
-            child: Container(
-              height: 30,
-              decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), color: color.withValues(alpha: 0.1),
-                border: Border.all(color: color.withValues(alpha: 0.45))),
-              // While the save icon shows, the chip's own icons give their room to the name.
-              padding: EdgeInsets.symmetric(horizontal: quick ? 8 : 10),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (!quick) ...[Icon(Icons.bookmarks_outlined, size: 14, color: color), const SizedBox(width: 5)],
-                Flexible(child: Text(name, key: const ValueKey('device-preset-name'), maxLines: 1,
-                  overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-                if (!quick && !widget.bar) const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
-              ]),
-            ),
-          ))),
-          if (widget.bar) arrow(1),
-          if (quick) Pressable(glow: color, circle: true, child: Tooltip(
-            message: 'Save over "${DevicePresets.currentUser(t)!.name}"${widget.shortcuts ? ' (Ctrl+S)' : ''}',
-            child: InkResponse(
-              key: const ValueKey('device-preset-quicksave'),
-              radius: 18,
-              onTap: () => quickSavePreset(context, t),
-              child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
-          if (widget.bar) SizedBox(width: 30, height: 34, child: IconButton(
-            key: const ValueKey('device-preset-fav'),
-            tooltip: current == null ? 'Load a preset to keep it in Favourites'
-                : fav ? 'Remove "${current.name}" from favourites' : 'Add "${current.name}" to favourites',
-            padding: EdgeInsets.zero,
-            iconSize: 19,
-            color: fav ? Neon.yellow : Neon.dim,
-            onPressed: current == null ? null : () {
-              DeviceFeel.tap();
-              t.state.userPresets.setFavourite(current.favouriteKey(id), !fav);
-            },
-            icon: Icon(fav ? Icons.star_rounded : Icons.star_outline_rounded))),
-        ]));
-    })),
-  );
+        icon: Icon(fav ? Icons.star_rounded : Icons.star_outline_rounded)));
+    });
+    return Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: widget.maxWidth), child: Row(
+      mainAxisSize: MainAxisSize.min, children: [
+        if (widget.bar) arrow(-1),
+        Flexible(child: ListenableBuilder(listenable: t.state.userPresets, builder: (_, _) => name())),
+        if (widget.bar) ...[arrow(1), star],
+      ])));
+  }
+}
+
+/// Rebuilds [builder] when the device's preset may have changed (a preset loaded, undo, the library edited), but not
+/// on a single knob step ([DeviceTarget.moving] names the one value it moved).
+class _PresetChanges extends StatefulWidget {
+  const _PresetChanges({required this.target, required this.builder});
+  final DeviceTarget target;
+  final WidgetBuilder builder;
+
+  @override
+  State<_PresetChanges> createState() => _PresetChangesState();
+}
+
+class _PresetChangesState extends State<_PresetChanges> {
+  late final Listenable _on = Listenable.merge([widget.target.tick, widget.target.state.userPresets]);
+
+  @override
+  void initState() {
+    super.initState();
+    _on.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    _on.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (DeviceTarget.moving == null && mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
 }
 
 /// The preset browser: a tap loads a preset (one undo step); with Preview on, presets play live until Cancel or OK.

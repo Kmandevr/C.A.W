@@ -7,11 +7,12 @@ import 'presets.dart';
 /// One preview session of [target]'s presets. While it runs the project's history is held open, so whatever the
 /// tapped presets change ends as one undo step on [keep], and as none on [cancel].
 class PresetPreview {
-  PresetPreview._(this.target, this._values, this._state, this._stateVersion, this._preset, this._remembered,
+  PresetPreview._(this.target, this._values, this._params, this._state, this._stateVersion, this._preset, this._remembered,
       this._loop, this._startedPlaying);
 
   final DeviceTarget target;
   final Map<String, double> _values;
+  final Map<String, double> _params; // the entry's own map, as saved (defaults left out)
   final String? _state;
   final int _stateVersion;
   final String? _preset;
@@ -64,7 +65,7 @@ class PresetPreview {
     }
     final play = !s.transportOn && s.engine != null;
     if (play) s.togglePlay();
-    return PresetPreview._(t, values, use?.state, use?.stateVersion ?? 1, use?.preset, DevicePresets.remembered(t),
+    return PresetPreview._(t, values, Map.of(use?.params ?? const {}), use?.state, use?.stateVersion ?? 1, use?.preset, DevicePresets.remembered(t),
         loop, play);
   }
 
@@ -83,6 +84,11 @@ class PresetPreview {
       use.preset = _preset;
     }
     target.setAll(_values);
+    // The values the engine plays are back; the entry's map too, key for key, so the project is as it was.
+    target.use?.params
+      ?..clear()
+      ..addAll(_params);
+    target.commit();
     DevicePresets.restoreRemembered(target, _remembered);
     _finish();
   }
