@@ -33,6 +33,7 @@
 #include "device_period.h"
 #include "device_render.h"
 #include "input_bridge.h"
+#include "load_stabilizer.h"
 #include "miniaudio.h"
 
 namespace {
@@ -79,6 +80,10 @@ struct Audio {
     // size to restore on return.
     bool background = false;
     int32_t savedBufferFrames = 0;
+    // The callback's load stabilizer (load_stabilizer.h, stabilize below): its epoch and the smoothed share of each
+    // period it spun (the callback's own).
+    caw::LoadStabilizer stabilizer;
+    double stabilizerShare = 0;
     // The buffer's automatic size (caw_audio_tune_buffer, #236; control thread, under gDeviceLock): which stream it
     // tunes, by `streams` (each open and each reroute counts one, so a new stream starts it again even where the
     // allocator hands back the old stream's address), when it last looked and in which playback (the engine's Play
@@ -431,6 +436,8 @@ int32_t callbackCore() {
 #endif
 }
 
+void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 frames, ma_uint32 rate);
+
 void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames) {
     auto* a = static_cast<Audio*>(dev->pUserData);
     const auto start = std::chrono::steady_clock::now();
@@ -464,6 +471,45 @@ void callback(ma_device* dev, void* output, const void* input, ma_uint32 frames)
     if (stress)
         stress->record(used, budget, static_cast<int32_t>(frames), stress->coreDue() ? callbackCore() : -1,
                        a->render.takeProcessNs(), a->render.takeSafetyNs());
+    stabilize(a, start, frames, dev->sampleRate);
+}
+
+// Where the load stabilizer may run (load_stabilizer.h): Android, whose governors lowered the callback core's clock
+// to a quarter of its top on the S22+ with no performance hint session there (2026-11-19). Elsewhere the callback
+// is a real-time thread the governor serves (Windows MMCSS) or a desktop where a low clock was not seen.
+#if defined(__ANDROID__)
+constexpr bool kStabilizerPlatform = true;
+#else
+constexpr bool kStabilizerPlatform = false;
+#endif
+
+// The load stabilizer, at the callback's end, after its timing (the meter, the performance hint and the Benchmark
+// see only the real work): on where the platform takes it, with the low-latency profile (not Battery: the user chose
+// the power), no hint session open (the system then knows the deadline itself), something sounding and the app in
+// front; idle otherwise, its epoch reset so it starts afresh.
+void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 frames, ma_uint32 rate) {
+    caw::Engine& e = *a->owner->engine;
+    caw::StabilizerState state = caw::StabilizerState::Off;
+    int64_t spun = 0;
+    if (kStabilizerPlatform && a->lowLatency && !e.hintOn()) {
+        if (e.audible() && !a->owner->behind.load(std::memory_order_relaxed)) {
+            auto now = [] {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            };
+            const int64_t from = std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count();
+            spun = caw::LoadStabilizer::spinUntil(a->stabilizer.deadline(from, static_cast<int>(frames), static_cast<int>(rate)), now);
+            state = caw::StabilizerState::On;
+        } else {
+            a->stabilizer.reset();
+            state = caw::StabilizerState::Idle;
+        }
+    } else {
+        a->stabilizer.reset();
+    }
+    const double period = rate > 0 ? 1e9 * frames / rate : 0.0;
+    const double share = period > 0 ? std::min(1.0, static_cast<double>(spun) / period) : 0.0;
+    a->stabilizerShare = 0.95 * a->stabilizerShare + 0.05 * share;  // about the last 20 callbacks
+    e.noteStabilizer(static_cast<uint8_t>(state), static_cast<float>(a->stabilizerShare));
 }
 
 // The capture device's callback: its frames into the bridge, nothing else.
@@ -1633,6 +1679,7 @@ int32_t caw_audio_set_background(CawEngine* e, int32_t background) {
     if (!e) return 0;
     std::lock_guard<std::mutex> op(gOpLock);
     std::lock_guard<std::mutex> lock(gDeviceLock);
+    e->behind.store(background != 0, std::memory_order_relaxed);  // the load stabilizer stops behind the app
     auto* a = static_cast<Audio*>(e->audio);
     if (!a) return 0;
     return setBackground(a, background != 0);

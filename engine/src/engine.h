@@ -334,6 +334,16 @@ public:
     std::string audioThreadsJson() const;
     // The platform layer, once its device runs: whether the callback thread joined MMCSS "Pro Audio" (Windows).
     void setCallbackMmcss(bool mmcss) noexcept;
+    // Audio thread (the device callback, after process()): whether anything sounds that the callback's clock
+    // matters for (playing, a count-in, previews), and whether a performance hint session is open (the live pool's).
+    bool audible() const noexcept { return playing_ || previewing_ || countInLeft_ > 0; }
+    bool hintOn() const noexcept;
+    // The platform layer's load stabilizer (load_stabilizer.h), for caw_audio_threads: what it did in the last
+    // callback and the smoothed share of each period it spent keeping the core busy. Atomics only.
+    void noteStabilizer(uint8_t state, float share) noexcept {
+        stabilizerState_.store(state, std::memory_order_relaxed);
+        stabilizerShare_.store(share, std::memory_order_relaxed);
+    }
     // The platform, around a live device (before it starts, after it stops): the pool with
     // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
     // The Benchmark's timed runs (stress_run.cpp), before they play: the pool with MixPool::defaultWorkers() on
@@ -608,6 +618,8 @@ private:
     double tailPoolSeconds_ = 0, tailOverSeconds_ = 0;
     std::atomic<uint32_t> tailFallbacks_{0};  // times the tail guard turned Auto off (mixTailFallbacks)
     std::atomic<float> waitShare_{0};
+    std::atomic<uint8_t> stabilizerState_{0};  // noteStabilizer: StabilizerState
+    std::atomic<float> stabilizerShare_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level
     int64_t processNs_ = 0;  // process() time since the last reportLoad (with a pool), for Auto's shares

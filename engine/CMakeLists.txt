@@ -312,6 +312,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/sample_timing_test.cpp tests/timing_oracle.cpp)  # note timing exact to the sample
   target_sources(caw_tests PRIVATE tests/tempo_map_test.cpp)  # the tempo map and time signatures (1.0.3, #207)
   target_sources(caw_tests PRIVATE tests/stress_test.cpp)  # the Benchmark (beta plan C): scenarios, ramps, cancel, profiles
+  target_sources(caw_tests PRIVATE tests/load_stabilizer_test.cpp)  # the callback's load stabilizer (Android, no hint session)
   target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
   target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
   target_sources(caw_tests PRIVATE tests/component_bench_test.cpp)  # #197: the plug-in benchmark
@@ -414,6 +415,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
   target_sources(caw_rt_tests PRIVATE tests/sample_preview_rt_test.cpp)  # #229: the sample preview
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
+  target_sources(caw_rt_tests PRIVATE tests/first_callback_rt_test.cpp)
   target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
