@@ -485,31 +485,38 @@ constexpr bool kStabilizerPlatform = false;
 
 // The load stabilizer, at the callback's end, after its timing (the meter, the performance hint and the Benchmark
 // see only the real work): on where the platform takes it, with the low-latency profile (not Battery: the user chose
-// the power), no hint session open (the system then knows the deadline itself), something sounding and the app in
-// front; idle otherwise, its epoch reset so it starts afresh.
+// the power), no hint session open (the system then knows the deadline itself), something sounding, the app in
+// front and the callback's own work a big enough share of its period for the clock to matter (LoadStabilizer::
+// wanted); idle otherwise, its epoch reset so it starts afresh.
 void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 frames, ma_uint32 rate) {
     caw::Engine& e = *a->owner->engine;
     caw::StabilizerState state = caw::StabilizerState::Off;
     int64_t spun = 0;
     if (kStabilizerPlatform && a->lowLatency && !e.hintOn()) {
+        state = caw::StabilizerState::Idle;
         if (e.audible() && !a->owner->behind.load(std::memory_order_relaxed)) {
             auto now = [] {
                 return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             };
             const int64_t from = std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count();
-            spun = caw::LoadStabilizer::spinUntil(a->stabilizer.deadline(from, static_cast<int>(frames), static_cast<int>(rate)), now);
-            state = caw::StabilizerState::On;
+            if (a->stabilizer.wanted(now() - from, static_cast<int>(frames), static_cast<int>(rate))) {
+                spun = caw::LoadStabilizer::spinUntil(a->stabilizer.deadline(from, static_cast<int>(frames), static_cast<int>(rate)), now);
+                state = caw::StabilizerState::On;
+            } else {
+                a->stabilizer.reset();
+            }
         } else {
             a->stabilizer.reset();
-            state = caw::StabilizerState::Idle;
+            a->stabilizer.resetLoad();
         }
     } else {
         a->stabilizer.reset();
+        a->stabilizer.resetLoad();
     }
     const double period = rate > 0 ? 1e9 * frames / rate : 0.0;
     const double share = period > 0 ? std::min(1.0, static_cast<double>(spun) / period) : 0.0;
     a->stabilizerShare = 0.95 * a->stabilizerShare + 0.05 * share;  // about the last 20 callbacks
-    e.noteStabilizer(static_cast<uint8_t>(state), static_cast<float>(a->stabilizerShare));
+    e.noteStabilizer(static_cast<uint8_t>(state), static_cast<float>(a->stabilizerShare), static_cast<float>(a->stabilizer.workShare()));
 }
 
 // The capture device's callback: its frames into the bridge, nothing else.

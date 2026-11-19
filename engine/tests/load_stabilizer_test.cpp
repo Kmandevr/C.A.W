@@ -130,3 +130,29 @@ TEST(load_stabilizer_does_not_spin_the_callback_that_starts_an_epoch) {
         CHECK_EQ(d, start);  // the others are early: new epochs, no spin
     }
 }
+
+// Battery: the stabilizer holds a core near 80 % only where the clock matters, when the callback's own work is a
+// real share of its period (smoothed: on above 0.16, off below 0.04, held on at least 2 s) or it overran.
+TEST(load_stabilizer_is_wanted_only_when_the_work_share_says_the_clock_matters) {
+    auto work = [](double share) { return static_cast<int64_t>(kPeriod * share); };
+    const int twoSeconds = static_cast<int>(2'000'000'000 / kPeriod) + 1;
+    LoadStabilizer idle;
+    for (int c = 0; c < 500; ++c) CHECK(!idle.wanted(work(0.02), 1024, kRate));  // a near-idle project
+    CHECK_NEAR(idle.workShare(), 0.02, 0.001);
+    LoadStabilizer s;
+    CHECK(s.wanted(work(0.5), 1024, kRate));  // heavy from the start
+    for (int c = 0; c < 500; ++c) CHECK(s.wanted(work(0.1), 1024, kRate));  // between the two: stays on
+    int on = 0;
+    for (int c = 0; c < 500; ++c) on += s.wanted(work(0.02), 1024, kRate);
+    CHECK(!s.wanted(work(0.02), 1024, kRate));  // light again: off
+    CHECK(on > 0 && on < 100);
+    for (int c = 0; c < 500; ++c) CHECK(!s.wanted(work(0.12), 1024, kRate));  // under 0.16: stays off
+    // One overrun turns it on and holds it about 2 s, then the light load turns it off.
+    CHECK(s.wanted(work(1.2), 1024, kRate));
+    for (int c = 0; c < twoSeconds - 2; ++c) CHECK(s.wanted(work(0.02), 1024, kRate));
+    for (int c = 0; c < 100; ++c) s.wanted(work(0.02), 1024, kRate);
+    CHECK(!s.wanted(work(0.02), 1024, kRate));
+    s.resetLoad();  // stopped: it starts off and from the next callback's work
+    CHECK(!s.wanted(work(0.1), 1024, kRate));
+    CHECK_NEAR(s.workShare(), 0.1, 0.001);
+}

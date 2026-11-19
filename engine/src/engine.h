@@ -339,10 +339,12 @@ public:
     bool audible() const noexcept { return playing_ || previewing_ || countInLeft_ > 0; }
     bool hintOn() const noexcept;
     // The platform layer's load stabilizer (load_stabilizer.h), for caw_audio_threads: what it did in the last
-    // callback and the smoothed share of each period it spent keeping the core busy. Atomics only.
-    void noteStabilizer(uint8_t state, float share) noexcept {
+    // callback, the smoothed share of each period it spent keeping the core busy, and the smoothed share the
+    // callback's own work took (what decides on or idle: LoadStabilizer::wanted). Atomics only.
+    void noteStabilizer(uint8_t state, float share, float work) noexcept {
         stabilizerState_.store(state, std::memory_order_relaxed);
         stabilizerShare_.store(share, std::memory_order_relaxed);
+        stabilizerWork_.store(work, std::memory_order_relaxed);
     }
     // The platform, around a live device (before it starts, after it stops): the pool with
     // MixPool::defaultWorkers(), Auto, and the count of live devices offline renders check.
@@ -620,6 +622,7 @@ private:
     std::atomic<float> waitShare_{0};
     std::atomic<uint8_t> stabilizerState_{0};  // noteStabilizer: StabilizerState
     std::atomic<float> stabilizerShare_{0};
+    std::atomic<float> stabilizerWork_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level
     int64_t processNs_ = 0;  // process() time since the last reportLoad (with a pool), for Auto's shares

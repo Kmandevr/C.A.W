@@ -87,6 +87,47 @@ public:
         return d;
     }
 
+    // Battery (1.0.9 review): a near-idle project does its work in a sliver of each period, and its clock does not
+    // matter, so holding a core near 80 % busy for it only spends the battery. The stabilizer is wanted only while
+    // the callback's own work (before any spin) is a real share of its period: on when the smoothed share (about
+    // 0.5 s) rises above kOnWork, off once it falls below kOffWork, and on at least kHoldNs each time it turns on or
+    // a callback overruns its period (work of a whole period or more). The gap and the hold keep it from flapping:
+    // a low clock makes the same work look up to about 4 times bigger (634 MHz of 2.5 GHz on the S22+), so it may
+    // turn on at a low clock and then see a quarter of that once the clock is up: off is a quarter of on. The S22+'s
+    // song8 took 6.3 ms of a 21.3 ms period at the low clock (0.30; about 0.075 at the top clock), so it turns on and
+    // stays on; a project under 0.16 at the floor clock has room to spare there. [Assumption] thresholds to tune
+    // with the owner's Benchmark (docs/performance.md).
+    static constexpr double kOnWork = 0.16, kOffWork = 0.04;
+    static constexpr int64_t kWorkTauNs = 500'000'000, kHoldNs = 2'000'000'000;
+
+    // The callback's own work this time (steady-clock ns from its start to before the spin): whether to spin.
+    bool wanted(int64_t workNs, int frames, int rate) noexcept {
+        if (frames <= 0 || rate <= 0) return on_;
+        const int64_t period = int64_t{frames} * 1'000'000'000 / rate;
+        if (period <= 0) return on_;
+        double share = static_cast<double>(workNs) / static_cast<double>(period);
+        share = share < 0.0 ? 0.0 : (share > 4.0 ? 4.0 : share);
+        const double a = static_cast<double>(period) / static_cast<double>(kWorkTauNs);
+        work_ = seeded_ ? work_ + (a > 1.0 ? 1.0 : a) * (share - work_) : share;
+        seeded_ = true;
+        holdNs_ = holdNs_ > period ? holdNs_ - period : 0;
+        if (share >= 1.0 || (!on_ && work_ > kOnWork)) {
+            on_ = true;
+            holdNs_ = kHoldNs;
+        } else if (on_ && holdNs_ == 0 && work_ < kOffWork) {
+            on_ = false;
+        }
+        return on_;
+    }
+    // The smoothed work share wanted() decides on (caw_audio_threads' "stabilizer_work").
+    double workShare() const noexcept { return work_; }
+    // Nothing sounds: the next callback's work decides afresh, starting off.
+    void resetLoad() noexcept {
+        seeded_ = on_ = false;
+        work_ = 0.0;
+        holdNs_ = 0;
+    }
+
     // Not stabilizing (stopped, behind the app, a hint session took over): the next callback starts an epoch.
     void reset() noexcept {
         frames_ = 0;
@@ -114,11 +155,15 @@ private:
     int noSpin_ = 0;      // callbacks in a row with no spin
     int window_ = 0;      // callbacks into this drift window
     int64_t minLate_ = INT64_MAX;  // the earliest lateness in it
+    double work_ = 0.0;     // wanted: the smoothed share of each period the callback's own work took
+    int64_t holdNs_ = 0;    // stays on at least this much longer
+    bool seeded_ = false, on_ = false;
 };
 
 // What the stabilizer did in the callback last seen, for caw_audio_threads' "stabilizer": Off (not used here: not
-// Android, the Battery buffer, or a performance hint session is on), Idle (it would run, but nothing plays or the
-// app is behind another), On (it kept the core busy).
+// Android, the Battery buffer, or a performance hint session is on), Idle (it would run, but nothing plays, the
+// app is behind another, or the callback's work is too small a share of its period for the clock to matter:
+// LoadStabilizer::wanted), On (it kept the core busy).
 enum class StabilizerState : uint8_t { Off = 0, Idle = 1, On = 2 };
 inline const char* stabilizerStateName(StabilizerState s) noexcept {
     switch (s) {
