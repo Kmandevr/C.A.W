@@ -34,7 +34,11 @@ enum CompParam : uint32_t {
     kThreshold, kRatio, kKnee, kAttack, kRelease, kAutoRelease, kMakeup, kAutoMakeup, kMix, kLookahead, kDetect, kLink,
     kScHpf, kScListen, kSidechain, kCompCount
 };
-constexpr std::string_view kDetectModes[] = {"Peak", "RMS"};
+constexpr std::string_view kDetectModes[] = {"Peak", "RMS", "ISP"};  // ISP: 1.1.0 (Talon's Down)
+// Talon's Down (1.1.0) appends these after `variant` (index kCompCount), before talon_layout: the key's low-pass,
+// the character and the output. At their defaults (20 kHz, Clean, 0 dB) the old path runs unchanged, bit for bit.
+enum CompExtra : uint32_t { kScLpf = kCompCount + 1, kCharacter, kOutput, kCompExtraEnd };
+constexpr std::string_view kCharacterModes[] = {"Clean", "Warm"};
 // What the detector hears: the effect's own input, or the key another track sends it (its sidechain input).
 constexpr std::string_view kSidechainSources[] = {"Internal", "External"};
 
@@ -56,6 +60,16 @@ const ParamTable& compParams() {
         p.expo("sc_hpf", "Sidechain high-pass", 20.0, 20.0, 1000.0, "Hz");
         p.pick("sc_listen", "Sidechain listen", 0.0, kOffOn);
         p.pick("sidechain", "Sidechain", 0.0, kSidechainSources);
+        return p;
+    }();
+    return t;
+}
+const ParamTable& compExtraParams() {
+    static const ParamTable t = [] {
+        ParamTable p;
+        p.expo("sc_lpf", "Sidechain low-pass", 20000.0, 500.0, 20000.0, "Hz");
+        p.pick("character", "Character", 0.0, kCharacterModes);
+        p.num("output", "Output", 0.0, -24.0, 12.0, "dB");
         return p;
     }();
     return t;
@@ -88,6 +102,9 @@ protected:
         sustained_ = 0.0;
         grMax_ = grNow_ = 0.0;
         levelMax_ = 0.0;
+        for (auto& f : lpf_) f.clear();
+        for (auto& t : tp_) t.clear();
+        outRamp_.reset();
     }
     uint64_t idleFrames() const noexcept override { return kLookaheadFrames + static_cast<uint64_t>(0.05 * rate()); }
 
@@ -117,6 +134,16 @@ protected:
         for (auto& f : hpf_) f.set(hpf, 0.70710678118654752, sr);
         listen_ = on(kScListen, at);
         external_ = choice(kSidechain, at) == 1;
+        isp_ = choice(kDetect, at) == 2;
+        // The extras exist only under Talon's Down descriptor (an instance under the old one reads its defaults).
+        const bool extras = descriptor().parameterCount >= kCompExtraEnd;
+        const double lpf = extras ? param(kScLpf, at) : 20000.0;
+        useLpf_ = lpf < 19500.0 && lpf < 0.49 * sr;
+        if (useLpf_) for (auto& f : lpf_) f.set(lpf, 0.70710678118654752, sr);
+        warm_ = extras && choice(kCharacter, at) == 1;
+        const double out = extras ? param(kOutput, at) : 0.0;
+        if (out != outDb_) outDb_ = out, outGain_ = lib::dbToGain(out);
+        outRamp_.set(outGain_, kControlFrames);
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
@@ -146,7 +173,11 @@ protected:
         for (int c = 0; c < 2; ++c) {
             if (useHpf_)
                 for (uint32_t i = 0; i < n; ++i) sc[c][i] = hpf_[c].highpass(sc[c][i]);
-            if (rms_) {
+            if (useLpf_)
+                for (uint32_t i = 0; i < n; ++i) sc[c][i] = lpf_[c].lowpass(sc[c][i]);
+            if (isp_) {
+                for (uint32_t i = 0; i < n; ++i) level[c][i] = tp_[c].process(sc[c][i]);
+            } else if (rms_) {
                 for (uint32_t i = 0; i < n; ++i) {
                     const double x = sc[c][i];
                     ms_[c] = x * x + (ms_[c] - x * x) * rmsCoef_;
@@ -195,12 +226,22 @@ protected:
                 outL[i] = static_cast<float>(sc[0][i]);
                 outR[i] = static_cast<float>(sc[1][i]);
             }
-        } else {
+        } else if (!warm_ && outRamp_.value == 1.0 && outRamp_.step == 0.0) {  // the old path
             for (uint32_t i = 0; i < n; ++i) {
                 const uint32_t a = (pos_ + i - kLookaheadFrames) & mask;
                 const double xl = ring_[0][a], xr = ring_[1][a];
                 outL[i] = static_cast<float>(xl * (1.0 + (gain[0][i] - 1.0) * mix_));
                 outR[i] = static_cast<float>(xr * (1.0 + (gain[1][i] - 1.0) * mix_));
+            }
+        } else {  // Down's character and output (1.1.0)
+            for (uint32_t i = 0; i < n; ++i) {
+                const uint32_t a = (pos_ + i - kLookaheadFrames) & mask;
+                const double xl = ring_[0][a], xr = ring_[1][a];
+                double wl = xl * gain[0][i], wr = xr * gain[1][i];
+                if (warm_) wl = lib::tanhApprox(wl), wr = lib::tanhApprox(wr);
+                const double o = outRamp_.next();
+                outL[i] = static_cast<float>(o * (xl + (wl - xl) * mix_));
+                outR[i] = static_cast<float>(o * (xr + (wr - xr) * mix_));
             }
         }
         pos_ = (pos_ + n) & mask;
@@ -284,6 +325,12 @@ private:
     double mix_ = 1, link_ = 1, rmsCoef_ = 0, sustainCoef_ = 0, sustained_ = 0;
     double grMax_ = 0, grNow_ = 0, levelMax_ = 0;
     bool rms_ = false, useHpf_ = false, listen_ = false;
+    // Talon's Down (1.1.0): the key's low-pass, ISP detection, the character and the output.
+    lib::Svf lpf_[2];
+    lib::TruePeak tp_[2];
+    Ramp outRamp_;
+    double outDb_ = 0.0, outGain_ = 1.0;
+    bool useLpf_ = false, isp_ = false, warm_ = false;
 };
 
 // ---------- Limiter ----------
@@ -649,6 +696,7 @@ ModuleProcessor* makeAs(const ModuleDescriptor& variant) noexcept {
 // The classes as merged variants (builtin_fx_merged_dynamics.cpp): the old descriptors, and an instance under a
 // variant's descriptor.
 const ModuleDescriptor& legacyCompressorDescriptor() { return compDescriptor(); }
+const ParamTable& talonDownExtraParams() { return compExtraParams(); }
 const ModuleDescriptor& legacyLimiterDescriptor() { return limDescriptor(); }
 const ModuleDescriptor& legacyGateDescriptor() { return gateDescriptor(); }
 const ModuleDescriptor& legacyTransientDescriptor() { return transientDescriptor(); }
