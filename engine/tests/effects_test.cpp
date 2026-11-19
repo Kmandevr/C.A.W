@@ -556,6 +556,29 @@ TEST(the_eq_is_transparent_by_default_and_shapes_as_its_bands_say) {
     CHECK_NEAR(db(rms(mOut.l, 12000, 24000) / rms(mono.l, 12000, 24000)), 0.0, 0.01);
 }
 
+// A band given a new type or channel fades out, switches and fades back in while every knob then stays as it is
+// (a steady EQ skips controls whose knobs are unchanged; a pending switch is work, not a steady state), also from
+// a band that had no gain (an identity band is not run, so it has nothing to fade).
+TEST(an_eq_band_comes_back_after_a_type_or_channel_change_with_the_knobs_held) {
+    Engine e(48000);
+    const Stereo tone = sine(4000, 0.5, 12000);  // 0.25 s, far above each 5 ms fade
+    auto lastHalf = [&](const std::vector<float>& x) { return db(rms(x, 6000, 12000) / rms(tone.l, 6000, 12000)); };
+    std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.eq");
+    const Values lowCut = {{"b1_on", 1}, {"b1_type", 5}, {"b1_freq", 1000}};
+    CHECK(lastHalf(run(*p, tone, lowCut).l) > -0.5);  // a low cut at 1 kHz passes 4 kHz
+    Values highCut = lowCut;
+    highCut[1] = {"b1_type", 8};
+    CHECK(lastHalf(run(*p, tone, highCut).l) < -60.0);  // a high cut at 1 kHz takes it away
+    Values left = highCut;
+    left.push_back({"b1_channel", 3});
+    const Stereo l = run(*p, tone, left);
+    CHECK(lastHalf(l.l) < -60.0);
+    CHECK(lastHalf(l.r) > -0.5);
+    std::unique_ptr<ModuleProcessor> q = make(e, "org.caw.eq");
+    CHECK(lastHalf(run(*q, tone).l) > -0.01);  // band 3: a bell at 250 Hz with no gain
+    CHECK(lastHalf(run(*q, tone, {{"b3_type", 8}}).l) < -60.0);  // now a high cut at 250 Hz
+}
+
 TEST(the_eq_display_shows_its_spectrum_and_curve_while_watched) {
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.eq");
