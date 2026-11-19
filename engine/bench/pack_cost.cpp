@@ -108,7 +108,7 @@ int packCost(double seconds) {
         {"Murmur: default (80 ms, 20 Hz)", murmur, {}, mb, 8000},
         {"Murmur: dense, Normal cap 32", murmur, {{"size", 300}, {"density", 150}, {"spray", 50}}, mb, 24000},
         {"Murmur: dense, Eco cap 16 (linear)", murmur, {{"size", 300}, {"density", 150}, {"spray", 50}}, mb, 8000, kQualityEco},
-        {"Murmur: dense, High cap 64", murmur, {{"size", 500}, {"density", 200}, {"spray", 50}}, mb, 24000, kQualityHigh},
+        {"Murmur: dense, High cap 64 (the cap, stress)", murmur, {{"size", 500}, {"density", 200}, {"spray", 50}}, mb, 32000, kQualityHigh},  // High's cap, a stress case like Flock's and Timber's: about 0.9x heavy here, CI's x64 runners measure it 15-20 % higher (24,836 on 2026-11-19)
         {"Murmur: frozen, scanning, fed back", murmur, {{"freeze", 1}, {"scan", 0.5}, {"feedback", 0.5}, {"size", 200}, {"density", 40}}, mb, 8000},
         {"Peck: default (1/16, chaos 0.35)", peck, {}, pb, 2000},
         {"Peck: every slice, 1/32, pitch heavy", peck, {{"chaos", 1}, {"grid", 0}, {"pitch", 1}, {"repeat", 0.2}}, pb, 2000},
