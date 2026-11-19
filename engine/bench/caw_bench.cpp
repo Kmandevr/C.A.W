@@ -234,6 +234,54 @@ void effectsCost(double seconds) {
     for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));
 }
 
+// 1.1.0's new effect modes (`caw_bench SECONDS 300`, after the suite): each with a ceiling, so a regression fails
+// the run (exit 1). A ceiling is the mode's plan budget on one phone core (light 0.5 %, medium 2 %, heavy 6 %)
+// divided by 2.5, **[Assumption]** the Galaxy S22+ being 2-3x slower than an x86 box: light 2000, medium 8000,
+// heavy 24000 µs per second of audio here.
+bool modesCostOver(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    constexpr double kLight = 2000, kMedium = 8000;  // heavy 24000 when a mode of that class comes
+    struct Case {
+        const char* name;
+        const char* id;
+        Values values;
+        double ceiling;
+    };
+    const Case cases[] = {
+        {"Delay: Tape (default)", "org.caw.delay", {{"variant", 2}}, kMedium},
+        {"Delay: Tape, worn (wow, flutter, wear 1)", "org.caw.delay", {{"variant", 2}, {"wow", 1}, {"flutter", 1}, {"wear", 1}}, kMedium},
+        {"Delay: Reverse (default)", "org.caw.delay", {{"variant", 3}}, kMedium},
+        {"Delay: Multi-tap (default, unpitched)", "org.caw.delay", {{"variant", 4}}, kMedium},
+        {"Delay: Multi-tap, 4 pitched taps", "org.caw.delay", {{"variant", 4}, {"t1_pitch", 7}, {"t2_pitch", 12}, {"t3_pitch", -5}, {"t4_pitch", -12}, {"t4_level", 0.5}}, kMedium},
+        {"Reverb: Room (default)", "org.caw.reverb", {{"variant", 2}}, kMedium},
+        {"Reverb: Plate (default)", "org.caw.reverb", {{"variant", 3}}, kMedium},
+        {"Reverb: Spring (default)", "org.caw.reverb", {{"variant", 4}}, kMedium},
+        {"Reverb: Gated (default)", "org.caw.reverb", {{"variant", 5}}, kMedium},
+        {"Reverb: Reverse (default)", "org.caw.reverb", {{"variant", 6}}, kMedium},
+        {"Drive: Amp (default: Crunch, 1x)", "org.caw.drive", {{"variant", 4}}, kMedium},
+        {"Drive: Amp, High gain (Auto: 2x)", "org.caw.drive", {{"variant", 4}, {"voicing", 3}}, kMedium},
+        {"Drive: Pedal (default: Overdrive, 1x)", "org.caw.drive", {{"variant", 5}}, kMedium},
+        {"Drive: Pedal, Fuzz (Auto: 2x)", "org.caw.drive", {{"variant", 5}, {"type", 2}}, kMedium},
+        {"Drive: Bands (default: 3 bands)", "org.caw.drive", {{"variant", 6}}, kMedium},
+        {"Drive: Bands, 4 bands", "org.caw.drive", {{"variant", 6}, {"bands", 3}}, kMedium},
+        {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
+        {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
+        {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
+        {"Convolver: Cab (default: 4x12)", "org.caw.convolver", {{"variant", 1}}, kMedium},
+        {"Convolver: Cab, far mic", "org.caw.convolver", {{"variant", 1}, {"distance", 1}}, kMedium},
+        // modes-bench end
+    };
+    std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");
+    bool over = false;
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool bad = us > c.ceiling || us <= 0.0;
+        over = over || bad;
+        std::printf("  %-44s %8.0f  (ceiling %5.0f)%s\n", c.name, us, c.ceiling, bad ? "  OVER" : "");
+    }
+    return over;
+}
+
 void flagshipVoiceCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     const Values dry = {{"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0}};
@@ -905,7 +953,7 @@ int main(int argc, char** argv) {
     }
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
         effectsCost(secs);
-        return 0;
+        return modesCostOver(secs) ? 1 : 0;  // a 1.1.0 mode over its ceiling fails the run
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
