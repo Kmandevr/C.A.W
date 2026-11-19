@@ -171,7 +171,7 @@ struct Cache {
     SourceId next = 100;
     std::thread worker;
     bool stop = false, started = false;
-    std::atomic<int> built{0};
+    std::atomic<int> built{0}, ever{0};
 
     ~Cache() {
         {
@@ -213,6 +213,7 @@ struct Cache {
         if (made) {
             s.bank.store(made);
             built.fetch_add(1);
+            ever.fetch_add(1);
             s.state.store(kReady);
         } else {
             s.state.store(kFailed);
@@ -305,6 +306,7 @@ std::unique_ptr<Bank> buildBankNow(const lib::Wavetable& source, int mode) {
 }
 
 int cachedBanks() noexcept { return cache().built.load(); }
+int banksBuilt() noexcept { return cache().ever.load(); }
 
 SourceId builtinSource(int index, const lib::Wavetable* table) {
     Cache& c = cache();

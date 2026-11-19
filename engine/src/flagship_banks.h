@@ -66,7 +66,9 @@ private:
 
 // For tests: the bank for (table, mode) built now on this thread (not shared, not cached).
 std::unique_ptr<Bank> buildBankNow(const lib::Wavetable& source, int mode);
-// For tests: how many banks the shared cache holds built.
+// For tests: how many banks the shared cache holds built, and how many it has built since the program started (a
+// bank freed and built again counts twice).
 int cachedBanks() noexcept;
+int banksBuilt() noexcept;
 
 }  // namespace caw::flagship

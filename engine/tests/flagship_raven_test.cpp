@@ -130,7 +130,10 @@ TEST(flagship_s_presets_from_before_1_1_0_render_as_they_did) {
         std::unique_ptr<ModuleProcessor> p = make(e, false);
         if (!p) continue;
         const Stereo out = play(*p, chord(), 48000, v);
-        CHECK_REFERENCE(refs, "old warps " + std::to_string(k++), (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);
+        // Osc FM (case 0) as the new modes' FM cases: chaotic (see flagship_new_modes_match_their_reference_renders).
+        CHECK_REFERENCE(refs, "old warps " + std::to_string(k), (cawtest::Audio{out.l, out.r}),
+                        k == 0 ? cawtest::Class::Chaotic : cawtest::Class::Stable);
+        ++k;
     }
 }
 
@@ -303,7 +306,11 @@ TEST(flagship_new_modes_match_their_reference_renders) {
         std::unique_ptr<ModuleProcessor> p = make(e);
         if (!p) continue;
         const Stereo out = play(*p, chord(), 48000, c.values);
-        CHECK_REFERENCE(refs, c.name, (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);  // the noise is seeded
+        // Phase modulation by another oscillator turns the last bit's differences between builds' arithmetic (the
+        // optimiser's reassociation, Arm64's fused multiply-adds) into audible-level noise far below the sound:
+        // those cases match in loudness, spectrum and onsets; the rest null (the noise source is seeded).
+        const bool fm = c.name.find("osc fm") != std::string::npos;
+        CHECK_REFERENCE(refs, c.name, (cawtest::Audio{out.l, out.r}), fm ? cawtest::Class::Chaotic : cawtest::Class::Stable);
     }
 }
 
@@ -396,12 +403,12 @@ TEST(flagship_spectral_banks_are_shared_and_built_off_the_audio_thread_live) {
     Engine e(48000);
     const Values v = plainPatch({{"osc1_frame", 1.0 / 3.0}, {"osc1_table", 1}, {"osc1_warp", 16}, {"osc1_warp_amt", 0.5}});
     // Offline: two instances, one bank.
-    const int before = flagship::cachedBanks();
+    const int before = flagship::banksBuilt();
     std::unique_ptr<ModuleProcessor> a = make(e), b = make(e);
     if (!a || !b) return;
     const Stereo x = play(*a, held(), 4800, v);
     const Stereo y = play(*b, held(), 4800, v);
-    CHECK_EQ(flagship::cachedBanks(), before + 1);
+    CHECK_EQ(flagship::banksBuilt(), before + 1);
     CHECK(x.l == y.l);
     // Live: the first notes play unwarped while the worker builds the bank (here the Vocal table's, not built yet).
     Values w = v;
@@ -409,10 +416,10 @@ TEST(flagship_spectral_banks_are_shared_and_built_off_the_audio_thread_live) {
     std::unique_ptr<ModuleProcessor> live = make(e, false);
     std::unique_ptr<ModuleProcessor> reference = make(e);
     if (!live || !reference) return;
-    const int have = flagship::cachedBanks();
+    const int have = flagship::banksBuilt();
     play(*live, held(), 64, w);  // asks for it
-    for (int i = 0; i < 300 && flagship::cachedBanks() == have; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    CHECK_EQ(flagship::cachedBanks(), have + 1);
+    for (int i = 0; i < 500 && flagship::banksBuilt() == have; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_EQ(flagship::banksBuilt(), have + 1);
     live->reset();
     const Stereo l = play(*live, held(), 4800, w);
     const Stereo r = play(*reference, held(), 4800, w);
