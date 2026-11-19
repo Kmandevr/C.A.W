@@ -34,7 +34,7 @@ class ReverbPage extends StatelessWidget {
         caption: 'REVERB',
         grid: false,
         readout: Builder(builder: (context) => Text('${formatParamValue(t.param('decay'), t.value('decay'))} · size ${(t.value('size') * 100).round()}%')),
-        child: const _ReverbHero(),
+        child: const ReverbHero(),
       )),
       Row(children: [
         const DeviceToggle('freeze', label: 'Freeze', icon: Icons.ac_unit),
@@ -48,14 +48,14 @@ class ReverbPage extends StatelessWidget {
   }
 }
 
-class _ReverbHero extends StatefulWidget {
-  const _ReverbHero();
+class ReverbHero extends StatefulWidget {
+  const ReverbHero({super.key});
 
   @override
-  State<_ReverbHero> createState() => _ReverbHeroState();
+  State<ReverbHero> createState() => _ReverbHeroState();
 }
 
-class _ReverbHeroState extends State<_ReverbHero> {
+class _ReverbHeroState extends State<ReverbHero> {
   bool _active = false;
   double _decay = 1, _size = 0;
 
@@ -134,7 +134,8 @@ class _ReverbPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5);
     }
-    // The tail across the bottom half: pre-delay, early reflections, decay to −60 dB.
+    // The tail across the bottom half, in dB (0 at the top to −60 at the base, so the decay is a straight line):
+    // pre-delay, early reflections, then the tail to −60 dB at the decay time.
     final span = freeze ? 4.0 : math.max(1.5, math.min(32.0, decay * 1.25 + predelay));
     final base = h - 10, top = h * 0.36;
     double x(double s) => 8 + (w - 16) * (s / span);
@@ -148,7 +149,7 @@ class _ReverbPainter extends CustomPainter {
       final s = span * i / bars;
       if (s < predelay) continue;
       final since = s - predelay;
-      final env = freeze ? 0.85 : math.exp(-6.9 * since / math.max(0.1, decay));
+      final env = freeze ? 0.85 : (1 - since / math.max(0.1, decay)).clamp(0.0, 1.0);
       final early = since < 0.08 ? (rand() > 0.55 ? 1.0 : 0.25) : 0.55 + 0.45 * rand();
       final hh = (base - top) * env * early;
       final c = Color.lerp(tone, second, (damping * since / math.max(0.2, decay)).clamp(0.0, 1.0))!;
@@ -161,7 +162,7 @@ class _ReverbPainter extends CustomPainter {
     final env = Path();
     for (var i = 0; i <= 80; i++) {
       final s = predelay + (span - predelay) * i / 80;
-      final e = freeze ? 0.85 : math.exp(-6.9 * (s - predelay) / math.max(0.1, decay));
+      final e = freeze ? 0.85 : (1 - (s - predelay) / math.max(0.1, decay)).clamp(0.0, 1.0);
       final p = Offset(x(s), base - (base - top) * e);
       i == 0 ? env.moveTo(p.dx, p.dy) : env.lineTo(p.dx, p.dy);
     }
@@ -220,14 +221,14 @@ class DelayPage extends StatelessWidget {
 
     final dual = t.param('mode') != null && t.value('mode').round() == 2;
     return effectPage('delay', [
-      if (t.param('mode') != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles('mode', icon: _modeIcon, height: 50)),
+      if (t.param('mode') != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles('mode', icon: delayModeIcon, height: 50)),
       HeroWithMeters(height: 190, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 190,
         caption: 'ECHOES',
         grid: false,
         readout: Builder(builder: (context) => Text(_ms(delaySeconds(scope, 'sync', 'time')))),
-        child: const _DelayHero(),
+        child: const DelayHero(),
       )),
       // The sync pickers and Freeze: one row, or wrapped in a narrow column (inline beside the hero).
       LayoutBuilder(builder: (context, box) {
@@ -259,7 +260,7 @@ class DelayPage extends StatelessWidget {
   static String _ms(double s) => s < 1 ? '${(s * 1000).round()} ms' : '${s.toStringAsFixed(2)} s';
 }
 
-void _modeIcon(Canvas canvas, Rect r, int index, Color color) {
+void delayModeIcon(Canvas canvas, Rect r, int index, Color color) {
   final p = Paint()..color = color;
   final line = Paint()
     ..color = color.withValues(alpha: 0.4)
@@ -293,17 +294,17 @@ void _modeIcon(Canvas canvas, Rect r, int index, Color color) {
   }
 }
 
-class _DelayHero extends StatefulWidget {
-  const _DelayHero();
+class DelayHero extends StatefulWidget {
+  const DelayHero({super.key});
 
   @override
-  State<_DelayHero> createState() => _DelayHeroState();
+  State<DelayHero> createState() => _DelayHeroState();
 }
 
 /// One echo: its time, its side (true: right), its level.
 typedef _Tap = (double seconds, bool right, double level);
 
-class _DelayHeroState extends State<_DelayHero> {
+class _DelayHeroState extends State<DelayHero> {
   bool? _right; // the tap being dragged: the left lane's first (false) or the right's (true)
   double _secs = 0, _fb = 0;
 

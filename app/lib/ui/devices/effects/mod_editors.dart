@@ -57,7 +57,7 @@ class CombPage extends StatelessWidget {
         grid: false,
         readout: Builder(builder: (context) => Text(flanger ? '${formatParamValue(t.param('delay'), t.value('delay'))} ms'
             : '${formatParamValue(t.param('center'), t.value('center'))} Hz')),
-        child: _CombHero(flanger: flanger),
+        child: CombHero(flanger: flanger),
       )),
       Row(children: [
         if (!flanger) ...[
@@ -75,15 +75,15 @@ class CombPage extends StatelessWidget {
   }
 }
 
-class _CombHero extends StatefulWidget {
-  const _CombHero({required this.flanger});
+class CombHero extends StatefulWidget {
+  const CombHero({super.key, required this.flanger});
   final bool flanger;
 
   @override
-  State<_CombHero> createState() => _CombHeroState();
+  State<CombHero> createState() => _CombHeroState();
 }
 
-class _CombHeroState extends State<_CombHero> {
+class _CombHeroState extends State<CombHero> {
   bool _active = false;
   double _x = 0, _fb = 0;
 

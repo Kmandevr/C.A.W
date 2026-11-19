@@ -329,7 +329,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value('sync'), greaterThan(7), reason: 'a longer division');
       expect(t.value('feedback'), greaterThan(0.4));
-      await tester.tap(find.byKey(const ValueKey('mode-mode-1')));
+      await tester.ensureVisible(find.byKey(const ValueKey('dchoice-mode-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('dchoice-mode-1')));
       await tester.pumpAndSettle();
       expect(t.value('mode'), 1);
       await close(tester);
@@ -380,7 +382,9 @@ void main() {
         final s = await open(tester, id);
         final t = targetOf(s, id);
         final before = t.value(place);
-        await tester.dragFrom(tester.getCenter(find.byKey(ValueKey('${id.substring(8)}-hero'))), const Offset(50, -30));
+        // The phaser's comb, the flanger's voices pad (delay across, feedback up).
+        final hero = id == 'org.caw.flanger' ? 'xy-delay-feedback' : 'phaser-hero';
+        await tester.dragFrom(tester.getCenter(find.byKey(ValueKey(hero))), const Offset(50, -30));
         await tester.pumpAndSettle();
         expect(t.value(place), greaterThan(before));
         expect(t.value('feedback'), greaterThan(0.4));
@@ -401,7 +405,7 @@ void main() {
     testWidgets('utility: sideways pans, up widens, a pinch widens; the switches flip', (tester) async {
       final s = await open(tester, 'org.caw.utility');
       final t = targetOf(s, 'org.caw.utility');
-      final hero = tester.getCenter(find.byKey(const ValueKey('stereo-hero')));
+      final hero = tester.getCenter(find.byKey(const ValueKey('utility-hero')));
       await tester.dragFrom(hero, const Offset(40, -30));
       await tester.pumpAndSettle();
       expect(t.value('pan'), greaterThan(0.1));
@@ -417,20 +421,22 @@ void main() {
       await b.up();
       await tester.pumpAndSettle();
       expect(t.value('width'), greaterThan(w0));
+      await tester.ensureVisible(find.byKey(const ValueKey('toggle-invert_l')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('toggle-invert_l')));
       await tester.pumpAndSettle();
       expect(t.value('invert_l'), 1);
       await close(tester);
     });
 
-    testWidgets('width and balance: the same field on their one knob', (tester) async {
+    testWidgets('width and balance: the same goniometer on their one knob', (tester) async {
       var s = await open(tester, 'org.caw.stereo.width');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(0, 40));
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.width').value('width'), lessThan(1));
       await close(tester);
       s = await open(tester, 'org.caw.stereo.balance');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(-50, 0));
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(-50, 0));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.balance').value('pan'), lessThan(-0.1));
       await close(tester);
