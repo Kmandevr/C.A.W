@@ -3,6 +3,23 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.9-alpha.1 (2026-11-19)
+
+The performance release: steadier live playback on phones, a fairer Benchmark, and cheaper effects.
+
+### Changed
+- **Steadier playback on phones that won't speed up the audio core:** some phones (the Galaxy S22+ among them) ignore Android's request to keep the audio core fast, so it dropped to its slowest speed and playback spiked. While something plays, C.A.W now keeps that core busy enough to stay fast. It costs a little more battery while playing, and none while stopped or in the background. The Battery buffer mode turns it off.
+- **Cheaper effects, same sound:**
+  - the EQ costs up to 70 % less when its settings aren't moving;
+  - the Compressor costs about 40 % less;
+  - a typical 8-track song does about 5 % less work in total.
+
+  Every render is bit-for-bit the same.
+- **A fairer Benchmark:** it warms up first, runs the coolest tests first, pauses to let the phone cool after heavy ones, and records each test's heat, clock speed and spikes. Results are also shown as if the phone ran at full speed, so a warm phone doesn't look like a slower app.
+
+### For contributors
+- **The brand and trademark policy** ([TRADEMARKS.md](https://github.com/Kmandevr/C.A.W/blob/Main/TRADEMARKS.md)): the code stays Apache 2.0; the C.A.W and AutoStacc names, logos and brand art belong to AutoStacc.
+
 ## 1.0.8-alpha.1 (2026-11-19)
 
 The effects release: fewer, better effects, each with a page you can play like an instrument, and a redesigned Flagship.

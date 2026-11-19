@@ -33,9 +33,9 @@ updated: 2026-11-19
 - **Changing a variant** keeps only knobs the new variant declares identically; the rest reset to defaults, and their automation lanes, modulation links and MIDI mappings are dropped with them, because their meaning changed. One undo step.
 - **Until the device UI kit,** a plain "Variant" pill opens a menu of variants on today's device pages (an assumption the approved device UI plan replaces).
 
-## 2026-11-18: The Hub goes into use with 1.1.0; APKs are installed by hand until then (owner)
+## 2026-11-18: The Hub goes into use with 1.2.0; APKs are installed by hand until then (owner)
 
-**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.1.0. Until then the owner installs APKs by hand.
+**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.2.0 (renumbered 2026-11-19; it was 1.1.0). Until then the owner installs APKs by hand.
 
 ## 2026-11-18: Declared capabilities: strict default, embedded in the binary, older components warned until rebuilt (owner, architect)
 
