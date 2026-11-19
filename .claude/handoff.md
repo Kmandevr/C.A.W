@@ -14,10 +14,10 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **1.1.0 on the session branch** (78c3eba): every engine part so far (Glint, Soar's Harmonizer and Octaver, Mimic, Preen, Hush, robust cost ceilings, key note-offs) and the 28 mode pages. ctest 15/15; the app suite fails only on Harmonizer and Octaver, which have no page yet.
-- **Running from 78c3eba** (push them to `caw-backup-*` at check-ins): ui-voice (pages for Harmonizer, Octaver, Glint, Mimic, Preen and Hush), dsp-lark (Lark, C API 42), dsp-pack (grain engine, Murmur, Peck, Bend, Iris).
-- **Next:** the instruments (Raven's synthesis, Timber, Flock, Magpie, Rook), then names, tags, theme, personality and Easter eggs, then the 1.1.0 PR.
-- **Follow-ups:** back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
+- **1.1.0 on the session branch** (d1f1e1c): every effect, the pack, Lark (API 42), Raven's synthesis, Magpie (API 43) and all their pages. The app suite passes 2692; ctest passes except `stress_profile_parts_add_up_and_name_the_feature`, which fails only under load (make it load-proof: thread CPU time).
+- **Running** (push them to `caw-backup-*` at check-ins): dsp-timber (Timber engine), inst-rook (Rook audit, sounds, groove, kits, Raven layout).
+- **Next:** Flock (the grain engine is in grain.hpp), Timber's page, Lark's page and editor (show the owner the editor-look options), names and tags, theme, personality, Easter eggs, logo previews, a final audio review, then the 1.1.0 PR.
+- **Follow-ups:** Magpie's keyboard zoom on phones;  back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
 
 ## Rules for continuing
 - **No lost work:** push after every commit. Agents can't push (their permissions refuse it), so the main session pushes their branches to `caw-backup-*` at each check-in and merge.
