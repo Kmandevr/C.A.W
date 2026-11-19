@@ -1,10 +1,10 @@
 # Handoff
 
-Commit: dab8d79 (Main: v1.0.8-alpha.1 released; the session branch holds 1.0.9, not yet in a PR)
+Commit: 71866ec (Main 41f9c1b: v1.0.9-alpha.1 released 2026-11-19 with 6 assets, PR #257)
 Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. **The owner's standing instructions and the full plan** are in the private Kmandevr/AutoStacc-Hub, in the caw folder's sound-plan note ("The owner's standing instructions…" at the top). Read that first.
 
 ## Goal
-1. Ship **1.0.9**, the performance release, then the owner reruns the S22+ Benchmark.
+1. **1.0.9 is released.** The owner reruns the S22+ Benchmark; live rows should show the stabilizer on and the callback clock well above 634 MHz.
 2. Build **1.1.0**, the effects and instruments suite, without the owner, except for logo designs and the pitch editor's look.
 
 ## Done and verified
@@ -14,8 +14,6 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **fix-109:** merged into the session branch (7118dc1; ctest 11/11).
-- **review-109:** merged (435640d; ctest 11/11). The full app suite runs before the 1.0.9 PR.
 - **1.1.0 parts, backed up as `caw-1.1.0-*` branches:** dsp-drive, dsp-tools, dsp-dynsplit and dsp-plume. They are being combined in worktree `caw-110` (branch caw-1.1.0), with the MIDI API renumbered to 41. Follow-ups: back up a project before its first conversion, Pedal gate's pre-FX key, an armed signal for effects, and the owner's look for the Talon/Hatch/Duck pages.
 
 ## Rules for continuing
