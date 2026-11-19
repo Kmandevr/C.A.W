@@ -9,6 +9,7 @@ import '../../kit/controls.dart' show iconCurve;
 import '../eq_editor.dart';
 import '../filters/eq_pages.dart';
 import '../filters/filters_shared.dart';
+import 'eq_filter_modes.dart';
 import 'variant_cards.dart';
 
 /// The EQ: its mode cards (the variant) and the mode's own page under them, each drawing on the same grid. In the
@@ -25,6 +26,8 @@ class EqDevicePage extends StatelessWidget {
       1 => GraphicEqPage(lead: lead),
       2 => Eq3Page(lead: lead),
       3 => TiltPage(lead: lead),
+      4 => EqEditorPage(lead: [...lead, const LinearRow()], caption: 'LINEAR'),
+      5 => MatchPage(lead: lead),
       _ => EqEditorPage(lead: lead, caption: 'BANDS'),
     };
   }
@@ -51,6 +54,13 @@ void eqModeIcon(Canvas canvas, Rect r, int mode, Color c) {
     case 3:
       iconCurve(canvas, r, c, (x) => 0.55 * (2 / (1 + math.exp(-x * 4)) - 1));
       canvas.drawCircle(r.center, 3, Paint()..color = c);
+    case 4:
+      // Linear: a symmetric impulse (linear phase) under a gentle curve.
+      iconCurve(canvas, r, c, (x) => 0.85 * math.exp(-x * x * 40) * math.cos(x * 30), steps: 80);
+    case 5:
+      // Match: a reference curve faint and the match following it.
+      iconCurve(canvas, r, c.withValues(alpha: 0.45), (x) => 0.4 * math.sin(x * 4) - 0.2 * x, width: 1.2);
+      iconCurve(canvas, r, c, (x) => 0.32 * math.sin(x * 4 + 0.3) - 0.15 * x);
     default:
       double db(double x) {
         final hz = 1000 * math.pow(2, x * 4.5).toDouble();

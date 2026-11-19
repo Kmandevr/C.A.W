@@ -36,6 +36,9 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.reverb', 5, {}, 'reverb_gated'),
   ('org.caw.reverb', 6, {}, 'reverb_reverse'),
   ('org.caw.convolver', 1, {}, 'convolver_cab'),
+  ('org.caw.eq', 4, {'b3_gain': 6, 'b6_gain': -4}, 'eq_linear'),
+  ('org.caw.eq', 5, {}, 'eq_match'),
+  ('org.caw.filter', 3, {}, 'filter_wah'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
@@ -71,6 +74,23 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
       for (var k = 0; k < 64; k++) {
         raw[8 + k] = math.exp(-k / 9) * math.cos(k * 1.3);
       }
+    case 'org.caw.eq.linear':
+      raw[0] = 128;
+      raw[3] = 1;
+      for (var j = 0; j < 128; j++) {
+        raw[4 + j] = -30 - j * 0.3 + 4 * math.sin(j * 0.5) + 10 * hit;
+        raw[132 + j] = raw[4 + j] + 2;
+      }
+      raw.setAll(456, [48, 4096, 0]);
+    case 'org.caw.eq.match':
+      raw.setAll(0, [0, 12.5, 9.8, 120, 20, 20000]);
+      for (var j = 0; j < 120; j++) {
+        raw[6 + j] = -24 - j * 0.25 + 6 * math.sin(j * 0.11);
+        raw[126 + j] = -28 - j * 0.3 + 4 * math.cos(j * 0.07);
+        raw[246 + j] = (raw[6 + j] - raw[126 + j]).clamp(-12, 12) * 0.8;
+      }
+    case 'org.caw.filter.wah':
+      raw.setAll(2, [400 * math.pow(5.5, 0.3 + 0.5 * hit).toDouble(), 0.3 + 0.5 * hit, level, 0, 80, 8000, 0]);
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -129,8 +149,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   }
 
-  test('no 1.1.0 mode waits for a page', () {
-    expect(MergedDevices.pagesToCome, isEmpty);
+  test('every 1.1.0 mode has a page of its own', () {
+    for (final v in MergedDevices.variants.where((v) => !v.retired && v.oldId != MergedDevices.duckPageId)) {
+      expect(modePages.any((p) => p.$1 == v.id && p.$2 == v.variant), isTrue, reason: v.oldId);
+    }
   });
 
   for (final (id, variant, values, name) in modePages) {
@@ -282,6 +304,41 @@ void main() {
     await drag(tester, const ValueKey('cab-hero'), const Offset(40, -40));
     expect(t.value('position'), greaterThan(p));
     expect(t.value('distance'), greaterThan(d));
+    await close(tester);
+  });
+
+  testWidgets('Match: Learn picks what to learn, the limits drag, Linear shows its latency', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.eq', 5);
+    await tester.tap(find.byKey(const ValueKey('match-learn-1')));
+    await tester.pumpAndSettle();
+    expect(t.value('match_learn'), 1);
+    final box = tester.getRect(find.byKey(const ValueKey('match-hero')));
+    final at = Offset(box.left + 10 + 0.0 * (box.width - 20) + 2, box.top + 24 + 14);
+    final g = await tester.startGesture(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    for (var i = 1; i <= 8; i++) {
+      await g.moveTo(at + Offset(60.0 * i / 8, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(t.value('match_low'), greaterThan(40));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.eq', 4);
+    expect(find.textContaining('48 ms'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('Wah: the treadle drags the pedal (Pedal) or the sensitivity (Envelope)', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.filter', 3, values: {'mode': 1});
+    final p = t.value('pedal');
+    await drag(tester, const ValueKey('wah-hero'), const Offset(0, -60));
+    expect(t.value('pedal'), greaterThan(p));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.filter', 3);
+    final s = t.value('sensitivity');
+    await drag(tester, const ValueKey('wah-hero'), const Offset(0, -60));
+    expect(t.value('sensitivity'), greaterThan(s));
     await close(tester);
   });
 
