@@ -34,6 +34,7 @@ using Clock = std::chrono::steady_clock;
 
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
+int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices against their ceilings
 
 namespace {
 
@@ -981,13 +982,15 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
+    if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
         const bool suiteOver = !effectsCost(secs);  // the suite's ceilings, the EQ's and Filter's 1.1.0 modes among them
         const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
         const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
         const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver) ? 1 : 0;
+        const bool voiceOver = voiceCost(secs) != 0;  // and the voice devices (bench/voice_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

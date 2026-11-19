@@ -228,6 +228,7 @@ target_sources(caw_core PRIVATE src/component_profile.cpp src/component_bench.cp
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
 target_sources(caw_core PRIVATE src/midi_fx.cpp src/midi_fx_effects.cpp)  # 1.1.0: MIDI effects before an instrument
 target_sources(caw_core PRIVATE src/builtin_fx_meters.cpp src/builtin_fx_lofi.cpp src/builtin_fx_phasealign.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
+target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.cpp)  # 1.1.0: Glint, Mimic, Soar's Harmonizer and Octaver
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp
@@ -308,6 +309,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/note_fx_test.cpp)  # per-note FX (#127): slots, overflow, tails, parity
   target_sources(caw_tests PRIVATE tests/midi_fx_test.cpp)  # 1.1.0: MIDI effects before the instrument
   target_sources(caw_tests PRIVATE tests/fx_tools_test.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
+  target_sources(caw_tests PRIVATE tests/fx_voice_test.cpp)  # 1.1.0: Glint, Soar's Harmonizer and Octaver, Mimic
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/fx_merged_test.cpp)  # FX consolidation: merged devices, migration, optional ports
@@ -435,6 +437,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing
+  target_sources(caw_rt_tests PRIVATE tests/fx_voice_rt_test.cpp)  # 1.1.0: Glint, Harmonizer, Octaver, Mimic while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
   target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
@@ -471,7 +474,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -486,6 +489,8 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_tools_cost COMMAND caw_bench 0.5 301)
     # 1.1.0's dynamics split against its cost ceilings.
     add_test(NAME caw_dynsplit_cost COMMAND caw_bench 0.5 302)
+    # 1.1.0's voice devices (Glint, Harmonizer, Octaver, Mimic) against their cost ceilings.
+    add_test(NAME caw_voice_cost COMMAND caw_bench 0.5 303)
   endif()
 endif()
 
