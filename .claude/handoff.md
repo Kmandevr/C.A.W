@@ -14,12 +14,12 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **fix-109** (`caw-backup-fix-109`): the audio-review fixes (the EQ band after a type change, the stabilizer's epoch drift, its load gate, arm64 bits).
+- **fix-109:** merged into the session branch (7118dc1; ctest 11/11).
 - **review-109** (`caw-backup-review-109`): the external-review fixes (the MIDI ring, library warming, Play/Stop status at C API 40, project-sized caps, `send` failures reported, ratchets up to 64).
 - **1.1.0 done, waiting for 1.0.9 to ship:** `caw-1.1.0-dsp-drive` and `caw-1.1.0-dsp-tools`. The MIDI effects' C API must be renumbered above 40.
 
 ## Rules for continuing
-- **No lost work:** push after every commit (the session branch, or a `caw-backup-*` branch).
+- **No lost work:** push after every commit. Agents can't push (their permissions refuse it), so the main session pushes their branches to `caw-backup-*` at each check-in and merge.
 - **Loop guard:** never repeat a failed attempt; try different fixes or workarounds. Block an item only when the approaches run out or it needs the owner, and keep other work going. At most one CI re-run per failure.
 - **Efficiency:** 2–3 well-briefed agents at a time, short output; the agents' common brief is in the plan's standing instructions.
 - **Check-in:** a recurring check-in every 5 hours resumes work from this file.
