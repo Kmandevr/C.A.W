@@ -9,6 +9,7 @@ import '../../../model/device_display.dart';
 import '../../../model/device_target.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
+import '../sidechain_bar.dart' show KeyFilterControls;
 import '../kit/controls.dart';
 import '../kit/feel.dart';
 import '../kit/grab_gesture.dart';
@@ -54,7 +55,8 @@ class CompressorPage extends StatelessWidget {
         DeviceToggle('auto_makeup', label: 'Auto makeup', icon: Icons.auto_fix_high),
         DeviceToggle('auto_release', label: 'Auto release', icon: Icons.auto_mode),
       ])),
-      const DeviceFold(child: ParamGrid(only: ['knee', 'lookahead', 'detect', 'detection', 'link', 'sc_hpf', 'sc_listen'])),
+      const DeviceFold(child: ParamGrid(only: ['knee', 'lookahead', 'detect', 'detection', 'link'])),
+      const KeyFilterControls(),
     ]);
   }
 }
@@ -389,7 +391,8 @@ class GatePage extends StatelessWidget {
         child: const _GateHero(),
       )),
       const KnobRow(['threshold', 'range', 'attack', 'hold', 'release'], size: 50),
-      const DeviceFold(child: ParamGrid(only: ['ratio', 'knee', 'sc_hpf'])),
+      const DeviceFold(child: ParamGrid(only: ['ratio', 'knee'])),
+      const KeyFilterControls(),
     ]);
   }
 }

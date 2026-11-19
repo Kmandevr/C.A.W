@@ -6,6 +6,37 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: The bird theme and personality in the app (Claude, building the owner's sound plan)
+
+**Owner (2026-11-19):** "a little bit of that theme", never distracting; personality that stays professional; the built-in themes renamed Raven, Jackdaw, Magpie and Jay; Parrot as a joke theme ([App](app.md)).
+- **Five families became four (Claude):** Neon's palette is Raven, Flat's is Jackdaw; Magpie (high contrast) and Jay (blue accent, light first) are new palettes. Dusk, Dawn and Amber are gone: a saved Dusk opens as Jackdaw, Dawn as Jay and Amber as Magpie (`migrateThemeName`), and settings.json writes `theme_families: 2` so a later bird name is never migrated twice. [Assumption] the owner wanted four families, not the old five renamed.
+- **Icons as a font (Claude):** the family hints are glyphs of a small icon font made by `scripts/icon-font.js` (plain Node, no package), so device headers and the browser show them through their existing `IconData` without changes there. **[Fact]** No new dependency.
+- **Sound:** the one sound the surprises make is synthesised in the app and played through the sample preview voice; nothing is downloaded or recorded.
+- **Left out:** the logo designs (each needs the owner's yes) and the restored-after-crash line (there is no such screen).
+
+## 2026-11-19: Flock's mips read at most at rate 1; its sample is read in place (Claude, within the sound plan)
+
+**Context:** the sound design (grain engine, Flock) asks for half-band mip copies for reads more than an octave up (+50 % RAM) and a sample read from the sample store, read-only and shared.
+- **Decision (Claude):** a grain over rate 2 reads the copy that brings its rate to at most 1 (not 2), so no content folds over; reaching 48 st takes four copies, about 94 % more RAM than the sample, and a sample over 120 s gets none. The sample is read in place from the asset store (no copy), its first frame kept for the cubic read. The filter defaults to Off (presets that want it turn it on), which keeps the design point inside the medium budget.
+- **[Fact]** No new dependency.
+
+## 2026-11-19: Drums 1.1.0 (Rook): settings that say when they are heard, appended layers, groove and the one-screen editor (Claude, building the owner's plan)
+
+**Owner (2026-11-19):** the drums were "finicky, some settings don't work… one big list"; plug and play with the advanced controls kept, and Raven's one-screen layout. **Built** ([engine](engine.md#drums-orgcawdrums), [app](app.md)):
+- **The audit found one setting that did nothing:** Noise mode Snappy without the Body (fixed: a shell of its own). Every other setting changed the sound, but many only in a context (a filter's resonance on LP 6 dB, Clap's bursts outside Clap, glide without Mono and tracking, Room send with the kit's room off). Choice: the engine publishes those contexts (`needs`) and the editor dims each such setting with what it needs, instead of hiding it; a test checks every rule both ways. Out 2..9 stay a known limit (one stereo output), said beside the choice.
+- **Append-only:** 51 pad and 6 kit-wide parameters after the old ones; every old preset renders bit-identically (hashes recorded from 20bcb8b).
+- **Groove only delays:** a hit can't play before its note arrives, so swing, the groove tables, humanize and flams move hits late (no look-ahead latency added). [Open question for the owner] a small look-ahead would let a groove push hits early too.
+- **No new dependencies.** The FM, waveguide and texture layers, the ring modulator and the echo are original code.
+- **Dawn chorus kit: left for later.** It needs real bird and nature recordings under CC0 or CC-BY with their licences checked; none were verified and fetched in this session, so no kit ships with them yet.
+
+## 2026-11-19: Timber's piano excitation is synthesised; Timber is one merged instrument (Claude, within the owner's Timber decisions)
+
+**Context:** the owner settled (2026-11-19) the commuted-waveguide piano designed around Modartt's US7915515B2 claims, and allowed a soundboard excitation derived from a CC-BY recording to ship built in, with credit.
+- **Decision (Claude):** this build ships **no recorded material**. The 24 soundboard excitations (Grand, Upright, Felt × 8 zones) are designed by Timber itself at registration (`engine/src/timber_tables.cpp`: decaying band noise, longer in the low bands, and six low body resonances), so no credit or NOTICE line is needed. Extracting a residual from the Salamander Grand (CC-BY 3.0) was not attempted in this session: it needs the samples fetched and an inverse-filtering pass whose ringing partials are the design's named risk. It stays the open option the owner allowed; if it is taken, its source, licence and credit go here and in NOTICE.
+- **Decision (Claude):** `org.caw.timber` is one merged device (`fx_merged.h`) whose `variant`, shown as "Model", picks one of seven classes, so only the chosen model's voices and memory exist (the design's "fx_merged's variant pattern").
+- **Departures from the design (Claude):** the bowed body is five resonators after the voices' sum, not a 2,048-tap convolution (no latency, a fraction of the cost); the sax is the clarinet's reed with its even harmonics folded in (an assumption, by ear); the brass model speaks from about C3 up; the organ's leakage is not modelled; phantom partials and sostenuto are not built.
+- **[Fact]** No new dependency: everything is the engine's own code and its Library (`lib::Reverb`, `org.caw.rotary`'s class).
+
 ## 2026-11-19: The brand is protected; the code stays Apache 2.0 (owner)
 
 **Decision (owner):** the code, engine and SDK stay open under Apache 2.0. The brand belongs to Kmandevr, doing business as AutoStacc, and is not licensed with the code ([brand and trademark policy](../TRADEMARKS.md)).

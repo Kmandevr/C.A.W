@@ -344,7 +344,7 @@ void main() {
       await pumpArranger(tester);
       await tester.tap(find.byKey(const ValueKey('lane-add-a')));
       await tester.pumpAndSettle();
-      expect(find.text('CHORUS · 1'), findsOneWidget, reason: 'grouped by device');
+      expect(find.text('FLUTTER · 1'), findsOneWidget, reason: 'grouped by device');
       await tester.enterText(find.byKey(const ValueKey('auto-pick-search')), 'mi');
       await tester.pumpAndSettle();
       expect(find.text('Rate'), findsNothing);
@@ -625,7 +625,7 @@ void main() {
         expect(find.descendant(of: tab, matching: find.byKey(ValueKey('automation-tab-lane-$key'))), findsOneWidget);
         expect(find.byKey(ValueKey('lane-row-$key')), findsOneWidget, reason: 'and under the track');
       }
-      expect(find.descendant(of: tab, matching: find.text('CHORUS · MIX')), findsOneWidget);
+      expect(find.descendant(of: tab, matching: find.text('FLUTTER · MIX')), findsOneWidget);
       // A finger drags the pan lane's middle point up in the tab (the whole song fits its width): the lane under the track has it.
       final row = find.byKey(ValueKey('automation-tab-row-$pan'));
       await tester.ensureVisible(row);
@@ -652,7 +652,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(add);
       await tester.pumpAndSettle();
-      expect(find.text('CHORUS · 1'), findsOneWidget, reason: 'the #230 picker, grouped by device');
+      expect(find.text('FLUTTER · 1'), findsOneWidget, reason: 'the #230 picker, grouped by device');
       await tester.tap(find.text('Rate'));
       await tester.pumpAndSettle();
       final rate = AutomationTarget('component', 'rate', layerId: 'a', component: 0).key;

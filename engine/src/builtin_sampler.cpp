@@ -15,6 +15,8 @@
 #include "caw/instrument.hpp"
 #include "caw/library/envelope.hpp"
 #include "caw/library/filter.hpp"
+#include "clip_stretch.h"
+#include "time_stretch.h"
 
 namespace caw {
 using lib::Adsr;
@@ -128,6 +130,12 @@ bool parseSamplerState(std::string_view text, SamplerProgram& out, std::string& 
         s.ampDecay = real("ampeg_decay", -1, 100, -1);
         s.ampSustain = real("ampeg_sustain", -1, 100, -1);
         s.ampRelease = real("ampeg_release", -1, 100, -1);
+        s.stretch = z.boolean("stretch", false);
+        s.stretchBpm = real("stretch_bpm", 0, 999, 0);
+        if (ok && s.stretchBpm > 0 && s.stretchBpm < 20) {
+            error = where + ": stretch_bpm must be 0 or 20..999";
+            ok = false;
+        }
         if (const Json* m = z.get("loop_mode"); m && m->type == Json::Type::String) {
             s.loopModeSet = true;
             if (m->str == "no_loop") s.loopMode = LoopMode::NoLoop;
@@ -178,6 +186,8 @@ std::string samplerStateJson(const SamplerProgram& p) {
         if (z.ampDecay >= 0) s += ",\"ampeg_decay\":" + num(z.ampDecay);
         if (z.ampSustain >= 0) s += ",\"ampeg_sustain\":" + num(z.ampSustain);
         if (z.ampRelease >= 0) s += ",\"ampeg_release\":" + num(z.ampRelease);
+        if (z.stretch) s += ",\"stretch\":true";
+        if (z.stretchBpm > 0) s += ",\"stretch_bpm\":" + num(z.stretchBpm);
         s += "}";
     }
     return s + "]}";
@@ -270,7 +280,10 @@ struct LoadedZone {
 
 struct Program {
     std::vector<LoadedZone> zones;
+    bool stretches = false;  // a zone is stretched: the processor keeps its readers and stretchers
 };
+
+constexpr uint32_t kStretchReaders = 16;  // stretched voices at once (WSOLA readers, about 110 KB each at 48 kHz)
 
 inline float cubic(float a, float b, float c, float d, float t) noexcept {
     return b + 0.5f * t * (c - a + t * (2.0f * a - 5.0f * b + 4.0f * c - d + t * (3.0f * (b - c) + d - a)));
@@ -281,6 +294,10 @@ public:
     ~SamplerProcessor() override { delete old_; }
     const ModuleDescriptor& descriptor() const noexcept override { return samplerDescriptor(); }
     bool activate(double sampleRate, uint32_t) noexcept override {
+        if (sampleRate != sr_) {  // the stretch pools are built at the rate (not running: activate is off the audio thread)
+            readers_.reset();
+            hq_.reset();
+        }
         sr_ = sampleRate;
         if (!loaded_.empty()) {  // a state loaded before activation: build it at this rate
             std::string e;
@@ -294,6 +311,8 @@ public:
     }
     void reset() noexcept override {
         for (Voice& v : voices_) v.active = false;
+        std::fill(std::begin(readerOwner_), std::end(readerOwner_), -1);
+        std::fill(std::begin(hqOwner_), std::end(hqOwner_), -1);
         std::fill(std::begin(counters_), std::end(counters_), 0u);
         rng_ = 0x9E3779B9u;
     }
@@ -350,6 +369,14 @@ protected:
             if (previous && (plays(previous) || !program_.retire(previous))) old_ = previous;
         }
         for (uint32_t k = 0; k < kParamCount; ++k) p_[k] = parameterAt(b, k, 0, parameters()[k].defaultValue);
+        tempo_ = b.transport && b.transport->tempo > 0 ? b.transport->tempo : 120.0;
+        // Stretch readers and stretchers whose voice ended are free again.
+        for (uint32_t k = 0; k < kStretchReaders; ++k)
+            if (readerOwner_[k] >= 0 && (!voices_[readerOwner_[k]].active || voices_[readerOwner_[k]].reader != static_cast<int>(k)))
+                readerOwner_[k] = -1;
+        for (uint32_t k = 0; k < kSamplerStretchers; ++k)
+            if (hqOwner_[k] >= 0 && (!voices_[hqOwner_[k]].active || voices_[hqOwner_[k]].hq != static_cast<int>(k)))
+                hqOwner_[k] = -1;
     }
     void onNote(const NoteMessage& m) noexcept override {
         if (m.type == NoteMessageType::On) start(m);
@@ -378,6 +405,10 @@ protected:
             const double inc = detPow(2.0, tuneCents / 1200.0);
             const bool looping = z.loopEnd > z.loopStart &&
                 (z.z.loopMode == LoopMode::Continuous || (z.z.loopMode == LoopMode::Sustain && v.held));
+            if (v.reader >= 0) {
+                renderStretched(v, z, looping, gain, filter, left, right, frames);
+                continue;
+            }
             const float* l = a.channel(0);
             const float* r = a.channel(1);
             const int64_t frameCount = a.frames;
@@ -431,6 +462,9 @@ protected:
 private:
     struct Voice {
         bool active = false, held = false;
+        int reader = -1, hq = -1;   // a stretched voice's reader and stretcher (indices into the pools; -1: none)
+        int64_t t = 0;              // a stretched voice's output frames so far
+        double src = 0, slope = 1;  // ... its source frame (unwrapped) and source frames per output frame
         uint32_t noteId = 0;
         const Program* prog = nullptr;  // the zones it plays (the current program, or the old one fading out)
         size_t zone = 0;
@@ -450,6 +484,97 @@ private:
         Svf svfL, svfR;
     };
     static constexpr double kFadeSeconds = 0.005;
+    // A stretched voice: its reader gives the zone's audio at the voice's pitch and the zone's speed, 64 frames at a
+    // time, then the same envelopes, fade and filter as a plain voice. The speed follows the song's tempo when the zone
+    // has a stretch_bpm.
+    void renderStretched(Voice& v, const LoadedZone& z, bool looping, double gain, int filter, float* left, float* right,
+                         uint32_t frames) noexcept {
+        ClipReader& rd = readers_[static_cast<size_t>(v.reader)];
+        const double slope = z.z.stretchBpm > 0 ? tempo_ / z.z.stretchBpm : 1.0;
+        if (slope != v.slope) {
+            rd.setMapping(v.t, v.src, slope);
+            v.slope = slope;
+        }
+        float bl[64], br[64];
+        uint32_t i = 0;
+        while (i < frames && v.active) {
+            const int n = static_cast<int>(std::min<uint32_t>(64, frames - i));
+            std::fill_n(bl, n, 0.0f);
+            std::fill_n(br, n, 0.0f);
+            rd.render(v.t, n, ones_, bl, br);
+            v.t += n;
+            for (int k = 0; k < n; ++k, ++i) {
+                if ((i & 15) == 0 && filter > 0) {
+                    const double env = v.fenv.level();
+                    double fc = p_[kCutoff] * detPow(2.0, p_[kFilterEnv] * env + p_[kFilterKey] * (v.pitch - 60.0) / 12.0);
+                    fc = std::clamp(fc, 20.0, 0.45 * sr_);
+                    v.svfL.set(fc, p_[kResonance], sr_);
+                    v.svfR.set(fc, p_[kResonance], sr_);
+                }
+                if (!looping && v.src > z.last) { v.active = false; return; }
+                double env = v.amp.next();
+                v.fenv.next();
+                if (v.amp.done()) { v.active = false; return; }
+                if (v.killStep > 0) {
+                    v.kill -= v.killStep;
+                    if (v.kill <= 0) { v.active = false; return; }
+                    env *= v.kill;
+                }
+                float ol = static_cast<float>(bl[k] * env * v.gainL * gain), orr = static_cast<float>(br[k] * env * v.gainR * gain);
+                if (filter > 0) {
+                    const SvfOutput fl = v.svfL.process(ol), fr = v.svfR.process(orr);
+                    ol = static_cast<float>(filter == 1 ? fl.low : filter == 2 ? fl.high : fl.band);
+                    orr = static_cast<float>(filter == 1 ? fr.low : filter == 2 ? fr.high : fr.band);
+                }
+                left[i] += ol;
+                right[i] += orr;
+                v.src += v.slope;
+            }
+        }
+    }
+    // Starts voice v (slot vi) on a stretched zone, with a free reader (else it plays as a plain voice) and a free
+    // Signalsmith stretcher (else WSOLA).
+    void startStretched(Voice& v, int vi, const LoadedZone& lz, double cents) noexcept {
+        if (!readers_) return;
+        int r = -1, h = -1;
+        for (uint32_t k = 0; k < kStretchReaders && r < 0; ++k)
+            if (readerOwner_[k] < 0) r = static_cast<int>(k);
+        if (r < 0) return;
+        for (uint32_t k = 0; k < kSamplerStretchers && h < 0 && hq_; ++k)
+            if (hqOwner_[k] < 0) h = static_cast<int>(k);
+        readerOwner_[r] = vi;
+        v.reader = r;
+        if (h >= 0) {
+            hqOwner_[h] = vi;
+            v.hq = h;
+        }
+        ClipSource src;
+        src.asset = lz.asset.get();
+        src.loop = lz.loopEnd > lz.loopStart &&
+                   (lz.z.loopMode == LoopMode::Continuous || lz.z.loopMode == LoopMode::Sustain);
+        src.loopStart = static_cast<int64_t>(std::llround(lz.loopStart));
+        src.loopEnd = static_cast<int64_t>(std::llround(lz.loopEnd));
+        src.seam = static_cast<int64_t>(std::llround(lz.crossfade));
+        v.slope = lz.z.stretchBpm > 0 ? tempo_ / lz.z.stretchBpm : 1.0;
+        v.src = lz.start;
+        v.t = 0;
+        readers_[static_cast<size_t>(r)].start(src, h >= 0 ? ReadMode::Hq : ReadMode::Stretch, detPow(2.0, std::clamp(cents, -4800.0, 4800.0) / 1200.0), 0,
+                                               lz.start, v.slope, h >= 0 ? &hq_[static_cast<size_t>(h)] : nullptr,
+                                               static_cast<int64_t>(lz.start), 0);
+    }
+    // Control thread: the pools a program with stretched zones needs, built once (at the processor's rate).
+    bool ensureStretchPools() {
+        if (readers_) return true;
+        std::unique_ptr<ClipReader[]> readers(new ClipReader[kStretchReaders]);
+        for (uint32_t k = 0; k < kStretchReaders; ++k)
+            if (!readers[k].prepare(sr_)) return false;
+        std::unique_ptr<HqStretcher[]> hq(new HqStretcher[kSamplerStretchers]);
+        for (uint32_t k = 0; k < kSamplerStretchers; ++k)
+            if (!hq[k].prepare(sr_)) return false;
+        hq_ = std::move(hq);
+        readers_ = std::move(readers);
+        return true;
+    }
     void fadeQuickly(Voice& v) noexcept {
         v.held = false;
         if (v.killStep == 0) v.killStep = 1.0 / std::max(1.0, kFadeSeconds * sr_);
@@ -526,6 +651,9 @@ private:
             if (!pick) pick = oldestFading ? oldestFading : victim;  // no slot left: one is cut
             if (!pick) return;
             Voice& v = *pick;
+            const int vi = static_cast<int>(&v - voices_);
+            if (v.reader >= 0) readerOwner_[v.reader] = -1;
+            if (v.hq >= 0) hqOwner_[v.hq] = -1;
             v = Voice{};
             v.active = v.held = true;
             v.noteId = m.noteId;
@@ -547,6 +675,9 @@ private:
             v.amp.e.gateOn();
             v.fenv.set(p_[kFAttack], p_[kFDecay], p_[kFSustain], p_[kFRelease], sr_);
             v.fenv.gateOn();
+            if (z.stretch)
+                startStretched(v, vi, lz, (m.pitch - z.root) * z.keytrack + z.tune + 100.0 * z.transpose + p_[kTune] +
+                                              100.0 * p_[kTranspose]);
         }
     }
     // Control thread: loads every zone's sample and hands the program to the audio thread.
@@ -574,7 +705,12 @@ private:
             const double pan = z.pan / 100.0;
             lz.gainL = g * std::min(1.0, 1.0 - pan);
             lz.gainR = g * std::min(1.0, 1.0 + pan);
+            prog->stretches = prog->stretches || z.stretch;
             prog->zones.push_back(std::move(lz));
+        }
+        if (prog->stretches && !ensureStretchPools()) {
+            error = "out of memory for the stretched zones";
+            return false;
         }
         program_.offer(prog.release());
         return true;
@@ -589,6 +725,16 @@ private:
     uint32_t rng_ = 0x9E3779B9u;
     uint64_t clock_ = 0;
     Handover<Program> program_;
+    // The stretch pools (control thread builds them once, before the first program that needs them is offered).
+    std::unique_ptr<ClipReader[]> readers_;
+    std::unique_ptr<HqStretcher[]> hq_;
+    int readerOwner_[kStretchReaders] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    int hqOwner_[kSamplerStretchers] = {-1, -1, -1, -1};
+    double tempo_ = 120;
+    static constexpr float kOnes[64] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    const float* ones_ = kOnes;
     std::string loaded_;  // control thread: the canonical state JSON
 };
 

@@ -13,10 +13,13 @@ import 'transient_device.dart';
 /// One page per merged device, whatever its variant (each page switches on the variant itself).
 final Map<String, DeviceEditorEntry> dynDriveEditors = {
   'org.caw.compressor': _cards('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorDevice()),
+  // 1.1.0's split: Gate and Ducker keep the page their variants had on the Compressor (cards of their own).
+  'org.caw.gate': _cards('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const CompressorDevice()),
+  'org.caw.duck': _cards('duck', 'DUCK', Icons.call_received, DeviceFamily.dynamics, () => const CompressorDevice()),
   'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterDevice()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientDevice()),
   'org.caw.drive': _cards('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DriveDevice()),
-  'org.caw.bits': singlePage('bits', 'BITS', Icons.grain, DeviceFamily.drive, () => const BitsDevice()),
+  'org.caw.bits': _cards('bits', 'BITS', Icons.grain, DeviceFamily.drive, () => const BitsDevice()),
 };
 
 /// A page that shows its variants as cards ([DeviceEditorEntry.ownsVariant]: the shell's Variant pill stays away).

@@ -115,6 +115,10 @@ struct LayerSpec {
     // stage, in up to `noteVoices` slots (1..16), before `components`. The instrument must expose a voice bus.
     std::vector<ComponentSpec> noteComponents;
     int noteVoices = 8;
+    // MIDI effects (1.1.0, midi_fx.h): event processors run on the layer's notes, in order, before its instrument hears
+    // them (at most 16). Automation lanes on them: "target_type":"midiComponent" with "component" (stored as the
+    // instrument's lanes on entry component + 1).
+    std::vector<ComponentSpec> midiComponents;
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };

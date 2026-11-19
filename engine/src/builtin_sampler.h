@@ -17,6 +17,7 @@ inline constexpr const char* kSamplerId = "org.caw.sampler";
 inline constexpr size_t kMaxSamplerZones = 4096;
 inline constexpr uint32_t kSamplerVoices = 64;
 inline constexpr uint32_t kMaxSamplerStateBytes = 4u << 20;
+inline constexpr uint32_t kSamplerStretchers = 4;  // Signalsmith Stretch instances a sampler with stretched zones keeps (heavy)
 
 enum class LoopMode : uint8_t { NoLoop, OneShot, Continuous, Sustain };
 
@@ -42,6 +43,10 @@ struct SamplerZone {
     int group = 0, offBy = 0;     // a zone with off_by = g is cut when a zone of group g starts (0: none)
     // Envelope overrides (negative: the instrument's parameter).
     double ampAttack = -1, ampDecay = -1, ampSustain = -1, ampRelease = -1;
+    // Time-stretch (C.A.W's own keys, not SFZ): the zone keeps its length on every key (Signalsmith Stretch, WSOLA
+    // while none is free); with stretchBpm (the sample's tempo) its speed also follows the song's tempo.
+    bool stretch = false;
+    double stretchBpm = 0;  // 0: its own speed; else 20..999
 };
 
 struct SamplerProgram {

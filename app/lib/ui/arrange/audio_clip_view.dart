@@ -29,6 +29,7 @@ import 'audio_waveform.dart';
 import '../../model/sample_edit.dart';
 import 'edit_cues.dart';
 import 'long_press_menu.dart';
+import 'pitch_editor.dart';
 import 'take_chip.dart';
 import 'track_color.dart';
 
@@ -573,8 +574,8 @@ class _NotchPainter extends CustomPainter {
   bool shouldRepaint(_NotchPainter old) => old.color != color || old.active != active;
 }
 
-/// An audio clip's menu: split, duplicate, reverse, loop, mute, lock, mode and stretch, takes, consolidate, bounce to
-/// audio, the inspector, delete.
+/// An audio clip's menu: the inspector, Edit pitch…, split, duplicate, reverse, loop, mute, lock, mode and stretch, takes, consolidate, bounce to
+/// audio, delete.
 Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer, AudioClipDoc clip, Offset at,
     {VoidCallback? onOpen}) async {
   final step = s.editStep.toDouble();
@@ -584,6 +585,9 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
   final v = await showLongPressMenu<String>(context, at: at, title: s.audioClipName(clip), style: s.settings.longPressMenu,
       actions: [
         if (onOpen != null) const MenuAction('open', 'Clip settings…', Icons.tune),
+        // The clip pitch editor (Lark, 1.1.0): one voice's notes, full screen.
+        MenuAction('pitch', 'Edit pitch…', Icons.multiline_chart, enabled: s.project.asset(clip.assetId) != null,
+            hint: s.project.asset(clip.assetId) == null ? 'Its audio file is missing' : null),
         if (canSplit) const MenuAction('split', 'Split at the playhead', Icons.content_cut),
         const MenuAction('duplicate', 'Duplicate', Icons.copy),
         MenuAction('reverse', 'Reverse', Icons.swap_horiz, checked: clip.reverse),
@@ -608,6 +612,10 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
     case 'open':
       s.selectAudioClip(layer, clip);
       onOpen?.call();
+    case 'pitch':
+      if (!context.mounted) return;
+      await showPitchEditor(context, s, layer, clip);
+      return;
     case 'split':
       s.selectAudioClip(layer, clip);
       s.splitAudioClips(step);

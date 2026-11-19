@@ -3,6 +3,15 @@ import 'package:flutter/foundation.dart';
 
 import 'device_target.dart';
 
+/// A device slot's cost as its header shows it: its share of one core (0.01 = 1 %; null until measured), the latency
+/// it reports now in ms (0 bypassed) and whether it plays its armed, near-zero-delay version now.
+class DeviceCost {
+  const DeviceCost({this.cpuShare, this.latencyMs = 0, this.armed = false});
+  final double? cpuShare;
+  final double latencyMs;
+  final bool armed;
+}
+
 /// What the engine offers per device slot: its output level and its auto gain (a trim that keeps the device's output
 /// as loud as its input). The device shell (header, footer, FX chain rows) reads it through [current]; the engine's
 /// implementation (EngineSlotAudio, lib/model/engine_slot_audio.dart) is set while an engine runs. Every method is
@@ -41,6 +50,10 @@ abstract class DeviceSlotAudio {
   /// Whether [t] in particular takes auto gain (default [hasAutoGain]; the engine's: a track's or the master's
   /// effect, not an instrument, a per-note effect or a rack's child).
   bool autoGainAvailable(DeviceTarget t) => hasAutoGain;
+
+  /// [t]'s cost now, or null when the engine has none for it (no engine, busy, not loaded, not a plain slot). Polled
+  /// a few times a second only while [t]'s header is on screen; each read keeps the engine timing that chain for 2 s.
+  DeviceCost? cost(DeviceTarget t) => null;
 
   /// Whether the shell can show [t]'s meter now.
   static bool meterFor(DeviceTarget t) => current?.meterAvailable(t) ?? false;

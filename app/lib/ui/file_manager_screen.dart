@@ -30,6 +30,7 @@ import 'midi_file_actions.dart';
 import 'theme.dart';
 import 'tokens.dart';
 import 'widgets.dart' show ResetOnDoubleTap;
+import 'crow.dart';
 
 /// The Files section. Landscape and desktop (wider than tall, or 900 dp and up) show the folder tree on the left;
 /// portrait puts it in a drawer and leads with the breadcrumb. Tap selects, double-tap opens in Build, a long
@@ -455,8 +456,12 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     if (subfolders.isEmpty && assets.isEmpty) {
       return Center(child: Padding(
         padding: const EdgeInsets.all(Space.l),
-        child: Text(_emptyText(folder, searching), textAlign: TextAlign.center,
-            style: const TextStyle(color: Neon.dim, fontSize: TypeScale.label)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const PerchedCrow(),
+          const SizedBox(height: Space.xs),
+          Text(_emptyText(folder, searching), textAlign: TextAlign.center,
+              style: const TextStyle(color: Neon.dim, fontSize: TypeScale.label)),
+        ]),
       ));
     }
     final list = _size < _listBelow;

@@ -49,6 +49,11 @@ std::span<const MergedDevice> mergedSpaceDevices();     // builtin_fx_merged_spa
 // Presets of a merged device's variants that are new DSP (no old effect to migrate them from), appended after its
 // old effects' (fx::mergedPresets): the Compressor's Duck (builtin_fx_duck.cpp). Each names its `variant`.
 std::span<const BuiltinPreset> newVariantPresets(std::string_view id);
+// 1.1.0's presets for variants that had fewer than 8 (the Compressor's Down, the Limiter, Transient, Phaser;
+// builtin_more_presets.cpp), appended last. Each names its `variant`.
+std::span<const BuiltinPreset> appendedVariantPresets(std::string_view id);
+// The same for the EQ's and the Filter's 1.1.0 modes (Bands' dynamics, Linear, Match; Wah): builtin_fx_eq_plume.cpp.
+std::span<const BuiltinPreset> newEqFilterVariantPresets(std::string_view id);
 
 // Every merged device, in family order.
 const std::vector<const MergedDevice*>& mergedDevices();
@@ -70,6 +75,12 @@ uint32_t variantIndex(const MergedDevice& device, const std::vector<std::pair<st
 const ModuleDescriptor& legacyVariantDescriptor(const ModuleDescriptor& legacy, std::string_view id,
                                                 std::string_view name, std::span<const std::string_view> labels,
                                                 uint32_t index);
+
+// legacyVariantDescriptor with `after` appended after `variant` (1.1.0: Talon's Down extras and its talon_layout
+// marker), so the base's indices and `variant`'s place hold for older racks' routes.
+const ModuleDescriptor& extendedVariantDescriptor(const ModuleDescriptor& base, std::string_view id,
+                                                  std::string_view name, std::span<const std::string_view> labels,
+                                                  uint32_t index, std::span<const ParameterDescriptor> after);
 
 // The `variant` parameter itself, for a variant that builds its own table: a choice of `labels`, default `index`,
 // structural (no automation, modulation or MIDI mapping, no smoothing).

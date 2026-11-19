@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'device_names.dart';
 import 'device_target.dart';
 import 'mixer_fx.dart';
 import 'project.dart';
@@ -22,8 +23,10 @@ class ModulatorKinds {
   static const midi = 'org.caw.mod.midi';
   static const builtins = [lfo, envelope, follower, steps, random, macros, midi];
 
-  /// A short name before the descriptor arrives, and the name a new one gets ("LFO 2").
-  static String label(String id) => switch (id) {
+  /// A short name before the descriptor arrives, and the name a new one gets ("Orbit 2"): its [DeviceNames] name.
+  static String label(String id) => DeviceNames.name(id, _plain(id));
+
+  static String _plain(String id) => switch (id) {
         lfo => 'LFO',
         envelope => 'Envelope',
         follower => 'Follower',
@@ -489,7 +492,7 @@ extension ModulationEdits on AppState {
   /// by default (its notes, or a follower its audio). Null at the budget.
   ModulatorDoc? addModulator(String componentId, {String? layerId}) {
     if (project.modulators.length >= kMaxModulators) return null;
-    final base = componentInfo(componentId)?.label ?? ModulatorKinds.label(componentId);
+    final base = componentInfo(componentId)?.shortLabel ?? ModulatorKinds.label(componentId);
     final same = project.modulators.where((m) => m.componentId == componentId).length;
     final info = componentInfo(componentId);
     final takesAudio = info?.ports.any((p) => p.input && p.isAudio) ?? componentId == ModulatorKinds.follower;

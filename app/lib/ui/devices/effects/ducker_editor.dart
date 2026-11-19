@@ -56,7 +56,7 @@ class DuckerPage extends StatelessWidget {
       HeroWithMeters(height: 200, hero: HeroCanvas(
         color: scope.accent,
         height: 200,
-        caption: 'DUCK',
+        caption: t.componentId == 'org.caw.tremolo' ? 'SHAPE' : 'DUCK',
         grid: false,
         readout: DeviceDisplay(builder: (context, f) {
           final gr = f?.values['gr'] ?? 0;

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.9-alpha.1+13
+version: 1.1.0-alpha.1+14
 
 environment:
   sdk: ^3.13.5
@@ -87,6 +87,10 @@ flutter:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
         - asset: assets/fonts/JetBrainsMono-Bold.ttf
           weight: 700
+    # C.A.W's own line icons (scripts/icon-font.js): the family hints and the modulation quill.
+    - family: CawIcons
+      fonts:
+        - asset: assets/fonts/CawIcons.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

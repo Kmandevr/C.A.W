@@ -7,6 +7,7 @@ import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
+import 'package:caw/model/device_names.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/effect_recents.dart';
 import 'package:caw/model/files_catalog.dart';
@@ -129,7 +130,10 @@ void main() {
       final s = state('org.caw.synth.flagship');
       final m = ModMatrix(DeviceTarget(s, 'a', DeviceTarget.instrumentSlot));
       expect(m.sourceValue(ModSource.lfo1), ModSource.lfo1.value);
-      expect(m.sourceValue(ModSource.macro1), 0);
+      // 1.1.0 (Raven): LFO 4 and Macro 1..8 at the end of the flagship's own list, after Accent (14).
+      expect(m.sourceValue(ModSource.lfo4), 15);
+      expect(m.sourceValue(ModSource.macro1), 16);
+      expect(m.sourceValue(ModSource.macro8), 23);
     });
 
     test('every built-in effect has a browser entry', () {
@@ -157,7 +161,7 @@ void main() {
       expect(EffectCatalog.of('org.caw.tapestop')!.category, EffectCategory.pitchTime);
       expect(EffectCatalog.of('org.caw.bitcrush')!.category, EffectCategory.creative);
       expect(EffectCatalog.of('org.caw.ladder')!.category, EffectCategory.eqFilter);
-      expect(EffectCatalog.of('org.caw.compressor')!.keywords, contains('glue'));
+      expect(DeviceNames.of('org.caw.compressor')!.tags, contains('glue'));
       // One entry per merged device, found by its old effects' names too.
       for (final id in MergedDevices.ids) {
         expect(EffectCatalog.of(id)?.description, isNotEmpty, reason: id);
@@ -165,7 +169,7 @@ void main() {
       expect(EffectCatalog.of('org.caw.drive')!.category, EffectCategory.drive);
       expect(EffectCatalog.of('org.caw.drive')!.matches('saturator', 'Drive'), isTrue);
       expect(EffectCatalog.of('org.caw.delay')!.matches('ping pong', 'Delay'), isTrue);
-      expect(EffectCatalog.of('org.caw.compressor')!.matches('ducker', 'Compressor'), isTrue);
+      expect(EffectCatalog.of('org.caw.tremolo')!.matches('ducker', 'Tremolo/Pan'), isTrue);  // 1.1.0: Shape moved there
       expect(EffectCatalog.of('org.caw.stutter')!.matches('beat repeat', 'Stutter'), isTrue);
       expect(EffectCategory.byLabel('EQ & Filter'), EffectCategory.eqFilter);
       expect(EffectCategory.byLabel('Nope'), isNull);
@@ -200,21 +204,30 @@ void main() {
       await openBrowser(tester, s)();
       expect(find.byKey(const ValueKey('fx-browser-tabs')), findsOneWidget);
       expect(find.text('DYNAMICS'), findsOneWidget);
-      expect(find.text(EffectCatalog.of('org.caw.compressor')!.description), findsOneWidget);
+      // The list builds lazily; with 1.1.0's devices Talon sits below the first screen.
+      final talon = find.text(EffectCatalog.of('org.caw.compressor')!.description);
+      await tester.scrollUntilVisible(talon, 200,
+          scrollable: find.byType(Scrollable).last);
+      expect(talon, findsOneWidget);
       await tab(tester, 'racks');
-      expect(find.text('FX rack'), findsOneWidget);
-      expect(find.text('Compressor'), findsNothing);
+      expect(find.text('Nest · FX rack'), findsOneWidget);
+      expect(find.text('Talon · Compressor'), findsNothing);
       await tab(tester, 'all');
       // Search reaches descriptions and keywords.
       await tester.enterText(find.byKey(const ValueKey('fx-browser-search')), 'multipass');
       await tester.pump();
-      expect(find.text('Multiband rack'), findsOneWidget);
-      expect(find.text('EQ'), findsNothing);
+      expect(find.text('Branch · Multiband rack'), findsOneWidget);
+      expect(find.text('Plume · EQ'), findsNothing);
       await tester.enterText(find.byKey(const ValueKey('fx-browser-search')), '');
       await tester.pump();
       // A star puts it in Favourites at the top.
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('fx-fav-org.caw.compressor')), 200,
+          scrollable: find.byType(Scrollable).last);
+      await tester.ensureVisible(find.byKey(const ValueKey('fx-fav-org.caw.compressor')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('fx-fav-org.caw.compressor')));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('FAVOURITES'), -120, scrollable: find.byType(Scrollable).last);
       expect(find.text('FAVOURITES'), findsOneWidget);
       expect(find.byKey(const ValueKey('fx-browser-Favourites-org.caw.compressor')), findsOneWidget);
       // A pick goes first in Recently used.

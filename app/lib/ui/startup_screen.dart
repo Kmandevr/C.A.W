@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
+import '../model/easter_eggs.dart';
 import '../model/startup_progress.dart';
 import '../model/updates/update_service.dart';
 import '../version.dart';
@@ -143,7 +144,8 @@ class _StartupGateState extends State<StartupGate> with SingleTickerProviderStat
 /// The startup screen itself: the logo (revealed from a waveform at Full motion, still otherwise), the loading
 /// steps as [progress] reports them, and [version].
 class StartupScreen extends StatefulWidget {
-  const StartupScreen({super.key, required this.progress, required this.version, this.updateLine, this.onRevealDone});
+  const StartupScreen({super.key, required this.progress, required this.version, this.updateLine, this.onRevealDone,
+      this.now, this.blink});
   final StartupProgress progress;
   final String version;
 
@@ -153,11 +155,15 @@ class StartupScreen extends StatefulWidget {
   /// "Update available: vX" when an earlier launch's check found one (startup never waits on the network).
   final String? updateLine;
 
+  /// The date the crow dresses for, and whether it blinks this launch (null: today, and now and then); for tests.
+  final DateTime? now;
+  final bool? blink;
+
   @override
   State<StartupScreen> createState() => _StartupScreenState();
 }
 
-class _StartupScreenState extends State<StartupScreen> with SingleTickerProviderStateMixin {
+class _StartupScreenState extends State<StartupScreen> with TickerProviderStateMixin {
   // A Ticker, so the reveal runs at the display's real rate; it stops when the reveal ends.
   late final AnimationController _reveal = AnimationController(vsync: this, duration: revealDuration)
     ..addStatusListener((status) {
@@ -165,9 +171,16 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
     });
   bool _told = false;
 
+  /// The crow's dress today, and its rare blink (an eyelid 0 to 1, after the reveal).
+  late final CrowSeason _season = crowSeasonOn(widget.now ?? DateTime.now());
+  late final bool _blinks = widget.blink ?? startupBlinks(math.Random());
+  // A short wait, the lid down and up again: on the controller, so no timer outlives the screen.
+  late final AnimationController _lid = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+
   void _done() {
     if (_told) return;
     _told = true;
+    if (_blinks && _moving == true) _lid.forward(from: 0);
     // After this frame: the gate's setState must not run inside this widget's build or layout.
     WidgetsBinding.instance.addPostFrameCallback((_) => widget.onRevealDone?.call());
   }
@@ -193,6 +206,7 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
 
   @override
   void dispose() {
+    _lid.dispose();
     _reveal.dispose();
     super.dispose();
   }
@@ -204,8 +218,17 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
           child: LayoutBuilder(builder: (context, box) {
             final logo = math.min(box.maxWidth * 0.36, box.maxHeight * 0.24).clamp(64.0, 148.0);
             final listWidth = math.min(280.0, box.maxWidth - 32);
-            final image = Image(
+            final plain = Image(
                 image: _logoImage, width: logo, height: logo, filterQuality: FilterQuality.medium, semanticLabel: 'C.A.W.');
+            // The seasonal dress and the blink draw over the logo; the logo itself is never redrawn.
+            final image = _season == CrowSeason.none && !_blinks
+                ? plain
+                : SizedBox.square(
+                    dimension: logo,
+                    child: CustomPaint(
+                        key: ValueKey('startup-crow-${_season.name}'),
+                        foregroundPainter: CrowDressPainter(season: _season, lid: _lid),
+                        child: plain));
             return Column(children: [
               const Spacer(flex: 5),
               // Layers of their own: the reveal repaints every frame without the steps and lines, and a step that
@@ -254,6 +277,74 @@ class _StartupScreenState extends State<StartupScreen> with SingleTickerProvider
           }),
         ),
       );
+}
+
+/// The startup crow's seasonal dress (a scarf, a party hat, a pumpkin beside it) and its eyelid, drawn over the logo
+/// in the logo's own coordinates ([WaveformRevealPainter._svg]).
+class CrowDressPainter extends CustomPainter {
+  CrowDressPainter({required this.season, required this.lid}) : super(repaint: lid);
+  final CrowSeason season;
+  final Animation<double> lid;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final k = size.width / 512;
+    Offset at(double x, double y) => WaveformRevealPainter._svg((x, y)) * k;
+    switch (season) {
+      case CrowSeason.scarf:
+        final band = Paint()
+          ..color = const Color(0xFFE0304E)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 26 * k
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(at(170, 392), at(300, 356), band);
+        canvas.drawLine(at(205, 384), at(190, 450), band..strokeWidth = 20 * k);
+        final stripe = Paint()
+          ..color = const Color(0xFFF2F2F7)
+          ..strokeWidth = 5 * k;
+        canvas.drawLine(at(240, 365), at(246, 389), stripe);
+        canvas.drawLine(at(272, 357), at(278, 381), stripe);
+      case CrowSeason.partyHat:
+        final hat = Path()
+          ..moveTo(at(190, 158).dx, at(190, 158).dy)
+          ..lineTo(at(240, 40).dx, at(240, 40).dy)
+          ..lineTo(at(285, 156).dx, at(285, 156).dy)
+          ..close();
+        canvas.drawPath(hat, Paint()..color = _violet);
+        canvas.drawPath(hat, Paint()
+          ..color = _cyan
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4 * k);
+        canvas.drawCircle(at(240, 40), 12 * k, Paint()..color = const Color(0xFFFFE81F));
+      case CrowSeason.pumpkin:
+        final c = at(60, 420);
+        final body = Paint()..color = const Color(0xFFFF8A1F);
+        for (final dx in [-16.0, 0.0, 16.0]) {
+          canvas.drawOval(Rect.fromCenter(center: c + Offset(dx * k, 0), width: 34 * k, height: 50 * k), body);
+        }
+        canvas.drawLine(c + Offset(0, -24 * k), c + Offset(4 * k, -38 * k), Paint()
+          ..color = _green
+          ..strokeWidth = 6 * k
+          ..strokeCap = StrokeCap.round);
+      case CrowSeason.none:
+        break;
+    }
+    // The controller's first half waits; then the lid closes and opens.
+    final v = lid.value;
+    final t = v < 0.5 ? 0.0 : (v < 0.75 ? (v - 0.5) / 0.25 : (1 - v) / 0.25);
+    if (t > 0) {
+      // The eyelid: the face's dark closing over the pink eye from above.
+      final eye = WaveformRevealPainter._svg(WaveformRevealPainter._eye) * k;
+      final r = WaveformRevealPainter._eyeRadius * 1.9 * k;
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(eye.dx - r, eye.dy - r, eye.dx + r, eye.dy - r + 2 * r * t));
+      canvas.drawCircle(eye, r, Paint()..color = const Color(0xFF1B1C25));
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(CrowDressPainter old) => old.season != season || old.lid != lid;
 }
 
 /// The steps begun so far, each appearing as it starts and ticking off as it ends.

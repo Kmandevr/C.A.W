@@ -1,4 +1,4 @@
-// FX consolidation, part A: the merged Compressor changes variant (keyed, plain, key notes) while playing without allocating on the audio thread.
+// FX consolidation, part A, and 1.1.0's split: the Compressor, Gate and Ducker change variant (keyed, plain, key notes) while playing without allocating on the audio thread.
 #include <string>
 #include <vector>
 
@@ -21,7 +21,7 @@ TEST(the_merged_compressor_changes_variant_while_playing_without_allocating_on_t
         p.layers[0].pattern = "beats";
         ComponentSpec comp;
         comp.id = "org.caw.compressor";
-        comp.params = {{"variant", variant}};
+        comp.params = {{"variant", variant}, {"talon_layout", 1}};  // 1.1.0: Down, Dynamics, Up, Bus
         comp.hasKey = true;
         comp.key.layer = "k";
         p.layers[1].components.push_back(comp);
@@ -36,6 +36,18 @@ TEST(the_merged_compressor_changes_variant_while_playing_without_allocating_on_t
         tr.params = {{"attack", 0.5}};
         p.layers[1].components.push_back(tr);
         p.layers[1].components.push_back(lim);
+        // 1.1.0's Gate and Ducker cycling through their three variants each, keyed (Level's look-ahead included).
+        ComponentSpec gate, duck;
+        gate.id = "org.caw.gate";
+        gate.params = {{"variant", variant % 3}, {"sidechain", 1}};
+        gate.hasKey = true;
+        gate.key.layer = "k";
+        duck.id = "org.caw.duck";
+        duck.params = {{"variant", (variant + 1) % 3}, {"lookahead", 2}};
+        duck.hasKey = true;
+        duck.key.layer = "k";
+        p.layers[1].components.push_back(gate);
+        p.layers[1].components.push_back(duck);
         master.id = variant % 2 ? "org.caw.ducker" : "org.caw.dynamics";
         master.params = {{"mix", 0.5}};
         p.masterComponents.push_back(master);
@@ -56,6 +68,8 @@ TEST(the_merged_compressor_changes_variant_while_playing_without_allocating_on_t
             e.process(left.data(), right.data(), 192);
             e.componentDisplay("t", 0, shown, 1024);
             e.componentDisplay("t", 1, shown, 1024);
+            e.componentDisplay("t", 4, shown, 1024);
+            e.componentDisplay("t", 5, shown, 1024);
         }
         operations += scope.count();
     }

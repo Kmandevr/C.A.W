@@ -105,11 +105,11 @@ void main() {
     });
 
     test('a theme in either mode is one object, so the Material theme is kept', () {
-      final light = dawnTheme.shown(true);
-      expect(dawnTheme.shown(true), same(light));
-      expect(light.shown(false), same(dawnTheme));
+      final light = jayTheme.shown(true);
+      expect(jayTheme.shown(true), same(light));
+      expect(light.shown(false), same(jayTheme));
       expect(Neon.theme(look: light).brightness, Brightness.light);
-      expect(Neon.theme(look: dawnTheme).brightness, Brightness.dark);
+      expect(Neon.theme(look: jayTheme).brightness, Brightness.dark);
     });
 
     test('ink is white on dark and the text colour on light', () {
@@ -122,7 +122,7 @@ void main() {
     test('Flat: no glow, no glass and solid fills, in both modes', () {
       for (final light in [false, true]) {
         final s = Settings();
-        s.chooseTheme('Flat');
+        s.chooseTheme('Jackdaw');
         s.setLookMode(light ? LookMode.light : LookMode.dark);
         expect(s.glass, isTrue, reason: 'the user\'s own setting stays');
         expect(Glass.enabled, isFalse);
@@ -131,7 +131,7 @@ void main() {
         expect(Neon.strokeGlow, 0);
         final r = Neon.ramp([const Color(0xFF000000), const Color(0xFFFFFFFF)]);
         expect(r[0], r[1]);
-        s.chooseTheme('Neon');
+        s.chooseTheme('Raven');
         expect(Glass.enabled, isTrue);
         expect(Neon.ramp([const Color(0xFF000000), const Color(0xFFFFFFFF)])[0].toARGB32(), 0xFF000000);
       }
@@ -143,7 +143,7 @@ void main() {
     setUp(() => dir = Directory.systemTemp.createTempSync('caw_modes'));
     tearDown(() => dir.deleteSync(recursive: true));
 
-    for (final (old, family) in [('Night', 'Dusk'), ('Calm neon', 'Neon'), ('Amber terminal', 'Amber')]) {
+    for (final (old, family) in [('Night', 'Jackdaw'), ('Calm neon', 'Raven'), ('Amber terminal', 'Magpie'), ('Neon', 'Raven'), ('Flat', 'Jackdaw'), ('Dusk', 'Jackdaw'), ('Dawn', 'Jay'), ('Amber', 'Magpie')]) {
       test('a saved "$old" opens as $family, dark', () async {
         File('${dir.path}/settings.json').writeAsStringSync(jsonEncode({'theme': old}));
         final s = await Settings.open(base: dir);
@@ -156,10 +156,10 @@ void main() {
 
     test('a custom theme named like a new family keeps its colours under another name', () async {
       Directory('${dir.path}/themes').createSync();
-      File('${dir.path}/themes/Dawn.theme').writeAsStringSync('---\nkind: theme\nname: Dawn\n---\nbg: #123456\n');
+      File('${dir.path}/themes/Jay.theme').writeAsStringSync('---\nkind: theme\nname: Jay\n---\nbg: #123456\n');
       final s = await Settings.open(base: dir);
-      expect(s.themeNamed('Dawn (mine)')['bg'].toARGB32(), 0xFF123456);
-      expect(s.isStarter('Dawn'), isTrue);
+      expect(s.themeNamed('Jay (mine)')['bg'].toARGB32(), 0xFF123456);
+      expect(s.isStarter('Jay'), isTrue);
     });
 
     test('Mode changes only the palette, saved, and the theme object is kept per mode', () async {
@@ -168,12 +168,12 @@ void main() {
         x.trackGap = 11;
         x.roundness = 1.5;
       });
-      await s.chooseTheme('Dawn');
+      await s.chooseTheme('Jay');
       final dark = s.activeTheme;
       await s.setLookMode(LookMode.light);
       expect(s.activeTheme.light, isTrue);
-      expect(Neon.bg.toARGB32(), dawnTheme.lightColors['bg']!.toARGB32());
-      expect((s.trackGap, s.roundness, s.themeName), (11.0, 1.5, 'Dawn'));
+      expect(Neon.bg.toARGB32(), jayTheme.lightColors['bg']!.toARGB32());
+      expect((s.trackGap, s.roundness, s.themeName), (11.0, 1.5, 'Jay'));
       await s.setLookMode(LookMode.dark);
       expect(s.activeTheme, same(dark));
       await s.setLookMode(LookMode.light);

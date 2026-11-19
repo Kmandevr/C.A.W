@@ -26,6 +26,7 @@ import '../pointer_input.dart';
 import '../theme.dart';
 import '../tokens.dart';
 import 'asset_views.dart' show MenuEntry, showCompactMenu;
+import '../crow.dart';
 
 /// The selected pad of a track's Drums, for the double tap's target.
 int? selectedDrumPad(AppState state, LayerDoc layer) =>
@@ -665,8 +666,13 @@ class _SampleBrowserViewState extends State<SampleBrowserView> with SingleTicker
         ? ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
             Padding(
               padding: const EdgeInsets.all(Space.xl),
-              child: Text(_all.isEmpty ? 'No audio files here yet. Pull down to read the folder again.' : 'Nothing matches.',
-                  textAlign: TextAlign.center, style: const TextStyle(color: Neon.dim, fontSize: TypeScale.label)),
+              child: CrowEmptyState(
+                  text: _all.isEmpty
+                      ? (_search.text.trim().isEmpty
+                          ? 'No audio files here yet. Pull down to read the folder again.'
+                          // A search in an empty library: rare, so a light line (the writing guide's puns).
+                          : 'Nothing to find in an empty nest yet. Pull down to read the folder again.')
+                      : 'Nothing matches.'),
             ),
           ])
         : ListView.builder(

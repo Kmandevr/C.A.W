@@ -20,7 +20,7 @@ void main() {
 
   test('the file is readable key: #RRGGBB text with a theme header', () {
     final f = calmNeon.toFile();
-    expect(f, startsWith('---\nkind: theme\nname: Neon\n---\n'));
+    expect(f, startsWith('---\nkind: theme\nname: Raven\n---\n'));
     expect(f, contains('bg: #07070B\n'));
     expect(f, contains('glow: on\n'));
   });
@@ -41,7 +41,7 @@ void main() {
   test('Neon colours, even const ones, read the active theme', () {
     const c = Neon.bg;
     expect(c.toARGB32(), 0xFF07070B);
-    Neon.active = starterThemes.firstWhere((t) => t.name == 'Dusk');
+    Neon.active = starterThemes.firstWhere((t) => t.name == 'Magpie');
     expect(c.toARGB32(), Neon.active['bg'].toARGB32());
     expect(Neon.layer(1).toARGB32(), Neon.active['layer2'].toARGB32());
     expect(Neon.glow(Neon.green), isEmpty); // Dusk has glow off

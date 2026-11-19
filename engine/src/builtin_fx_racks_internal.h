@@ -74,7 +74,7 @@ struct RackLayout {
 
 // A rack: a ModuleProcessor whose children are other built-ins, run on a 16-frame grid counted across blocks (so any
 // block size gives the same bits), asleep after 50 ms of silence in and out once every child is quiet.
-class RackBase : public ModuleProcessor, public RackContainer, public VariableLatency {
+class RackBase : public ModuleProcessor, public RackContainer, public VariableLatency, public ArmedVersion {
 public:
     ~RackBase() override;
     const ModuleDescriptor& descriptor() const noexcept override {
@@ -96,6 +96,9 @@ public:
     bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept override;
     bool loadState(const uint8_t* source, uint32_t size, uint32_t version) noexcept override;
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override;
+    // The armed signal reaches each child that has an armed version (their latencies then follow it).
+    void setArmed(bool armed) noexcept override;
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override;
 
 protected:
     struct Slot {
@@ -103,6 +106,7 @@ protected:
         uint32_t first = 0, count = 0;               // its parameters in the rack's
         bool keyed = false, keyEvents = false, active = false;
         const VariableLatency* variable = nullptr;
+        ArmedVersion* armed = nullptr;
         uint32_t latencyCap = 0;  // the most latency it may add (activate)
         double mix = -1.0;        // 1 on, 0 off, between while crossfading; -1 before the first block
     };

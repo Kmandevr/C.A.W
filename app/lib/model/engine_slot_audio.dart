@@ -60,6 +60,20 @@ class EngineSlotAudio extends DeviceSlotAudio {
     return m == null ? null : math.max(m.peakL, m.peakR);
   }
 
+  /// The last cost read for each slot, kept while the engine is busy so the header doesn't blink.
+  static final Expando<DeviceCost> _lastCost = Expando('slot cost');
+
+  @override
+  DeviceCost? cost(DeviceTarget t) {
+    final e = t.state.engine, use = t.use;
+    if (e == null || use == null || !_plain(t)) return null;
+    final at = _slot(t);
+    if (at == null) return null;
+    final c = e.componentCost(at.layer, at.index);
+    if (c == null) return _lastCost[use];
+    return _lastCost[use] = DeviceCost(cpuShare: c.cpuShare, latencyMs: c.latencyMs, armed: c.armed);
+  }
+
   @override
   bool autoGain(DeviceTarget t) => !t.isInstrument && _plain(t) && (t.use?.autoGain ?? false);
 

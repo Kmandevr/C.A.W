@@ -40,6 +40,9 @@ class ProjectMeta {
     this.bpm = 0,
     this.bytes = 0,
     this.folder,
+    this.bars = 0,
+    this.spentSeconds = 0,
+    this.lastExport,
   });
 
   final String id, name;
@@ -55,12 +58,16 @@ class ProjectMeta {
   final double seconds, bpm;
   final int bytes;
 
+  /// The card's stats line: the song's length in bars, the time spent on it and its last export (null: never).
+  final int bars, spentSeconds;
+  final DateTime? lastExport;
+
   /// The folder's id; null at the top level.
   final String? folder;
 
   ProjectMeta withFolder(String? f) => ProjectMeta(id: id, name: name, modified: modified, created: created,
       savedWithVersion: savedWithVersion, savedWithBuild: savedWithBuild, tracks: tracks, seconds: seconds, bpm: bpm,
-      bytes: bytes, folder: f);
+      bytes: bytes, folder: f, bars: bars, spentSeconds: spentSeconds, lastExport: lastExport);
 
   /// "0.9.0-beta.1 (2)", or "unknown".
   String get savedWith => savedWithVersion == null
@@ -76,6 +83,9 @@ class ProjectMeta {
         'seconds': seconds,
         'bpm': bpm,
         'bytes': bytes,
+        'bars': bars,
+        if (spentSeconds > 0) 'time_spent_s': spentSeconds,
+        if (lastExport != null) 'last_export': lastExport!.toUtc().toIso8601String(),
       };
 
   /// A cached entry from the index (untrusted): null when anything is out of range.
@@ -83,7 +93,10 @@ class ProjectMeta {
     if (raw is! Map) return null;
     final name = raw['name'], modified = raw['modified'], tracks = raw['tracks'], seconds = raw['seconds'],
         bpm = raw['bpm'], bytes = raw['bytes'];
-    if (name is! String || modified is! int || tracks is! int || seconds is! num || bpm is! num || bytes is! int) {
+    final bars = raw['bars'];
+    // An entry without the stats (an index from before them) is read again from its project.
+    if (name is! String || modified is! int || tracks is! int || seconds is! num || bpm is! num || bytes is! int ||
+        bars is! int || bars < 0) {
       return null;
     }
     if (tracks < 0 || tracks > 1 << 20 || !seconds.isFinite || seconds < 0 || !bpm.isFinite || bytes < 0) return null;
@@ -100,18 +113,23 @@ class ProjectMeta {
       bpm: bpm.toDouble(),
       bytes: bytes,
       folder: folder,
+      bars: bars,
+      spentSeconds: projectTimeSpentFromJson(raw['time_spent_s']),
+      lastExport: projectCreatedFromJson(raw['last_export']),
     );
   }
 
   /// Reads a project file's details from its decoded JSON [j] (on the scanning isolate).
   static ProjectMeta fromProject(String id, Map<String, dynamic> j, {required DateTime modified, required int bytes}) {
-    var tracks = 0;
+    var tracks = 0, bars = 0;
     var seconds = 0.0, bpm = 0.0;
     try {
       final doc = ProjectDoc.fromJson(j);
       tracks = doc.layers.where((l) => !l.isFolder).length;
       bpm = doc.bpm.isFinite && doc.bpm > 0 ? doc.bpm : 0;
       seconds = bpm <= 0 ? 0 : doc.arrangementEndSteps / 4 * 60 / bpm;
+      final perBar = doc.stepsPerBar;
+      bars = perBar <= 0 ? 0 : (doc.arrangementEndSteps / perBar).ceil();
     } catch (_) {
       // Details that don't parse stay zero; the name and dates still show.
     }
@@ -127,6 +145,9 @@ class ProjectMeta {
       seconds: seconds.isFinite ? seconds : 0,
       bpm: bpm,
       bytes: bytes,
+      bars: bars,
+      spentSeconds: projectTimeSpentFromJson(j['time_spent_s']),
+      lastExport: projectCreatedFromJson(j['last_export']),
     );
   }
 }

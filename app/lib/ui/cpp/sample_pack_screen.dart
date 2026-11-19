@@ -17,6 +17,7 @@ import '../theme.dart';
 import 'tool_kit.dart';
 import '../pointer_input.dart';
 import '../panel_motion.dart';
+import '../crow.dart';
 
 /// Opens the maker full screen, with [instrumentId] picked when given.
 Future<void> openSamplePackMaker(BuildContext context, AppState state, {String? instrumentId}) =>
@@ -109,7 +110,7 @@ class SamplePackScreenState extends State<SamplePackScreen> {
     super.dispose();
   }
 
-  String get _defaultName => _instrument == null ? 'Pack' : packFolderName(s.componentLabel(_instrument!));
+  String get _defaultName => _instrument == null ? 'Pack' : packFolderName(s.componentInfo(_instrument!)?.shortLabel ?? s.componentLabel(_instrument!));
 
   List<int> get notes => [for (var n = _from; n <= _to; n += _step) n];
   List<int> get velocities => velocityLayers[_layers]!;
@@ -371,7 +372,7 @@ class _ResultCard extends StatelessWidget {
           key: const ValueKey('pack-save-zip'),
           onPressed: saving ? null : onSave,
           icon: saving
-              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const CrowLoader(size: 14)
               : const Icon(Icons.file_upload_outlined, size: 16),
           label: Text(saving ? 'Zipping…' : 'Save pack (.zip)…'),
           style: TextButton.styleFrom(foregroundColor: Neon.green),

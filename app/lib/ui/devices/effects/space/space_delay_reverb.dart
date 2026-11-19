@@ -14,7 +14,9 @@ import '../../kit/feel.dart';
 import '../../kit/hero.dart';
 import '../effect_page.dart';
 import '../space_editors.dart' show DelayHero, ReverbHero, delayModeIcon, delaySeconds;
+import 'space_delay_modes.dart';
 import 'space_devices.dart';
+import 'space_reverb_modes.dart';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Delay
@@ -29,11 +31,14 @@ class DelayDevicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    final cards = VariantCards(height: 50, icon: (c, r, i, col) =>
+        i >= 2 ? delayNewModeIcon(c, r.deflate(2), i, col) : delayModeIcon(c, r, i == 0 ? 0 : 1, col));
+    if (variantOf(context) >= 2) return DelayModesPage(cards: cards);
     final digital = variantOf(context) == 0;
     final free = _isFree(t.param('sync'), t.value('sync'));
     final dual = digital && t.value('mode').round() == 2;
     return mergedPage(context, 'delay',
-      cards: VariantCards(icon: (c, r, i, col) => delayModeIcon(c, r, i == 0 ? 0 : 1, col), height: 50),
+      cards: cards,
       hero: HeroWithMeters(height: 190, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 190,
@@ -145,9 +150,12 @@ class ReverbDevicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    final cards = VariantCards(height: 50, icon: (c, r, i, col) =>
+        i >= 2 ? reverbNewModeIcon(c, r.deflate(2), i, col) : _algorithmIcon(c, r, i, col));
+    if (variantOf(context) >= 2) return ReverbModesPage(cards: cards);
     final hall = variantOf(context) == 0;
     return mergedPage(context, 'reverb',
-      cards: VariantCards(icon: _algorithmIcon, height: 50),
+      cards: cards,
       hero: HeroWithMeters(height: 200, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 200,

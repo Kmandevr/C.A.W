@@ -1,4 +1,4 @@
-// The Compressor's Duck variant (1.0.8): its static curve, hold, detection modes, key against no key, block sizes, presets, display and reference renders.
+// Ducker's Duck variant (org.caw.duck variant 0; 1.0.8-1.0.9 the Compressor's variant 4): its static curve, hold, detection modes, key against no key, block sizes, presets, display and reference renders.
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -19,7 +19,7 @@ using namespace caw;
 namespace {
 
 using Values = std::vector<std::pair<std::string, double>>;
-constexpr const char* kCompressor = "org.caw.compressor";
+constexpr const char* kDuck = "org.caw.duck";  // 1.1.0 (1.0.8-1.0.9: org.caw.compressor variant 4)
 constexpr double kPi = 3.14159265358979323846;
 
 const ModuleRegistry& registry() {
@@ -69,7 +69,7 @@ Stereo kicks(size_t frames) {
 }
 
 std::unique_ptr<ModuleProcessor> duck() {
-    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kCompressor, {{"variant", 4.0}});
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kDuck, {{"variant", 0.0}});
     CHECK(p != nullptr);
     if (p) CHECK(p->activate(48000, 512));
     return p;
@@ -134,25 +134,28 @@ double steadyGain(const Values& v) {
 
 }  // namespace
 
-TEST(duck_is_the_compressors_fifth_variant_keyed_without_latency) {
-    const fx::MergedDevice* m = fx::findMergedDevice(kCompressor);
-    CHECK(m && m->variants.size() == 5u && m->variants[4].name == "Duck");
-    if (!m || m->variants.size() < 5) return;
-    const ModuleDescriptor& d = m->variants[4].descriptor();
-    CHECK(d.id == std::string(kCompressor));
+TEST(duck_is_the_duckers_first_variant_keyed_without_latency) {
+    const fx::MergedDevice* m = fx::findMergedDevice(kDuck);
+    CHECK(m && m->variants.size() == 3u && m->variants[0].name == "Duck");
+    if (!m || m->variants.size() < 3) return;
+    const ModuleDescriptor& d = m->variants[0].descriptor();
+    CHECK(d.id == std::string(kDuck));
     CHECK(ComponentChain::isKeyedEffect(d));
     CHECK_EQ(d.latencyFrames, 0u);
     const char* ids[] = {"threshold", "amount", "attack", "hold", "release", "detection", "output", "mix", "sidechain", "variant"};
-    CHECK_EQ(d.parameterCount, 10u);
+    // 1.1.0 appends the sidechain filter after `variant` (sc_hpf, sc_lpf, sc_listen), so `variant` keeps its place.
+    CHECK_EQ(d.parameterCount, 13u);
     for (uint32_t k = 0; k < d.parameterCount && k < 10; ++k) CHECK(d.parameters[k].id == std::string(ids[k]));
-    const ParameterDescriptor& variant = d.parameters[d.parameterCount - 1];
-    CHECK_EQ(variant.defaultValue, 4.0);
+    CHECK(d.parameters[10].id == std::string("sc_hpf") && d.parameters[11].id == std::string("sc_lpf") &&
+          d.parameters[12].id == std::string("sc_listen"));
+    const ParameterDescriptor& variant = d.parameters[9];
+    CHECK_EQ(variant.defaultValue, 0.0);
     CHECK(!variant.automatable && !variant.modulatable);
     CHECK_EQ(d.parameters[5].choiceCount, 3u);  // RMS, Peak, ISP
-    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kCompressor, {{"variant", 4.0}});
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kDuck, {{"variant", 0.0}});
     CHECK(p && &p->descriptor() == &d);
-    // The other variants' choice lists grew to five too; their own parameters are untouched.
-    CHECK_EQ(m->variants[0].descriptor().parameters[m->variants[0].descriptor().parameterCount - 1].choiceCount, 5u);
+    // Its `variant` lists the Ducker's three (Duck, Level, Carve).
+    CHECK_EQ(variant.choiceCount, 3u);
 }
 
 TEST(duck_pulls_the_level_above_the_threshold_by_its_amount_in_every_detection_mode) {
@@ -241,8 +244,8 @@ TEST(duck_follows_the_key_when_external_and_its_own_input_otherwise) {
     // In a chain with no track keying it, External hears silence: nothing ducks (as the Compressor variant).
     std::string error;
     ComponentSpec spec;
-    spec.id = kCompressor;
-    spec.params = {{"variant", 4}, {"threshold", -20}, {"amount", 1}, {"sidechain", 1}};
+    spec.id = kDuck;
+    spec.params = {{"variant", 0}, {"threshold", -20}, {"amount", 1}, {"sidechain", 1}};
     auto chain = ComponentChain::build(registry(), {spec}, 48000.0, error);
     CHECK(chain != nullptr);
     if (!chain) return;
@@ -280,8 +283,8 @@ TEST(duck_keeps_ducking_through_a_gap_in_its_input_while_the_key_pumps) {
     // The same in a track's chain, which skips a sleeping effect: its key is heard there too.
     std::string error;
     ComponentSpec spec;
-    spec.id = kCompressor;
-    spec.params = {{"variant", 4}};
+    spec.id = kDuck;
+    spec.params = {{"variant", 0}};
     for (const auto& [id, x] : v) spec.params.emplace_back(id, x);
     auto chain = ComponentChain::build(registry(), {spec}, 48000.0, error);
     CHECK(chain != nullptr);
@@ -370,17 +373,17 @@ TEST(duck_gives_the_same_bits_at_any_block_size) {
 TEST(duck_presets_are_job_named_and_duck_a_bass_under_kicks) {
     size_t count = 0;
     const Stereo in = bass(48000), key = kicks(48000);
-    for (const BuiltinPreset& preset : builtinPresets(kCompressor)) {
+    for (const BuiltinPreset& preset : builtinPresets(kDuck)) {
         bool isDuck = false, keyed = false;
         for (const auto& [k, x] : preset.values) {
-            isDuck = isDuck || (k == "variant" && x == 4.0);
+            isDuck = isDuck || (k == "variant" && x == 0.0);
             keyed = keyed || (k == "sidechain" && x == 1.0);
         }
         if (!isDuck) continue;
         ++count;
         Values values;
-        CHECK(applyBuiltinPreset(kCompressor, preset.name, values));
-        auto p = std::unique_ptr<ModuleProcessor>(createComponent(registry(), kCompressor, values).release());
+        CHECK(applyBuiltinPreset(kDuck, preset.name, values));
+        auto p = std::unique_ptr<ModuleProcessor>(createComponent(registry(), kDuck, values).release());
         CHECK(p && p->activate(48000, 512));
         if (!p) continue;
         // A leveller hears its own input: louder (peaks near -3 dBFS), so the peak catcher's -6 dB is crossed too.
@@ -397,8 +400,8 @@ TEST(duck_presets_are_job_named_and_duck_a_bass_under_kicks) {
         if (!(most < -1.0)) cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + " does not reduce");
     }
     CHECK(count >= 8u);
-    CHECK(findBuiltinPreset(kCompressor, "Kick duck bass") && findBuiltinPreset(kCompressor, "Voice over music") &&
-          findBuiltinPreset(kCompressor, "Gentle leveller"));
+    CHECK(findBuiltinPreset(kDuck, "Kick duck bass") && findBuiltinPreset(kDuck, "Voice over music") &&
+          findBuiltinPreset(kDuck, "Gentle leveller"));
 }
 
 TEST(duck_publishes_its_levels_and_reduction) {

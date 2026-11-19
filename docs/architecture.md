@@ -219,6 +219,10 @@ The owner put per-note effects in the beta ([decisions](decisions.md), 2026-11-1
 - **Expression:** each slot's event inputs get only its note's events; per-note link sources (`note.pitch`, `.velocity`, `.pressure`, `.timbre`, `.gate`, `.age`; `modulation_links.*`) are worked out per slot and frame, global modulator links once per chunk (`ModChainKind::NoteFx`) and added. Latency is the same for every slot and counts with the instrument's in the layer's compensation.
 - **Swaps:** a new rack (other components or voice count) crossfades in over 20 ms in the same slots; turning per-note FX off crossfades back to the dry voices.
 - **Project JSON, C API, quality:** per layer `"noteComponents"` and `"noteVoices"`; automation and links of kind `"noteComponent"`; `CAW_NOTE_COMPONENT` component indices; `caw_engine_note_fx_stats` (API 22). Live budget: Eco min(B, 4), Normal B, High min(B, 16), read at each note; nothing changes on CPU overload; an export uses the same rules. A project with per-note FX on an instrument without a voice bus, or an effect that can't run per note, is refused with a clear error.
+
+### MIDI effects before the instrument [Fact: built 2026-11-19, 1.1.0]
+
+A layer's `midiComponents` are event processors (one event input, one event output) that run in order on its notes before its instrument, as entries 1.. of the instrument's chain, so they rebuild, crossfade, automate and save state as any entry does; the per-note FX and modulation taps see their output ([engine](engine.md#midi-effects-110)).
 - **CPU:** about (active slots + overflow) × the chain's per-instance cost while notes sound; free slots don't run. Figures in [engine](engine.md#per-note-fx-host-127-steps-46); phone figures are **[Assumption]** until measured on the S22+. Memory is the limit with large effects (18 × reverb.pro for 16 voices).
 - **App:** a "Per note" section above the track effects in the FX stack, with a voice-budget chip and a dot per slot, and "Run per note" in an effect card's menu (greyed out with a reason). The look and the overflow default are to confirm ([decisions](decisions.md)). Note sources in the mod matrix are not in the app yet.
 

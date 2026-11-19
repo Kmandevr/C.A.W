@@ -20,7 +20,7 @@ void main() {
 
   test('defaults: Neon (dark), compact, auto-update on at 400 ms, swap now', () async {
     final s = await Settings.open(base: dir);
-    expect(s.themeName, 'Neon');
+    expect(s.themeName, 'Raven');
     expect(s.density, Density.compact, reason: "compact by default (owner, 2026-11-09)");
     expect(s.liveUpdate, isTrue);
     expect(s.liveDelayMs, 400);
@@ -153,10 +153,10 @@ void main() {
   test('a starter theme is never overwritten: saving it makes a copy', () async {
     final s = await Settings.open(base: dir);
     final saved = await s.saveTheme(calmNeon.withColor('pink', const Color(0xFF00FF00)));
-    expect(saved.name, 'Neon copy');
-    expect(s.themeNamed('Neon')['pink'].toARGB32(), 0xFFFF2BD6);
+    expect(saved.name, 'Raven copy');
+    expect(s.themeNamed('Raven')['pink'].toARGB32(), 0xFFFF2BD6);
     await s.deleteTheme(saved.name);
-    expect(s.themeName, 'Neon');
+    expect(s.themeName, 'Raven');
     expect(s.customThemes, isEmpty);
   });
 

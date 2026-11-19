@@ -314,6 +314,7 @@ const List<SettingEntry> settingEntries = [
   _E('projects.newStart', _C.newProjects, 'New project starts from', 'Blank, or the Mid tempo template', ['template', 'new']),
   _E('projects.newTempo', _C.newProjects, 'New project tempo', 'A blank project\'s BPM', ['bpm', 'tempo', 'new']),
   _E('projects.newMeter', _C.newProjects, 'New project time signature', 'A blank project\'s beats per bar', ['meter', '4/4', 'beats']),
+  _E('projects.generatedNames', _C.newProjects, 'Name new projects', 'Short generated names like "Low Roost" instead of "New project"', ['name', 'untitled', 'generated']),
   _E('export.kind', _C.export, 'Default export', 'What the exporter opens on: loop, free length, one-shot, wavetable or MIDI',
       ['format', 'render', 'wav', 'midi']),
   _E('export.rate', _C.export, 'Export sample rate', '44.1 or 48 kHz', ['khz', 'render']),

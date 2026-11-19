@@ -168,7 +168,7 @@ endif()
 
 add_library(caw_core STATIC
   src/pattern.cpp
-  src/engine.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/flagship_banks.cpp src/builtin_flagship_presets.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
@@ -182,10 +182,16 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 # FX consolidation (1.0.8): merged devices and the migration of the ids they replace; one file pair per family part.
 target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_dynamics.cpp src/fx_migrate_dynamics.cpp src/builtin_fx_duck.cpp
+  src/builtin_fx_talon.cpp src/builtin_fx_hatch.cpp src/builtin_fx_duck_level_carve.cpp src/builtin_fx_dynsplit_presets.cpp  # 1.1.0: the Talon/Hatch/Duck split
+  src/builtin_more_presets.cpp  # 1.1.0: presets for the devices that had fewer than 8
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
+  src/builtin_fx_eq_plume.cpp src/eq_design.cpp src/builtin_fx_filters_wah.cpp  # 1.1.0: the EQ's Linear and Match, the Filter's Wah
   src/builtin_fx_merged_stereomod.cpp src/fx_migrate_stereomod.cpp
   src/builtin_fx_merged_space.cpp src/fx_migrate_space.cpp)
+# 1.1.0: new modes of merged devices (Delay, Reverb, Drive, Bit distortion, Convolver).
+target_sources(caw_core PRIVATE src/builtin_fx_delay_modes.cpp src/builtin_fx_reverb_modes.cpp
+  src/builtin_fx_drive_modes.cpp src/builtin_fx_bits_bitwise.cpp src/builtin_fx_cab.cpp)
 # modulators begin (#161: project modulation, its built-in modulators)
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
@@ -221,6 +227,14 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden C_VISIBIL
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 target_sources(caw_core PRIVATE src/component_profile.cpp src/component_bench.cpp)  # the plug-in benchmark (#197)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
+target_sources(caw_core PRIVATE src/midi_fx.cpp src/midi_fx_effects.cpp)  # 1.1.0: MIDI effects before an instrument
+target_sources(caw_core PRIVATE src/builtin_fx_meters.cpp src/builtin_fx_lofi.cpp src/builtin_fx_phasealign.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
+target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.cpp src/builtin_fx_shift_voices.cpp src/builtin_fx_vocoder.cpp)  # 1.1.0: Glint, Mimic, Soar's Harmonizer and Octaver
+target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 1.1.0: Lark (org.caw.pitchfix) and the clip pitch editor's engine
+target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
+target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
+target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
+target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp
@@ -228,7 +242,7 @@ target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/
 # fx-dynamics begin: the Dynamics and Drive effects
 # Audio assets, clips, the sampler and audio input (WP-J); miniaudio's decoders compiled privately (static).
 target_sources(caw_core PRIVATE src/asset_store.cpp src/time_stretch.cpp src/audio_clips.cpp src/audio_input.cpp
-  src/builtin_sampler.cpp src/builtin_sampler_sfz.cpp platform/decode_miniaudio.c)
+  src/builtin_sampler.cpp src/builtin_sampler_sfz.cpp src/sampler_tools.cpp platform/decode_miniaudio.c)
 set_source_files_properties(platform/decode_miniaudio.c PROPERTIES COMPILE_OPTIONS "-w"
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio")
 # Clip stretching (1.0.4, #208): Signalsmith Stretch and Signalsmith Linear, header-only, MIT (third_party/, decisions.md);
@@ -260,6 +274,7 @@ else()
   target_include_directories(caw_engine PRIVATE src)
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
+target_sources(caw_engine PRIVATE src/capi_pitch_clip.cpp)  # API 42: the clip pitch editor (Lark)
 
 # The file is libcaw.so / caw.dll; only the C API (marked CAW_API) is exported.
 set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
@@ -281,6 +296,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/sample_pack_test.cpp)  # the sample-pack maker (#164)
   target_sources(caw_tests PRIVATE tests/flagship_test.cpp)  # the flagship synth (#171) and its kernels
   target_sources(caw_tests PRIVATE tests/flagship_tables_test.cpp)  # its warps' aliasing and its user wavetable
+  target_sources(caw_tests PRIVATE tests/flagship_raven_test.cpp)  # its 1.1.0 synthesis (Raven) and old presets unchanged
   target_sources(caw_tests PRIVATE tests/quality_test.cpp)  # the quality setting (Eco, Normal, High) and the buffer mode
   target_sources(caw_tests PRIVATE tests/output_safety_test.cpp)  # #244: the live output's safety flags through the C API
   target_sources(caw_tests PRIVATE tests/display_test.cpp)  # live display data, engine to UI (#173)
@@ -288,6 +304,8 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
   target_sources(caw_tests PRIVATE tests/mixer_routing_test.cpp)  # outputs, sends into tracks, returns, feedback sends
   target_sources(caw_tests PRIVATE tests/drums_test.cpp)  # org.caw.drums: 64 pads, layers, presets, samples, migration
+  target_sources(caw_tests PRIVATE tests/drums_audit_test.cpp)  # org.caw.drums: every setting moves the sound; 1.1.0's groove
+  target_sources(caw_tests PRIVATE tests/drums_compat_test.cpp)  # org.caw.drums: old presets bit-identical after 1.1.0
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
@@ -299,20 +317,37 @@ target_include_directories(caw_cli PRIVATE src)
   # fx-filters begin
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   target_sources(caw_tests PRIVATE tests/note_fx_test.cpp)  # per-note FX (#127): slots, overflow, tails, parity
+  target_sources(caw_tests PRIVATE tests/midi_fx_test.cpp)  # 1.1.0: MIDI effects before the instrument
+  target_sources(caw_tests PRIVATE tests/fx_tools_test.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
+  target_sources(caw_tests PRIVATE tests/fx_voice_test.cpp)  # 1.1.0: Glint, Soar's Harmonizer and Octaver, Mimic
+  target_sources(caw_tests PRIVATE tests/lark_test.cpp src/capi_pitch_clip.cpp)  # 1.1.0: Lark (live correction, the clip pitch editor, API 42)
+  target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
+  target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
+  target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
+  target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/fx_merged_test.cpp)  # FX consolidation: merged devices, migration, optional ports
   target_sources(caw_tests PRIVATE tests/fx_merged_drive_test.cpp)  # FX consolidation part B: Drive and Bit distortion
   target_sources(caw_tests PRIVATE tests/fx_merged_space_test.cpp)  # FX consolidation part E: Delay and Reverb
+  target_sources(caw_tests PRIVATE tests/fx_delay_modes_test.cpp)  # 1.1.0: the Delay's Tape, Reverse and Multi-tap
+  target_sources(caw_tests PRIVATE tests/fx_reverb_modes_test.cpp)  # 1.1.0: the Reverb's Room, Plate, Spring, Gated and Reverse
+  target_sources(caw_tests PRIVATE tests/fx_drive_modes_test.cpp)  # 1.1.0: the Drive's Amp, Pedal and Bands
+  target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
+  target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters
+  target_sources(caw_tests PRIVATE tests/fx_dynsplit_test.cpp)  # 1.1.0: the Talon/Hatch/Duck split and its migration
+  target_sources(caw_tests PRIVATE tests/fx_extras_test.cpp)  # 1.1.0: armed versions, sidechain filter, LUFS target, slot cost
   target_sources(caw_tests PRIVATE tests/fx_merged_stereomod_test.cpp)  # FX consolidation D: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan
   target_sources(caw_tests PRIVATE tests/modulation_test.cpp)  # #161: project modulators and links
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/sampler_tools_test.cpp)  # 1.1.0: drop and play, slicing, takes, stretched zones
   target_sources(caw_tests PRIVATE tests/audio_stretch_test.cpp)  # 1.0.4: stretch, pitch, clip fields, tempo, slices
   target_sources(caw_tests PRIVATE tests/input_bridge_test.cpp)  # the input bridge: output unchanged when the input dies
   target_sources(caw_tests PRIVATE tests/device_drift_test.cpp)  # #241: tracks in time through the device path with the input on
@@ -410,18 +445,29 @@ target_include_directories(caw_cli PRIVATE src)
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
+  target_sources(caw_rt_tests PRIVATE tests/flagship_raven_rt_test.cpp)  # Flagship's 1.1.0 synthesis (Raven)
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_rt_test.cpp)  # FX consolidation: a variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_drive_rt_test.cpp)  # part B: a Drive variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_space_rt_test.cpp)  # part E: Delay and Reverb variant changes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
+  target_sources(caw_rt_tests PRIVATE tests/fx_clean_rt_test.cpp)  # 1.1.0: Preen and Hush
+  target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
+  target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
+  target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
+  target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
+  target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing
+  target_sources(caw_rt_tests PRIVATE tests/fx_voice_rt_test.cpp)  # 1.1.0: Glint, Harmonizer, Octaver, Mimic while playing
+  target_sources(caw_rt_tests PRIVATE tests/lark_rt_test.cpp)  # 1.1.0: Lark while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
   target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
+  target_sources(caw_rt_tests PRIVATE tests/midi_fx_rt_test.cpp)  # 1.1.0: MIDI effects
   target_sources(caw_rt_tests PRIVATE tests/sample_preview_rt_test.cpp)  # #229: the sample preview
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_sources(caw_rt_tests PRIVATE tests/first_callback_rt_test.cpp)
@@ -452,7 +498,11 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp bench/pack_cost.cpp bench/raven_cost.cpp bench/rook_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+  target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
+  target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
+  target_sources(caw_bench PRIVATE bench/timber_cost.cpp)  # 1.1.0: Timber's cost ceilings
+  target_sources(caw_bench PRIVATE bench/flock_cost.cpp)  # 1.1.0: Flock's cost ceilings
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -461,6 +511,28 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_patch_bench PRIVATE src)
   target_link_libraries(caw_patch_bench PRIVATE caw_core)
+  # 1.1.0's tools (MIDI effects, Meters, Lo-fi, Phase align) against their cost ceilings: a Release build only (a
+  # Debug or sanitized one is slower by design).
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_test(NAME caw_tools_cost COMMAND caw_bench 0.5 301)
+    # 1.1.0's dynamics split against its cost ceilings.
+    add_test(NAME caw_dynsplit_cost COMMAND caw_bench 0.5 302)
+    # 1.1.0's voice devices (Glint, Harmonizer, Octaver, Mimic) against their cost ceilings.
+    add_test(NAME caw_voice_cost COMMAND caw_bench 0.5 303)
+    add_test(NAME caw_clean_cost COMMAND caw_bench 0.5 310)  # 1.1.0: Preen and Hush
+    add_test(NAME caw_pack_cost COMMAND caw_bench 0.5 307)  # 1.1.0: the AutoStacc beta pack
+    add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
+    add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
+    add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
+    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
+    add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
+    add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
+    # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
+    # x64 runner then measured cases 10-20 % over their usual figure (Timber's organ 8,002 against 8,000 on PR #258).
+    set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
+                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost
+                         PROPERTIES RUN_SERIAL TRUE)
+  endif()
 endif()
 
 # The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no
@@ -478,6 +550,7 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 # x86-64, Arm64 (where the fast flags fuse multiply-adds) and with clang-cl; their complex exponentials come from the
 # engine's deterministic sine, not libm.
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

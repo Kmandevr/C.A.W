@@ -26,7 +26,7 @@ class SamplerZone {
       this.tune = 0, this.transpose = 0, this.keytrack = 100, this.volume = 0, this.pan = 0, this.veltrack = 100,
       this.offset = 0, this.end = 0, this.loopMode, this.loopStart = 0, this.loopEnd = 0, this.loopCrossfade = 0,
       this.seqLength = 1, this.seqPosition = 1, this.loRand = 0, this.hiRand = 1, this.group = 0, this.offBy = 0,
-      this.attack = -1, this.decay = -1, this.sustain = -1, this.release = -1});
+      this.attack = -1, this.decay = -1, this.sustain = -1, this.release = -1, this.stretch = false, this.stretchBpm = 0});
 
   String path;
   int loKey, hiKey, root, loVel, hiVel, transpose;
@@ -43,6 +43,11 @@ class SamplerZone {
 
   /// This zone's own envelope (-1: the instrument's).
   double attack, decay, sustain, release;
+
+  /// Time-stretch (C.A.W's own keys): the zone keeps its length on every key; with [stretchBpm] (the sample's tempo,
+  /// 20..999; 0: none) it also follows the song's tempo.
+  bool stretch;
+  double stretchBpm;
 
   String get name => path.split(RegExp(r'[/\\]')).last;
 
@@ -72,6 +77,8 @@ class SamplerZone {
         if (decay >= 0) 'ampeg_decay': decay,
         if (sustain >= 0) 'ampeg_sustain': sustain,
         if (release >= 0) 'ampeg_release': release,
+        if (stretch) 'stretch': true,
+        if (stretchBpm >= 20) 'stretch_bpm': stretchBpm,
       };
 
   static SamplerZone? fromJson(Object? j) {
@@ -95,6 +102,7 @@ class SamplerZone {
       group: i('group', 0, 0, 1000000), offBy: i('off_by', 0, 0, 1000000),
       attack: d('ampeg_attack', -1, -1, 100), decay: d('ampeg_decay', -1, -1, 100),
       sustain: d('ampeg_sustain', -1, -1, 100), release: d('ampeg_release', -1, -1, 100),
+      stretch: j['stretch'] == true, stretchBpm: d('stretch_bpm', 0, 0, 999) < 20 ? 0 : d('stretch_bpm', 0, 0, 999),
     );
     z.normalize();
     return z;

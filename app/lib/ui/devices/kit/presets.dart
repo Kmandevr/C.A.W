@@ -49,7 +49,21 @@ class DevicePresets {
 
   static List<DevicePreset> fromDescriptor(DeviceTarget target) => [
         for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
-          if (p.name != 'Init') DevicePreset(p.name, p.params, category: 'Factory'),
+          if (p.name != 'Init' && !(hidden[target.componentId]?.contains(p.name) ?? false))
+            DevicePreset(p.name, p.params, category: 'Factory'),
+      ];
+
+  /// The engine's presets the browser leaves out of its list, by component: each is found by scrolling past the
+  /// list's end ([hiddenOf]).
+  static const hidden = {
+    'org.caw.vocoder': {'Talking crow'},
+    'org.caw.pack.granular': {'Crow flock'},
+  };
+
+  /// The device's hidden presets, as the engine has them (empty for most devices).
+  static List<DevicePreset> hiddenOf(DeviceTarget target) => [
+        for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
+          if (hidden[target.componentId]?.contains(p.name) ?? false) DevicePreset(p.name, p.params, category: 'Factory'),
       ];
 
   static void register(String componentId, List<DevicePreset> presets) => _byId[componentId] = presets;

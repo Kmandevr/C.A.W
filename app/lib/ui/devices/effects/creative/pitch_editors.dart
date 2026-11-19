@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../theme.dart';
 import '../../device_scope.dart';
+import '../../sidechain_bar.dart' show KeyFilterControls;
 import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
@@ -326,6 +327,7 @@ class RingModPage extends StatelessWidget {
         child: const _RingHero(),
       )),
       KnobRow([if (!keyed) 'freq', if (!keyed) 'spread', 'bias', 'rectify', 'mix'], size: 50),
+      if (keyed && !DeviceScope.isInline(context)) const KeyFilterControls(),
     ]);
   }
 }

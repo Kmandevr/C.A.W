@@ -2,11 +2,14 @@
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
+import '../../../model/device_names.dart';
 import '../../../model/merged_devices.dart';
+import '../../caw_icons.dart';
 import '../../theme.dart';
 import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
 import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
 import 'filters/filters_shared.dart' as fx_filters show filtersBrowserEntries;  // fx-filters
+import 'pack/pack_devices.dart' as fx_pack show packCatalog;  // the AutoStacc pack
 import '../../../model/fx_space_display.dart' as fx_space_model show fxSpaceBrowser;  // fx-space
 import 'space/space_fx.dart' as fx_space show fxSpaceIcons;  // fx-space
 
@@ -20,7 +23,8 @@ enum EffectCategory {
   pitchTime('Pitch & Time', Icons.timelapse),
   creative('Creative', Icons.auto_awesome),
   utility('Utility', Icons.tune),
-  racks('Racks', Icons.view_agenda_outlined);
+  racks('Racks', CawIcons.nest),
+  autostacc('AutoStacc pack', Icons.toys_outlined);
 
   const EffectCategory(this.label, this.icon);
   final String label;
@@ -45,10 +49,12 @@ enum EffectCategory {
         EffectCategory.creative => Color.lerp(Neon.pink, Neon.yellow, 0.5)!,
         EffectCategory.utility => Neon.dim,
         EffectCategory.racks => Color.lerp(Neon.green, Neon.blue, 0.5)!,
+        EffectCategory.autostacc => Neon.pink,
       };
 }
 
-/// One effect in the browser. [icon] is its small picture; [keywords] are extra search words (what it is also called).
+/// One effect in the browser. [icon] is its small picture; [keywords] are extra search words besides its
+/// [DeviceNames] tags (the table in lib/model/device_names.dart holds what each built-in is also called).
 class EffectEntry {
   const EffectEntry(this.id, this.category, this.description, this.icon, {this.keywords = const []});
   final String id;
@@ -57,12 +63,18 @@ class EffectEntry {
   final IconData icon;
   final List<String> keywords;
 
-  /// Whether [query] (lower case, trimmed) finds it by [name], description, keywords or id.
-  bool matches(String query, String name) {
-    if (query.isEmpty) return true;
-    final q = query.toLowerCase();
-    return name.toLowerCase().contains(q) || description.toLowerCase().contains(q) || id.toLowerCase().contains(q) ||
-        keywords.any((k) => k.toLowerCase().contains(q)) || category.label.toLowerCase().contains(q);
+  /// Whether [query] (lower case, trimmed) finds it by [name], its [DeviceNames] tags, description, keywords or id.
+  bool matches(String query, String name) => rank(query, name) != null;
+
+  /// How well [query] finds it (lower first; null: not at all): its [DeviceNames] name or a tag exactly (0), a word
+  /// of one starting with it (1), one containing it (2), then [name], the description, keywords, id or tab (3).
+  int? rank(String query, String name) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return 0;
+    final byName = DeviceNames.rank(id, q, also: [name, ...keywords]);
+    if (byName != null) return byName;
+    return description.toLowerCase().contains(q) || id.toLowerCase().contains(q) ||
+        category.label.toLowerCase().contains(q) ? 3 : null;
   }
 }
 
@@ -101,6 +113,7 @@ class EffectCatalog {
     [for (final e in fx_dynamics.fxDynamicsCatalog) (e.id, e.category, e.description, e.icon)],  // fx-dynamics
     [for (final e in fx_creative.creativeCatalog) (e.id, e.category, e.description, e.icon)],  // fx-creative
     [for (final e in fx_filters.filtersBrowserEntries) (e.id, e.category, e.description, e.icon)],  // fx-filters
+    [for (final e in fx_pack.packCatalog) (e.id, e.category, e.description, e.icon)],  // the AutoStacc pack
     [for (final e in fx_space_model.fxSpaceBrowser.entries) (e.key, e.value.category, e.value.description, fx_space.fxSpaceIcons[e.key]!)],  // fx-space
     _merged,  // the merged devices (FX consolidation, 1.0.8), last: their entries win over a reused id's older one
   ];
@@ -108,7 +121,9 @@ class EffectCatalog {
   /// The merged devices (FX consolidation, 1.0.8): one entry each, listed by the engine in place of the old effects
   /// they replaced (engine/src/fx_merged.h; the old ids are retired and no longer listed).
   static const List<(String, String, String, IconData)> _merged = [
-    ('org.caw.compressor', 'Dynamics', 'Compressor, Dynamics, Gate or Shape (the drawn duck), with a sidechain', Icons.compress),
+    ('org.caw.compressor', 'Dynamics', 'Down, Dynamics, Up (upward) or Bus (glue), with a sidechain', Icons.compress),
+    ('org.caw.gate', 'Dynamics', 'Gate, Expand or Pedal gate: closes or lowers the quiet parts', Icons.door_sliding_outlined),
+    ('org.caw.duck', 'Dynamics', 'Duck under a key, Level (a slow rider) or Carve (the key\'s frequencies dip)', Icons.call_received),
     ('org.caw.limiter', 'Dynamics', 'A brickwall ceiling with look-ahead and true peak', Icons.vertical_align_top),
     ('org.caw.transient', 'Dynamics', 'More or less attack and sustain, whatever the level', Icons.show_chart),
     ('org.caw.drive', 'Drive', 'Distortion, Saturate, Clip or Phase: from warmth to grit', Icons.whatshot_outlined),
@@ -118,55 +133,63 @@ class EffectCatalog {
     ('org.caw.utility', 'Utility', 'Utility, Width, Balance, Imager, Haas or Mixer: gain and the stereo field', Icons.tune),
     ('org.caw.chorus', 'Modulation', 'Chorus, Ensemble, Doubler, Flanger, Vibrato or Rotary', Icons.waves),
     ('org.caw.phaser', 'Modulation', 'Swept all-pass notches with feedback', Icons.waves),
-    ('org.caw.tremolo', 'Modulation', 'Tremolo or Pan: level or place moving in time', Icons.swap_horiz),
+    ('org.caw.tremolo', 'Modulation', 'Tremolo, Pan or Shape (the drawn duck): level or place moving in time', Icons.swap_horiz),
     ('org.caw.delay', 'Space', 'Digital (synced, dual, drive in the loop) or Ping-pong echoes', Icons.blur_linear),
     ('org.caw.reverb', 'Space', 'Hall (rooms to halls, ducking and freeze) or Shimmer', Icons.blur_on),
-    ('org.caw.shift', 'Pitch & Time', 'Pitch (semitones and cents) or Frequency (every partial by the same hertz)', Icons.height),
+    ('org.caw.shift', 'Pitch & Time', 'Pitch, Frequency, Harmonizer (voices in key) or Octaver (an octave under and over)', Icons.height),
+    // 1.1.0's new devices (Glint, Mimic, Preen, Hush, Lark).
+    ('org.caw.exciter', 'Drive', 'Exciter (air and presence) or Bass (low harmonics that carry on small speakers)', Icons.auto_awesome),
+    ('org.caw.vocoder', 'Creative', 'A vocoder: the voice speaks through a synth playing the key track\'s notes, or its audio', Icons.record_voice_over_outlined),
+    ('org.caw.clean', 'Utility', 'Clean-up: Denoise (learn the noise), De-hum or De-reverb', Icons.cleaning_services_outlined),
+    ('org.caw.vocalclean', 'Utility', 'Vocal clean-up: De-click, De-plosive or Breath', Icons.mic_none),
+    ('org.caw.pitchfix', 'Pitch & Time', 'Lark: pitch correction to a key and scale, with Keep vibrato; edits a clip\'s notes', Icons.multiline_chart),
   ];
 
   static const List<EffectEntry> _entries = [
     // The effects suite (#173) and the Library's stereo tools.
     EffectEntry('org.caw.compressor', EffectCategory.dynamics, 'Evens out levels; soft knee, look-ahead and a sidechain',
-        Icons.compress, keywords: ['comp', 'glue', 'sidechain', 'squash']),
+        Icons.compress),
     EffectEntry('org.caw.limiter', EffectCategory.dynamics, 'A brickwall ceiling with look-ahead and true peak',
-        Icons.vertical_align_top, keywords: ['maximizer', 'loudness', 'clip']),
+        Icons.vertical_align_top),
     EffectEntry('org.caw.gate', EffectCategory.dynamics, 'Closes on quiet parts; expander, hold and an external key',
-        Icons.door_sliding_outlined, keywords: ['noise gate', 'expander']),
+        Icons.door_sliding_outlined),
     EffectEntry('org.caw.transient', EffectCategory.dynamics, 'More or less attack and sustain, whatever the level',
-        Icons.show_chart, keywords: ['shaper', 'punch', 'snap']),
+        Icons.show_chart),
     EffectEntry('org.caw.ducker', EffectCategory.dynamics, 'Ducks to a drawn shape from a key, notes or the tempo',
-        Icons.call_received, keywords: ['sidechain', 'pump', 'volume shaper', 'duck']),
+        Icons.call_received),
     EffectEntry('org.caw.eq', EffectCategory.eqFilter, 'Eight bands with a live spectrum; mid/side per band',
-        Icons.graphic_eq, keywords: ['equalizer', 'parametric', 'shelf', 'bell']),
+        Icons.graphic_eq),
     EffectEntry('org.caw.filter', EffectCategory.eqFilter, 'A resonant multimode filter with its own LFO and envelope',
-        Icons.filter_alt_outlined, keywords: ['low-pass', 'high-pass', 'band-pass', 'cutoff', 'wah']),
+        Icons.filter_alt_outlined),
     EffectEntry('org.caw.saturator', EffectCategory.drive, 'Tape, tube, clip, fold or crush, oversampled',
-        Icons.whatshot_outlined, keywords: ['distortion', 'warmth', 'bitcrush', 'overdrive']),
+        Icons.whatshot_outlined),
     EffectEntry('org.caw.distortion', EffectCategory.drive, 'Drive, hard clip, fold or crush per channel',
-        Icons.bolt_outlined, keywords: ['fuzz', 'clip', 'bitcrush']),
+        Icons.bolt_outlined),
     EffectEntry('org.caw.chorus', EffectCategory.modulation, 'Two swept voices a quarter cycle apart: wide and lush',
-        Icons.waves, keywords: ['ensemble', 'detune']),
+        Icons.waves),
     EffectEntry('org.caw.phaser', EffectCategory.modulation, 'Swept all-pass notches with feedback',
-        Icons.waves, keywords: ['phase', 'swirl']),
+        Icons.waves),
     EffectEntry('org.caw.flanger', EffectCategory.modulation, 'A short swept delay with feedback: jet sweeps',
-        Icons.waves, keywords: ['jet', 'comb']),
+        Icons.waves),
     EffectEntry('org.caw.reverb.pro', EffectCategory.space, 'A smooth hall to small room with ducking and freeze',
-        Icons.blur_on, keywords: ['hall', 'room', 'plate', 'ambience']),
+        Icons.blur_on),
     EffectEntry('org.caw.delay.pro', EffectCategory.space, 'Synced stereo, ping-pong or dual echoes, drive in the loop',
-        Icons.blur_linear, keywords: ['echo', 'tape delay', 'ping pong']),
+        Icons.blur_linear),
     EffectEntry('org.caw.delay.pingpong', EffectCategory.space, 'A simple synced ping-pong echo',
-        Icons.blur_linear, keywords: ['echo', 'ping pong']),
+        Icons.blur_linear),
     EffectEntry('org.caw.utility', EffectCategory.utility, 'Gain, phase, width, pan, mono bass and DC block',
-        Icons.tune, keywords: ['gain', 'trim', 'mono', 'invert']),
+        Icons.tune),
     EffectEntry('org.caw.stereo.width', EffectCategory.utility, 'Mid/side width from mono to extra wide',
-        Icons.swap_horiz, keywords: ['stereo', 'imager', 'mono']),
+        Icons.swap_horiz),
     EffectEntry('org.caw.stereo.balance', EffectCategory.utility, 'Left/right balance',
-        Icons.swap_horiz, keywords: ['pan', 'stereo']),
+        Icons.swap_horiz),
+    // Lark (1.1.0); its search words are in lib/model/device_names.dart.
+    EffectEntry('org.caw.pitchfix', EffectCategory.pitchTime, 'Pitch correction to a key and scale', Icons.multiline_chart),
     // fx-racks begin
     EffectEntry('org.caw.rack.fx', EffectCategory.racks, 'Up to 8 effects in one device, with LFOs, envelopes and macros',
-        Icons.view_agenda_outlined, keywords: ['snap heap', 'chain', 'container', 'macro', 'modulation']),
+        Icons.view_agenda_outlined),
     EffectEntry('org.caw.rack.multiband', EffectCategory.racks, 'Split into up to 5 bands, each with its own effects',
-        Icons.view_week_outlined, keywords: ['multipass', 'multiband', 'crossover', 'split']),
+        Icons.view_week_outlined),
     // fx-racks end
   ];
 

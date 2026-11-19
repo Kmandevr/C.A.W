@@ -50,7 +50,8 @@ class PresetDevice {
   Map<String, Object> toJson() => {
         'component': componentId,
         'descriptor_version': descriptorVersion,
-        'params': params,
+        // A Compressor preset says it is 1.1.0's (talon_layout), so it never reads as a 1.0.9 one whose variants moved.
+        'params': componentId == talonId ? {...params, talonLayoutParam: talonLayoutCurrent} : params,
         if (bypass) 'bypass': true,
         if (state != null) ...{'state': state!, 'state_version': stateVersion},
       };
@@ -79,6 +80,7 @@ class PresetDevice {
         ..addAll(merged.params);
       if (!merged.keepsState) state = null;
     }
+    params.remove(talonLayoutParam);  // only on file: toJson writes it again
     return PresetDevice(
       componentId,
       params,

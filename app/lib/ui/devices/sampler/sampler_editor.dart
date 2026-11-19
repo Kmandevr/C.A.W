@@ -1,42 +1,50 @@
-// The sampler's editor (org.caw.sampler), in the device kit's style: ZONES (the zone map over keys and velocity,
-// the keyboard that takes dropped samples and plays them, the zone's waveform with its loop points, the zone
-// inspector, round robins, SFZ import and export) and SOUND (level, envelope and filter knobs).
-import '../kit/repaint.dart';
+// The sampler's editor (org.caw.sampler) in Raven's one-screen layout: the keyboard map on top (drop a sample and it plays on every key), the zone, sound, slicing and recording sections below, the mod-source strip at the bottom; a phone held upright swipes three panels (Zone, Sound, Tools) under the map.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../../../engine/audio_engine.dart';
 import '../../../model/app_state.dart';
-import '../../../model/audio_clips.dart';
 import '../../../model/audio_edit.dart';
+import '../../../model/audio_record.dart';
 import '../../../model/project.dart';
 import '../../../model/project_package.dart';
 import '../../../model/sampler.dart';
-import '../../arrange/audio_waveform.dart';
+import '../../../model/sampler_tools.dart';
 import '../../frame/sections.dart';
 import '../../haptics.dart';
+import '../../motion.dart';
 import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
+import '../flagship/flagship_editor.dart' show DevicePicker;
+import '../flagship/flagship_panels.dart';
+import '../flagship/flagship_tools.dart' show PanelDots;
 import '../kit/controls.dart';
 import '../kit/device_style.dart';
+import 'sampler_widgets.dart';
+import '../../crow.dart';
+
+export 'sampler_widgets.dart';
 
 final Map<String, DeviceEditorEntry> samplerEditors = {
   samplerComponentId: DeviceEditorEntry(
     (_) => [
-      DeviceSection('zones', 'ZONES', Icons.view_quilt_outlined, (_) => const SamplerZonesPage()),
-      DeviceSection('sound', 'SOUND', Icons.tune, (_) => const SamplerSoundPage()),
+      DeviceSection('sampler', 'SAMPLER', Icons.piano_outlined, (_) => const SamplerPage(), stripAtBottom: true),
     ],
     family: DeviceFamily.synth,
     inline: (_) => const SamplerSoundPage(),
   ),
 };
+
+/// Width from which the editor is one screen; narrower, the map over three panels.
+const double samplerWide = 700;
+
+/// The phone's three panels, by name.
+const samplerPanels = ['Zone', 'Sound', 'Tools'];
 
 /// Picking files for the sampler, for tests to replace: sample files (absolute paths in app storage) and an SFZ.
 class SamplerFiles {
@@ -69,34 +77,42 @@ class SamplerFiles {
   }
 }
 
-/// What the ZONES page edits: the zones (a working copy while a drag runs) and the selection.
-class _Zones {
-  _Zones(this.state, this.layer);
-  final AppState state;
-  final LayerDoc layer;
-  SamplerState get saved => state.samplerState(layer);
-  void save(SamplerState z) => state.setSamplerState(layer, z);
-}
-
-class SamplerZonesPage extends StatefulWidget {
-  const SamplerZonesPage({super.key});
+/// The sampler's one page.
+class SamplerPage extends StatefulWidget {
+  const SamplerPage({super.key});
 
   @override
-  State<SamplerZonesPage> createState() => _SamplerZonesPageState();
+  State<SamplerPage> createState() => _SamplerPageState();
 }
 
-class _SamplerZonesPageState extends State<SamplerZonesPage> {
+class _SamplerPageState extends State<SamplerPage> {
   final Set<int> _selected = {};
+  final _pages = PageController();
   SamplerState? _working; // a drag's zones before they are saved
   bool _busy = false;
+  bool _narrow = false;
+  int _panel = 0;
+  DropMapping _mapping = DropMapping.auto;
+  // Slicing.
+  bool _grid = false;
+  int _divisions = 16;
+  double _sensitivity = 0.5;
+  // Recording.
+  final _plan = MultisamplePlan();
 
-  void _say(String t) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(t)));
+  AppState get _state => DeviceScope.of(context).target.state;
+  LayerDoc? get _layer => DeviceScope.of(context).target.layer;
+  SamplerState get _saved => _state.samplerState(_layer!);
+  void _save(SamplerState z) => _state.setSamplerState(_layer!, z);
 
-  _Zones? _zones(BuildContext context) {
-    final t = DeviceScope.of(context).target;
-    final l = t.layer;
-    return l == null ? null : _Zones(t.state, l);
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
   }
+
+  void _say(String t, {bool undo = false}) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(t),
+      action: undo ? SnackBarAction(label: 'Undo', onPressed: () => _state.undo()) : null));
 
   Future<void> _run(String label, Future<void> Function() job) async {
     setState(() => _busy = true);
@@ -110,591 +126,562 @@ class _SamplerZonesPageState extends State<SamplerZonesPage> {
     }
   }
 
-  Future<void> _addSamples(_Zones z, {int? key}) => _run('Adding samples', () async {
-        final paths = await SamplerFiles.pickSamples(z.state);
+  void goTo(int i) {
+    if (!_narrow || !_pages.hasClients) return;
+    i = i.clamp(0, samplerPanels.length - 1);
+    final d = Motion.fade(Motion.standard * 2, Motion.of(context));
+    d == Duration.zero ? _pages.jumpToPage(i) : _pages.animateToPage(i, duration: d, curve: Curves.easeOutCubic);
+  }
+
+  /// Drop and play: [paths] mapped over the keys by [_mapping] (One key each: from [key] up, beside the zones kept;
+  /// otherwise they replace the map), saved as one undo step, so the keyboard plays them at once.
+  Future<void> _dropAndPlay(List<String> paths, {int? key}) => _run('Mapping samples', () async {
         if (paths.isEmpty) return;
-        final s = z.saved;
-        final made = s.addFiles(paths, key ?? (s.zones.isEmpty ? 60 : zoneSpan(s).$2 + 1));
-        z.save(s);
-        setState(() => _selected..clear()..addAll(made));
+        final keys = _mapping == DropMapping.keys;
+        final r = await _state.mapDroppedSamples(paths, mode: _mapping, startKey: key ?? 36);
+        if (!mounted || _layer == null) return;
+        final next = keys ? _saved : SamplerState();
+        final first = next.zones.length;
+        next.zones.addAll(r.zones.take(SamplerState.maxZones - next.zones.length));
+        _save(next);
+        setState(() => _selected..clear()..addAll([for (var i = first; i < next.zones.length; i++) i]));
         Haptics.drop();
+        final known = r.roots.whereType<int>().toList();
+        final how = switch (r.mode) {
+          DropMapping.root when paths.length == 1 =>
+            'on every key, root ${noteName(r.zones.first.root)}${known.isEmpty ? ' (none found: C4)' : ''}',
+          DropMapping.root => 'across the keyboard by root',
+          DropMapping.spread => 'spread evenly across the keyboard',
+          _ => 'one key each from ${noteName(key ?? 36)}',
+        };
+        _say('${paths.length == 1 ? 'Sample' : '${paths.length} samples'} $how', undo: true);
       });
 
-  Future<void> _importSfz(_Zones z) => _run('SFZ import', () async {
+  Future<void> _addSamples() async {
+    final paths = await SamplerFiles.pickSamples(_state);
+    if (paths.isNotEmpty) await _dropAndPlay(paths);
+  }
+
+  Future<void> _importSfz() => _run('SFZ import', () async {
         final path = await SamplerFiles.pickSfz();
         if (path == null) return;
-        final r = await z.state.audioIo.sfzImport(path);
+        final r = await _state.audioIo.sfzImport(path);
         if (!r.ok || r.state == null) throw r.error.isEmpty ? 'the file could not be read' : r.error;
         final zones = SamplerState.fromJson(r.state!);
         // The SFZ's samples are the user's pick: an export may package them (ProjectPackaging.isProjectFile).
-        z.state.userPickedFiles.addAll(zones.zones.map((x) => x.path));
-        z.save(zones);
+        _state.userPickedFiles.addAll(zones.zones.map((x) => x.path));
+        _save(zones);
         setState(_selected.clear);
         Haptics.drop();
         _say('Imported ${r.zones} zone${r.zones == 1 ? '' : 's'}'
             '${r.warnings.isEmpty ? '' : ' · left out: ${r.warnings.take(3).join('; ')}${r.warnings.length > 3 ? '…' : ''}'}');
       });
 
-  Future<void> _exportSfz(_Zones z) => _run('SFZ export', () async {
-        final path = await SamplerFiles.exportPath(z.layer.name.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '_'));
+  Future<void> _exportSfz() => _run('SFZ export', () async {
+        final path = await SamplerFiles.exportPath(_layer!.name.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '_'));
         if (path == null) return;
-        final r = await z.state.audioIo.sfzExport(jsonEncode(z.saved.toJson()), path,
-            copySamples: true);
+        final r = await _state.audioIo.sfzExport(jsonEncode(_saved.toJson()), path, copySamples: true);
         if (!r.ok) throw r.error;
         Haptics.drop();
         _say('Exported ${r.files.length} file${r.files.length == 1 ? '' : 's'} (samples copied beside it)');
       });
 
+  /// The sample slicing reads: the selected zone's, else the first zone's.
+  String? _slicePath(SamplerState s) {
+    if (s.zones.isEmpty) return null;
+    final i = _selected.isEmpty ? 0 : _selected.first;
+    return s.zones[i.clamp(0, s.zones.length - 1)].path;
+  }
+
+  Future<void> _slice({required bool drums}) => _run('Slicing', () async {
+        final path = _slicePath(_saved);
+        if (path == null) return;
+        final r = await _state.sliceSample(path, grid: _grid, divisions: _divisions, sensitivity: _sensitivity);
+        if (!r.ok) throw r.error.isEmpty ? 'no slices found' : r.error;
+        if (!mounted) return;
+        if (drums) {
+          final name = '${path.split(RegExp(r'[/\\]')).last.split('.').first} pads';
+          _state.sendSlicesToDrums(path, r.slices, r.frames, name: name, after: _layer);
+          Haptics.drop();
+          _say('${math.min(r.slices.length, 16)} slices on a new Drums track’s pads', undo: true);
+        } else {
+          _save(SamplerState(r.zones));
+          setState(() => _selected.clear());
+          Haptics.drop();
+          _say('${r.zones.length} slices from ${noteName(r.zones.first.loKey)} up', undo: true);
+        }
+      });
+
+  Future<void> _record() async {
+    final layer = _layer;
+    if (layer == null) return;
+    final zones = await showDialog<List<SamplerZone>>(context: context, barrierDismissible: false,
+        builder: (_) => MultisampleDialog(state: _state, layer: layer, plan: _plan));
+    if (zones == null || zones.isEmpty || !mounted) return;
+    _save(SamplerState(zones));
+    setState(_selected.clear);
+    Haptics.drop();
+    _say('${zones.length} recorded zone${zones.length == 1 ? '' : 's'} mapped by root', undo: true);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final z = _zones(context);
-    if (z == null) return const SizedBox.shrink();
-    final scope = DeviceScope.of(context);
-    final s = _working ?? z.saved;
+    final layer = _layer;
+    if (layer == null) return const SizedBox.shrink();
+    final s = _working ?? _saved;
     _selected.removeWhere((i) => i >= s.zones.length);
-    final sel = _selected.isEmpty ? null : _selected.first;
-    final accent = scope.accent;
-    return ListView(key: const ValueKey('sampler-zones'), padding: const EdgeInsets.fromLTRB(8, 8, 8, 32), children: [
-      Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-add'), avatar: const Icon(Icons.library_add_outlined, size: 16),
-            label: const Text('Add samples'), onPressed: _busy ? null : () => _addSamples(z)),
-        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-import-sfz'), avatar: const Icon(Icons.file_open_outlined, size: 16),
-            label: const Text('Import SFZ'), onPressed: _busy ? null : () => _importSfz(z)),
-        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-export-sfz'), avatar: const Icon(Icons.file_upload_outlined, size: 16),
-            label: const Text('Export SFZ'), onPressed: _busy || s.zones.isEmpty ? null : () => _exportSfz(z)),
-        if (_selected.length > 1)
-          ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-round-robin'), avatar: const Icon(Icons.repeat, size: 16),
-              label: Text('Round robin (${_selected.length})'), onPressed: () {
-                final next = z.saved..roundRobin(_selected.toList()..sort());
-                z.save(next);
-                Haptics.drop();
-                _say('${_selected.length} zones take turns on each hit');
-              }),
-        if (_selected.isNotEmpty)
-          ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-delete'), avatar: const Icon(Icons.delete_outline, size: 16, color: Neon.pink),
-              label: Text(_selected.length == 1 ? 'Delete zone' : 'Delete ${_selected.length}'), onPressed: () {
-                final next = z.saved;
-                for (final i in _selected.toList()..sort((a, b) => b.compareTo(a))) {
-                  next.zones.removeAt(i);
-                }
-                z.save(next);
-                setState(_selected.clear);
-                Haptics.tap();
-              }),
-        if (_busy) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-      ]),
-      const SizedBox(height: 8),
-      ZoneMap(
-        key: const ValueKey('sampler-zone-map'),
-        zones: s,
-        selected: _selected,
-        accent: accent,
-        onSelect: (i, {additive = false}) => setState(() {
-          if (i == null) return _selected.clear();
-          if (!additive) _selected.clear();
-          _selected.contains(i) && additive ? _selected.remove(i) : _selected.add(i);
+    return LayoutBuilder(builder: (context, box) {
+      _narrow = box.maxWidth < samplerWide;
+      final accent = DeviceScope.of(context).accent;
+      return Column(key: const ValueKey('sampler-page'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _toolbar(s, accent),
+        Expanded(child: _narrow ? _phone(s) : _wide(s, box.maxWidth)),
+      ]);
+    });
+  }
+
+  Widget _toolbar(SamplerState s, Color accent) {
+    Widget act(String key, IconData icon, String tip, VoidCallback? on, {Color? color}) => IconButton(
+        key: ValueKey(key), tooltip: tip, visualDensity: VisualDensity.compact, iconSize: 18,
+        icon: Icon(icon, color: on == null ? null : color), onPressed: _busy ? null : on);
+    return SizedBox(height: 40, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Row(children: [
+      if (_narrow) ...[
+        PanelDots(count: samplerPanels.length, index: _panel, color: accent, onPick: goTo),
+        const SizedBox(width: 6),
+        Flexible(child: Text(samplerPanels[_panel].toUpperCase(), key: const ValueKey('sampler-panel-name'), maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: Neon.text))),
+      ] else
+        const Flexible(child: Text('Drop samples on the map or the keys: they fit the whole keyboard.', maxLines: 1,
+            overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Neon.dim))),
+      const Spacer(),
+      if (_busy) const Padding(padding: EdgeInsets.only(right: 6),
+          child: CrowLoader(size: 14)),
+      if (_selected.length > 1)
+        act('sampler-round-robin', Icons.repeat, 'Round robin (${_selected.length})', () {
+          _save(_saved..roundRobin(_selected.toList()..sort()));
+          Haptics.drop();
+          _say('${_selected.length} zones take turns on each hit');
+        }),
+      if (_selected.isNotEmpty)
+        act('sampler-delete', Icons.delete_outline, _selected.length == 1 ? 'Delete zone' : 'Delete ${_selected.length}', () {
+          final next = _saved;
+          for (final i in _selected.toList()..sort((a, b) => b.compareTo(a))) {
+            next.zones.removeAt(i);
+          }
+          _save(next);
+          setState(_selected.clear);
           Haptics.tap();
-        }),
-        onDrag: (next) => setState(() => _working = next),
-        onDragEnd: () {
-          final w = _working;
-          _working = null;
-          if (w != null) z.save(w);
-          Haptics.drop();
-        },
-      ),
-      SamplerKeyboard(
-        key: const ValueKey('sampler-keyboard'),
-        zones: s,
-        accent: accent,
-        onNote: (key, on) {
-          final id = key + 1000;
-          on ? z.state.previewOn(z.layer.id, id, key.toDouble(), 0.8) : z.state.previewOff(id);
-        },
-        onDropFiles: (key, paths) {
-          final next = z.saved;
-          final made = next.addFiles(paths, key);
-          z.save(next);
-          setState(() => _selected..clear()..addAll(made));
-          Haptics.drop();
-        },
-      ),
-      if (s.zones.isEmpty)
-        const Padding(padding: EdgeInsets.all(12), child: Text(
-            'No zones yet: add samples, import an SFZ, or drag audio from Files onto a key.',
-            textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))),
-      if (sel != null) ...[
-        const SizedBox(height: 8),
-        ZoneWaveform(key: ValueKey('sampler-wave-$sel'), state: z.state, zone: s.zones[sel], accent: accent,
-            onChanged: (zone) {
-              final next = z.saved;
-              next.zones[sel] = zone;
-              z.save(next);
-            }),
-        ZoneInspector(key: ValueKey('sampler-zone-$sel'), zone: s.zones[sel], accent: accent, onChanged: (zone) {
-          final next = z.saved;
-          next.zones[sel] = zone..normalize();
-          z.save(next);
-        }),
+        }, color: Neon.pink),
+      act('sampler-add', Icons.library_add_outlined, 'Add samples', _addSamples),
+      act('sampler-import-sfz', Icons.file_open_outlined, 'Import SFZ', _importSfz),
+      act('sampler-export-sfz', Icons.file_upload_outlined, 'Export SFZ', s.zones.isEmpty ? null : _exportSfz),
+    ])));
+  }
+
+  /// The centrepiece: the zone map over the keyboard, one drop target; empty, it says what a drop does.
+  Widget _centrepiece(SamplerState s, {required double mapHeight}) {
+    final accent = DeviceScope.of(context).accent;
+    final state = _state;
+    final layer = _layer!;
+    String pathOf(AssetDrag d) => state.project.asset(d.id)?.path ?? d.id;
+    return FPanel(
+      key: const ValueKey('sampler-centrepiece'),
+      title: 'KEYBOARD MAP',
+      trailing: [
+        Text('${s.zones.length} zone${s.zones.length == 1 ? '' : 's'}', style: const TextStyle(fontSize: 10, color: Neon.dim)),
+        const SizedBox(width: 6),
+        PopupMenuButton<DropMapping>(
+          key: const ValueKey('sampler-mapping'),
+          tooltip: 'How dropped samples map',
+          initialValue: _mapping,
+          onSelected: (m) => setState(() => _mapping = m),
+          itemBuilder: (_) => [for (final m in DropMapping.values)
+            PopupMenuItem(value: m, key: ValueKey('sampler-mapping-${m.name}'), child: Text(dropMappingLabel(m)))],
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), child: Row(mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(dropMappingLabel(_mapping), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: accent)),
+              Icon(Icons.arrow_drop_down, size: 16, color: accent),
+            ])),
+        ),
       ],
+      child: DragTarget<AssetDrag>(
+        key: const ValueKey('sampler-drop'),
+        onWillAcceptWithDetails: (d) => d.data.kind == AssetKind.audioFile,
+        onAcceptWithDetails: (d) => _dropAndPlay([pathOf(d.data)]),
+        builder: (context, hovering, _) => AnimatedContainer(
+          duration: Motion.fade(Motion.small, Motion.of(context)),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: hovering.isNotEmpty ? accent : Colors.transparent, width: 2)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Stack(children: [
+              ZoneMap(
+                key: const ValueKey('sampler-zone-map'),
+                zones: s,
+                selected: _selected,
+                accent: accent,
+                height: mapHeight,
+                onSelect: (i, {additive = false}) => setState(() {
+                  if (i == null) return _selected.clear();
+                  if (!additive) _selected.clear();
+                  _selected.contains(i) && additive ? _selected.remove(i) : _selected.add(i);
+                  Haptics.tap();
+                }),
+                onDrag: (next) => setState(() => _working = next),
+                onDragEnd: () {
+                  final w = _working;
+                  _working = null;
+                  if (w != null) _save(w);
+                  Haptics.drop();
+                },
+              ),
+              if (s.zones.isEmpty)
+                Positioned.fill(child: IgnorePointer(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.file_download_outlined, color: accent.withValues(alpha: 0.8)),
+                  const SizedBox(height: 4),
+                  const Text('Drop a sample here: it plays on every key.', key: ValueKey('sampler-empty'),
+                      textAlign: TextAlign.center, style: TextStyle(color: Neon.text, fontSize: 12)),
+                  const Text('Several map by their notes, or spread evenly.', textAlign: TextAlign.center,
+                      style: TextStyle(color: Neon.dim, fontSize: 10)),
+                ])))),
+            ]),
+            const SizedBox(height: 4),
+            SamplerKeyboard(
+              key: const ValueKey('sampler-keyboard'),
+              zones: s,
+              accent: accent,
+              onNote: (key, on) {
+                final id = key + 1000;
+                on ? state.previewOn(layer.id, id, key.toDouble(), 0.8) : state.previewOff(id);
+              },
+              onDropFiles: (key, paths) => _dropAndPlay(paths, key: key),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _zonePanel(SamplerState s) {
+    final accent = DeviceScope.of(context).accent;
+    final sel = _selected.isEmpty ? null : _selected.first;
+    return FPanel(key: const ValueKey('sampler-zone-panel'), title: 'ZONE',
+      trailing: [if (sel != null) Text(s.zones[sel].name, style: const TextStyle(fontSize: 10, color: Neon.dim))],
+      child: sel == null
+          ? const Padding(padding: EdgeInsets.all(12), child: Text('Pick a zone on the map to edit its sample, keys, loop '
+              'and stretch.', textAlign: TextAlign.center, style: TextStyle(color: Neon.dim, fontSize: 11)))
+          : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              ZoneWaveform(key: ValueKey('sampler-wave-$sel'), state: _state, zone: s.zones[sel], accent: accent,
+                  onChanged: (zone) => _save(_saved..zones[sel] = zone)),
+              ZoneInspector(key: ValueKey('sampler-zone-$sel'), zone: s.zones[sel], accent: accent,
+                  onChanged: (zone) => _save(_saved..zones[sel] = (zone..normalize()))),
+            ]));
+  }
+
+  List<Widget> _soundPanels(double k) => [
+    FPanel(key: const ValueKey('sampler-amp'), title: 'AMP', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FKnobRow(const ['gain', 'velocity', 'tune', 'transpose', 'polyphony'], size: k),
+        FKnobRow(const ['attack', 'decay', 'sustain', 'release'], size: k),
+      ])),
+    FPanel(key: const ValueKey('sampler-filter'), title: 'FILTER', trailing: const [DeviceChoice('filter')],
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        FKnobRow(const ['cutoff', 'resonance', 'filter_env', 'filter_key'], size: k),
+        FKnobRow(const ['filter_attack', 'filter_decay', 'filter_sustain', 'filter_release'], size: k,
+            labels: const {'filter_attack': 'Attack', 'filter_decay': 'Decay', 'filter_sustain': 'Sustain',
+              'filter_release': 'Release'}),
+      ])),
+  ];
+
+  Widget _stepper(String key, String label, String value, VoidCallback down, VoidCallback up) => Row(children: [
+    SizedBox(width: 70, child: Text(label, style: const TextStyle(fontSize: 11, color: Neon.dim))),
+    IconButton(key: ValueKey('$key-down'), visualDensity: VisualDensity.compact, iconSize: 16, icon: const Icon(Icons.remove),
+        onPressed: () => setState(() { Haptics.tick(); down(); })),
+    Expanded(child: Center(child: Text(value, style: Neon.code(size: 11, color: Neon.text)))),
+    IconButton(key: ValueKey('$key-up'), visualDensity: VisualDensity.compact, iconSize: 16, icon: const Icon(Icons.add),
+        onPressed: () => setState(() { Haptics.tick(); up(); })),
+  ]);
+
+  Widget _slicePanel(SamplerState s) {
+    final path = _slicePath(s);
+    return FPanel(key: const ValueKey('sampler-slice'), title: 'SLICE',
+      trailing: [if (path != null) Flexible(child: Text(path.split(RegExp(r'[/\\]')).last, maxLines: 1,
+          overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Neon.dim)))],
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        DevicePicker(labels: const ['Transients', 'Grid'], selected: _grid ? 1 : 0, keyPrefix: 'sampler-slice-by',
+            onPick: (i) => setState(() => _grid = i == 1)),
+        const SizedBox(height: 4),
+        AnimatedSwitcher(duration: Motion.fade(Motion.small, Motion.of(context)), child: _grid
+            ? KeyedSubtree(key: const ValueKey('grid'), child: _stepper('sampler-divisions', 'Slices', '$_divisions',
+                () => _divisions = math.max(1, _divisions ~/ 2 == 0 ? 1 : (_divisions > 8 ? _divisions - 4 : _divisions - 1)),
+                () => _divisions = math.min(128, _divisions >= 8 ? _divisions + 4 : _divisions + 1)))
+            : Row(key: const ValueKey('transients'), children: [
+                const SizedBox(width: 70, child: Text('Sensitivity', style: TextStyle(fontSize: 11, color: Neon.dim))),
+                Expanded(child: Slider(key: const ValueKey('sampler-sensitivity'), value: _sensitivity,
+                    onChanged: (v) => setState(() => _sensitivity = v))),
+              ])),
+        const SizedBox(height: 4),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          FilledButton.tonalIcon(key: const ValueKey('sampler-slice-keys'), icon: const Icon(Icons.piano, size: 16),
+              label: const Text('To keys'), onPressed: _busy || path == null ? null : () => _slice(drums: false)),
+          FilledButton.tonalIcon(key: const ValueKey('sampler-slice-drums'), icon: const Icon(Icons.grid_view, size: 16),
+              label: const Text('To Drums pads'), onPressed: _busy || path == null ? null : () => _slice(drums: true)),
+        ]),
+        if (path == null) const Padding(padding: EdgeInsets.only(top: 6), child: Text('Drop a loop first; its slices '
+            'go to keys from C2, or to a Drums track’s pads.', style: TextStyle(fontSize: 10, color: Neon.dim))),
+      ]));
+  }
+
+  Widget _recordPanel() {
+    final p = _plan;
+    final n = p.notes.length;
+    return FPanel(key: const ValueKey('sampler-record-panel'), title: 'RECORD MULTISAMPLE',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _stepper('sampler-rec-low', 'From', noteName(p.lowKey), () => p.lowKey = math.max(0, p.lowKey - 1),
+            () => p.lowKey = math.min(p.highKey, p.lowKey + 1)),
+        _stepper('sampler-rec-high', 'To', noteName(p.highKey), () => p.highKey = math.max(p.lowKey, p.highKey - 1),
+            () => p.highKey = math.min(127, p.highKey + 1)),
+        _stepper('sampler-rec-step', 'Every', '${p.step} st', () => p.step = math.max(1, p.step - 1),
+            () => p.step = math.min(12, p.step + 1)),
+        _stepper('sampler-rec-layers', 'Velocities', '${p.layers}', () => p.layers = math.max(1, p.layers - 1),
+            () => p.layers = math.min(4, p.layers + 1)),
+        _stepper('sampler-rec-hold', 'Hold', '${p.noteSeconds.toStringAsFixed(1)} s',
+            () => p.noteSeconds = math.max(0.5, p.noteSeconds - 0.5), () => p.noteSeconds = math.min(10, p.noteSeconds + 0.5)),
+        const SizedBox(height: 4),
+        Row(children: [
+          Expanded(child: Text('$n note${n == 1 ? '' : 's'} · ${p.seconds.round()} s', key: const ValueKey('sampler-rec-summary'),
+              style: const TextStyle(fontSize: 11, color: Neon.dim))),
+          FilledButton.icon(key: const ValueKey('sampler-record'), icon: const Icon(Icons.fiber_manual_record, size: 16),
+              label: const Text('Record'), onPressed: _busy || n == 0 ? null : _record),
+        ]),
+      ]));
+  }
+
+  /// The one screen: the map, then the zone beside the sound, then slicing beside recording. It scrolls when short.
+  Widget _wide(SamplerState s, double width) {
+    final roomy = width >= 1200;
+    final k = roomy ? 40.0 : 34.0;
+    const gap = SizedBox(width: 8, height: 8);
+    final sound = _soundPanels(k);
+    return SingleChildScrollView(key: const ValueKey('sampler-wide'), padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _centrepiece(s, mapHeight: roomy ? 200 : 160),
+        gap,
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 6, child: _zonePanel(s)),
+          gap,
+          Expanded(flex: 5, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [sound[0], gap, sound[1]])),
+        ]),
+        gap,
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: _slicePanel(s)),
+          gap,
+          Expanded(child: _recordPanel()),
+        ]),
+      ]));
+  }
+
+  /// The phone: the map stays on top; under it the three panels swipe sideways.
+  Widget _phone(SamplerState s) {
+    Widget panel(String key, List<Widget> children) => ListView(key: ValueKey(key),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+      children: [for (final c in children) Padding(padding: const EdgeInsets.only(bottom: 8), child: c)]);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: _centrepiece(s, mapHeight: 130)),
+      Expanded(child: PageView(
+        key: const ValueKey('sampler-pages'),
+        controller: _pages,
+        onPageChanged: (i) {
+          Motion.tick();
+          setState(() => _panel = i);
+        },
+        children: [
+          panel('sampler-panel-zone', [_zonePanel(s)]),
+          panel('sampler-panel-sound', _soundPanels(40)),
+          panel('sampler-panel-tools', [_slicePanel(s), _recordPanel()]),
+        ],
+      )),
     ]);
   }
 }
 
-// ---------- the zone map ----------
+// ---------- multisample recording ----------
 
-/// Zones over keys (across) and velocity (up): tap picks one (Ctrl or a second tap adds), drag a zone to move it,
-/// drag its edges to change its range. The keys shown follow the zones, with room around them.
-class ZoneMap extends StatefulWidget {
-  const ZoneMap({super.key, required this.zones, required this.selected, required this.accent, required this.onSelect,
-      required this.onDrag, required this.onDragEnd, this.height = 180});
-  final SamplerState zones;
-  final Set<int> selected;
-  final Color accent;
-  final double height;
-  final void Function(int? index, {bool additive}) onSelect;
-  final ValueChanged<SamplerState> onDrag;
-  final VoidCallback onDragEnd;
-
-  /// The keys drawn: the zones' span with an octave around it, at least four octaves.
-  static (int, int) keySpan(SamplerState z) {
-    final (lo, hi) = zoneSpan(z);
-    var a = math.max(0, lo - 12), b = math.min(127, hi + 12);
-    while (b - a < 48) {
-      if (a > 0) a--;
-      if (b - a < 48 && b < 127) b++;
-      if (a == 0 && b == 127) break;
-    }
-    return (a, b);
-  }
-
-  @override
-  State<ZoneMap> createState() => _ZoneMapState();
-}
-
-enum _Edge { body, left, right, top, bottom }
-
-class _ZoneMapState extends State<ZoneMap> {
-  int? _zone;
-  _Edge _edge = _Edge.body;
-  SamplerZone? _start;
-  Offset _from = Offset.zero;
-
-  (int, int) get _span => ZoneMap.keySpan(widget.zones);
-
-  Rect _rect(SamplerZone z, Size size) {
-    final (a, b) = _span;
-    final kw = size.width / (b - a + 1);
-    double y(int vel) => (1 - vel / 127) * size.height;
-    return Rect.fromLTRB((z.loKey - a) * kw, y(z.hiVel), (z.hiKey - a + 1) * kw, y(z.loVel - 1));
-  }
-
-  int? _hit(Offset at, Size size) {
-    // The selected zones first, then the last drawn (on top).
-    final order = [...widget.selected, for (var i = widget.zones.zones.length - 1; i >= 0; i--) i];
-    for (final i in order) {
-      if (i < widget.zones.zones.length && _rect(widget.zones.zones[i], size).inflate(4).contains(at)) return i;
-    }
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) => SizedBox(height: widget.height, child: LayoutBuilder(builder: (context, box) {
-    final size = Size(box.maxWidth, widget.height);
-    final (a, b) = _span;
-    final kw = size.width / (b - a + 1);
-    // A zone moves from the first few pixels (a key is narrow on a phone), before the page's scroll takes the drag.
-    final mq = MediaQuery.of(context);
-    void addUnder(Offset at) {
-      final under = [
-        for (var i = widget.zones.zones.length - 1; i >= 0; i--)
-          if (_rect(widget.zones.zones[i], size).inflate(4).contains(at)) i,
-      ];
-      final i = under.where((i) => !widget.selected.contains(i)).firstOrNull ?? under.firstOrNull;
-      if (i != null) widget.onSelect(i, additive: true);
-    }
-
-    return MediaQuery(data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 3)),
-        child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      // Where the finger went down picks the zone and its edge, not where the drag was recognised.
-      dragStartBehavior: DragStartBehavior.down,
-      onTapUp: (d) => widget.onSelect(_hit(d.localPosition, size), additive: widget.selected.length > 1 ||
-          HardwareKeyboard.instance.isControlPressed),
-      // A long-press adds a zone to the selection: of stacked zones, the first not chosen yet (layers, round robins).
-      onLongPressStart: (d) => addUnder(d.localPosition),
-      onSecondaryTapUp: (d) => addUnder(d.localPosition), // a right-click does the same
-      onPanStart: (d) {
-        final i = _hit(d.localPosition, size);
-        if (i == null) return;
-        final r = _rect(widget.zones.zones[i], size);
-        final p = d.localPosition;
-        // The edges are 10 px wide (8 px high), less on a narrow zone so its middle still moves it.
-        final ex = math.min(10.0, r.width / 4), ey = math.min(8.0, r.height / 4);
-        _edge = (p.dx - r.left).abs() < ex ? _Edge.left : (p.dx - r.right).abs() < ex ? _Edge.right
-            : (p.dy - r.top).abs() < ey ? _Edge.top : (p.dy - r.bottom).abs() < ey ? _Edge.bottom : _Edge.body;
-        _zone = i;
-        _start = widget.zones.zones[i].copy();
-        _from = p;
-        if (!widget.selected.contains(i)) widget.onSelect(i);
-        Haptics.grab();
-      },
-      onPanUpdate: (d) {
-        final i = _zone, s0 = _start;
-        if (i == null || s0 == null) return;
-        final dk = ((d.localPosition.dx - _from.dx) / kw).round();
-        final dv = (-(d.localPosition.dy - _from.dy) / size.height * 127).round();
-        final next = widget.zones.copy();
-        final z = s0.copy();
-        switch (_edge) {
-          case _Edge.body:
-            next.zones[i] = z;
-            next.moveZone(i, dk, dv);
-          case _Edge.left:
-            z.loKey = (s0.loKey + dk).clamp(0, s0.hiKey);
-            next.zones[i] = z;
-          case _Edge.right:
-            z.hiKey = (s0.hiKey + dk).clamp(s0.loKey, 127);
-            next.zones[i] = z;
-          case _Edge.top:
-            z.hiVel = (s0.hiVel + dv).clamp(s0.loVel, 127);
-            next.zones[i] = z;
-          case _Edge.bottom:
-            z.loVel = (s0.loVel + dv).clamp(1, s0.hiVel);
-            next.zones[i] = z;
-        }
-        final was = widget.zones.zones[i];
-        if (was.loKey != next.zones[i].loKey || was.hiKey != next.zones[i].hiKey ||
-            was.loVel != next.zones[i].loVel || was.hiVel != next.zones[i].hiVel) {
-          Haptics.tick();
-        }
-        widget.onDrag(next);
-      },
-      onPanEnd: (_) {
-        if (_zone == null) return;
-        _zone = null;
-        _start = null;
-        widget.onDragEnd();
-      },
-      child: CustomPaint(size: size, painter: _ZoneMapPainter(widget.zones, widget.selected, widget.accent, a, b, _rect)),
-    ));
-  }));
-}
-
-class _ZoneMapPainter extends CustomPainter {
-  _ZoneMapPainter(this.zones, this.selected, this.accent, this.lo, this.hi, this.rectOf);
-  final SamplerState zones;
-  final Set<int> selected;
-  final Color accent;
-  final int lo, hi;
-  final Rect Function(SamplerZone, Size) rectOf;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bg = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(8));
-    canvas.drawRRect(bg, Paint()..color = Color.lerp(Neon.bg, accent, 0.06)!);
-    final kw = size.width / (hi - lo + 1);
-    final grid = Paint()..color = Neon.line.withValues(alpha: 0.5);
-    for (var k = lo; k <= hi; k++) {
-      if (k % 12 == 0) canvas.drawLine(Offset((k - lo) * kw, 0), Offset((k - lo) * kw, size.height), grid);
-    }
-    for (final v in [32, 64, 96]) {
-      final y = (1 - v / 127) * size.height;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid..color = Neon.line.withValues(alpha: 0.25));
-    }
-    for (var i = 0; i < zones.zones.length; i++) {
-      final z = zones.zones[i];
-      final r = rectOf(z, size).deflate(0.5);
-      final on = selected.contains(i);
-      final hue = z.seqLength > 1 ? Color.lerp(accent, Neon.pink, 0.5)! : accent;
-      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)),
-          Paint()..color = hue.withValues(alpha: on ? 0.45 : 0.20));
-      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), Paint()
-        ..color = on ? Neon.ink : hue.withValues(alpha: 0.8)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = on ? 1.6 : 1);
-      // The root key: a tick at the zone's foot.
-      final rx = (z.root - lo + 0.5) * kw;
-      if (rx >= r.left && rx <= r.right) {
-        canvas.drawLine(Offset(rx, r.bottom - 6), Offset(rx, r.bottom), Paint()..color = Neon.ink..strokeWidth = 2);
-      }
-      if (r.width > 34 && r.height > 14) {
-        final tp = TextPainter(text: TextSpan(text: z.seqLength > 1 ? '${z.name} · ${z.seqPosition}/${z.seqLength}' : z.name,
-            style: Neon.code(size: 9, color: Neon.ink)), textDirection: TextDirection.ltr, maxLines: 1,
-            ellipsis: '…')
-          ..layout(maxWidth: r.width - 6);
-        tp.paint(canvas, Offset(r.left + 3, r.top + 2));
-      }
-    }
-    final tp = TextPainter(text: TextSpan(text: '${noteName(lo)} · velocity ↑',
-        style: Neon.code(size: 9, color: Neon.dim)), textDirection: TextDirection.ltr)..layout();
-    tp.paint(canvas, Offset(4, size.height - tp.height - 2));
-  }
-
-  @override
-  bool shouldRepaint(covariant _ZoneMapPainter old) =>
-      paintInputsChanged([old.zones, old.selected, old.accent, old.lo, old.hi, old.rectOf], [zones, selected, accent, lo, hi, rectOf]);
-}
-
-// ---------- the keyboard ----------
-
-/// The keys under the map: a press plays the sampler, an audio file dropped on a key makes zones from there up.
-class SamplerKeyboard extends StatelessWidget {
-  const SamplerKeyboard({super.key, required this.zones, required this.accent, required this.onNote,
-      required this.onDropFiles, this.height = 44});
-  final SamplerState zones;
-  final Color accent;
-  final double height;
-  final void Function(int key, bool on) onNote;
-  final void Function(int key, List<String> paths) onDropFiles;
-
-  static bool _black(int k) => const {1, 3, 6, 8, 10}.contains(k % 12);
-
-  @override
-  Widget build(BuildContext context) {
-    final (lo, hi) = ZoneMap.keySpan(zones);
-    final state = DeviceScope.maybeOf(context)?.target.state;
-    return SizedBox(height: height, child: LayoutBuilder(builder: (context, box) {
-      final kw = box.maxWidth / (hi - lo + 1);
-      int keyAt(double x) => (lo + (x / kw).floor()).clamp(lo, hi);
-      return DragTarget<AssetDrag>(
-        onWillAcceptWithDetails: (d) => d.data.kind == AssetKind.audioFile,
-        onAcceptWithDetails: (d) {
-          final box = context.findRenderObject() as RenderBox?;
-          final x = box == null ? 0.0 : box.globalToLocal(d.offset).dx;
-          final path = state?.project.asset(d.data.id)?.path ?? d.data.id;
-          onDropFiles(keyAt(x), [path]);
-        },
-        builder: (context, hovering, _) => Listener(
-          onPointerDown: (e) => onNote(keyAt(e.localPosition.dx), true),
-          onPointerUp: (e) => onNote(keyAt(e.localPosition.dx), false),
-          onPointerCancel: (e) => onNote(keyAt(e.localPosition.dx), false),
-          child: CustomPaint(size: Size(box.maxWidth, height), painter: _KeysPainter(lo, hi, accent, zones,
-              hovering.isNotEmpty)),
-        ),
-      );
-    }));
-  }
-}
-
-class _KeysPainter extends CustomPainter {
-  _KeysPainter(this.lo, this.hi, this.accent, this.zones, this.hover);
-  final int lo, hi;
-  final Color accent;
-  final SamplerState zones;
-  final bool hover;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final kw = size.width / (hi - lo + 1);
-    for (var k = lo; k <= hi; k++) {
-      final r = Rect.fromLTWH((k - lo) * kw, 0, kw, size.height).deflate(0.4);
-      final mapped = zones.zones.any((z) => k >= z.loKey && k <= z.hiKey);
-      final black = SamplerKeyboard._black(k);
-      canvas.drawRect(r, Paint()..color = black ? const Color(0xFF1A1A22) : const Color(0xFFDADAE2));
-      if (mapped) canvas.drawRect(Rect.fromLTWH(r.left, r.bottom - 4, r.width, 4), Paint()..color = accent);
-    }
-    if (hover) {
-      canvas.drawRect(Offset.zero & size, Paint()
-        ..color = accent
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _KeysPainter old) =>
-      paintInputsChanged([old.lo, old.hi, old.accent, old.zones, old.hover], [lo, hi, accent, zones, hover]);
-}
-
-// ---------- the zone's waveform ----------
-
-/// The zone's sample with its start and end and its loop (drag a marker to move it; positions are the file's
-/// frames).
-class ZoneWaveform extends StatefulWidget {
-  const ZoneWaveform({super.key, required this.state, required this.zone, required this.accent, required this.onChanged});
+/// The guided recording: the input opens, the song plays and records the track's input while the dialog prompts
+/// each note in turn (its name, its velocity layer and a bar running down its hold); then the take is cut into
+/// zones by the engine and the result says what was heard. Pops with the zones (Use) or null.
+class MultisampleDialog extends StatefulWidget {
+  const MultisampleDialog({super.key, required this.state, required this.layer, required this.plan});
   final AppState state;
-  final SamplerZone zone;
-  final Color accent;
-  final ValueChanged<SamplerZone> onChanged;
+  final LayerDoc layer;
+  final MultisamplePlan plan;
 
   @override
-  State<ZoneWaveform> createState() => _ZoneWaveformState();
+  State<MultisampleDialog> createState() => _MultisampleDialogState();
 }
 
-class _ZoneWaveformState extends State<ZoneWaveform> {
-  AssetInfo? _info;
-  String? _marker;
-  SamplerZone? _drag;
+enum _RecPhase { ready, recording, cutting, done }
 
-  static final Map<String, AssetInfo> _known = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+class _MultisampleDialogState extends State<MultisampleDialog> {
+  _RecPhase _phase = _RecPhase.ready;
+  double _elapsed = 0; // seconds since the take started, counted by the prompt's ticks
+  Timer? _timer;
+  String _error = '';
+  TakeResult? _result;
+  late final List<PlannedNote> _notes = widget.plan.notes;
 
   @override
-  void didUpdateWidget(ZoneWaveform old) {
-    super.didUpdateWidget(old);
-    if (old.zone.path != widget.zone.path) _load();
+  void dispose() {
+    _timer?.cancel();
+    if (_phase == _RecPhase.recording) unawaited(_stopEngine());
+    super.dispose();
   }
 
-  void _load() {
-    final path = widget.zone.path;
-    _info = _known[path];
-    if (_info != null) return;
-    widget.state.audioIo.loadAsset(path).then((i) {
-      if (!i.ok) return;
-      _known[path] = i;
-      if (mounted && widget.zone.path == path) setState(() => _info = i);
+  Future<void> _stopEngine() async {
+    final io = widget.state.audioIo;
+    final r = await io.recordStop();
+    if (widget.state.transportOn) widget.state.stopPlayback();
+    if (!mounted) return;
+    final take = r.takes.where((t) => t.layer == widget.layer.id && t.path.isNotEmpty).firstOrNull;
+    if (take == null) {
+      setState(() {
+        _phase = _RecPhase.done;
+        _error = r.error.isEmpty ? 'nothing was recorded' : r.error;
+      });
+      return;
+    }
+    setState(() => _phase = _RecPhase.cutting);
+    final res = await widget.state.takeToZones(take.path, widget.plan);
+    if (!mounted) return;
+    setState(() {
+      _phase = _RecPhase.done;
+      _result = res;
+      _error = res.error;
     });
   }
 
-  int get _frames => _info == null ? 0 : (_info!.seconds * (_info!.sourceRate > 0 ? _info!.sourceRate : _info!.sampleRate)).round();
+  Future<void> _start() async {
+    final io = widget.state.audioIo;
+    final rec = AudioRecorder.current;
+    if (rec != null) {
+      if (!rec.inputOpen && !await rec.openInput(force: true)) {
+        setState(() => _error = 'the input did not open');
+        return;
+      }
+    } else {
+      await io.configureInput(enabled: true);
+    }
+    final dir = widget.state.recordingsDirectory;
+    await dir.create(recursive: true);
+    final r = await io.recordStart({
+      'dir': dir.path,
+      'bpm': widget.state.project.bpm,
+      'tracks': [{'layer': widget.layer.id, 'channel': 0, 'channels': 1}],
+    });
+    if (!mounted) return;
+    if (!r.ok) {
+      setState(() => _error = r.error.isEmpty ? 'recording did not start' : r.error);
+      return;
+    }
+    if (!widget.state.transportOn) widget.state.togglePlay();
+    _elapsed = 0;
+    _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted) return;
+      _elapsed += 0.05;
+      if (_elapsed >= widget.plan.seconds) {
+        _finish();
+      } else {
+        setState(() {});
+      }
+    });
+    setState(() => _phase = _RecPhase.recording);
+  }
+
+  void _finish() {
+    if (_phase != _RecPhase.recording) return;
+    _timer?.cancel();
+    _phase = _RecPhase.cutting;
+    setState(() {});
+    unawaited(_stopEngine());
+  }
+
+  /// The note asked for now (null: getting ready or between notes) and how far through its hold.
+  (PlannedNote?, double, int) _now() {
+    final t = _elapsed;
+    for (final (i, n) in _notes.indexed) {
+      if (t >= n.start && t < n.end) return (n, (t - n.start) / (n.end - n.start), i);
+      if (t < n.start) return (null, 0, i);
+    }
+    return (null, 1, _notes.length);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final z = _drag ?? widget.zone;
-    final info = _info;
-    return SizedBox(height: 96, child: LayoutBuilder(builder: (context, box) {
-      final w = box.maxWidth;
-      final frames = _frames;
-      double x(int frame) => frames <= 0 ? 0 : frame / frames * w;
-      int frameAt(double px) => frames <= 0 ? 0 : (px / w * frames).round().clamp(0, frames);
-      final end = z.end > 0 ? z.end : frames;
-      final markers = <(String, int, Color)>[
-        ('start', z.offset, Neon.green),
-        ('end', end, Neon.pink),
-        if (z.loopEnd > z.loopStart || z.playedLoopMode.startsWith('loop')) ...[
-          ('loop_start', z.loopStart, Neon.yellow),
-          ('loop_end', z.loopEnd > 0 ? z.loopEnd : end, Neon.yellow),
-        ],
-      ];
-      return Stack(children: [
-        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Color.lerp(Neon.bg, widget.accent, 0.07),
-            borderRadius: BorderRadius.circular(8)))),
-        if (info != null)
-          Positioned.fill(child: CustomPaint(key: const ValueKey('sampler-wave'), painter: AudioClipPainter(
-            peaks: () => WaveformCache.instance.peaks(widget.state.audioIo, z.path, info.seconds, info.seconds / w),
-            window: ClipWindow(offset: 0, perPixel: info.seconds / w, fileSeconds: info.seconds),
-            color: widget.accent.withValues(alpha: 0.85), gain: 1, fadeIn: 0, fadeOut: 0,
-            inCurve: FadeCurve.linear, outCurve: FadeCurve.linear, path: z.path))),
-        if (z.loopEnd > z.loopStart)
-          Positioned(left: x(z.loopStart), width: math.max(1, x(z.loopEnd) - x(z.loopStart)), top: 0, bottom: 0,
-              child: IgnorePointer(child: ColoredBox(color: Neon.yellow.withValues(alpha: 0.10)))),
-        for (final (name, frame, color) in markers)
-          // Kept inside the waveform, so a marker at either end can still be grabbed; its line stays on its frame.
-          Positioned(left: (x(frame) - 12).clamp(0.0, math.max(0.0, w - 24)), top: 0, bottom: 0, width: 24, child: GestureDetector(
-            key: ValueKey('sampler-marker-$name'),
-            behavior: HitTestBehavior.opaque,
-            dragStartBehavior: DragStartBehavior.down,
-            onHorizontalDragStart: (_) {
-              _marker = name;
-              _drag = widget.zone.copy();
-              Haptics.grab();
-            },
-            onHorizontalDragUpdate: (d) {
-              final dz = _drag;
-              if (dz == null || frames <= 0) return;
-              final f = frameAt(x(switch (_marker) {
-                    'start' => dz.offset,
-                    'end' => dz.end > 0 ? dz.end : frames,
-                    'loop_start' => dz.loopStart,
-                    _ => dz.loopEnd > 0 ? dz.loopEnd : frames,
-                  }) + d.delta.dx);
-              setState(() {
-                switch (_marker) {
-                  case 'start':
-                    dz.offset = f.clamp(0, (dz.end > 0 ? dz.end : frames) - 1);
-                  case 'end':
-                    dz.end = f.clamp(dz.offset + 1, frames);
-                  case 'loop_start':
-                    dz.loopStart = f.clamp(0, (dz.loopEnd > 0 ? dz.loopEnd : frames) - 1);
-                    if (dz.loopEnd <= dz.loopStart) dz.loopEnd = frames;
-                  default:
-                    dz.loopEnd = f.clamp(dz.loopStart + 1, frames);
-                }
-              });
-            },
-            onHorizontalDragEnd: (_) {
-              final dz = _drag;
-              _drag = null;
-              _marker = null;
-              if (dz != null) widget.onChanged(dz);
-              Haptics.drop();
-            },
-            child: Align(alignment: Alignment((x(frame) - (x(frame) - 12).clamp(0.0, math.max(0.0, w - 24)) - 12) / 12, 0),
-                child: Container(width: 2, color: color)))),
-        Positioned(left: 6, top: 4, child: Text(info == null ? '${z.name} · loading…'
-            : '${z.name} · ${info.seconds.toStringAsFixed(2)} s', style: const TextStyle(fontSize: 10, color: Neon.dim))),
-      ]);
-    }));
+    final accent = DeviceScope.maybeOf(context)?.accent ?? Neon.green;
+    final (note, through, index) = _now();
+    final layers = widget.plan.layers;
+    Widget body;
+    switch (_phase) {
+      case _RecPhase.ready:
+        body = Text('Connect the instrument to the input. When you start, the song plays and each note to play shows here '
+            'in turn: ${_notes.length} notes from ${noteName(widget.plan.lowKey)} to ${noteName(widget.plan.highKey)}, '
+            'held ${widget.plan.noteSeconds.toStringAsFixed(1)} s each.', style: const TextStyle(fontSize: 12));
+      case _RecPhase.recording:
+        final next = index < _notes.length ? _notes[index] : null;
+        final show = note ?? next;
+        final layer = show == null ? 0 : (_notes.indexOf(show) % layers);
+        body = Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(note != null ? 'PLAY' : 'NEXT', style: const TextStyle(fontSize: 11, letterSpacing: 1.4, color: Neon.dim)),
+          AnimatedSwitcher(duration: Motion.fade(Motion.small, Motion.of(context)), child: Text(
+              show == null ? '—' : noteName(show.key), key: ValueKey('rec-prompt-${show?.key}-$layer'),
+              style: TextStyle(fontSize: 44, fontWeight: FontWeight.w800, color: note != null ? accent : Neon.text))),
+          if (layers > 1 && show != null)
+            Text(['soft', 'medium', 'loud', 'hardest'][(layer * 4 ~/ layers).clamp(0, 3)],
+                style: const TextStyle(fontSize: 12, color: Neon.dim)),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(value: note == null ? 0 : 1 - through, color: accent),
+          const SizedBox(height: 6),
+          Text('Note ${math.min(index + 1, _notes.length)} of ${_notes.length}', style: const TextStyle(fontSize: 11, color: Neon.dim)),
+        ]);
+      case _RecPhase.cutting:
+        body = const Row(children: [
+          CrowLoader(size: 16),
+          SizedBox(width: 10),
+          Text('Finding each note in the take…'),
+        ]);
+      case _RecPhase.done:
+        final r = _result;
+        final missing = r == null ? 0 : r.found.where((f) => !f).length;
+        final off = r == null ? 0 : [for (var i = 0; i < r.found.length; i++) r.found[i] && !r.inTune[i]].where((x) => x).length;
+        body = Text(_error.isNotEmpty ? 'Recording failed: $_error' : '${r!.zones.length} zones made'
+            '${missing > 0 ? ' · $missing note${missing == 1 ? '' : 's'} not heard' : ''}'
+            '${off > 0 ? ' · $off not at the note asked for' : ''}.', key: const ValueKey('rec-result'));
+    }
+    return AlertDialog(
+      key: const ValueKey('sampler-record-dialog'),
+      title: const Text('Record multisample'),
+      content: SizedBox(width: 320, child: AnimatedSwitcher(duration: Motion.fade(Motion.small, Motion.of(context)),
+          child: KeyedSubtree(key: ValueKey(_phase), child: body))),
+      actions: [
+        if (_phase != _RecPhase.cutting)
+          TextButton(key: const ValueKey('rec-cancel'), onPressed: () {
+            if (_phase == _RecPhase.recording) {
+              _finish();
+            } else {
+              Navigator.pop(context);
+            }
+          }, child: Text(_phase == _RecPhase.recording ? 'Stop' : 'Close')),
+        if (_phase == _RecPhase.ready)
+          FilledButton(key: const ValueKey('rec-start'), onPressed: _start, child: const Text('Start')),
+        if (_phase == _RecPhase.done && (_result?.zones.isNotEmpty ?? false))
+          FilledButton(key: const ValueKey('rec-use'), onPressed: () => Navigator.pop(context, _result!.zones),
+              child: const Text('Use these zones')),
+      ],
+    );
   }
 }
 
-// ---------- the zone inspector ----------
-
-class ZoneInspector extends StatelessWidget {
-  const ZoneInspector({super.key, required this.zone, required this.accent, required this.onChanged});
-  final SamplerZone zone;
-  final Color accent;
-  final ValueChanged<SamplerZone> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget stepper(String key, String label, String value, VoidCallback down, VoidCallback up) => SizedBox(
-          width: 172,
-          child: Row(children: [
-            SizedBox(width: 54, child: Text(label, style: const TextStyle(fontSize: 11, color: Neon.dim))),
-            IconButton(key: ValueKey('zone-$key-down'), visualDensity: VisualDensity.compact, iconSize: 16,
-                icon: const Icon(Icons.remove), onPressed: () { Haptics.tick(); down(); }),
-            Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: Text(value, maxLines: 1, softWrap: false,
-                style: Neon.code(size: 11, color: Neon.text)))),
-            IconButton(key: ValueKey('zone-$key-up'), visualDensity: VisualDensity.compact, iconSize: 16,
-                icon: const Icon(Icons.add), onPressed: () { Haptics.tick(); up(); }),
-          ]));
-    SamplerZone c() => zone.copy();
-    return Padding(padding: const EdgeInsets.only(top: 8), child: Wrap(spacing: 8, runSpacing: 2, children: [
-      stepper('root', 'Root', noteName(zone.root), () => onChanged(c()..root = (zone.root - 1).clamp(0, 127)),
-          () => onChanged(c()..root = (zone.root + 1).clamp(0, 127))),
-      stepper('lokey', 'Low key', noteName(zone.loKey), () => onChanged(c()..loKey = (zone.loKey - 1).clamp(0, 127)),
-          () => onChanged(c()..loKey = (zone.loKey + 1).clamp(0, zone.hiKey))),
-      stepper('hikey', 'High key', noteName(zone.hiKey), () => onChanged(c()..hiKey = (zone.hiKey - 1).clamp(zone.loKey, 127)),
-          () => onChanged(c()..hiKey = (zone.hiKey + 1).clamp(0, 127))),
-      stepper('lovel', 'Low vel', '${zone.loVel}', () => onChanged(c()..loVel = (zone.loVel - 8).clamp(1, zone.hiVel)),
-          () => onChanged(c()..loVel = (zone.loVel + 8).clamp(1, zone.hiVel))),
-      stepper('hivel', 'High vel', '${zone.hiVel}', () => onChanged(c()..hiVel = (zone.hiVel - 8).clamp(zone.loVel, 127)),
-          () => onChanged(c()..hiVel = (zone.hiVel + 8).clamp(zone.loVel, 127))),
-      stepper('tune', 'Tune', '${zone.tune.round()} ct', () => onChanged(c()..tune = zone.tune - 5),
-          () => onChanged(c()..tune = zone.tune + 5)),
-      stepper('volume', 'Volume', '${zone.volume.toStringAsFixed(1)} dB', () => onChanged(c()..volume = zone.volume - 1),
-          () => onChanged(c()..volume = math.min(24, zone.volume + 1))),
-      stepper('pan', 'Pan', zone.pan == 0 ? 'C' : '${zone.pan.abs().round()}${zone.pan < 0 ? 'L' : 'R'}',
-          () => onChanged(c()..pan = (zone.pan - 10).clamp(-100, 100)), () => onChanged(c()..pan = (zone.pan + 10).clamp(-100, 100))),
-      stepper('group', 'Choke', zone.group == 0 ? 'none' : '${zone.group}',
-          () => onChanged(c()..group = math.max(0, zone.group - 1)..offBy = math.max(0, zone.group - 1)),
-          () => onChanged(c()..group = zone.group + 1..offBy = zone.group + 1)),
-      SizedBox(width: 300, child: Row(children: [
-        const SizedBox(width: 54, child: Text('Loop', style: TextStyle(fontSize: 11, color: Neon.dim))),
-        DropdownButton<String>(key: const ValueKey('zone-loop-mode'), isDense: true, value: zone.playedLoopMode,
-            underline: const SizedBox.shrink(),
-            items: [for (final m in samplerLoopModes) DropdownMenuItem(value: m, child: Text(loopModeLabel(m),
-                style: const TextStyle(fontSize: 12)))],
-            onChanged: (m) {
-              if (m == null) return;
-              Haptics.tick();
-              onChanged(c()..loopMode = m);
-            }),
-        if (zone.seqLength > 1) Padding(padding: const EdgeInsets.only(left: 8), child: Text(
-            'Round robin ${zone.seqPosition}/${zone.seqLength}', style: TextStyle(fontSize: 11, color: accent))),
-      ])),
-    ]));
-  }
-}
-
-// ---------- SOUND ----------
+// ---------- the track card's inline controls ----------
 
 class SamplerSoundPage extends StatelessWidget {
   const SamplerSoundPage({super.key});

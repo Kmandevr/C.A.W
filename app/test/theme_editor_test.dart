@@ -76,11 +76,11 @@ void main() {
     final s = await open(tester);
     await tester.tap(find.byKey(const ValueKey('theme-start-from')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('start-from-Dawn')));
+    await tester.tap(find.byKey(const ValueKey('start-from-Jay')));
     await tester.pumpAndSettle();
-    expect(s.themeName, 'My Dawn');
-    expect(s.isStarter('My Dawn'), isFalse);
-    expect(s.theme.lightColors['bg'], dawnTheme.lightColors['bg']);
+    expect(s.themeName, 'My Jay');
+    expect(s.isStarter('My Jay'), isFalse);
+    expect(s.theme.lightColors['bg'], jayTheme.lightColors['bg']);
     await close(tester);
   });
 
@@ -112,9 +112,9 @@ void main() {
 
   testWidgets('Flat turns glow and glass off in the editor; Advanced is folded until opened', (tester) async {
     final s = await open(tester);
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Flat'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Jackdaw'));
     await tester.pumpAndSettle();
-    expect(s.themeName, 'Flat');
+    expect(s.themeName, 'Jackdaw');
     final glass = tester.widget<SwitchListTile>(find.byKey(const ValueKey('theme-glass')));
     expect(glass.onChanged, isNull);
     expect(find.byKey(const ValueKey('slot-bg')), findsNothing);

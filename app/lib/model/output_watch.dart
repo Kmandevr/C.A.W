@@ -7,7 +7,7 @@ import 'settings.dart';
 
 /// Owned by the app state: listens for the output being unplugged (Android's broadcast, or a removed output in the
 /// audio status on desktop, looked at once a second while playing) and pauses when Settings.pauseOnUnplug says so;
-/// asks the platform to keep the screen on as Settings.keepAwake says, while the app is in front.
+/// asks the platform to keep the screen on as Settings.keepAwake says (and while a Benchmark runs), while the app is in front.
 class OutputWatch {
   OutputWatch(this.state, {OutputUnplug? unplug, ScreenAwake? awake})
       : unplug = unplug ?? OutputUnplug.current,
@@ -50,13 +50,15 @@ class OutputWatch {
     if (last != null && outputRemoved(last, st)) unplugged();
   }
 
-  /// Whether the screen should stay on now.
+  /// Whether the screen should stay on now: always while a Benchmark runs (owner, 2026-11-19: no watching the phone
+  /// so it doesn't sleep), else as the setting says.
   bool get wantsAwake => state.foreground.value &&
+      (state.stressSuspended ||
       switch (state.settings.keepAwake) {
         KeepAwake.off => false,
         KeepAwake.playing => state.transportOn || state.meters.playing,
         KeepAwake.always => true,
-      };
+      });
 
   /// Asks the platform when [wantsAwake] changed.
   void update() {

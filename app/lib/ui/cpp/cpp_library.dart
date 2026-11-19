@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../model/cpp_reference.dart';
+import '../../model/device_names.dart';
 import '../glass.dart';
 import '../theme.dart';
 
@@ -40,7 +41,7 @@ class _Item {
   _Item.builtin(CppBuiltin b)
       : group = b.instrument ? 'Built-in instruments' : 'Built-in effects',
         title = b.id,
-        detail = b.name,
+        detail = DeviceNames.title(b.id, b.name),
         doc = b.doc,
         example = '',
         insert = '"${b.id}"',
@@ -71,6 +72,7 @@ class _Item {
         has(group) ||
         members.any((m) => has(m.name) || has(m.doc)) ||
         (builtin?.knobs.any(has) ?? false) ||
+        (builtin != null && DeviceNames.rank(builtin!.id, q) != null) ||
         (format?.fields.any((f) => has(f.$1)) ?? false);
   }
 }

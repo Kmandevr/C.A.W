@@ -70,12 +70,22 @@ void main() {
 
   group('the table', () {
     test('every old id maps to a merged device and its variant, and each variant to one old page', () {
-      expect(MergedDevices.variants.where((v) => v.retired && v.oldId != v.id), hasLength(30));
-      // The Compressor's Duck is a new variant: a page id of its own, never an old id read from a file.
-      expect(MergedDevices.pageId('org.caw.compressor', 4), MergedDevices.duckPageId);
+      // 1.1.0: org.caw.gate is a device's own id again (29 retired ids, as the engine's legacy table).
+      expect(MergedDevices.variants.where((v) => v.retired && v.oldId != v.id), hasLength(29));
+      // The Duck is a new variant (the Ducker's first since 1.1.0): a page id of its own, never an old id read from
+      // a file.
+      expect(MergedDevices.pageId('org.caw.duck', 0), MergedDevices.duckPageId);
       expect(MergedDevices.isRetired(MergedDevices.duckPageId), isFalse);
       expect(MergedDevices.of(MergedDevices.duckPageId), isNull);
-      expect(MergedDevices.variantOf('org.caw.compressor', {'variant': 4}), 4);
+      expect(MergedDevices.variantOf('org.caw.compressor', {'variant': 4}), 3, reason: 'Talon has four variants');
+      // The split: Gate and Shape open their old pages under their new devices; the 1.0.9 indices move.
+      expect(MergedDevices.pageId('org.caw.gate', 0), 'org.caw.gate');
+      expect(MergedDevices.pageId('org.caw.tremolo', 2), 'org.caw.ducker');
+      expect(MergedDevices.of('org.caw.ducker')!.id, 'org.caw.tremolo');
+      expect(MergedDevices.isRetired('org.caw.gate'), isFalse, reason: 'a reused id is a device');
+      expect(MergedDevices.talonMoves[4], (id: 'org.caw.duck', variant: 0));
+      expect(MergedDevices.isLegacyTalon('org.caw.compressor', {'variant': 2}), isTrue);
+      expect(MergedDevices.isLegacyTalon('org.caw.compressor', {'variant': 2, talonLayoutParam: 1}), isFalse);
       expect(MergedDevices.of('org.caw.saturator')!.id, 'org.caw.drive');
       expect(MergedDevices.of('org.caw.saturator')!.variant, 1);
       expect(MergedDevices.isRetired('org.caw.saturator'), isTrue);
@@ -157,9 +167,18 @@ void main() {
         final d = PresetDevice.fromJson({'component': 'org.caw.saturator', 'params': {'drive': 5, 'mode': 3}})!;
         expect(d.componentId, 'org.caw.drive', reason: '$resolver');
         expect(d.params, {'drive': 5, 'mode': 3, 'variant': 1});
+        // A Compressor preset from before 1.1.0 stays (its variant 0; the marker lives only on file); one of its
+        // moved variants goes to its new device; a 1.1.0 one (marked) keeps Talon's numbering.
         final reused = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'ratio': 3}})!;
         expect(reused.componentId, 'org.caw.compressor');
         expect(reused.params, {'ratio': 3});
+        expect(reused.toJson()['params'], {'ratio': 3, talonLayoutParam: talonLayoutCurrent});
+        final up = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'variant': 2, talonLayoutParam: 1}})!;
+        expect(up.componentId, 'org.caw.compressor');
+        expect(up.params, {'variant': 2});
+        final duck = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'variant': 4, 'amount': 0.6}})!;
+        expect(duck.componentId, 'org.caw.duck', reason: '$resolver');
+        expect(duck.params, {'variant': 0, 'amount': 0.6});
       }
     });
 
@@ -360,6 +379,6 @@ void main() {
     expect(t.info!.parameters[rack.params['mod1_dst']!.round() - 1].id, 's1.mix');
     expect(rack.params['mod2_dst'], 0, reason: 'the route to the reset drive is cleared');
     expect(child.info!.variantIndex, 1);
-    expect(jsonEncode(rack.toJson()), contains('"$rackLayoutParam":2.0'));
+    expect(jsonEncode(rack.toJson()), contains('"$rackLayoutParam":4.0'));
   });
 }

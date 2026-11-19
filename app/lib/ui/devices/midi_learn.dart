@@ -5,6 +5,7 @@ import '../../model/device_target.dart';
 import '../../model/live_midi.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import '../crow.dart';
 
 /// Learn, waiting ("Move a control…", a tap cancels), or the mapped CC with a button to forget it. Nothing where no
 /// MIDI device can be read or the parameter can't be mapped.
@@ -72,7 +73,7 @@ class _MidiLearnButtonState extends State<MidiLearnButton> {
           _waiting = false;
           midi.cancelLearn();
         },
-        icon: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: c)),
+        icon: CrowLoader(size: 14, color: c),
         label: const Text('Move a control…'),
       );
     }

@@ -29,6 +29,29 @@ public:
     virtual uint32_t latencyFor(const double* values, uint32_t count) const noexcept = 0;
 };
 
+// The armed signal (1.1.0): a built-in with a near-zero-delay version it plays while its track is armed for monitoring
+// (Linear EQ's minimum phase, Preen's monitoring window...). The chain tells it on the control thread (setArmed;
+// ComponentChain::setArmed), before the Engine compensates again; the effect reads the flag at its next control step
+// (ArmedFlag: one relaxed load), and its VariableLatency::latencyFor then reports the armed version's latency, so
+// the chain's latency follows. An export never arms. Engine-internal; not part of the SDK.
+class ArmedVersion {
+public:
+    virtual ~ArmedVersion() = default;
+    virtual void setArmed(bool armed) noexcept = 0;
+    // Control thread, with the held values: whether the armed version plays differently from what these values play
+    // anyway (the device header's badge): false for Preen already on `monitor`, a ducker with no look-ahead.
+    virtual bool armedDiffers(const double* values, uint32_t count) const noexcept = 0;
+};
+// The flag most implementations keep: set from any thread, read with one relaxed load on the audio thread.
+class ArmedFlag : public ArmedVersion {
+public:
+    void setArmed(bool armed) noexcept override { armed_.store(armed, std::memory_order_relaxed); }
+    bool armed() const noexcept { return armed_.load(std::memory_order_relaxed); }
+
+private:
+    std::atomic<bool> armed_{false};
+};
+
 // Which automation lane drives each parameter of a chain. Immutable once made; a project update
 // that changes the lanes makes a new one, and the audio thread swaps it in (the chain keeps playing).
 struct ComponentAutomation {
@@ -125,8 +148,19 @@ public:
     // A track's instrument: one component with one event input and one stereo audio output (and no
     // other ports), played by the notes in notes(). Everything else (values, bypass, state,
     // automation, tails, latency, rebuilds) works as for an effect chain of one.
+    // `midi`: the track's MIDI effects (1.1.0, midi_fx.h), at most midifx::kMaxPerTrack, run on the notes before the
+    // instrument hears them (runMidiEffects). They are entries 1.. of the chain (the instrument is 0), so values,
+    // bypass, state, display and automation ("instrument" lanes with component 1..) address them by index.
     static std::unique_ptr<ComponentChain> buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
-                                                           double sampleRate, std::string& error);
+                                                           double sampleRate, std::string& error,
+                                                           const std::vector<ComponentSpec>& midi = {});
+    // Audio thread, an instrument with MIDI effects: runs them on this block's events in notes() (sorted), each one's
+    // output the next one's input, and puts the last one's output in notes(). A bypassed one passes its input on; one
+    // that fails a block, or writes events out of order or past the block, passes its input on for that block.
+    // process() runs them itself when nothing has this block (so a fading or tail render maps its note-offs too).
+    void runMidiEffects(uint32_t m, double sampleRate, const ChainTime* time) noexcept;
+    // How many MIDI effects the instrument has (entries 1..).
+    std::size_t midiEffects() const noexcept { return midiCount_; }
     // Whether a descriptor has an instrument's ports (one event input, one stereo audio output).
     static bool isInstrument(const ModuleDescriptor& d) noexcept;
     // One slot of a layer's per-note FX (#127, note_fx_host.h): effects as build() takes them (keyed ones excepted),
@@ -232,6 +266,23 @@ public:
     // bypass crossfade) since the last read, and whether any sample went over full scale (|x| > 1) since then. Any
     // thread but the audio thread; lock-free; reading resets them. False for no such index.
     bool readSlotMeter(std::size_t index, float& peakL, float& peakR, bool& clipped) const noexcept;
+    // The armed signal (1.1.0, ArmedVersion): control thread. On, every component with an armed version plays it
+    // (and reports its latency); the caller compensates again (Engine::updateCompensation). An effect chain of a
+    // track whose input is armed for monitoring, never an export's.
+    void setArmed(bool armed) noexcept;
+    bool armed() const noexcept { return armed_.load(std::memory_order_relaxed); }
+    // Control thread: whether component `index` plays its armed version now (the chain is armed, it has one that
+    // differs for its values, and it is not bypassed): the device header's badge. False for no such index.
+    bool slotArmed(std::size_t index) const noexcept;
+    // Per-slot cost (1.1.0): component `index`'s share of real time (its process time over the audio time the chain
+    // ran, 0.01 = 1 % of a core) since the last read, and the latency it reports now (0 while bypassed). A read asks
+    // the audio thread to time each slot (a clock pair per slot, one block in four) for kCpuWatchSeconds from then; share is
+    // -1 until a measured block has passed. Control thread, one reader at a time (the Engine's lock). False for no
+    // such index.
+    static constexpr double kCpuWatchSeconds = 2.0;
+    bool readSlotCost(std::size_t index, double& share, uint32_t& latency) const noexcept;
+    // Control thread: component `index`'s latency now (as latencyFrames() counts it).
+    uint32_t slotLatency(std::size_t index) const noexcept;
     // Control thread: each component's state as save_state writes it, in chain order. Components
     // must allow save_state while they process (the component interface's thread rule).
     struct SavedState {
@@ -320,6 +371,12 @@ private:
         // The slot's output meter (readSlotMeter): peaks since the last read, raised by the audio thread.
         mutable std::atomic<float> peakL{0.0f}, peakR{0.0f};
         mutable std::atomic<bool> clipped{false};
+        ArmedVersion* armedIf = nullptr;  // its armed version (null: none), cached at build
+        // Per-slot cost (readSlotCost): process time the audio thread added while watched (single writer), and what
+        // the reader saw last (the reader's own, under the Engine's lock).
+        std::atomic<uint64_t> cpuNs{0};
+        mutable uint64_t cpuNsSeen = 0, cpuFramesSeen = 0;
+        mutable double cpuShare = -1.0;
     };
     ComponentChain() = default;
     static void meterSlot(Entry& e, const float* left, const float* right, uint32_t m) noexcept;
@@ -346,6 +403,9 @@ private:
     // Set at build only for chains of built-ins (make()); a chain holding a loaded component is reset on the
     // audio thread as before.
     bool clean_ = false;
+    std::size_t midiCount_ = 0;         // an instrument's MIDI effects: the last midiCount_ entries
+    bool midiRan_ = false;              // audio thread: runMidiEffects ran for the block process() is about to play
+    std::vector<Event> midiScratch_;    // their ping-pong buffer (NoteEvents::kCapacity; only with MIDI effects)
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects
@@ -353,6 +413,14 @@ private:
     const VoiceBus* voices_ = nullptr;   // audio thread: an instrument's voice bus for the next process()
     const Event* noteEvents_ = nullptr;  // audio thread: per-note FX events for the next process()
     uint32_t noteEventCount_ = 0;
+    std::atomic<bool> armed_{false};            // setArmed (control thread)
+    // Per-slot cost: the reader bumps cpuAsked_; the audio thread then times each slot for kCpuWatchSeconds and counts
+    // the frames it timed (cpuFrames_, single writer).
+    mutable std::atomic<uint32_t> cpuAsked_{0};
+    uint32_t cpuAskedSeen_ = 0;  // audio thread
+    double cpuWatchLeft_ = 0;    // audio thread: frames still to time
+    uint32_t cpuPhase_ = 0;      // audio thread: which blocks are timed (one in four)
+    std::atomic<uint64_t> cpuFrames_{0};
     std::array<float, kMaxFrames> stageL_{}, stageR_{};
     std::array<double, kMaxFrames> lane_{};
 };

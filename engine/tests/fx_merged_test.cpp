@@ -15,6 +15,7 @@
 #include "caw.h"
 #include "component_chain.h"
 #include "engine.h"
+#include "builtin_fx_voice.h"
 #include "fx_merged.h"
 #include "fx_migrate.h"
 #include "json.h"
@@ -174,7 +175,7 @@ TEST(merged_pitch_shift_lists_its_variants_with_a_structural_variant_parameter) 
     const fx::MergedDevice* m = fx::findMergedDevice(kShift);
     CHECK(m != nullptr);
     if (!m) return;
-    CHECK_EQ(m->variants.size(), 2u);
+    CHECK_EQ(m->variants.size(), 4u);  // the two old effects, then 1.1.0's Harmonizer and Octaver (new DSP, fx_voice_test.cpp)
     CHECK(registry().find(kShift) == &m->variants[0].descriptor());  // the registry lists the first variant's
     for (uint32_t v = 0; v < 2; ++v) {
         const ModuleDescriptor& d = m->variants[v].descriptor();
@@ -188,7 +189,7 @@ TEST(merged_pitch_shift_lists_its_variants_with_a_structural_variant_parameter) 
         CHECK(variant.id == fx::kVariantParam);
         CHECK(!variant.automatable && !variant.modulatable && !variant.midiMappable);
         CHECK_EQ(variant.defaultValue, static_cast<double>(v));
-        CHECK_EQ(variant.choiceCount, 2u);
+        CHECK_EQ(variant.choiceCount, 4u);
         CHECK_EQ(d.tailFrames, old->tailFrames);
         CHECK_EQ(d.latencyFrames, old->latencyFrames);
         CHECK(d.cpuClass == old->cpuClass);
@@ -229,10 +230,23 @@ TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
     for (const fx::MergedDevice* d : fx::mergedDevices()) {
         const ModuleDescriptor* listed = registry().find(d->id);
         CHECK(listed == &d->variants[0].descriptor());
-        CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
+        // `variant` last, but for Talon (1.1.0), whose list goes on with Down's extras and the talon_layout marker, and
+        // the devices 1.1.0's "Around the effects" appended to (the sidechain filter, the Limiter's target).
+        bool has = false;
+        for (uint32_t k = 0; listed && k < listed->parameterCount; ++k) has = has || listed->parameters[k].id == fx::kVariantParam;
+        CHECK(has);
+        const bool appended = d->id == "org.caw.gate" || d->id == "org.caw.duck" || d->id == "org.caw.limiter";
+        if (appended && listed) {
+            const ParameterDescriptor& last = listed->parameters[listed->parameterCount - 1];
+            CHECK(last.id == std::string("sc_listen") || last.id == std::string("target"));
+        } else if (d->id != "org.caw.compressor")
+            CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
     }
     // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.
-    CHECK(&builtinPresets("org.caw.convolver") == &ownBuiltinPresets("org.caw.convolver"));  // stays its own device
+    CHECK(&builtinPresets("org.caw.downmix") == &ownBuiltinPresets("org.caw.downmix"));  // stays its own device
+    // The Convolver (merged in 1.1.0, its id reused): its own presets first, then its Cab's.
+    CHECK_EQ(builtinPresets("org.caw.convolver").size(),
+             ownBuiltinPresets("org.caw.convolver").size() + fx::newVariantPresets("org.caw.convolver").size());
     CHECK(ownBuiltinPresets(kShift).empty() && builtinPresets(kShift).size() >= 10u);
 }
 
@@ -243,7 +257,7 @@ TEST(the_old_ids_are_retired_but_still_play_as_their_merged_devices) {
     registerBuiltinComponents(plain);
     Engine e(48000);
     const std::string json = e.nativeComponentsJson();
-    CHECK(fx::legacyEffects().size() == 30u);
+    CHECK(fx::legacyEffects().size() == 29u);  // 1.1.0: org.caw.gate is a device's own id again
     for (const fx::LegacyEffect* old : fx::legacyEffects()) {
         const std::string id(old->from);
         CHECK(plain.find(id) == nullptr);
@@ -345,7 +359,8 @@ TEST(merged_pitch_shift_resolves_the_old_presets_under_its_id_with_equal_values)
             CHECK(applyBuiltinPreset(kShift, p.name, applied));
             CHECK_EQ(valueOf(applied, "variant"), static_cast<double>(v));
         }
-    CHECK_EQ(builtinPresets(kShift).size(), total);
+    // The old effects' presets, then the 1.1.0 variants' (each naming its own variant).
+    CHECK_EQ(builtinPresets(kShift).size(), total + fx::newVoiceVariantPresets(kShift).size());
     CHECK(total >= 10u);
 }
 
@@ -541,8 +556,8 @@ TEST(the_components_json_lists_every_variants_descriptor_and_the_presets) {
     CHECK(shift != nullptr);
     if (!shift) return;
     const Json* variants = shift->get("variants");
-    CHECK(variants && variants->arr.size() == 2u);
-    if (variants && variants->arr.size() == 2u) {
+    CHECK(variants && variants->arr.size() == 4u);  // Pitch, Frequency, then 1.1.0's Harmonizer and Octaver
+    if (variants && variants->arr.size() == 4u) {
         CHECK(variants->arr[1].string("id") == kShift);
         bool hasShift = false;
         for (const Json& p : variants->arr[1].get("parameters")->arr) hasShift = hasShift || p.string("id") == "shift";

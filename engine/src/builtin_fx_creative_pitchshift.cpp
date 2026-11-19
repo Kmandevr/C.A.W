@@ -49,14 +49,20 @@ const ModuleDescriptor& pitchDescriptor() {
 double grainFrames(double ms, double sr) noexcept { return std::floor(clampTo(ms, 10.0, kMaxGrainMs) * 0.001 * sr); }
 uint32_t latencyOf(double grain) noexcept { return static_cast<uint32_t>(std::floor(grain * 0.5)) + 1; }
 
-class PitchShift : public EffectBase, public VariableLatency {
+class PitchShift : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return pitchDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
-        return latencyOf(grainFrames(count > kGrain ? values[kGrain] : 60.0, rate()));
+        return latencyOf(grainFrames(grainMs(count > kGrain ? values[kGrain] : 60.0), rate()));
+    }
+    // Armed: the grain at most kArmedGrainMs (half of it is the latency).
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return (count > kGrain ? values[kGrain] : 60.0) > kArmedGrainMs;
     }
 
 protected:
+    static constexpr double kArmedGrainMs = 20.0;
+    double grainMs(double knob) const noexcept { return armed() && knob > kArmedGrainMs ? kArmedGrainMs : knob; }
     bool prepare(double sr, uint32_t) noexcept override {
         noise_.seed(0x9171);
         return ring_.allocate(static_cast<size_t>(std::ceil(kMaxGrainMs * 0.001 * sr)) + 8);
@@ -74,7 +80,7 @@ protected:
     uint64_t idleFrames() const noexcept override { return static_cast<uint64_t>(grain_ + 0.05 * rate()); }
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        const double want = grainFrames(param(kGrain, at), sr);
+        const double want = grainFrames(grainMs(param(kGrain, at)), sr);
         if (grain_ <= 0.0) grain_ = want;
         else if (want != grain_ && fadeDir_ >= 0.0) fadeDir_ = -1.0;  // fade out, switch, fade in
         semis_ = clampTo(std::floor(param(kSemitones, at) + 0.5), -24.0, 24.0) + clampTo(param(kCents, at), -100.0, 100.0) * 0.01;

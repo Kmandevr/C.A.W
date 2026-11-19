@@ -237,6 +237,19 @@ class ExportJob {
   /// 0..1 while it runs (not saved).
   double progress = 0;
 
+  /// Called once when this render ends done, in this run of the app (not saved): the project's last export.
+  void Function(ExportJob job)? whenDone;
+
+  /// The mix's length in seconds (the first file's frames at the request's rate), 0 when unknown.
+  double get seconds {
+    final rate = request['sample_rate'];
+    if (files.isEmpty || rate is! num || rate <= 0) return 0;
+    return files.first.frames / rate;
+  }
+
+  /// The loudest peak of its files, in dBFS.
+  double get peakDb => files.isEmpty ? 0 : files.map((f) => f.peakDb).reduce((a, b) => a > b ? a : b);
+
   bool get finished => state == ExportJobState.done || state == ExportJobState.failed || state == ExportJobState.cancelled;
 
   Map<String, dynamic> toJson() => {
@@ -477,6 +490,7 @@ class ExportQueue extends ChangeNotifier {
     _runningJob = null;
     notifyListeners();
     await _save();
+    if (job.state == ExportJobState.done) job.whenDone?.call(job);
     onFinished?.call(job);
     _next();
   }

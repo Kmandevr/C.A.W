@@ -201,6 +201,12 @@ void main() {
     s.settings.keepAwake = KeepAwake.off;
     w.update();
     expect(awake.asked.last, isFalse);
+    s.suspendForStress();
+    w.update();
+    expect(awake.asked.last, isTrue, reason: 'a Benchmark keeps the screen on whatever the setting');
+    s.resumeAfterStress();
+    w.update();
+    expect(awake.asked.last, isFalse);
   });
 
   test('remember zoom per project: the arranger\'s view kept by project id, and given back', () {

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
+import '../model/easter_eggs.dart' show isCageSilence;
 import '../model/project.dart';
 import '../model/settings.dart';
 import '../model/song_export.dart';
@@ -173,6 +174,10 @@ class _SongExportPanelState extends State<SongExportPanel> {
         '${o.hasStems ? ' (${o.stems.label.toLowerCase()})' : ''} · ${_range.label} · '
         '${o.bitDepth == 32 ? '32-bit float' : '${o.bitDepth}-bit'} · ${o.sampleRate ~/ 1000 == o.sampleRate / 1000 ? o.sampleRate ~/ 1000 : (o.sampleRate / 1000).toStringAsFixed(1)} kHz';
     final added = widget.queue.add(title: title, projectJson: p.toEngineJson(), request: request);
+    if (added) {
+      final projectId = p.id;
+      widget.queue.jobs.last.whenDone = (_) => s.noteExported(projectId);
+    }
     widget.queue.remember(opts);
     if (added) {
       Haptics.drop();
@@ -641,7 +646,9 @@ class _JobTileState extends State<_JobTile> {
     final status = switch (job.state) {
       ExportJobState.queued => 'Waiting',
       ExportJobState.running => 'Rendering ${(job.progress * 100).round()} %',
-      ExportJobState.done => '${job.files.length} file${job.files.length == 1 ? '' : 's'}',
+      ExportJobState.done => isCageSilence(seconds: job.seconds, peakDb: job.peakDb)
+          ? 'Bravo, Mr Cage.'
+          : '${job.files.length} file${job.files.length == 1 ? '' : 's'}',
       ExportJobState.failed => job.error ?? 'Failed',
       ExportJobState.cancelled => 'Cancelled',
     };

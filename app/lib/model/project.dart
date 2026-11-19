@@ -340,10 +340,17 @@ class ComponentUseDoc {
   /// other rack is saved with `rack_layout` (the engine's current layout), whatever values it holds.
   bool legacyRack = false;
 
-  /// Whether this entry names something the FX consolidation replaced: a retired effect id or a [legacyRack].
-  bool get needsResolving => legacyRack || MergedDevices.isRetired(id);
+  /// A Compressor read from a file older than 1.1.0 (no `talon_layout`): written back as it was until the engine
+  /// migrates it ([ProjectDoc.resolveComponents]; its variants 2-4 left for Gate, Tremolo/Pan and Ducker). Every
+  /// other Compressor entry is saved with `talon_layout`.
+  bool legacyTalon = false;
+
+  /// Whether this entry names something the FX consolidation or 1.1.0's split replaced: a retired effect id, a
+  /// [legacyRack] or a [legacyTalon].
+  bool get needsResolving => legacyRack || legacyTalon || MergedDevices.isRetired(id);
 
   bool get _isRack => id.startsWith('org.caw.rack.');
+  bool get _isTalon => id == talonId;
 
   /// Passes its input through and is not run.
   bool bypass;
@@ -371,12 +378,13 @@ class ComponentUseDoc {
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
   Object toJson({bool withKey = true}) => params.isEmpty && !bypass && !autoGain && state == null && preset == null &&
-          (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack)
+          (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack) && !(_isTalon && !legacyTalon)
       ? id
       : {
           'id': id,
           if (preset != null) 'preset': preset,
           if (_isRack && !legacyRack) 'params': {...params, rackLayoutParam: rackLayoutCurrent}
+          else if (_isTalon && !legacyTalon) 'params': {...params, talonLayoutParam: talonLayoutCurrent}
           else if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
           if (autoGain) 'auto_gain': true,
@@ -389,7 +397,7 @@ class ComponentUseDoc {
   static ComponentUseDoc? fromJson(Object? j) {
     if (j is String) {
       final id = _boundedProjectText(j, 128);
-      return id.isEmpty ? null : ComponentUseDoc(id);
+      return id.isEmpty ? null : (ComponentUseDoc(id)..legacyTalon = id == talonId);
     }
     if (j is! Map) return null;
     final id = _boundedProjectText(j['id'], 128);
@@ -416,7 +424,8 @@ class ComponentUseDoc {
       ..autoGain = j['auto_gain'] == true
       ..key = ComponentKeyDoc.fromJson(j['key'])
       ..samples = ComponentSampleDoc.listFromJson(j['samples'])
-      ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent;
+      ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent
+      ..legacyTalon = MergedDevices.isLegacyTalon(id, params);
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
@@ -1044,6 +1053,11 @@ class ProjectDoc {
   /// (2026-11-12), shown as unknown. Copies (Duplicate) start again; imports keep the original's.
   DateTime? created;
 
+  /// Seconds spent with the project open and the app in front (Files › Projects' card), and when it was last
+  /// exported (null: never). Stats, not edits: an undo keeps them.
+  int timeSpentSeconds = 0;
+  DateTime? lastExport;
+
   /// The app version and build that last wrote the file this was read from (`saved_with`; null before 2026-11-12,
   /// shown as unknown). [toJson] always writes the running app's.
   String? savedWithVersion;
@@ -1331,6 +1345,8 @@ class ProjectDoc {
         if (automationFollowsClips) 'automation_follows_clips': true,
         if (recentAutomation.isNotEmpty) 'recent_automation': recentAutomation,
         if (created != null) 'created': created!.toUtc().toIso8601String(),
+        if (timeSpentSeconds > 0) 'time_spent_s': timeSpentSeconds,
+        if (lastExport != null) 'last_export': lastExport!.toUtc().toIso8601String(),
         'saved_with': {'version': appVersion, 'build': appBuild},
       };
 
@@ -1401,6 +1417,7 @@ class ProjectDoc {
         };
         if (r['keeps_state'] == false) use.state = null;
         use.legacyRack = false;
+        use.legacyTalon = false;
         automation.removeWhere((lane) {
           if (lane.targetType != laneType || lane.layerId != layerId || lane.component != i) return false;
           final to = moved(lane.target);
@@ -1515,6 +1532,8 @@ class ProjectDoc {
           if (k is String && k.length <= 512) k,
       ]
       ..created = projectCreatedFromJson(j['created'])
+      ..timeSpentSeconds = projectTimeSpentFromJson(j['time_spent_s'])
+      ..lastExport = projectCreatedFromJson(j['last_export'])
       ..savedWithVersion = savedWithFromJson(j['saved_with']).version
       ..savedWithBuild = savedWithFromJson(j['saved_with']).build;
 
@@ -1670,6 +1689,9 @@ List<(int, String)> lengthChoices(int stepsPerBar) => [
 /// `created` from untrusted JSON: an ISO-8601 time of at most 40 characters, else null (unknown).
 DateTime? projectCreatedFromJson(Object? raw) =>
     raw is String && raw.length <= 40 ? DateTime.tryParse(raw)?.toUtc() : null;
+
+/// `time_spent_s` from untrusted JSON: whole seconds, at most about a century, else 0.
+int projectTimeSpentFromJson(Object? raw) => raw is int && raw > 0 && raw < 1 << 32 ? raw : 0;
 
 /// `saved_with` from untrusted JSON: a version of at most 40 printable characters and a build in 0..2^31, else nulls.
 ({String? version, int? build}) savedWithFromJson(Object? raw) {

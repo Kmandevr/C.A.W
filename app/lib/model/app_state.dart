@@ -30,6 +30,7 @@ import 'default_project.dart';
 import 'device_slot_audio.dart';
 import 'engine_slot_audio.dart';
 import 'freeze.dart';
+import 'freeze_hint.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -41,6 +42,8 @@ import 'startup_progress.dart';
 import 'stress_runner.dart' show StressHost;
 import 'pattern_templates.dart';
 import 'templates.dart';
+import 'easter_eggs.dart';
+import 'project_names.dart';
 
 class _LibrarySnapshot {
   _LibrarySnapshot(ProjectDoc project)
@@ -488,6 +491,13 @@ class AppState extends ChangeNotifier implements StressHost {
 
   /// Set when an overload switched light mode on, so the app can say so once.
   bool lightTurnedOnBySelf = false;
+
+  /// Smart freeze (1.1.0): the one-time suggestion to freeze the heaviest track when the CPU stays near the limit.
+  final FreezeHint freezeHint = FreezeHint();
+
+  /// The platform's thermal and power state as it last reported it (the heat banner reads it; nothing changes a
+  /// setting on it).
+  final ValueNotifier<EnginePressure> pressure = ValueNotifier(EnginePressure.unknown);
   List<LayerMeterValue> layerMeters = const [];
 
   Timer? _saveTimer;
@@ -548,10 +558,15 @@ class AppState extends ChangeNotifier implements StressHost {
       try {
         await latency.load();
         _resourcePressureSubscription = ResourceSignals.changes.listen(
-          (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+          (p) {
+            EngineExecutionPolicy.updateRuntimeSignals(pressure: p);
+            pressure.value = p;
+          },
           onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
         );
-        EngineExecutionPolicy.updateRuntimeSignals(pressure: await readPressure());
+        final now = await readPressure();
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: now);
+        pressure.value = now;
       } catch (_) {
         // The signals are optional: the policy stays conservative without them.
         EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
@@ -696,6 +711,8 @@ class AppState extends ChangeNotifier implements StressHost {
     _syncTimer?.cancel();
     _historyTimer?.cancel();
     masterValueTick.dispose();
+    freezeHint.dispose();
+    pressure.dispose();
     values.dispose();
     tick.dispose();
     startup.dispose();
@@ -730,6 +747,9 @@ class AppState extends ChangeNotifier implements StressHost {
       checkAudioDevice();
     }
     tick.value++;
+    freezeHint.poll(now, cpu: meters.cpu, playing: meters.playing, overloaded: meters.overloaded > 0,
+        tracks: () => freezeCandidates(this), share: (l) => measuredTrackShare(this, l),
+        hint: (l) => hintedTrackCost(this, l));
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
       // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
       lightTurnedOnBySelf = true;
@@ -1104,6 +1124,7 @@ class AppState extends ChangeNotifier implements StressHost {
 
   void _recordHistory() {
     if (starting || _restoring) return;
+    EasterEggs.instance.streakBroken();
     final could = (history.canUndo, history.canRedo);
     history.begin();
     // Drags save without notifying (so they stay light); the transport's buttons still need to see a flip.
@@ -1148,16 +1169,27 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   /// Goes back one step of project edits (the transport's undo, Ctrl+Z outside an editor with its own).
-  bool undo() => _restore(history.undo(_snapshot()));
+  bool undo() {
+    final done = _restore(history.undo(_snapshot()));
+    if (done) EasterEggs.instance.undone();
+    return done;
+  }
 
-  bool redo() => _restore(history.redo(_snapshot()));
+  bool redo() {
+    EasterEggs.instance.streakBroken();
+    return _restore(history.redo(_snapshot()));
+  }
 
   bool _restore(String? snapshot) {
     _historyTimer?.cancel();
     if (snapshot == null) return false;
     _restoring = true;
     try {
-      project = ProjectDoc.fromJson(jsonDecode(snapshot) as Map<String, dynamic>);
+      // The project's own stats (time spent, the last export) are not edits: an undo keeps them.
+      final spent = project.timeSpentSeconds, exported = project.lastExport;
+      project = ProjectDoc.fromJson(jsonDecode(snapshot) as Map<String, dynamic>)
+        ..timeSpentSeconds = spent
+        ..lastExport = exported;
       // The other undo stacks and the last good Run sources describe the project before the restore.
       _lastGoodRunSources.clear();
       _libraryUndo.clear();
@@ -1194,8 +1226,29 @@ class AppState extends ChangeNotifier implements StressHost {
       project.storeComponentStates(e.componentStates);
       _docGen++;
     }
+    _foldTimeSpent();
     final storage = _storage;
     if (storage != null) await storage.save(project, json: _snapshot());
+  }
+
+  /// Time with the project open and the app in front (the card's "time spent" in Files), counted from here.
+  final Stopwatch _spent = Stopwatch();
+
+  /// Adds the time counted since the last save to the project (whole seconds; the rest keeps counting).
+  void _foldTimeSpent() {
+    final whole = _spent.elapsed.inSeconds;
+    if (whole <= 0) return;
+    project.timeSpentSeconds += whole;
+    _spent.reset();
+    _docGen++;
+  }
+
+  /// An export of project [projectId] finished: the card in Files shows it as the last export.
+  void noteExported(String projectId, {DateTime? at}) {
+    if (project.id != projectId) return;
+    project.lastExport = (at ?? DateTime.now()).toUtc();
+    _docGen++;
+    _save();
   }
 
   Future<bool> createRestorePoint() async {
@@ -1509,6 +1562,7 @@ class AppState extends ChangeNotifier implements StressHost {
   void lifecycle({required bool foreground}) {
     _poller.setVisible(foreground);
     this.foreground.value = foreground;
+    foreground ? _spent.start() : _spent.stop();
     final e = engine;
     if (e == null) return;
     // A throttled stretch in the background must not thin the song for good: layers the engine shed come back
@@ -2457,6 +2511,10 @@ class AppState extends ChangeNotifier implements StressHost {
     // A project with no file yet is being made now: it records when (an old one without the field stays unknown).
     if (p.created == null && !(await _storage?.has(p.id) ?? true)) p.created = DateTime.now().toUtc();
     dropMissingFreezes(p);
+    _spent
+      ..reset()
+      ..start();
+    EasterEggs.instance.streakBroken();
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
@@ -2511,10 +2569,18 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   /// New project: the template Settings › Projects and export names, else blank (with its tempo and meter).
-  Future<void> newProject() => _switchTo(newProjectDoc());
+  Future<void> newProject() async => _switchTo(await _named(newProjectDoc()));
 
   /// New project from template [t] (the project menu's New from template).
-  Future<void> newProjectFromTemplate(TemplateDoc t) => _switchTo(projectFromTemplate(t));
+  Future<void> newProjectFromTemplate(TemplateDoc t) async => _switchTo(await _named(projectFromTemplate(t)));
+
+  /// [p] with a generated name ("Low Roost") unless Settings › Projects and export turned them off; never a name a
+  /// saved project has.
+  Future<ProjectDoc> _named(ProjectDoc p) async {
+    if (!settings.generatedProjectNames) return p;
+    final taken = [for (final s in await listProjects()) s.name, project.name];
+    return p..name = generateProjectName(taken);
+  }
 
   Future<void> openProject(String id) async {
     final ProjectDoc? p;

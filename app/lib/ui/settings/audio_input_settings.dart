@@ -13,6 +13,7 @@ import '../haptics.dart';
 import '../theme.dart';
 import 'settings_widgets.dart';
 import '../panel_motion.dart';
+import '../crow.dart';
 
 /// The input rows' ids, in the order they show.
 const audioInputRows = ['audio.input', 'audio.inputDevice', 'audio.inputChannels', 'audio.latency', 'audio.latencyOffset',
@@ -206,7 +207,7 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
                   '${_ping != null && !_ping!.reliable ? ' · the last measurement was unreliable' : ''}',
           trailing: FilledButton.tonal(key: const ValueKey('latency-measure'), onPressed: _pinging ? null : _measure,
               child: _pinging
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const CrowLoader(size: 16)
                   : const Text('Measure'))),
       'audio.latencyOffset': settingAction('audio.latencyOffset', icon: Icons.tune,
           subtitle: p.latencyOverride < 0 ? 'Not set: the measured or device latency is used'

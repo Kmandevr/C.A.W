@@ -8,6 +8,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'app_state.dart';
+import 'audio_clips.dart';
+import 'chain_templates.dart';
 import 'cpp_component.dart';
 import 'project.dart';
 import 'routing.dart';
@@ -150,6 +152,10 @@ String templateLabel(String id) => switch (id) {
       blankTemplateId => 'Blank',
       firstLoopTemplateId => 'Mid tempo',
       'builtin:song-sketch' => 'Song sketch',
+      'builtin:guitar-recording' => 'Guitar recording',
+      'builtin:podcast' => 'Podcast',
+      'builtin:beat' => 'Beat',
+      'builtin:sound-design' => 'Sound design',
       _ => 'a saved template',
     };
 
@@ -327,7 +333,62 @@ extension Templates on AppState {
         TemplateDoc(id: 'builtin:song-sketch', name: 'Song sketch', kind: TemplateKind.project, bundled: true,
             summary: 'Empty drums, bass, keys and pad tracks with a reverb bus, ready to record',
             json: _songSketch().toJson()),
+        for (final (id, name, summary, p) in _purposeProjects())
+          TemplateDoc(id: id, name: name, kind: TemplateKind.project, bundled: true, summary: summary, json: p.toJson()),
       ];
+
+  /// The purpose project templates (sound plan, "Around the effects"): (id, name, summary, project). Their chains
+  /// are the bundled chain templates ([ChainTemplates]), each effect starting from its engine preset.
+  List<(String, String, String, ProjectDoc)> _purposeProjects() {
+    const flagship = 'org.caw.synth.flagship';
+    List<ComponentUseDoc> chain(String id) =>
+        [for (final step in ChainTemplates.byId(id)!.steps) ComponentUseDoc(step.componentId, chainStepValues(step))];
+    LayerDoc audio(String id, String name, String chainId, {int channel = 0}) => LayerDoc(id: id, name: name, color: 0,
+        volume: 0.8, input: AudioInputDoc(channel: channel, monitor: settings.newTrackMonitor), components: chain(chainId));
+    LayerDoc synth(String id, String name, String instrument, {String? preset, List<ComponentUseDoc> fx = const [],
+        double volume = 0.8}) => LayerDoc(id: id, name: name, color: 0, volume: volume,
+        instrument: ComponentUseDoc(instrument, {}, false, null, 1, preset), components: [...fx]);
+    ProjectDoc project(String name, List<LayerDoc> layers, List<ComponentUseDoc> master) {
+      final p = ProjectDoc(id: 'template', name: name, masterComponents: master)
+        ..bpm = settings.newProjectBpm
+        ..beatsPerBar = settings.newProjectBeatsPerBar;
+      p.layers.addAll(layers);
+      for (var i = 0; i < p.layers.length; i++) {
+        p.layers[i].color = i % LayerDoc.trackColors;
+      }
+      return p;
+    }
+    ComponentUseDoc fx(String id, [String? preset]) => ComponentUseDoc(id, chainStepValues(ChainStep(id, preset)));
+    return [
+      ('builtin:guitar-recording', 'Guitar recording', 'Crunch, clean and lead guitar inputs on their chains, and a mastering chain',
+          project('Guitar recording', [
+            audio('tpl-gtr-crunch', 'Guitar crunch', 'chain:guitar-crunch'),
+            audio('tpl-gtr-clean', 'Guitar clean', 'chain:guitar-clean'),
+            audio('tpl-gtr-lead', 'Guitar lead', 'chain:guitar-lead'),
+          ], chain('chain:master'))),
+      ('builtin:podcast', 'Podcast', 'Two voices on the Podcast voice chain, and a master at podcast loudness',
+          project('Podcast', [
+            audio('tpl-host', 'Host', 'chain:podcast-voice'),
+            audio('tpl-guest', 'Guest', 'chain:podcast-voice', channel: 1),
+          ], [fx('org.caw.limiter'), fx('org.caw.meters', 'Podcast -16 LUFS')])),
+      ('builtin:beat', 'Beat', 'Drums on a drum bus chain, a bass, keys and a mastering chain',
+          project('Beat', [
+            synth('tpl-beat-drums', 'Drums', 'org.caw.drums', preset: 'Kit: 808', volume: 0.9, fx: chain('chain:drum-bus')),
+            synth('tpl-beat-bass', 'Bass', flagship, preset: 'Mono bass', volume: 0.75),
+            synth('tpl-beat-keys', 'Keys', flagship, preset: 'Pluck', volume: 0.6,
+                fx: [fx('org.caw.delay', 'Dotted gallop'), fx('org.caw.reverb', 'Wooden hall')]),
+          ], chain('chain:master'))),
+      ('builtin:sound-design', 'Sound design', 'Raven, Flock and Magpie with space and movement, and Lookout on the master',
+          project('Sound design', [
+            synth('tpl-sd-raven', 'Raven', flagship, preset: 'Smeared air pad', volume: 0.6,
+                fx: [fx('org.caw.filter', 'Slow bloom wah'), fx('org.caw.reverb', 'Octave heaven')]),
+            synth('tpl-sd-flock', 'Flock', 'org.caw.flock', preset: 'Glass shimmer', volume: 0.6,
+                fx: [fx('org.caw.delay', 'Shimmer taps')]),
+            synth('tpl-sd-magpie', 'Magpie', 'org.caw.sampler', volume: 0.7,
+                fx: [fx('org.caw.pack.granular', 'Soft cloud')]),
+          ], [fx('org.caw.limiter'), fx('org.caw.meters', 'Mix spectrum')])),
+    ];
+  }
 
   List<TemplateDoc> _bundledTracks() => [
         for (final (id, name, summary, layers) in _starterTracks())

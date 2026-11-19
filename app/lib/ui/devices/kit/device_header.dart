@@ -1,18 +1,22 @@
-// Every device's header (device shell): power, the name in its family's colour, the preset bar, A/B, the auto gain ear and the ⋯ menu; one line on wide screens, two on a phone.
+// Every device's header (device shell): power, the name in its family's colour, its CPU and latency (and the armed badge), the preset bar, A/B, the auto gain ear, the "?" field guide and the ⋯ menu; one line on wide screens, two on a phone.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../model/device_slot_audio.dart';
 import '../../../model/device_target.dart';
+import '../../motion.dart';
 import '../../theme.dart';
 import 'device_menu.dart';
 import 'device_style.dart';
 import 'feel.dart';
+import 'field_guide.dart';
 import 'preset_browser.dart';
 import 'presets.dart';
 
 /// A device's header: [leading] (the FX chain's drag handle, the editor's back or close), power, the name in
 /// [color] (tap: [onTitle]) over [subtitle], the preset bar (‹ name › ★), A/B, the auto gain ear (when the engine
-/// has it) and ⋯, then the host's [actions]. Below [wideAt] dp the preset bar, A/B and the ear go on a second line.
+/// has it), "?" (the field guide) and ⋯, then the host's [actions]. Below [wideAt] dp the preset bar, A/B and the ear go on a second line.
 class DeviceHeader extends StatelessWidget {
   const DeviceHeader({super.key, required this.target, required this.color, this.style, this.leading,
     this.actions = const [], this.onTitle, this.titleKey, this.powerKey, this.presetKey, this.subtitle,
@@ -62,14 +66,23 @@ class DeviceHeader extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Column(
             mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: nameSize, fontWeight: FontWeight.w800, color: color,
-                shadows: [Shadow(color: color.withValues(alpha: 0.45), blurRadius: 8)])),
+            LayoutBuilder(builder: (context, name) => Row(children: [
+              Flexible(flex: 4, child: Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: nameSize, fontWeight: FontWeight.w800, color: color,
+                  shadows: [Shadow(color: color.withValues(alpha: 0.45), blurRadius: 8)]))),
+              // The badge shrinks rather than overflow a narrow header.
+              if (t.info?.isAutoStacc ?? false) ...[const SizedBox(width: 6),
+                const Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: AutoStaccBadge(small: true)))],
+              // Zero wide while the engine has no cost for it, so the name keeps its room; at most half the line.
+              ConstrainedBox(constraints: BoxConstraints(maxWidth: (name.maxWidth * 0.5).clamp(0.0, 120.0)),
+                child: FittedBox(fit: BoxFit.scaleDown, child: DeviceCostReadout(target: t, color: color))),
+            ])),
             if (subtitle != null) Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Neon.dim)),
           ])),
         )),
         if (wide) ...[presets, ...tools],
+        DeviceGuideButton(target: t, color: color),
         DeviceMoreButton(target: t, color: color),
         ...actions,
       ]));
@@ -83,6 +96,89 @@ class DeviceHeader extends StatelessWidget {
       ]);
     }),
   );
+}
+
+/// The device's cost, small and quiet beside its name: its CPU share ("1.2%") and the latency it adds ("48 ms"), and
+/// a "Live" badge while its track is armed and it plays its near-zero-delay version. Read through
+/// [DeviceSlotAudio.cost] four times a second while the header is on screen (no read off screen; the engine stops
+/// timing the chain 2 s after the last read); nothing while the engine has no cost for it.
+class DeviceCostReadout extends StatefulWidget {
+  const DeviceCostReadout({super.key, required this.target, required this.color});
+  final DeviceTarget target;
+  final Color color;
+
+  /// The armed badge's tooltip.
+  static const armedTip = 'Plays a near-zero-delay version while this track is armed; playback and export use the full one';
+
+  @override
+  State<DeviceCostReadout> createState() => _DeviceCostReadoutState();
+}
+
+class _DeviceCostReadoutState extends State<DeviceCostReadout> {
+  // A timer, not a ticker: four reads a second without asking for frames in between.
+  Timer? _timer;
+  DeviceCost? _cost;
+
+  @override
+  void initState() {
+    super.initState();
+    _cost = _read();
+    _timer = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  DeviceCost? _read() => DeviceSlotAudio.current?.cost(widget.target);
+
+  void _tick() {
+    // Off screen (a hidden tab or route): no read, so the engine stops timing the chain.
+    if (!mounted || !TickerMode.valuesOf(context).enabled) return;
+    final c = _read();
+    if (c?.cpuShare != _cost?.cpuShare || c?.latencyMs != _cost?.latencyMs || c?.armed != _cost?.armed ||
+        (c == null) != (_cost == null)) {
+      setState(() => _cost = c);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _cost;
+    final fade = Motion.fade(Motion.standard, Motion.of(context));
+    return AnimatedSwitcher(duration: fade, child: c == null ? const SizedBox.shrink(key: ValueKey('none')) : Row(
+      key: const ValueKey('device-cost'), mainAxisSize: MainAxisSize.min, children: [
+      const SizedBox(width: 6),
+      Tooltip(message: 'CPU (share of one core) and the delay this device adds, which the track compensates',
+        waitDuration: const Duration(milliseconds: 600),
+        child: Text('${formatCpu(c.cpuShare)} · ${formatLatency(c.latencyMs)}', key: const ValueKey('device-cost-text'),
+          maxLines: 1, style: Neon.code(size: 9, color: Neon.dim))),
+      AnimatedSize(duration: fade, child: !c.armed ? const SizedBox.shrink() : Padding(
+        padding: const EdgeInsets.only(left: 5),
+        child: Tooltip(message: DeviceCostReadout.armedTip, child: Container(
+          key: const ValueKey('device-armed-badge'),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(6),
+            color: Neon.pink.withValues(alpha: 0.14), border: Border.all(color: Neon.pink.withValues(alpha: 0.6))),
+          child: Text('Live', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Neon.text)))))),
+    ]));
+  }
+}
+
+/// A CPU share (0.01 = 1 % of one core) as the header shows it: "1.2%", "<0.1%", "–" until measured.
+String formatCpu(double? share) {
+  if (share == null || !share.isFinite || share < 0) return '– CPU';
+  final pc = share * 100;
+  if (pc < 0.05) return '<0.1%';
+  return '${pc < 10 ? pc.toStringAsFixed(1) : pc.round()}%';
+}
+
+/// A latency in ms as the header shows it: "0 ms", "4.9 ms", "48 ms".
+String formatLatency(double ms) {
+  if (!ms.isFinite || ms <= 0.05) return '0 ms';
+  return '${ms < 10 ? ms.toStringAsFixed(1) : ms.round()} ms';
 }
 
 /// The device's power button: green and glowing while it plays, dim while bypassed.
@@ -250,7 +346,7 @@ class DeviceMoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(width: 36, height: 36, child: Builder(builder: (context) => IconButton(
     key: const ValueKey('device-more'),
-    tooltip: 'More: copy, paste, randomize, history, reset',
+    tooltip: 'More: copy, paste, happy accident, randomize, history, reset',
     padding: EdgeInsets.zero,
     iconSize: 20,
     color: Neon.dim,

@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../platform/midi_input.dart';
 import 'app_state.dart';
 import 'device_target.dart';
+import 'easter_eggs.dart';
 import 'latency_comp.dart' show beatDeviationsMs;
 import 'midi_mapping.dart';
 import 'pattern_doc.dart';
@@ -336,6 +337,7 @@ class LiveMidi extends ChangeNotifier {
           ? DateTime.now().add(Duration(
               microseconds: (countInBeats * _countInTickMs * 1000).round() + state.outputLatencyUs))
           : null;
+      if (countInEnds != null) EasterEggs.instance.countInStarted();
     }
     _wraps = 0;
     _pass = 0;
@@ -390,6 +392,7 @@ class LiveMidi extends ChangeNotifier {
       return;
     }
     if (!accepts(m)) return;
+    if (m.isNoteOn) EasterEggs.instance.notePlayed(m.data1, onScreen: m.source.isEmpty);
     if (m.source.isNotEmpty) {
       _blink(m.source);
       if (m.isControl && _control(m)) return;

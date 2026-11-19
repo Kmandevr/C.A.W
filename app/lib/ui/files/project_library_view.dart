@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
+import '../../model/easter_eggs.dart' show isMurderName;
 import '../../model/project_library.dart';
 import '../../model/storage.dart' show StorageUse;
 import '../../platform/save_copy.dart';
@@ -17,6 +18,7 @@ import '../theme.dart';
 import '../tokens.dart';
 import 'asset_views.dart' show MenuEntry, showCompactMenu;
 import 'selection_bar.dart';
+import '../crow.dart';
 
 /// What a held project carries onto a folder: the selection when it is in it, else itself.
 class ProjectDrag {
@@ -46,6 +48,21 @@ String libraryLength(double seconds) {
   final two = r.toString().padLeft(2, '0');
   return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$two' : '$m:$two';
 }
+
+/// "2 h 15 min", "12 min", or "under a minute".
+String libraryTimeSpent(int seconds) {
+  final m = seconds ~/ 60, h = m ~/ 60;
+  if (m < 1) return 'under a minute';
+  return h > 0 ? '$h h ${m % 60} min' : '$m min';
+}
+
+/// A card's stats on one line: time spent, bars, tracks and the last export.
+String projectStatsLine(ProjectMeta m) => [
+      '${libraryTimeSpent(m.spentSeconds)} spent',
+      '${m.bars} bar${m.bars == 1 ? '' : 's'}',
+      '${m.tracks} track${m.tracks == 1 ? '' : 's'}',
+      m.lastExport == null ? 'not exported yet' : 'exported ${libraryDate(m.lastExport)}',
+    ].join(' · ');
 
 /// A name a file can take on any system ("Song (2).caw").
 String exportFileName(String name, Set<String> taken) {
@@ -466,17 +483,20 @@ class _ProjectLibraryViewState extends State<ProjectLibraryView> {
           final level = Motion.of(context);
           final Widget list;
           if (_loading && l.projects.isEmpty) {
-            list = const Center(key: ValueKey('loading'), child: SizedBox(width: 20, height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2)));
+            list = const Center(key: ValueKey('loading'), child: CrowLoader(size: 20));
           } else if (folders.isEmpty && projects.isEmpty) {
             list = Center(
               key: ValueKey('empty:$_folder:$searching'),
               child: Padding(
                 padding: const EdgeInsets.all(Space.l),
-                child: Text(
-                    searching ? 'No project matches.' : _folder == null ? 'No saved projects yet.'
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const PerchedCrow(),
+                  const SizedBox(height: Space.xs),
+                  Text(
+                    searching ? 'No project matches.' : _folder == null ? 'No saved projects yet. New project starts one.'
                         : 'This folder is empty. Hold a project and drag it here, or use Select › Move.',
                     textAlign: TextAlign.center, style: const TextStyle(color: Neon.dim, fontSize: TypeScale.label)),
+                ]),
               ),
             );
           } else {
@@ -619,7 +639,6 @@ class _ProjectCardState extends State<ProjectCard> {
     final checked = widget.checked == true;
     final level = Motion.of(context);
     final details = [
-      '${m.tracks} track${m.tracks == 1 ? '' : 's'}',
       libraryLength(m.seconds),
       if (m.bpm > 0) '${m.bpm.toStringAsFixed(m.bpm == m.bpm.roundToDouble() ? 0 : 1)} BPM',
       StorageUse.format(m.bytes),
@@ -643,7 +662,9 @@ class _ProjectCardState extends State<ProjectCard> {
             borderRadius: BorderRadius.circular(Radii.s),
             border: Border.all(color: Neon.green.withValues(alpha: 0.35)),
           ),
-          child: const Icon(Icons.music_note, size: 20, color: Neon.green),
+          child: isMurderName(m.name)
+              ? const Center(child: MurderIcon(size: 26, color: Neon.green))
+              : const Icon(Icons.music_note, size: 20, color: Neon.green),
         ),
         const SizedBox(width: Space.s),
         Expanded(
@@ -662,6 +683,8 @@ class _ProjectCardState extends State<ProjectCard> {
             const SizedBox(height: 2),
             Text('Edited ${libraryDate(m.modified)} · Created ${libraryDate(m.created)}', maxLines: 1,
                 overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: TypeScale.caption, color: Neon.dim)),
+            Text(projectStatsLine(m), key: ValueKey('project-stats:${m.id}'), maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: TypeScale.number(size: 10.5, color: Neon.text.withValues(alpha: 0.8))),
             Text(details.join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TypeScale.number(size: 10.5, color: Neon.dim)),
             Text('Saved with ${m.savedWith}', maxLines: 1, overflow: TextOverflow.ellipsis,

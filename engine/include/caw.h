@@ -176,13 +176,34 @@ extern "C" {
    warnings, as before; a send level it could not queue now too. Routes per track and modulation are sized from the
    project, with a CPU warning past the old budgets and a 4,096 safety bound (no API change).
    Device MIDI keeps its last queue slots for note offs and merges controller moves under pressure (no API change).
-   Nothing else changes. */
-#define CAW_API_VERSION 40
+   Nothing else changes.
+   41 (2026-11-19, 1.1.0): MIDI effects. A layer's optional "midiComponents" (absent: none, so older projects play as
+   before): at most 16 event processors (one event input, one event output: org.caw.midi.arp, .chords, .scale, .echo,
+   .humanize, or a loaded one) run in order on the layer's notes before its instrument hears them. Component index
+   CAW_MIDI_COMPONENT | k addresses MIDI effect k in caw_engine_set_component_param, _bypass, _display, _states and
+   _set_component_state; automation lanes "target_type":"midiComponent" with "component" k. New devices
+   org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md).
+   42 (2026-11-19, 1.1.0): the clip pitch editor's engine (Lark, one voice): caw_pitch_clip_analyse,
+   caw_pitch_clip_curve, caw_pitch_clip_render and caw_pitch_clip_free (below). New device org.caw.pitchfix (live
+   pitch correction). Nothing else changes.
+   43 (2026-11-19, 1.1.0): the sampler's tools (docs/engine.md "Sampler tools"): caw_sampler_map (drop and play:
+   roots detected, zones over the whole keyboard), caw_sampler_slice (a loop sliced to keys) and caw_sampler_take
+   (a recorded take cut into zones); sampler zones gain "stretch" and "stretch_bpm". Nothing else changes.
+   44 (2026-11-19, 1.1.0): around the effects. caw_engine_component_cost (CawSlotCost) gives a slot's measured CPU
+   share, its latency now and whether it plays its armed version: an audio track whose "input" is armed with
+   monitoring on or auto runs its effects' near-zero-delay versions (Linear EQ minimum phase, Preen's and Pitch fix's
+   monitoring windows, look-aheads off...), the full ones in playback of other tracks and in every export, and the
+   latency compensation follows. Every keyed effect takes sc_hpf, sc_lpf and sc_listen (appended; off by default);
+   the Limiter appends target_on and target (a loudness target it reports against; docs/engine.md). */
+#define CAW_API_VERSION 44
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
    "noteComponents" (per-note FX, #127). */
 #define CAW_NOTE_COMPONENT 0x40000000u
+/* A component index with this bit (API version 41) names MIDI effect (index & ~CAW_MIDI_COMPONENT) of the layer's
+   "midiComponents". */
+#define CAW_MIDI_COMPONENT 0x20000000u
 
 typedef struct CawEngine CawEngine;
 
@@ -365,6 +386,22 @@ typedef struct CawSlotMeter {
    instrument; not per-note FX): what it passes on, after its auto gain and bypass. Lock-free on the audio side; 1,
    0 when the engine is busy with a project update (out is zeroed; call again) or -1 when there is no such slot. */
 CAW_API int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t index, CawSlotMeter* out);
+/* An effect slot's cost (API version 44), for a device's header. Versioned: the caller sets struct_size to
+   sizeof(CawSlotCost) (or an older size); the engine writes only the fields that size covers, and fields are only
+   ever appended. */
+typedef struct CawSlotCost {
+    uint32_t struct_size;
+    float cpu_share;          /* the slot's smoothed share of real time (0.01 = 1 % of one core); -1 until measured */
+    uint32_t latency_frames;  /* the latency it reports now (0 while bypassed), which the chain compensates */
+    float latency_ms;         /* the same in milliseconds at the engine's rate */
+    int32_t armed;            /* 1: it plays its armed (near-zero-delay) version now: the header's badge */
+} CawSlotCost;
+/* Reads slot `index`'s cost (addressed as in caw_engine_set_component_param; CAW_INSTRUMENT_INDEX the instrument;
+   not per-note FX). The first read starts the measuring: the audio thread then times each slot of the chain (a clock
+   pair per slot in one block of four, no allocation) until 2 s pass with no read, so cpu_share is -1 on the first read; poll it
+   a few times a second while the header shows. 1, 0 when the engine is busy with a project update (call again;
+   never blocks) or -1 when there is no such slot. */
+CAW_API int32_t caw_engine_component_cost(CawEngine* e, const char* layer_id, uint32_t index, CawSlotCost* out);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
    {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
    index CAW_INSTRUMENT_INDEX). Store "state" and
@@ -887,6 +924,23 @@ CAW_API void caw_asset_store_purge(void);
    sample into a "samples" folder beside it first. {"ok", "error", "files": [paths]}. Free with caw_free. */
 CAW_API char* caw_sfz_import(const char* sfz_path);
 CAW_API char* caw_sfz_export(const char* state_json, const char* sfz_path, int32_t copy_samples);
+/* API 43, the sampler's tools (docs/engine.md "Sampler tools"). Each loads files as caw_asset_load does (a worker
+   isolate), takes a JSON request of at most 64 KiB (a value out of range fails with an error naming it) and answers
+   {"ok", "error", ..., "state": the sampler's state JSON ({"zones": [...]})}. Free with caw_free.
+   caw_sampler_map: {"samples": [{"path", "root" (0..127; absent: detected)}] (1..128), "mode": "auto" (default:
+   one sample over the whole keyboard; several by root when every root is known, else spread), "root", "spread"
+   (equal ranges over the keyboard) or "keys" (one key each from "start_key", 36), "detect" (true)}. Answers "mode"
+   (the one used) and "samples": [{"path", "sure", "root", "midi", "cents"}] (root and midi null when unsure).
+   caw_sampler_slice: options {"by": "transients" (default) or "grid", "divisions" 1..128 (16, grid), "sensitivity"
+   0..1 (0.5), "min_gap_seconds" 0.005..2 (0.05), "max_slices" 1..128 (64), "start_key" (36)}. Answers "frames"
+   (the file's own), "seconds" and "slices": [{"start", "end" (file frames, [start, end)), "key"}]; the zones play
+   each slice one shot on its key.
+   caw_sampler_take: {"path" (the take), "notes": [{"key", "start_seconds", "end_seconds" (where it was asked for in
+   the take), "lovel", "hivel"}] (1..128)}. Answers "notes": [{"key", "found", "midi" (the pitch heard, null when
+   unsure), "in_tune" (within half a semitone of key), "start", "end"}]; the zones span the keys by root. */
+CAW_API char* caw_sampler_map(CawEngine* e, const char* request_json);
+CAW_API char* caw_sampler_slice(CawEngine* e, const char* path, const char* options_json);
+CAW_API char* caw_sampler_take(CawEngine* e, const char* request_json);
 /* Audio input. The capture devices, as caw_audio_devices lists playback ones, plus "channels" (the most the
    device offers; 0 unknown). On Android the app needs the RECORD_AUDIO permission before input opens. */
 CAW_API char* caw_audio_input_devices(void);
@@ -1055,6 +1109,35 @@ typedef struct CawComponentBenchRequest {
    "sample_rate"} ([x, % of a block] pairs), "thresholds"}. Keys, measurements and thresholds: docs/engine.md, "The
    plug-in benchmark". A failed job's caw_job_error says why ("cancelled" when cancelled); its progress is 0..1000. */
 CAW_API CawJob* caw_worker_pool_submit_component_bench(CawWorkerPool* pool, const CawComponentBenchRequest* request);
+
+/* API 42: the clip pitch editor's engine (Lark; docs/engine.md "Lark"). Monophonic. Call these off the audio thread
+   (a worker isolate); they allocate, take no lock the audio thread holds, and are deterministic: the same audio,
+   options and edits give the same notes and the same samples on every run.
+   caw_pitch_clip_analyse: `frames` (1..30 minutes) of `left` and `right` (NULL: mono) at `sample_rate`
+   (8000..192000), options {"low_hz" 50..400 (60), "high_hz" 200..2000 (1000; above 1.5 x low_hz)} (NULL for the
+   defaults; at most 4096 bytes; an unknown key or a value out of range fails with an error naming it). On success
+   *out is the clip (free it with caw_pitch_clip_free) and the result is {"ok":true, "error", "sample_rate",
+   "frames", "hop_frames" (hop k is centred on frame k x hop_frames), "hops", "notes": [{"start", "end" (frames,
+   [start, end)), "pitch" (the centre, a MIDI note, fractional), "drift_cents" (the slow wander's rms),
+   "vibrato_rate" (Hz; 0 when none), "vibrato_cents" (depth), "transition_in_ms", "transition_out_ms", "gain_db"}]};
+   on failure *out is NULL and {"ok":false, "error"}. Free the result with caw_free. */
+typedef struct CawPitchClip CawPitchClip;
+CAW_API char* caw_pitch_clip_analyse(const float* left, const float* right, int64_t frames, int32_t sample_rate,
+                                     const char* options_json, CawPitchClip** out);
+/* The pitch curve, one value a hop: midi (0 when unvoiced), voicing (0..1) and rms_db, each written for
+   min(max, hops) hops when not NULL. Returns the hops (-1: no clip). */
+CAW_API int64_t caw_pitch_clip_curve(const CawPitchClip* clip, float* midi, float* voicing, float* rms_db, int64_t max);
+/* Renders `clip`'s audio (the same `left`, `right` and `frames` it analysed: another is refused) with the edits
+   {"edits": [{"note" (its index), "pitch" -24..24 semitones (0), "drift" 0..1 (1 keeps the drift, 0 flattens it),
+   "vibrato" 0..2 (the depth scale, 1), "formant" -12..12 semitones (0), "formant_keep" (true; false: the formant
+   follows the pitch), "time_frames" (the move, at most 10 s either way, 0), "stretch" 0.25..4 (1), "gain_db"
+   -60..24 (0), "transition_ms" 0..500 (30: the ramps at the note's changes)}]} (NULL: none; at most 8 MiB; a note
+   edited twice, an unknown key or a value out of range fails naming it) into out_left (and out_right when right is
+   given), each `frames` long. The source is never changed; where no edit reaches, the output is the input exactly.
+   Result {"ok", "error", "notes_edited"}; free with caw_free. */
+CAW_API char* caw_pitch_clip_render(const CawPitchClip* clip, const float* left, const float* right, int64_t frames,
+                                    const char* edits_json, float* out_left, float* out_right);
+CAW_API void caw_pitch_clip_free(CawPitchClip* clip);
 
 #ifdef __cplusplus
 }

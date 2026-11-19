@@ -51,7 +51,7 @@ void main() {
     await tester.tap(find.byKey(ValueKey('modout-$id-0')));
     await tester.pump();
     expect(s.assigningModulation.value, ModSourceRef(id, 0));
-    expect(find.text('Tap knobs for LFO to move'), findsOneWidget);
+    expect(find.text('Tap knobs for Orbit to move'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('dknob-cutoff')));
     await tester.pump();
     expect(s.project.linksTo(_cutoff).single.source, id);
@@ -140,7 +140,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: RoutingView(state: s))));
     await tester.pumpAndSettle();
-    expect(find.text('Random → Volume'), findsOneWidget);
+    expect(find.text('Flit → Volume'), findsOneWidget);
     await _end(tester);
   });
 

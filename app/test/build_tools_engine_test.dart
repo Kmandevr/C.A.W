@@ -95,6 +95,6 @@ void main() {
     expect(find.byKey(const ValueKey('pack-result')), findsOneWidget);
     final pack = state.samplePacks.single;
     expect(pack.files.map((f) => f.file), hasLength(5));
-    expect(pack.sfz, ['Flagship.sfz']);
+    expect(pack.sfz, ['Raven.sfz']);
   }, skip: skip != null);
 }

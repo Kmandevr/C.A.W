@@ -1,4 +1,4 @@
-// The Compressor's "Duck" variant (1.0.8): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
+// Duck's "Duck" variant (org.caw.duck variant 0; 1.0.8-1.0.9 the Compressor's variant 4): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
 #include "builtin_effects.h"
 
 #include <algorithm>
@@ -9,6 +9,7 @@
 
 #include "caw/library/dynamics.hpp"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
 #include "presets.h"
 
 // Original code (C.A.W. is Apache-2.0), C.A.W's own design with the controls the owner listed for Kilohearts
@@ -53,7 +54,7 @@ const ParamTable& duckParams() {
 
 // Its own table as a "legacy" descriptor (never registered): legacyVariantDescriptor appends `variant`.
 const ModuleDescriptor& duckBaseDescriptor() {
-    static const ModuleDescriptor d = keyedEffectDescriptor("org.caw.compressor", "Compressor", duckParams(), 0, 0, false);
+    static const ModuleDescriptor d = keyedEffectDescriptor("org.caw.duck", "Ducker", duckParams(), 0, 0, false);
     return d;
 }
 
@@ -65,6 +66,7 @@ public:
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         rmsCoef_ = lib::timeCoefficient(0.01, sampleRate);
+        sc_.bind(descriptor());
         // ISP's interpolators: window sample 3 itself (phase 0) and the points d = 1/4, 1/2, 3/4 after it, from
         // window samples 0..7 (tap_[phase][tap]).
         for (int k = 0; k < kTaps; ++k) tap_[0][k] = k == 3 ? 1.0f : 0.0f;
@@ -86,6 +88,7 @@ protected:
         ms_ = 0.0;
         env_ = 0.0;
         holdLeft_ = 0;
+        sc_.clear();
         for (auto& h : win_)
             for (float& v : h) v = 0.0f;
         grMax_ = grNow_ = 0.0;
@@ -114,6 +117,7 @@ protected:
         outRamp_.set(outGain_, kControlFrames);
         mixRamp_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
         external_ = choice(kSidechain, at) == 1;
+        if (sc_.bound()) sc_.set(param(sc_.hp, at), param(sc_.lp, at), on(sc_.li, at), sr);
     }
 
     // The detector's level of one frame, linear (RMS: its mean square, returned squared; `squared` says so).
@@ -166,10 +170,14 @@ protected:
         const float* keyR = keyRight();
         // The key when one is asked for and given (the chain gives silence when no track keys it); else the input.
         const bool key = external_ && keyL && keyR;
-        if (detection_ == 2) truePeaks(key ? keyL : inL, key ? keyR : inR, n);
+        // The detector's source through the sidechain filter (unfiltered while it is off).
+        const float* srcL = key ? keyL : inL;
+        const float* srcR = key ? keyR : inR;
+        sc_.apply(srcL, srcR, n);
+        if (detection_ == 2) truePeaks(srcL, srcR, n);
         for (uint32_t i = 0; i < n; ++i) {
             const double xl = inL[i], xr = inR[i];
-            const double sl = key ? keyL[i] : xl, sr = key ? keyR[i] : xr;
+            const double sl = srcL[i], sr = srcR[i];
             if (key) {
                 const double k = std::max(sl < 0 ? -sl : sl, sr < 0 ? -sr : sr);
                 keyMax_ = k > keyMax_ ? k : keyMax_;
@@ -203,6 +211,7 @@ protected:
             outL[i] = static_cast<float>(xl * g);
             outR[i] = static_cast<float>(xr * g);
         }
+        if (sc_.listen) sc_.listenTo(srcL, srcR, outL, outR, n);
     }
 
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -234,6 +243,7 @@ private:
     uint32_t ispAt_ = 0;
     int detection_ = 0;
     bool external_ = false;
+    SidechainFilter sc_;
     double threshold_ = -20, thresholdLin_ = 0.1, thresholdSq_ = 0.01, amount_ = 0.5;
     double attack_ = 0, release_ = 0, attackFor_ = -1, releaseFor_ = -1, rateFor_ = -1, rmsCoef_ = 0;
     double outDb_ = 1e300, outGain_ = 1.0;
@@ -242,46 +252,39 @@ private:
     double grNow_ = 0, grMax_ = 0, levelMax_ = 0, keyMax_ = 0;
 };
 
-// Its presets (job-named; `variant` 4). A keyed one says so: the app turns Sidechain to External with a key.
+// Its presets (job-named; `variant` 0 of org.caw.duck: 1.0.9 had them under org.caw.compressor variant 4). A keyed one says so: the app turns Sidechain to External with a key.
 const std::vector<BuiltinPreset>& duckPresets() {
     static const std::vector<BuiltinPreset> p = {
         {"Kick duck bass", "Key it from the kick: the bass dips under each hit and is back before the next",
-         {{"threshold", -30}, {"amount", 0.8}, {"attack", 0.5}, {"hold", 20}, {"release", 110}, {"detection", 1}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -30}, {"amount", 0.8}, {"attack", 0.5}, {"hold", 20}, {"release", 110}, {"detection", 1}, {"sidechain", 1}, {"variant", 0}}},
         {"Voice over music", "Key it from the voice: the music steps back while someone talks",
-         {{"threshold", -40}, {"amount", 0.5}, {"attack", 15}, {"hold", 250}, {"release", 600}, {"detection", 0}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -40}, {"amount", 0.5}, {"attack", 15}, {"hold", 250}, {"release", 600}, {"detection", 0}, {"sidechain", 1}, {"variant", 0}}},
         {"Pad pump", "Key it from the kick: a deep, slow-recovering pump on pads and chords",
-         {{"threshold", -36}, {"amount", 1}, {"attack", 1}, {"hold", 0}, {"release", 220}, {"detection", 1}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -36}, {"amount", 1}, {"attack", 1}, {"hold", 0}, {"release", 220}, {"detection", 1}, {"sidechain", 1}, {"variant", 0}}},
         {"Snare makes room", "Key it from the snare: a short dip so the crack comes through",
-         {{"threshold", -28}, {"amount", 0.6}, {"attack", 0.2}, {"hold", 10}, {"release", 70}, {"detection", 2}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -28}, {"amount", 0.6}, {"attack", 0.2}, {"hold", 10}, {"release", 70}, {"detection", 2}, {"sidechain", 1}, {"variant", 0}}},
         {"Gentle leveller", "Its own input: evens out a part that comes and goes, slowly",
-         {{"threshold", -24}, {"amount", 0.35}, {"attack", 30}, {"hold", 100}, {"release", 800}, {"detection", 0}, {"variant", 4}}},
+         {{"threshold", -24}, {"amount", 0.35}, {"attack", 30}, {"hold", 100}, {"release", 800}, {"detection", 0}, {"variant", 0}}},
         {"Vocal rider", "Its own input: holds a voice's loud words near the threshold",
-         {{"threshold", -20}, {"amount", 0.6}, {"attack", 10}, {"hold", 50}, {"release", 300}, {"detection", 0}, {"output", 2}, {"variant", 4}}},
+         {{"threshold", -20}, {"amount", 0.6}, {"attack", 10}, {"hold", 50}, {"release", 300}, {"detection", 0}, {"output", 2}, {"variant", 0}}},
         {"Peak catcher", "Its own input: true-peak detection pulls fast peaks to the threshold",
-         {{"threshold", -6}, {"amount", 1}, {"attack", 0.05}, {"hold", 5}, {"release", 60}, {"detection", 2}, {"variant", 4}}},
+         {{"threshold", -6}, {"amount", 1}, {"attack", 0.05}, {"hold", 5}, {"release", 60}, {"detection", 2}, {"variant", 0}}},
         {"Bus glue", "Its own input: a light, even hold on a group or the mix",
-         {{"threshold", -18}, {"amount", 0.25}, {"attack", 20}, {"hold", 30}, {"release", 250}, {"detection", 0}, {"variant", 4}}},
+         {{"threshold", -18}, {"amount", 0.25}, {"attack", 20}, {"hold", 30}, {"release", 250}, {"detection", 0}, {"variant", 0}}},
         {"Parallel duck", "Key it from the kick: half the ducked signal under the dry, a gentle groove",
-         {{"threshold", -32}, {"amount", 1}, {"attack", 0.5}, {"hold", 15}, {"release", 140}, {"detection", 1}, {"mix", 0.5}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -32}, {"amount", 1}, {"attack", 0.5}, {"hold", 15}, {"release", 140}, {"detection", 1}, {"mix", 0.5}, {"sidechain", 1}, {"variant", 0}}},
     };
     return p;
 }
 
 }  // namespace
 
-const ModuleDescriptor& duckVariantDescriptor(std::span<const std::string_view> labels, uint32_t index) {
-    static const ModuleDescriptor& d =
-        legacyVariantDescriptor(duckBaseDescriptor(), "org.caw.compressor", "Compressor", labels, index);
-    return d;
-}
+const ModuleDescriptor& duckBaseVariantDescriptor() { return duckBaseDescriptor(); }
 
 ModuleProcessor* makeDuckAs(const ModuleDescriptor& variant) noexcept {
     return new (std::nothrow) Duck(variant);
 }
 
-std::span<const BuiltinPreset> newVariantPresets(std::string_view id) {
-    if (id == "org.caw.compressor") return duckPresets();
-    return {};
-}
+const std::vector<BuiltinPreset>& duckVariantPresets() { return duckPresets(); }
 
 }  // namespace caw::fx

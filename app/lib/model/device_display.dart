@@ -16,7 +16,8 @@ import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDi
 
 /// One frame of what a device shows besides its parameters, read from the engine at the meter rate.
 class DeviceDisplayFrame {
-  const DeviceDisplayFrame({this.spectrum, this.gainReductionDb, this.inputDb, this.outputDb, this.values = const {}});
+  const DeviceDisplayFrame({this.spectrum, this.gainReductionDb, this.inputDb, this.outputDb, this.values = const {},
+    this.raw});
 
   /// Magnitudes 0..1, low to high on a log frequency axis from 20 Hz to 20 kHz (an EQ's analyser).
   final List<double>? spectrum;
@@ -29,6 +30,13 @@ class DeviceDisplayFrame {
 
   /// Anything else by name (an LFO's phase, an envelope's stage), for the device's own editor.
   final Map<String, double> values;
+
+  /// Every float as the engine published it, for a layout read by index (1.1.0's modes and tools); null for a
+  /// frame decoded by name only.
+  final List<double>? raw;
+
+  /// Float [i] of [raw], or [fallback] when there is none.
+  double at(int i, [double fallback = 0]) => raw != null && i >= 0 && i < raw!.length ? raw![i] : fallback;
 }
 
 /// Where editors get display frames: [engine] reads `caw_engine_component_display` (API version 6); [none] gives no
@@ -158,7 +166,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
           values: named(['detector_db', 'key_db', 'gr', 'gr_max', 'threshold', 'amount', 'detection', 'sidechain'], 2));
     case 'org.caw.limiter':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
-          values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak'], 2));
+          // 1.1.0 appends the loudness target (7-12; LUFS and LU, -200 while off or unmeasured).
+          values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak', 'target_on', 'target_lufs', 'short_lufs',
+            'integrated_lufs', 'short_from_target', 'integrated_from_target'], 2));
     case 'org.caw.gate':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2),
           values: named(['gr', 'gr_max', 'detector_db', 'threshold', 'open'], 2));
@@ -231,7 +241,26 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
           values: named(['source', 'freq_l', 'freq_r', 'carrier_phase', 'carrier_peak', 'oversample'], 2));
     // fx-creative end
+    // 1.1.0's Compressor, Gate and Ducker modes (docs/engine.md "Display data"): levels and gain change by name, the
+    // rest by index.
+    case 'org.caw.compressor.up':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: at(2), raw: List.of(f.take(n)),
+          values: named(['lift', 'lift_max', 'detector_db', 'threshold'], 2));
+    case 'org.caw.compressor.bus':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3), raw: List.of(f.take(n)),
+          values: named(['gr_max', 'gr', 'detector_db', 'threshold', 'ratio', 'knee', 'makeup_db'], 2));
+    case 'org.caw.gate.expand':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2), raw: List.of(f.take(n)),
+          values: named(['gr', 'gr_max', 'detector_db', 'threshold'], 2));
+    case 'org.caw.gate.pedal':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2), raw: List.of(f.take(n)),
+          values: named(['gr', 'gr_max', 'detector_db', 'open_threshold', 'close_threshold', 'open', 'release_ms'], 2));
+    case 'org.caw.duck.level':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: at(4), raw: List.of(f.take(n)),
+          values: named(['lufs', 'target', 'ride', 'max_boost', 'max_cut', 'gate', 'riding'], 2));
     default:
-      return DeviceDisplayFrame(values: {for (var i = 0; i < n && i < 64; ++i) '$i': f[i]});
+      // Every float by index ([DeviceDisplayFrame.raw]); the first 64 by name too, as before.
+      return DeviceDisplayFrame(raw: List.of(f.take(n)),
+          values: {for (var i = 0; i < n && i < 64; ++i) '$i': f[i]});
   }
 }
