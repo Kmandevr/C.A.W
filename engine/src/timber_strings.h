@@ -165,7 +165,9 @@ struct Pluck {
         for (uint32_t d = 1; d <= v.D + 1; ++d) v.line.buf[(v.line.w - d) & v.line.mask] = 0.0f;
         v.x1 = v.y1 = v.z = v.h = 0;
         v.b = v.bFree, v.p = v.pFree, v.damp = 0;
-        const uint32_t period = v.D + 1;
+        // The excitation's span, kept inside the pluck table: at 192 kHz a low note's period is longer than a third of
+        // it (equal to the period at 48 kHz, so the sound there is unchanged).
+        const uint32_t period = std::min<uint32_t>(v.D + 1, (Tables::kPluck - 8) / 3);
         v.excLeft = period;
         v.comb = static_cast<uint32_t>(position * period + 0.5);
         v.excAt = (hash32(++plucks * 2654435761u + v.key) % (Tables::kPluck - 2 * period - 4)) + period;

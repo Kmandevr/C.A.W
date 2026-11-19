@@ -90,7 +90,7 @@ public:
 protected:
     bool prepare(double sr, uint32_t) noexcept override {
         lib::SvfMix hp;
-        const double g = detTan(kPi * 5000.0 / sr), k = 1.4142135623730951;
+        const double g = detTan(kPi * std::min(5000.0, 0.4 * sr) / sr), k = 1.4142135623730951;  // below Nyquist at 8 kHz
         hp.set(g, k, 1.0, -k, -1.0);
         sib_ = hp;
         sc_.bind(descriptor());
@@ -131,7 +131,8 @@ protected:
             detune_ = std::clamp(param(voDetune, at), 0.0, 50.0);
             glide_ = 1.0 - detExp(-static_cast<double>(kControlFrames) / (std::max(1.0, param(voGlide, at)) * 0.001 * sr));
             const double low = std::clamp(param(voLow, at), 50.0, 400.0);
-            const double high = std::clamp(param(voHigh, at), 3000.0, std::min(16000.0, 0.45 * sr));
+            const double highLo = std::min(3000.0, 0.4 * sr), highHi = std::max(std::min(16000.0, 0.45 * sr), highLo);
+            const double high = std::clamp(param(voHigh, at), highLo, highHi);
             const double sharp = std::clamp(param(voSharp, at), 0.5, 2.0);
             const double attack = std::clamp(param(voAttack, at), 0.5, 50.0) * 0.001;
             release_ = std::clamp(param(voRelease, at), 5.0, 500.0) * 0.001;

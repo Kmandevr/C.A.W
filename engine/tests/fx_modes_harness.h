@@ -69,10 +69,10 @@ inline Values with(Values v, double variant) {
     return v;
 }
 
-inline std::unique_ptr<ModuleProcessor> make(const char* id, const Values& values) {
+inline std::unique_ptr<ModuleProcessor> make(const char* id, const Values& values, double sr = 48000) {
     std::unique_ptr<ModuleProcessor> p = createComponent(registry(), id, values);
     CHECK(p != nullptr);
-    if (p && !p->activate(48000, 512)) {
+    if (p && !p->activate(sr, 512)) {
         cawtest::fail(__FILE__, __LINE__, "activate failed");
         return nullptr;
     }
@@ -80,7 +80,7 @@ inline std::unique_ptr<ModuleProcessor> make(const char* id, const Values& value
 }
 
 // Runs `p` over `in` in blocks of `block` (process(): no key).
-inline Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values, uint32_t block = 64) {
+inline Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values, uint32_t block = 64, double sr = 48000) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
@@ -97,7 +97,7 @@ inline Stereo run(ModuleProcessor& p, const Stereo& in, const Values& values, ui
         b.input = {ic, 2, n};
         b.output = {oc, 2, n};
         b.frames = n;
-        b.sampleRate = 48000;
+        b.sampleRate = sr;
         b.parameters = params.data();
         b.parameterCount = d.parameterCount;
         CHECK(p.process(b));

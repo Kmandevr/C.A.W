@@ -558,7 +558,7 @@ private:
         v.slope = lz.z.stretchBpm > 0 ? tempo_ / lz.z.stretchBpm : 1.0;
         v.src = lz.start;
         v.t = 0;
-        readers_[static_cast<size_t>(r)].start(src, h >= 0 ? ReadMode::Hq : ReadMode::Stretch, detPow(2.0, cents / 1200.0), 0,
+        readers_[static_cast<size_t>(r)].start(src, h >= 0 ? ReadMode::Hq : ReadMode::Stretch, detPow(2.0, std::clamp(cents, -4800.0, 4800.0) / 1200.0), 0,
                                                lz.start, v.slope, h >= 0 ? &hq_[static_cast<size_t>(h)] : nullptr,
                                                static_cast<int64_t>(lz.start), 0);
     }

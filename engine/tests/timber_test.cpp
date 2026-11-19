@@ -472,3 +472,20 @@ TEST(timber_winds_speak_and_hold_their_pitch) {
         }
     }
 }
+
+// The final 1.1.0 audio review: at 192 kHz a low pluck's period passed a third of the pluck table and the
+// excitation's offset wrapped far outside it (a crash on the audio thread). Every model, its lowest notes, at the
+// top rates the engine takes.
+TEST(timber_low_notes_play_at_192_khz) {
+    for (double sr : {176400.0, 192000.0})
+        for (int model = 0; model < 7; ++model) {
+            const Values v = withModel(model, {});
+            auto p = make(v, sr);
+            CHECK(p != nullptr);
+            if (!p) continue;
+            const Stereo out = play(*p, v, {{0.0, 0.3, 21.0, 0.9}, {0.05, 0.3, 24.0, 0.9}, {0.1, 0.3, 28.0, 0.5}}, 0.4, sr);
+            bool ok = true;
+            for (size_t i = 0; i < out.l.size(); ++i) ok = ok && std::isfinite(out.l[i]) && std::isfinite(out.r[i]);
+            CHECK(ok);
+        }
+}

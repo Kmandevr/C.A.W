@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -74,11 +75,8 @@ char* caw_pitch_clip_analyse(const float* left, const float* right, int64_t fram
         if (!number(j, "low_hz", 50, 400, o.lowHz, error) || !number(j, "high_hz", 200, 2000, o.highHz, error))
             return dup(fail(error));
     }
-    auto* clip = new CawPitchClip();
-    if (!caw::lark::analyse(left, right, frames, sample_rate, o, clip->analysis, error)) {
-        delete clip;
-        return dup(fail(error));
-    }
+    auto clip = std::make_unique<CawPitchClip>();  // freed if anything below throws
+    if (!caw::lark::analyse(left, right, frames, sample_rate, o, clip->analysis, error)) return dup(fail(error));
     const caw::lark::Analysis& a = clip->analysis;
     std::string s = "{\"ok\":true,\"error\":\"\",\"sample_rate\":" + std::to_string(sample_rate) +
                     ",\"frames\":" + std::to_string(frames) + ",\"hop_frames\":" + std::to_string(a.hopFrames) +
@@ -91,7 +89,7 @@ char* caw_pitch_clip_analyse(const float* left, const float* right, int64_t fram
              num(n.transitionInMs) + ",\"transition_out_ms\":" + num(n.transitionOutMs) + ",\"gain_db\":" +
              num(n.gainDb) + "}";
     }
-    *out = clip;
+    *out = clip.release();
     return dup(s + "]}");
 } catch (...) {
     return dup(fail("out of memory"));

@@ -2,7 +2,7 @@
 title: Engine reference
 summary: What the built C++ engine does: patterns, playback of tracks, the project file, exports, the C API, the Drums instrument, the caw CLI, the pre-load scan, the component testing suite, the sample-pack maker, the Benchmark and the tests.
 covers: [engine/, examples/]
-updated: 2026-11-19
+updated: 2026-11-20
 ---
 
 # Engine reference

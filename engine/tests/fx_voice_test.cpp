@@ -368,3 +368,16 @@ TEST(voice_devices_match_their_reference_renders) {
     const Stereo mimicKey = vocode({{"carrier", 1}, {"formant", 3}}, in, saw(110, 0.4, in.size()));
     CHECK_REFERENCE(refs, "mimic_sidechain", (cawtest::Audio{mimicKey.l, mimicKey.r}), cawtest::Class::Stable);
 }
+
+// The final 1.1.0 audio review: at 8 kHz (the engine takes 8-192 kHz) Mimic's fixed 5 kHz sibilance high-pass sat
+// above Nyquist and blew up to NaN within 160 frames; it stays finite now, at every rate the engine takes.
+TEST(mimic_stays_finite_at_8_khz) {
+    for (double sr : {8000.0, 11025.0, 192000.0}) {
+        auto p = make("org.caw.vocoder", {}, sr);
+        if (!p) continue;
+        const Stereo in = music(static_cast<size_t>(sr));
+        const Stereo out = run(*p, in, {}, 64, sr);
+        CHECK(finite(out));
+        CHECK(peak(out.l) < 4.0);
+    }
+}
