@@ -15,6 +15,11 @@ The performance release: steadier live playback on phones, a fairer Benchmark, a
   - a typical 8-track song does about 5 % less work in total.
 
   Every render is bit-for-bit the same.
+- **No stuck notes:** a flood of MIDI controller messages can no longer push out a note-off. Releases have their own reserved room, and repeated controller moves merge.
+- **No stutter the first time a plug-in plays:** a plug-in's code is loaded into memory before playback starts.
+- **Bigger projects:** routes per track and modulators or links per project now grow with the project. Very heavy modulation shows a CPU warning instead of being refused.
+- **Ratchets up to 64 per step** (from 8).
+- **Fixed:** an EQ band that changed type or channel while no knob moved could stay silent.
 - **A fairer Benchmark:** it warms up first, runs the coolest tests first, pauses to let the phone cool after heavy ones, and records each test's heat, clock speed and spikes. Results are also shown as if the phone ran at full speed, so a warm phone doesn't look like a slower app.
 
 ### For contributors
