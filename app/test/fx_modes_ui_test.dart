@@ -45,6 +45,7 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.gate', 2, {}, 'gate_pedal'),
   ('org.caw.duck', 1, {}, 'duck_level'),
   ('org.caw.duck', 2, {}, 'duck_carve'),
+  ('org.caw.tremolo', 2, {}, 'tremolo_shape'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
