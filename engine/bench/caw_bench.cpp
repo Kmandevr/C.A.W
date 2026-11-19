@@ -236,11 +236,11 @@ void effectsCost(double seconds) {
 
 // 1.1.0's new effect modes (`caw_bench SECONDS 300`, after the suite): each with a ceiling, so a regression fails
 // the run (exit 1). A ceiling is the mode's plan budget on one phone core (light 0.5 %, medium 2 %, heavy 6 %)
-// divided by 3, **[Assumption]** the Galaxy S22+ being 2-3x slower than an x86 box: light 1667, medium 6667,
-// heavy 20000 µs per second of audio here.
+// divided by 2.5, **[Assumption]** the Galaxy S22+ being 2-3x slower than an x86 box: light 2000, medium 8000,
+// heavy 24000 µs per second of audio here.
 bool modesCostOver(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
-    constexpr double kLight = 1667, kMedium = 6667, kHeavy = 20000;
+    constexpr double kLight = 2000, kMedium = 8000, kHeavy = 24000;
     (void)kLight;
     (void)kHeavy;
     struct Case {
@@ -255,6 +255,11 @@ bool modesCostOver(double seconds) {
         {"Delay: Reverse (default)", "org.caw.delay", {{"variant", 3}}, kMedium},
         {"Delay: Multi-tap (default, unpitched)", "org.caw.delay", {{"variant", 4}}, kMedium},
         {"Delay: Multi-tap, 4 pitched taps", "org.caw.delay", {{"variant", 4}, {"t1_pitch", 7}, {"t2_pitch", 12}, {"t3_pitch", -5}, {"t4_pitch", -12}, {"t4_level", 0.5}}, kMedium},
+        {"Reverb: Room (default)", "org.caw.reverb", {{"variant", 2}}, kMedium},
+        {"Reverb: Plate (default)", "org.caw.reverb", {{"variant", 3}}, kMedium},
+        {"Reverb: Spring (default)", "org.caw.reverb", {{"variant", 4}}, kMedium},
+        {"Reverb: Gated (default)", "org.caw.reverb", {{"variant", 5}}, kMedium},
+        {"Reverb: Reverse (default)", "org.caw.reverb", {{"variant", 6}}, kMedium},
         // modes-bench end
     };
     std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");

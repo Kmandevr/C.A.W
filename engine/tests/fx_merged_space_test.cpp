@@ -185,7 +185,7 @@ TEST(merged_delay_and_reverb_list_their_variants_as_the_old_descriptors_plus_var
         CHECK(m != nullptr);
         if (!m) continue;
         // The old effects are variants 0 and 1; 1.1.0's new modes follow (fx_delay_modes_test.cpp).
-        CHECK_EQ(m->variants.size(), dev == &kDelay ? 5u : 2u);
+        CHECK_EQ(m->variants.size(), dev == &kDelay ? 5u : 7u);
         CHECK(registry().find(dev->id) == &m->variants[0].descriptor());
         for (uint32_t v = 0; v < 2; ++v) {
             const ModuleDescriptor& d = m->variants[v].descriptor();
@@ -466,6 +466,6 @@ TEST(the_components_json_lists_the_delay_and_reverb_variants) {
         const Json* variants = found->get("variants");
         // Every variant, the old two and 1.1.0's new modes after them.
         CHECK(variants && variants->arr.size() == fx::findMergedDevice(dev->id)->variants.size());
-        CHECK(fx::findMergedDevice(dev->id)->variants.size() == (dev == &kDelay ? 5u : 2u));
+        CHECK(fx::findMergedDevice(dev->id)->variants.size() == (dev == &kDelay ? 5u : 7u));
     }
 }

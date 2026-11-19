@@ -12,6 +12,7 @@
 #include "fx_merged.h"
 #include "fx_modes_kit.h"
 #include "presets.h"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0), C.A.W's own designs (sound plan 2026-11-19, "New modes in existing
 // effects"). Each is a new class appended to org.caw.delay (variants 2, 3 and 4), its own table plus `variant`.
@@ -49,6 +50,7 @@ enum TapeParam : uint32_t { kTSync, kTTime, kTFeedback, kTWow, kTFlutter, kTSatu
 constexpr double kTapeMax = 2.0;          // seconds
 constexpr double kWowDepth = 0.006;       // seconds
 constexpr double kFlutterDepth = 0.0004;  // seconds
+constexpr double kTapeMinBack = 2.0 + EffectBase::kControlFrames;  // frames (the shortest time is far longer)
 
 const ParamTable& tapeParams() {
     static const ParamTable t = [] {
@@ -148,38 +150,56 @@ protected:
         }
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        // The heads' reads first (the shortest time is 5 ms, so nothing read is written in this run), then both
+        // sides as one two-wide vector (stereo_pair.h): the loss filters and the saturation; then the writes.
         const double sr = rate();
-        for (int c = 0; c < 2; ++c)
-            if (seconds_[c] < 0.0) seconds_[c] = target_[c];
-        const float* in[2] = {inL, inR};
-        float* out[2] = {outL, outR};
-        double fb[kControlFrames], mix[kControlFrames];
-        for (uint32_t i = 0; i < n; ++i) fb[i] = feedback_.next(), mix[i] = mix_.next();
+        double rd[2][kControlFrames];
         for (int c = 0; c < 2; ++c) {
-            Line& line = line_[c];
+            if (seconds_[c] < 0.0) seconds_[c] = target_[c];
             double sec = seconds_[c];
             const double target = target_[c];
             for (uint32_t i = 0; i < n; ++i) {
-                const double x = in[c][i];
                 sec += (target - sec) * glide_;
-                const double back = std::max(2.0, sec * sr + mod_[c].next());
-                double y = line.hermite(back);
-                y = high_[c].highpass(low_[c].lowpass(y));
-                y += (lib::tanhApprox(y * satK_) * satInv_ - y) * satMix_;
-                // The hiss rides on the tape's signal (a follower of it), so a silent tape is silent and sleeps;
-                // each side has its own noise, so block splits keep the order.
-                const double ay = y < 0 ? -y : y;
-                env_[c] = modes::flush(ay > env_[c] ? ay : env_[c] * envK_);
-                y = y * drop_[c].next(dropTarget_[c], dropK_) + hissLevel_ * std::min(1.0, 8.0 * env_[c]) * hiss_[c].next();
-                line.write(x + y * fb[i]);
-                const double a = y < 0 ? -y : y;
-                wetPeak_ = a > wetPeak_ ? a : wetPeak_;
-                out[c][i] = static_cast<float>(x + (y - x) * mix[i]);
+                rd[c][i] = line_[c].hermite(std::max(kTapeMinBack, sec * sr + mod_[c].next()) - i);
             }
             seconds_[c] = std::fabs(sec - target) < 1e-12 ? target : sec;
-            low_[c].flushDenormals();
-            high_[c].flushDenormals();
         }
+        const Pair two = splat(2.0), satK = splat(satK_), satInv = splat(satInv_), satMix = splat(satMix_);
+        const Pair la1 = splat(low_[0].a1()), la2 = splat(low_[0].a2()), la3 = splat(low_[0].a3());
+        const Pair ha1 = splat(high_[0].a1()), ha2 = splat(high_[0].a2()), ha3 = splat(high_[0].a3()), hk = splat(high_[0].k());
+        Pair l1 = pairOf(low_[0].ic1(), low_[1].ic1()), l2 = pairOf(low_[0].ic2(), low_[1].ic2());
+        Pair h1 = pairOf(high_[0].ic1(), high_[1].ic1()), h2 = pairOf(high_[0].ic2(), high_[1].ic2());
+        double feed[2][kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) {
+            Pair y = pairOf(rd[0][i], rd[1][i]), v1, v2;
+            lib::Svf::step(y, l1, l2, la1, la2, la3, two, v1, v2);
+            y = v2;  // the loss low-pass
+            lib::Svf::step(y, h1, h2, ha1, ha2, ha3, two, v1, v2);
+            y = y - hk * v1 - v2;  // and high-pass
+            y = y + (tanhApproxPair(y * satK) * satInv - y) * satMix;
+            const double fb = feedback_.next(), m = mix_.next();
+            const double x[2] = {inL[i], inR[i]};
+            double o[2];
+            for (int c = 0; c < 2; ++c) {
+                // The hiss rides on the tape's signal (a follower of it), so a silent tape is silent and sleeps;
+                // each side has its own noise.
+                double v = lane(y, c);
+                const double a = v < 0 ? -v : v;
+                env_[c] = modes::flush(a > env_[c] ? a : env_[c] * envK_);
+                v = v * drop_[c].next(dropTarget_[c], dropK_) + hissLevel_ * std::min(1.0, 8.0 * env_[c]) * hiss_[c].next();
+                const double av = v < 0 ? -v : v;
+                wetPeak_ = av > wetPeak_ ? av : wetPeak_;
+                feed[c][i] = x[c] + v * fb;
+                o[c] = x[c] + (v - x[c]) * m;
+            }
+            outL[i] = static_cast<float>(o[0]);
+            outR[i] = static_cast<float>(o[1]);
+        }
+        for (int c = 0; c < 2; ++c)
+            for (uint32_t i = 0; i < n; ++i) line_[c].write(feed[c][i]);
+        l1 = flushPair(l1), l2 = flushPair(l2), h1 = flushPair(h1), h2 = flushPair(h2);
+        low_[0].setState(lane(l1, 0), lane(l2, 0)), low_[1].setState(lane(l1, 1), lane(l2, 1));
+        high_[0].setState(lane(h1, 0), lane(h2, 0)), high_[1].setState(lane(h1, 1), lane(h2, 1));
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();

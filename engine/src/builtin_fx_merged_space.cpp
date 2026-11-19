@@ -9,8 +9,8 @@
 //   org.caw.delay.pingpong (variant 1 "Ping-pong", builtin_components.cpp). 1.1.0 appends new DSP: 2 "Tape", 3 "Reverse"
 //   and 4 "Multi-tap" (builtin_fx_delay_modes.cpp).
 // Reverb ("org.caw.reverb", built): org.caw.reverb.pro (variant 0 "Hall", builtin_effects_space.cpp) and
-//   org.caw.shimmer (variant 1 "Shimmer", builtin_fx_space_reverb.cpp). Room, Plate and Spring are new DSP for later
-//   and will follow as variants 2 on (a saved index never moves). org.caw.convolver stays its own device.
+//   org.caw.shimmer (variant 1 "Shimmer", builtin_fx_space_reverb.cpp). 1.1.0 appends new DSP: 2 "Room", 3 "Plate",
+//   4 "Spring", 5 "Gated", 6 "Reverse" (builtin_fx_reverb_modes.cpp; a saved index never moves). org.caw.convolver stays its own device.
 //
 // How to build a family, as Pitch/Shift here: per variant a descriptor function (legacyVariantDescriptor of the old
 // class's descriptor, or a table of its own with variantParameter) and a factory (AsVariant<OldClass>, the class made
@@ -36,6 +36,17 @@ const ModuleDescriptor& multiTapDelayDescriptor(std::span<const std::string_view
 ModuleProcessor* makeTapeDelayAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeReverseDelayAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeMultiTapDelayAs(const ModuleDescriptor& variant) noexcept;
+// 1.1.0's new Reverb modes (builtin_fx_reverb_modes.cpp).
+const ModuleDescriptor& roomReverbDescriptor(std::span<const std::string_view> labels, uint32_t index);
+const ModuleDescriptor& plateReverbDescriptor(std::span<const std::string_view> labels, uint32_t index);
+const ModuleDescriptor& springReverbDescriptor(std::span<const std::string_view> labels, uint32_t index);
+const ModuleDescriptor& gatedReverbDescriptor(std::span<const std::string_view> labels, uint32_t index);
+const ModuleDescriptor& reverseReverbDescriptor(std::span<const std::string_view> labels, uint32_t index);
+ModuleProcessor* makeRoomReverbAs(const ModuleDescriptor& variant) noexcept;
+ModuleProcessor* makePlateReverbAs(const ModuleDescriptor& variant) noexcept;
+ModuleProcessor* makeSpringReverbAs(const ModuleDescriptor& variant) noexcept;
+ModuleProcessor* makeGatedReverbAs(const ModuleDescriptor& variant) noexcept;
+ModuleProcessor* makeReverseReverbAs(const ModuleDescriptor& variant) noexcept;
 
 namespace {
 
@@ -90,7 +101,7 @@ const Variant kDelay[] = {{kDelayVariants[0], &digitalVariant, &makeDigital},
 // Reverb: the same.
 constexpr std::string_view kReverbId = "org.caw.reverb";
 constexpr std::string_view kReverbName = "Reverb";
-constexpr std::string_view kReverbVariants[] = {"Hall", "Shimmer"};
+constexpr std::string_view kReverbVariants[] = {"Hall", "Shimmer", "Room", "Plate", "Spring", "Gated", "Reverse"};
 
 const ModuleDescriptor& hallVariant() {
     static const ModuleDescriptor& d = legacyVariantDescriptor(reverbProDescriptor(), kReverbId, kReverbName, kReverbVariants, 0);
@@ -103,8 +114,24 @@ const ModuleDescriptor& shimmerVariant() {
 }
 ModuleProcessor* makeHall() noexcept { return makeReverbProAs(hallVariant()); }
 ModuleProcessor* makeShimmer() noexcept { return makeShimmerAs(shimmerVariant()); }
+const ModuleDescriptor& roomVariant() { return roomReverbDescriptor(kReverbVariants, 2); }
+const ModuleDescriptor& plateVariant() { return plateReverbDescriptor(kReverbVariants, 3); }
+const ModuleDescriptor& springVariant() { return springReverbDescriptor(kReverbVariants, 4); }
+const ModuleDescriptor& gatedVariant() { return gatedReverbDescriptor(kReverbVariants, 5); }
+const ModuleDescriptor& reverseReverbVariant() { return reverseReverbDescriptor(kReverbVariants, 6); }
+ModuleProcessor* makeRoom() noexcept { return makeRoomReverbAs(roomVariant()); }
+ModuleProcessor* makePlate() noexcept { return makePlateReverbAs(plateVariant()); }
+ModuleProcessor* makeSpring() noexcept { return makeSpringReverbAs(springVariant()); }
+ModuleProcessor* makeGated() noexcept { return makeGatedReverbAs(gatedVariant()); }
+ModuleProcessor* makeReverseReverb() noexcept { return makeReverseReverbAs(reverseReverbVariant()); }
 
-const Variant kReverb[] = {{kReverbVariants[0], &hallVariant, &makeHall}, {kReverbVariants[1], &shimmerVariant, &makeShimmer}};
+const Variant kReverb[] = {{kReverbVariants[0], &hallVariant, &makeHall},
+                           {kReverbVariants[1], &shimmerVariant, &makeShimmer},
+                           {kReverbVariants[2], &roomVariant, &makeRoom},
+                           {kReverbVariants[3], &plateVariant, &makePlate},
+                           {kReverbVariants[4], &springVariant, &makeSpring},
+                           {kReverbVariants[5], &gatedVariant, &makeGated},
+                           {kReverbVariants[6], &reverseReverbVariant, &makeReverseReverb}};
 
 const MergedDevice kDevices[] = {{kDelayId, kDelayName, kDelay}, {kReverbId, kReverbName, kReverb}, {kShiftId, kShiftName, kShift}};
 
