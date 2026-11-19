@@ -325,6 +325,8 @@ void main() {
             fail('presets are tested in user_presets_test.dart');
           case AssetKind.audioFile:
             fail('audio drops are tested in audio_clips_test.dart');
+          case AssetKind.chainTemplate:
+            fail('chain templates are tested in device_library_test.dart');
         }
       });
     }

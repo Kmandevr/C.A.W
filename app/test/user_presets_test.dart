@@ -306,12 +306,12 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('preset-save')));
       await tester.pumpAndSettle();
       final field = tester.widget<TextField>(find.byKey(const ValueKey('preset-save-name')));
-      expect(field.controller!.text, '${t.label} 1');
+      expect(field.controller!.text, '${t.shortLabel} 1');
       await tester.enterText(find.byKey(const ValueKey('preset-save-tag')), 'Bus');
       await tester.tap(find.byKey(const ValueKey('preset-save-ok')));
       await tester.pumpAndSettle();
       final saved = s.userPresets.forComponent(comp).single;
-      expect((saved.name, saved.category, saved.device!.params['ratio']), ('${t.label} 1', 'Bus', 5));
+      expect((saved.name, saved.category, saved.device!.params['ratio']), ('${t.shortLabel} 1', 'Bus', 5));
       expect(find.text('Saved "${saved.name}"'), findsOneWidget, reason: 'the toast');
       expect(find.byKey(ValueKey('preset-user-${saved.name}')), findsOneWidget);
 

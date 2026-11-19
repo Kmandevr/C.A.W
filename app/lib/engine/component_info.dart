@@ -1,4 +1,6 @@
 // Typed descriptors of loaded native components, parsed from caw_engine_components (engine/include/caw.h).
+import '../model/device_names.dart';
+
 class ComponentPortInfo {
   const ComponentPortInfo({
     required this.id,
@@ -197,7 +199,12 @@ class NativeComponentInfo {
 
   bool get runsPerNote => domains.contains('per_note') || domains.contains('per_voice');
 
-  String get label => name.isEmpty ? id : name;
+  /// What the app shows: a built-in's crow-family name and plain subtitle ("Talon · Compressor", [DeviceNames]),
+  /// else its descriptor's name, else its id.
+  String get label => DeviceNames.title(id, name.isEmpty ? id : name);
+
+  /// The short name for names the app makes up ("Talon 2"): a built-in's crow-family name, else [label].
+  String get shortLabel => DeviceNames.name(id, name.isEmpty ? id : name);
 
   /// Parameter [id], or null. A long list is indexed on first use, so a descriptor with thousands of knobs (the
   /// drums' 10392) costs one hash lookup per knob, not a scan; a short one (or a rack's, rebuilt per read) is scanned.

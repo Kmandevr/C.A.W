@@ -1,4 +1,4 @@
-// Every device's header (device shell): power, the name in its family's colour, the preset bar, A/B, the auto gain ear and the ⋯ menu; one line on wide screens, two on a phone.
+// Every device's header (device shell): power, the name in its family's colour, the preset bar, A/B, the auto gain ear, the "?" field guide and the ⋯ menu; one line on wide screens, two on a phone.
 import 'package:flutter/material.dart';
 
 import '../../../model/device_slot_audio.dart';
@@ -7,12 +7,13 @@ import '../../theme.dart';
 import 'device_menu.dart';
 import 'device_style.dart';
 import 'feel.dart';
+import 'field_guide.dart';
 import 'preset_browser.dart';
 import 'presets.dart';
 
 /// A device's header: [leading] (the FX chain's drag handle, the editor's back or close), power, the name in
 /// [color] (tap: [onTitle]) over [subtitle], the preset bar (‹ name › ★), A/B, the auto gain ear (when the engine
-/// has it) and ⋯, then the host's [actions]. Below [wideAt] dp the preset bar, A/B and the ear go on a second line.
+/// has it), "?" (the field guide) and ⋯, then the host's [actions]. Below [wideAt] dp the preset bar, A/B and the ear go on a second line.
 class DeviceHeader extends StatelessWidget {
   const DeviceHeader({super.key, required this.target, required this.color, this.style, this.leading,
     this.actions = const [], this.onTitle, this.titleKey, this.powerKey, this.presetKey, this.subtitle,
@@ -63,16 +64,19 @@ class DeviceHeader extends StatelessWidget {
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Column(
             mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Flexible(child: Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
+              Flexible(flex: 4, child: Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: nameSize, fontWeight: FontWeight.w800, color: color,
                   shadows: [Shadow(color: color.withValues(alpha: 0.45), blurRadius: 8)]))),
-              if (t.info?.isAutoStacc ?? false) ...[const SizedBox(width: 6), const AutoStaccBadge(small: true)],
+              // The badge shrinks rather than overflow a narrow header.
+              if (t.info?.isAutoStacc ?? false) ...[const SizedBox(width: 6),
+                const Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: AutoStaccBadge(small: true)))],
             ]),
             if (subtitle != null) Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Neon.dim)),
           ])),
         )),
         if (wide) ...[presets, ...tools],
+        DeviceGuideButton(target: t, color: color),
         DeviceMoreButton(target: t, color: color),
         ...actions,
       ]));
@@ -253,7 +257,7 @@ class DeviceMoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(width: 36, height: 36, child: Builder(builder: (context) => IconButton(
     key: const ValueKey('device-more'),
-    tooltip: 'More: copy, paste, randomize, history, reset',
+    tooltip: 'More: copy, paste, happy accident, randomize, history, reset',
     padding: EdgeInsets.zero,
     iconSize: 20,
     color: Neon.dim,

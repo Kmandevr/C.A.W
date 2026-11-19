@@ -14,7 +14,9 @@ import 'live_midi.dart';
 import 'midi_clips.dart';
 import 'modulation.dart';
 import 'mixer_fx.dart';
+import 'chain_templates.dart';
 import 'cpp_component.dart';
+import 'device_names.dart';
 import 'freeze.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
@@ -25,9 +27,11 @@ import 'user_presets.dart';
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
 bool isBuiltinComponent(String id) => id.startsWith('org.caw.');
 
-/// A readable name for a built-in before its descriptor arrives: `org.caw.delay.pingpong` → "Delay pingpong".
+/// A readable name for a built-in before its descriptor arrives: its [DeviceNames] title ("Talon · Compressor"), else
+/// one made from its id (`org.caw.test.osc` → "Test osc").
 String builtinComponentName(String id) {
   if (!isBuiltinComponent(id)) return id;
+  if (DeviceNames.of(id) case final n?) return n.title;
   final text = id.substring('org.caw.'.length).split('.').join(' ');
   return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
 }
@@ -304,6 +308,10 @@ extension ArrangeFx on AppState {
   /// and a pattern becomes a clip at [atStep] (snapped). True when something changed.
   bool dropAsset(LayerDoc layer, AssetDrag asset, {int? atStep}) {
     // The master's chain holds C++ effects only (the engine's `master_components`).
+    if (asset.kind == AssetKind.chainTemplate) {
+      final t = ChainTemplates.byId(asset.id);
+      return t != null && (isMasterLayer(layer) || !layer.isFolder || layer.busEnabled) && applyChainTemplate(layer, t);
+    }
     if (isMasterLayer(layer)) {
       return asset.kind == AssetKind.nativeEffect && !isInstrumentAsset(asset) && addNativeEffect(layer, asset.id) != null;
     }
@@ -330,6 +338,8 @@ extension ArrangeFx on AppState {
         return p != null && applyTrackPreset(layer, p);
       case AssetKind.audioFile:
         return dropAudio(layer, asset.id, atStep: atStep);
+      case AssetKind.chainTemplate:
+        return false;  // handled above
     }
   }
 

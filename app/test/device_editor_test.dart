@@ -122,7 +122,7 @@ void main() {
     wtest('the FX stack opens the instrument\'s editor full screen on a phone; close returns', (tester) async {
       await openSynth(tester);
       expect(find.byKey(const ValueKey('device-editor')), findsOneWidget);
-      expect(find.text('Flagship'), findsWidgets);
+      expect(find.text('Raven · Wavetable synth'), findsWidgets);
       expect(find.byKey(const ValueKey('flagship-synth')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('device-close')));
       await tester.pumpAndSettle();

@@ -281,8 +281,8 @@ void main() {
       expect(req['instrument'], {'id': flagship.id});
       expect(req['notes'], [36, 48, 60, 72, 84]);
       expect(req['velocities'], [64, 127]);
-      expect(req['output_dir'], '${root.path}${Platform.pathSeparator}Flagship');
-      expect(req['name'], 'Flagship');
+      expect(req['output_dir'], '${root.path}${Platform.pathSeparator}Raven');
+      expect(req['name'], 'Raven');
       expect(req['loop'], {'enabled': true, 'min_seconds': 0.05, 'max_seconds': 0.5});
       expect(req['sfz'], isTrue);
       expect(req['max_files'], 10);
@@ -314,16 +314,16 @@ void main() {
             return true;
           })));
       await render(tester);
-      final dir = Directory('${root.path}/Flagship')..createSync();
+      final dir = Directory('${root.path}/Raven')..createSync();
       await tester.runAsync(() async {
         for (final n in ['C2', 'C3']) {
-          File('${dir.path}/Flagship_${n}_100.wav').writeAsBytesSync(List.filled(64, 1));
+          File('${dir.path}/Raven_${n}_100.wav').writeAsBytesSync(List.filled(64, 1));
         }
-        File('${dir.path}/Flagship.sfz').writeAsStringSync('<region> sample=Flagship_C2_100.wav');
-        File('${dir.path}/Flagship.json').writeAsStringSync('{"files": []}');
-        File('${dir.path}/Flagship_C4_100.wav.part').writeAsBytesSync([0]); // a half-written file stays out
-        fake.run!.done.complete({'ok': true, 'error': '', 'warnings': <String>[], 'sfz': ['Flagship.sfz'],
-          'files': [for (final n in ['C2', 'C3']) {'file': 'Flagship_${n}_100.wav', 'seconds': 1.0, 'loop': null}]});
+        File('${dir.path}/Raven.sfz').writeAsStringSync('<region> sample=Raven_C2_100.wav');
+        File('${dir.path}/Raven.json').writeAsStringSync('{"files": []}');
+        File('${dir.path}/Raven_C4_100.wav.part').writeAsBytesSync([0]); // a half-written file stays out
+        fake.run!.done.complete({'ok': true, 'error': '', 'warnings': <String>[], 'sfz': ['Raven.sfz'],
+          'files': [for (final n in ['C2', 'C3']) {'file': 'Raven_${n}_100.wav', 'seconds': 1.0, 'loop': null}]});
       });
       for (var i = 0; i < 100 && find.byKey(const ValueKey('pack-result')).evaluate().isEmpty; i++) {
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
@@ -338,10 +338,10 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 50));
       });
       await tester.pump();
-      expect(saved.keys.single, 'Flagship.zip');
-      expect(saved.values.single, ['Flagship/Flagship.json', 'Flagship/Flagship.sfz', 'Flagship/Flagship_C2_100.wav',
-        'Flagship/Flagship_C3_100.wav']);
-      expect(find.text('Saved Flagship.zip (4 files).'), findsOneWidget);
+      expect(saved.keys.single, 'Raven.zip');
+      expect(saved.values.single, ['Raven/Raven.json', 'Raven/Raven.sfz', 'Raven/Raven_C2_100.wav',
+        'Raven/Raven_C3_100.wav']);
+      expect(find.text('Saved Raven.zip (4 files).'), findsOneWidget);
     });
 
     testWidgets('a project instrument that is not built says so', (tester) async {

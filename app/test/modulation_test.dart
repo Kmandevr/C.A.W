@@ -90,9 +90,9 @@ void main() {
     s.project = _project();
     final bass = s.project.layers[1];
     final m = s.addModulator(ModulatorKinds.lfo, layerId: 'bass')!;
-    expect(m.name, 'LFO');
+    expect(m.name, 'Orbit');
     expect(m.inputId, 'bass');
-    expect(s.addModulator(ModulatorKinds.lfo, layerId: 'bass')!.name, 'LFO 2');
+    expect(s.addModulator(ModulatorKinds.lfo, layerId: 'bass')!.name, 'Orbit 2');
     final link = s.toggleModLink(ModSourceRef(m.id, 0), const ModTarget.component('bass', 1, 'cutoff'))!;
     expect(link.bipolar, isTrue);  // an LFO swings both ways
     expect(s.project.linksTo(const ModTarget.component('bass', 1, 'cutoff')).single.id, link.id);

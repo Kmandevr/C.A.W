@@ -136,6 +136,7 @@ enum AssetKind {
   devicePreset, // a user device preset (a component with its values), by preset id
   trackPreset,  // a user track preset (an instrument and effects), by preset id
   audioFile,    // an audio file: a project asset by its id, or a WAV in app storage by its absolute path
+  chainTemplate, // a bundled chain template (several effects at once), by ChainTemplate id
 }
 
 @immutable

@@ -156,7 +156,7 @@ bool _put(BuildContext context, UserPresetStore store, UserPreset p, {String? ve
 /// "DEVICE 1", "DEVICE 2"...
 String defaultPresetName(DeviceTarget t) =>
     DevicePresets.currentUser(t)?.name ??
-    t.state.userPresets.freeName(t.label, UserPresetKind.device, componentId: t.componentId);
+    t.state.userPresets.freeName(t.shortLabel, UserPresetKind.device, componentId: t.componentId);
 
 /// "Save preset…": asks for a name and tag, asks before replacing one of that name, saves the device's values and
 /// state, and makes it the current preset. Returns the saved preset.
