@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "reference_cost.h"
 #include "builtin_components.h"
 #include "caw/instrument.hpp"
 #include "fx_merged.h"
@@ -16,7 +17,6 @@
 #include "builtin_fx_voice.h"
 
 using namespace caw;
-using Clock = std::chrono::steady_clock;
 using Values = std::vector<std::pair<std::string, double>>;
 
 namespace {
@@ -57,12 +57,13 @@ double cost(ModuleProcessor& p, const Values& values, double seconds) {
     for (uint32_t k = 0; k < d.portCount; ++k) keyed = keyed || (d.ports[k].input && d.ports[k].id == "sidechain");
     Transport tr;
     tr.playing = true;
-    double best = 1e30;
-    for (int run = 0; run < 3; ++run) {
+    bench::RelativeCost rel;  // against the reference, interleaved (reference_cost.h)
+    for (int run = 0; run < bench::kRuns; ++run) {
         p.reset();
         const int blocks = static_cast<int>(seconds * kRate / kBlock);
-        const auto t0 = Clock::now();
+        rel.begin();
         for (int b = 0; b < blocks; ++b) {
+            rel.tick(b);
             const int at = (b * static_cast<int>(kBlock)) % (frames - static_cast<int>(kBlock));
             const float* in[2] = {inL.data() + at, inR.data() + at};
             const float* key[2] = {keyL.data() + at, keyR.data() + at};
@@ -95,9 +96,9 @@ double cost(ModuleProcessor& p, const Values& values, double seconds) {
             float sink[128];
             p.readDisplay(sink, 128);
         }
-        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+        rel.end();
     }
-    return best;
+    return rel.us();
 }
 
 struct Case {

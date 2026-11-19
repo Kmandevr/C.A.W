@@ -8,13 +8,13 @@
 #include <utility>
 #include <vector>
 
+#include "reference_cost.h"
 #include "builtin_components.h"
 #include "fx_clean.h"
 #include "fx_merged.h"
 #include "module_registry.h"
 
 using namespace caw;
-using Clock = std::chrono::steady_clock;
 using Values = std::vector<std::pair<std::string, double>>;
 
 namespace {
@@ -53,12 +53,13 @@ double cost(ModuleProcessor& p, const Values& values, double seconds) {
     }
     Transport tr;
     tr.playing = true;
-    double best = 1e30;
-    for (int run = 0; run < 3; ++run) {
+    bench::RelativeCost rel;  // against the reference, interleaved (reference_cost.h)
+    for (int run = 0; run < bench::kRuns; ++run) {
         p.reset();
         const int blocks = static_cast<int>(seconds * kRate / kBlock);
-        const auto t0 = Clock::now();
+        rel.begin();
         for (int b = 0; b < blocks; ++b) {
+            rel.tick(b);
             const int at = (b * static_cast<int>(kBlock)) % (frames - static_cast<int>(kBlock));
             const float* in[2] = {inL.data() + at, inR.data() + at};
             float* out[2] = {outL.data(), outR.data()};
@@ -74,9 +75,9 @@ double cost(ModuleProcessor& p, const Values& values, double seconds) {
             float sink[128];
             p.readDisplay(sink, 128);
         }
-        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+        rel.end();
     }
-    return best;
+    return rel.us();
 }
 
 struct Case {
