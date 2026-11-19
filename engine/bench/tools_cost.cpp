@@ -207,6 +207,13 @@ int toolsCost(double seconds) {
         {"MIDI: scale (snap, transpose)", "org.caw.midi.scale", {{"transpose", 2}}, 2000},
         {"MIDI: note echo (16 repeats)", "org.caw.midi.echo", {{"repeats", 16}, {"decay", 0.95}}, 2000},
         {"MIDI: humanize", "org.caw.midi.humanize", {{"timing", 30}}, 2000},
+        {"Meters: Analyzer (on screen)", "org.caw.meters", {{"variant", 0}}, 2000},
+        {"Meters: Tuner (on screen)", "org.caw.meters", {{"variant", 1}}, 2000},
+        {"Meters: Loudness", "org.caw.meters", {{"variant", 2}}, 8000},
+        {"Lo-fi: Age 1 (every section)", "org.caw.lofi", {{"age", 1.0}, {"band", 2}, {"wobble", 0.5}}, 8000},
+        {"Lo-fi: cassette band and hiss", "org.caw.lofi", {{"band", 3}, {"hiss", 0.5}}, 8000},
+        {"Phase align: manual 3.3 ms", "org.caw.phasealign", {{"delay", 3.3}}, 2000},
+        {"Phase align: Auto, learning", "org.caw.phasealign", {{"mode", 1}, {"window", 10}}, 8000},
     };
     int over = 0;
     std::printf("1.1.0 tools (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");

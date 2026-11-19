@@ -697,7 +697,7 @@ const ModuleDescriptor& humanDescriptor() {
 
 class Humanize final : public MidiEffect {
 public:
-    Humanize() noexcept : MidiEffect(humanDescriptor(), 1024) {}
+    Humanize() noexcept : MidiEffect(humanDescriptor(), 512) {}
 
 protected:
     struct Rec {
