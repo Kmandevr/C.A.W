@@ -1,5 +1,6 @@
 // The built-in effects suite (#173): kernels, each effect's response, stability, block sizes, sleep, display, reference renders.
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -229,6 +230,12 @@ TEST(fast_log_pair_gives_fast_log_s_bits_lane_by_lane) {
         differ += lane(fastLogNormalPair(pairOf(x, x)), 0) != lib::fastLog(x);
     CHECK(tried > 2000);
     CHECK_EQ(differ, 0u);
+    // And both are the plain operations in their order whatever the flags and the platform: fastLog's bits over
+    // 1e-300 .. 1e300 hash to what a strict build (no contraction, no reassociation) gives on x86-64 and on Arm64
+    // (before fastLogSeries pinned them, the engine's -ffp-contract=fast fused them on Arm64: 47a7f7fe49833d96).
+    uint64_t h = 1469598103934665603ull;  // FNV-1a over each result's bits
+    for (double x = 1e-300; x < 1e300; x *= 1.0137) h = (h ^ std::bit_cast<uint64_t>(lib::fastLog(x))) * 1099511628211ull;
+    CHECK_EQ(h, 0x37a69ee6c1dca50cull);
 }
 
 TEST(a_parametric_band_has_its_type_s_response_measured_and_computed) {
