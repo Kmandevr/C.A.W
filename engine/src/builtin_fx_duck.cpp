@@ -282,12 +282,14 @@ ModuleProcessor* makeDuckAs(const ModuleDescriptor& variant) noexcept {
 std::span<const BuiltinPreset> delayModePresets();   // builtin_fx_delay_modes.cpp
 std::span<const BuiltinPreset> reverbModePresets();  // builtin_fx_reverb_modes.cpp
 std::span<const BuiltinPreset> driveModePresets();   // builtin_fx_drive_modes.cpp
+std::span<const BuiltinPreset> bitwisePresets();     // builtin_fx_bits_bitwise.cpp
 
 std::span<const BuiltinPreset> newVariantPresets(std::string_view id) {
     if (id == "org.caw.compressor") return duckPresets();
     if (id == "org.caw.delay") return delayModePresets();
     if (id == "org.caw.reverb") return reverbModePresets();
     if (id == "org.caw.drive") return driveModePresets();
+    if (id == "org.caw.bits") return bitwisePresets();
     return {};
 }
 

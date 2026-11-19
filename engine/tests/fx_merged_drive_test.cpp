@@ -189,7 +189,7 @@ TEST(merged_drive_and_bits_list_their_variants_with_the_old_parameters_and_a_str
     CHECK(drive && bits);
     if (!drive || !bits) return;
     CHECK_EQ(drive->variants.size(), 7u);  // the old four, then 1.1.0's Amp, Pedal and Bands (fx_drive_modes_test.cpp)
-    CHECK_EQ(bits->variants.size(), 1u);
+    CHECK_EQ(bits->variants.size(), 2u);  // Crush, then 1.1.0's Bitwise (fx_bits_bitwise_test.cpp)
     CHECK(drive->name == "Drive" && bits->name == "Bit distortion");
     CHECK(drive->variants[0].name == "Distortion" && drive->variants[1].name == "Saturate" &&
           drive->variants[2].name == "Clip" && drive->variants[3].name == "Phase" && bits->variants[0].name == "Crush");

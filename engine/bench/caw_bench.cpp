@@ -240,7 +240,7 @@ void effectsCost(double seconds) {
 // heavy 24000 µs per second of audio here.
 bool modesCostOver(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
-    constexpr double kMedium = 8000;  // light 2000 and heavy 24000 when a mode of that class comes
+    constexpr double kLight = 2000, kMedium = 8000;  // heavy 24000 when a mode of that class comes
     struct Case {
         const char* name;
         const char* id;
@@ -265,6 +265,8 @@ bool modesCostOver(double seconds) {
         {"Drive: Bands (default: 3 bands)", "org.caw.drive", {{"variant", 6}}, kMedium},
         {"Drive: Bands, 4 bands", "org.caw.drive", {{"variant", 6}, {"bands", 3}}, kMedium},
         {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
+        {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
+        {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
         // modes-bench end
     };
     std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");

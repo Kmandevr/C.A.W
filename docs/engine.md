@@ -315,7 +315,7 @@ The native hardware probe is a one-time, non-real-time snapshot. It uses active/
 
 ### Merged devices (FX consolidation)
 
-Owner, 2026-11-17 (the merge table is in the private plans): "one really good device instead of five okay ones", for 1.0.8. Built 2026-11-18: the framework and every family's merges below, each variant the old class unchanged, so a migrated project renders the same bits; then (part F) the old ids retired. New DSP comes as further variants appended so saved indices never move: the first is the Compressor's Duck (variant 4, built 2026-11-19, [below](#the-compressors-duck-variant)), then 1.1.0's [new modes](#new-modes-110) of the Delay, Reverb and Drive (built 2026-11-19); the expander, upward compression, dynamic EQ, M/S, auto-filter, envelope wah and the other 1.1.0 modes come after.
+Owner, 2026-11-17 (the merge table is in the private plans): "one really good device instead of five okay ones", for 1.0.8. Built 2026-11-18: the framework and every family's merges below, each variant the old class unchanged, so a migrated project renders the same bits; then (part F) the old ids retired. New DSP comes as further variants appended so saved indices never move: the first is the Compressor's Duck (variant 4, built 2026-11-19, [below](#the-compressors-duck-variant)), then 1.1.0's [new modes](#new-modes-110) of the Delay, Reverb, Drive and Bit distortion (built 2026-11-19); the expander, upward compression, dynamic EQ, M/S, auto-filter, envelope wah and the other 1.1.0 modes come after.
 
 | Device (id) | Variants (old id) | Optional ports |
 |---|---|---|
@@ -323,7 +323,7 @@ Owner, 2026-11-17 (the merge table is in the private plans): "one really good de
 | Limiter (`org.caw.limiter`, reused) | Limiter | none |
 | Transient (`org.caw.transient`, reused) | Transient | `transient`, `sustain` (the output split by its onset follower; they sum to it) |
 | Drive (`org.caw.drive`) | Distortion (`distortion`), Saturate (`saturator`, its own `mode` kept), Clip (`clipper`), Phase (`phasedist`), Amp, Pedal, Bands (1.1.0, new DSP, [below](#new-modes-110)) | none |
-| Bit distortion (`org.caw.bits`) | Crush (`bitcrush`) | none |
+| Bit distortion (`org.caw.bits`) | Crush (`bitcrush`), Bitwise (1.1.0, new DSP, [below](#new-modes-110)) | none |
 | EQ (`org.caw.eq`, reused) | Bands, Graphic (`geq`), DJ (`eq.dj`), Tilt (`tilt`) | none |
 | Filter (`org.caw.filter`, reused) | Multimode, Ladder (`ladder`), Nonlinear (`nlfilter`) | none (the old classes compute only the response they play) |
 | Utility/Stereo (`org.caw.utility`, reused) | Utility, Width (`stereo.width`), Balance (`stereo.balance`), Imager (`imager`), Haas (`haas`), Mixer (`channelmixer`) | `mid`, `side` on Utility (they sum to it) |
@@ -379,6 +379,7 @@ New DSP appended to merged devices (the sound plan's "New modes in existing effe
 | Drive: Amp (Crunch, 1x; High gain, Auto 2x) | 2790–3390 (6750–7480) | none (filters only) | 8000 (medium) |
 | Drive: Pedal (Overdrive, 1x; Fuzz, Auto 2x) | 1790–1830 (4560–4850) | none | 8000 (medium) |
 | Drive: Bands (1 band; 3; 4) | 1680–1780 (3340–3880; 4650–4690) | none | 8000 (medium) |
+| Bit distortion: Bitwise (default; shift, XOR, AND) | 1100 (1120) | none | 2000 (light) |
 | (for scale) Reverb: Hall, Shimmer | 6860–7060, 13980–14460 | | none (old) |
 
 RAM is the buffers each instance allocates at 48 kHz, power-of-two lines rounded up (twice as much at 96 kHz).
@@ -402,6 +403,8 @@ RAM is the buffers each instance allocates at 48 kHz, power-of-two lines rounded
 - **Pedal** (variant 5): `type` (Overdrive, Distortion, Fuzz), `drive` (0.5), `tone` (0..1: a low-pass 600 Hz..11 kHz), `level` −24..12 dB, `mix`, `oversample`. Overdrive: a 720 Hz high-passed drive (0..40 dB) soft-clipped (x / (1 + |x|)) over half the clean signal (a mid hump); Distortion: 80 Hz up, +10..56 dB into a hard knee held at ±1; Fuzz: +12..48 dB into a biased, asymmetric clip that closes at low levels (a fuzz's gating). Display (7): 0 input peak, 1 output peak, 2 type, 3 drive, 4 gain dB, 5 tone Hz, 6 oversampling factor.
 - **Bands** (variant 6): `bands` (1–4; 3), `x1`, `x2`, `x3` (120, 1000, 5000 Hz; each held a third of an octave above the last), per band `bN_type` (Clean, Soft, Hard, Tube, Fuzz, Fold), `bN_drive` (0..36 dB, half of it taken back off), `bN_tone` (−1..1, a tilt about the band's geometric centre), `bN_mix`, `bN_solo`, `bN_mute`; `output`, `mix`. Linkwitz-Riley 24 dB/octave splits (one state-variable stage gives a crossover's low and high, each through a second), every band below a crossover through that crossover's own 2nd-order Butterworth all-pass, so the bands sum to an all-pass: flat within 0.1 dB with every band Clean. Only the crossovers in use run; a muted (or un-soloed) band's shaper is skipped; each band's shaper is picked once per run. Display (26): 0 input peak, 1 output peak, 2 bands, 3–5 crossovers Hz, then per band from 6 (5 floats): in peak dB, out peak dB, type, drive, active (1, or 0 when muted, un-soloed or unused).
 - **Tests** (`fx_drive_modes_test.cpp`): appended after Phase; harmonics rising from Clean to High gain; bass and treble moving their own ends; Distortion harder than Overdrive, Fuzz's even harmonics, Overdrive at drive 0 nearly clean; the aliasing above, 2x cutting it by 15 dB or more where Auto picks it and under −40 dB at 1x where it doesn't, and the display's factor; Bands flat at 1–4 bands, solo and mute, a driven band distorting only its range; the same bits at blocks of 1, 37, 64 and 512; bad input; 8 presets each; the display; four reference renders (`references/fx_drive_modes.cawref`, stable).
+
+**Bit distortion: Bitwise** (`engine/src/builtin_fx_bits_bitwise.cpp`, variant 1 of `org.caw.bits`; light; latency 0, no tail): `bits` 2..16 (12), `shift` −8..8 (0), `xor` and `and` (16-bit masks 0..65535; 0 and 65535), `output`, `mix`; the four whole-number knobs jump (no smoothing). Each sample, held to ±1, is rounded to a signed word of `bits` bits, shifted (left: louder, wrapping round past full scale; right: coarser steps), wrapped back to its bits, XORed and ANDed with the masks' top `bits` bits (so a mask means the same at every word size) and read back; a word that rounds to 0 stays 0, so silence stays silence (a XOR mask would otherwise make it a constant) and it sleeps. Integer arithmetic throughout: the same on every platform. Display (38): 0 input peak, 1 output peak, 2 bits, 3 shift, 4 XOR mask, 5 AND mask, 6–21 how often each of the left side's 16 lanes (as a 16-bit word, lane 0 the least significant) flipped since the last publish (0..1 a frame: the lanes "drawn flipping"), 22–37 the latest word's bits. Tests (`fx_bits_bitwise_test.cpp`): every frame bit-exact against the arithmetic written out independently at seven settings, the defaults a plain 12-bit quantiser, the lanes (a 4-bit word moves only the top 4), block sizes, bad input, 9 presets, a reference render (`references/fx_bits_bitwise.cawref`).
 
 ### Per-slot auto gain and output meters (API 39)
 
@@ -467,6 +470,7 @@ What each built-in publishes through `caw_engine_component_display`, float by fl
 | `org.caw.delay` (Tape, Reverse, Multi-tap) | 13, 8, 25 | see [new modes](#new-modes-110) |
 | `org.caw.reverb` (Room, Plate, Spring, Gated, Reverse) | 15, 8, 7, 8, 30 | see [new modes](#new-modes-110) |
 | `org.caw.drive` (Amp, Pedal, Bands) | 11, 7, 26 | see [new modes](#new-modes-110) |
+| `org.caw.bits` (Bitwise) | 38 | see [new modes](#new-modes-110) |
 | `org.caw.delay.pro` | 9 | 0 input peak, 1 wet peak, 2 output peak, 3 left time s, 4 right time s (gliding), 5 feedback, 6 most ducking dB, 7 freeze, 8 mode |
 | `org.caw.saturator` | 73 | 0 input peak, 1 output peak, 2 mode, 3 drive dB, 4 bias, 5 tone, 6 auto gain dB, 7 curve points (65); 8–72 the transfer curve: the output for inputs −1..1 in 65 even steps, before tone, output and mix (0 when nobody watched) |
 | `org.caw.gate` | 8 | 0 input peak, 1 output peak, 2 reduction now, 3 most reduction, 4 detector level dB, 5 threshold, 6 open (reduction under 1 dB), 7 sidechain (0: internal) |

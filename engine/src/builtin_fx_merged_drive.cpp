@@ -30,6 +30,8 @@ const ModuleDescriptor& bandsDriveDescriptor(std::span<const std::string_view> l
 ModuleProcessor* makeAmpDriveAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makePedalDriveAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeBandsDriveAs(const ModuleDescriptor& variant) noexcept;
+const ModuleDescriptor& bitwiseDescriptor(std::span<const std::string_view> labels, uint32_t index);  // builtin_fx_bits_bitwise.cpp
+ModuleProcessor* makeBitwiseAs(const ModuleDescriptor& variant) noexcept;
 
 namespace {
 
@@ -39,7 +41,7 @@ constexpr std::string_view kDriveVariants[] = {"Distortion", "Saturate", "Clip",
 
 constexpr std::string_view kBitsId = "org.caw.bits";
 constexpr std::string_view kBitsName = "Bit distortion";
-constexpr std::string_view kBitsVariants[] = {"Crush"};
+constexpr std::string_view kBitsVariants[] = {"Crush", "Bitwise"};
 
 // Each variant is the old class unchanged under its own descriptor: the old parameters (so its indices hold), its
 // own latency (Phase: its delay line's centre, 48 frames; the others none: the IIR oversamplers add none) and tail,
@@ -75,6 +77,8 @@ const ModuleDescriptor& bandsVariant() { return bandsDriveDescriptor(kDriveVaria
 ModuleProcessor* makeAmp() noexcept { return makeAmpDriveAs(ampVariant()); }
 ModuleProcessor* makePedal() noexcept { return makePedalDriveAs(pedalVariant()); }
 ModuleProcessor* makeBands() noexcept { return makeBandsDriveAs(bandsVariant()); }
+const ModuleDescriptor& bitwiseVariant() { return bitwiseDescriptor(kBitsVariants, 1); }
+ModuleProcessor* makeBitwise() noexcept { return makeBitwiseAs(bitwiseVariant()); }
 
 const Variant kDrive[] = {{kDriveVariants[0], &distortionVariant, &makeDistortion},
                           {kDriveVariants[1], &saturateVariant, &makeSaturate},
@@ -83,7 +87,7 @@ const Variant kDrive[] = {{kDriveVariants[0], &distortionVariant, &makeDistortio
                           {kDriveVariants[4], &ampVariant, &makeAmp},
                           {kDriveVariants[5], &pedalVariant, &makePedal},
                           {kDriveVariants[6], &bandsVariant, &makeBands}};
-const Variant kBits[] = {{kBitsVariants[0], &crushVariant, &makeCrush}};
+const Variant kBits[] = {{kBitsVariants[0], &crushVariant, &makeCrush}, {kBitsVariants[1], &bitwiseVariant, &makeBitwise}};
 
 const MergedDevice kDevices[] = {{kDriveId, kDriveName, kDrive}, {kBitsId, kBitsName, kBits}};
 
