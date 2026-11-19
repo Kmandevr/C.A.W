@@ -35,6 +35,7 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.reverb', 4, {}, 'reverb_spring'),
   ('org.caw.reverb', 5, {}, 'reverb_gated'),
   ('org.caw.reverb', 6, {}, 'reverb_reverse'),
+  ('org.caw.convolver', 1, {}, 'convolver_cab'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
@@ -65,6 +66,11 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
       }
     case 'org.caw.reverb.gated':
       raw[3] = hit > 0.3 ? 1 : hit * 3;
+    case 'org.caw.convolver.cab':
+      raw.setAll(2, [2, 0.3, 0.2, 128, 2.7, 64]);
+      for (var k = 0; k < 64; k++) {
+        raw[8 + k] = math.exp(-k / 9) * math.cos(k * 1.3);
+      }
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -265,6 +271,18 @@ void main() {
       expect(t.value(y), greaterThan(y0), reason: 'variant $v: $y');
       await close(tester);
     }
+  });
+
+  testWidgets('Cab: a cabinet card picks it, the mic drags position and distance', (tester) async {
+    final (_, t) = await open(tester, 'org.caw.convolver', 1);
+    await tester.tap(find.byKey(const ValueKey('mode-cab-5')));
+    await tester.pumpAndSettle();
+    expect(t.value('cab'), 5);
+    final p = t.value('position'), d = t.value('distance');
+    await drag(tester, const ValueKey('cab-hero'), const Offset(40, -40));
+    expect(t.value('position'), greaterThan(p));
+    expect(t.value('distance'), greaterThan(d));
+    await close(tester);
   });
 
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {

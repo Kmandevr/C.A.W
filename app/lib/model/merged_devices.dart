@@ -123,7 +123,7 @@ class MergedDevices {
     'org.caw.eq.linear',
     'org.caw.eq.match', 'org.caw.filter.wah', 
     
-    'org.caw.convolver.cab',
+    
   };
 
   /// The page id of the Ducker's Duck variant (org.caw.duck 0; 1.0.8-1.0.9 the Compressor's variant 4), which no
