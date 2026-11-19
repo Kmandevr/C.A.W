@@ -14,7 +14,9 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **1.1.0 parts, backed up as `caw-1.1.0-*` branches:** dsp-drive, dsp-tools, dsp-dynsplit and dsp-plume. They are being combined in worktree `caw-110` (branch caw-1.1.0), with the MIDI API renumbered to 41. Follow-ups: back up a project before its first conversion, Pedal gate's pre-FX key, an armed signal for effects, and the owner's look for the Talon/Hatch/Duck pages.
+- **1.1.0 integrated on the session branch** (a3a3bc7: Delay, Reverb, Drive, Bits, Cab, MIDI effects at API 41, Meters, Lo-fi, Phase align, the Talon/Hatch/Duck split, Plume, Wah). ctest 13/13, app suite 2580.
+- **Running from a3a3bc7** (push them to `caw-backup-*` at check-ins): dsp-voice (Glint, Soar's Harmonizer and Octaver, Mimic), dsp-clean (Preen, Hush), ui-modes (pages for the new modes, by the approved device UI plan).
+- **Follow-ups:** back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
 
 ## Rules for continuing
 - **No lost work:** push after every commit. Agents can't push (their permissions refuse it), so the main session pushes their branches to `caw-backup-*` at each check-in and merge.
