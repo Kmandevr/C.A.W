@@ -94,8 +94,6 @@ struct Engine::Slot {
     ComponentChain* inserts = nullptr;  // native stereo effects after the instrument, before volume and pan
     DelayLine* delay = nullptr;         // latency compensation, after volume and pan
     SendTable* sends = nullptr;         // where the slot's sends and keys go (owned; replaced by SetSends)
-    double routeGain[kMaxRoutes] = {};  // audio thread: each route's gain at the end of the last block
-    bool routeOk[kMaxRoutes] = {};      // updateRouting: the route's destination runs after this slot this chunk
     bool routesStale = false;           // stopped or silent: the routes' delays hold old audio; clear them
     // A bus's input from sends this chunk, summed from its sources' route outputs when it runs (pullRoutes).
     float recvL[kBlock] = {}, recvR[kBlock] = {};
@@ -252,6 +250,8 @@ struct Engine::SendTable {
         // tap at 0 and fades back in, so it never jumps.
         bool pre = false, mute = false, tapPre = false;
         DelayLine* delay = nullptr;  // owned; null: none
+        double gain = 0;   // audio thread: its gain at the end of the last block (a route that stays keeps it)
+        bool ok = false;   // updateRouting: its destination runs after this slot this chunk
         // Audio thread (speed phase 5a): the source writes the route's signal here, and its destination sums its
         // routes from their sources' tables in a fixed order when it runs (pullRoutes). `chunk`: the chunk it
         // reached its destination in (the destination then takes it: a bus marks its input received, a key its
@@ -264,20 +264,20 @@ struct Engine::SendTable {
         bool feedback = false;
         FeedbackRing* ring = nullptr;  // owned; feedback only
     };
-    Route routes[kMaxRoutes];
+    std::unique_ptr<Route[]> routes;  // count, sized from the layer's routes on the control thread
     int count = 0;
     bool keys = false;  // some route keys a component: the slot runs even while muted or soloed out
     // Audio thread: the note-ons the slot played in the chunk its routes last ran (keyNotes), which its key routes'
     // destinations take into their keys.
     Event keyEvents[ComponentChain::kMaxKeyEvents] = {};
     uint32_t keyEventCount = 0;
-    SendTable() = default;
+    explicit SendTable(int n) : routes(new Route[static_cast<size_t>(n)]), count(n) {}
     SendTable(const SendTable&) = delete;
     SendTable& operator=(const SendTable&) = delete;
     ~SendTable() {
-        for (Route& r : routes) {
-            delete r.delay;
-            delete r.ring;
+        for (int k = 0; k < count; ++k) {
+            delete routes[k].delay;
+            delete routes[k].ring;
         }
     }
 };
@@ -541,6 +541,7 @@ struct Engine::MixGraph {
     // The layout depends on the slot count (layer capacity + the audition), fixed at construction.
     const int slots;   // slot count
     const int master;  // the master in slot-level routing scratch (== slots)
+    const int routesPerSlot;  // the most routes one slot's table holds (kDefaultRoutes, or what a project needs)
     uint32_t trackNode(int slot) const noexcept { return static_cast<uint32_t>(slot); }
     uint32_t busNode(int slot) const noexcept { return static_cast<uint32_t>(slots + slot); }
     uint32_t masterNode() const noexcept { return static_cast<uint32_t>(2 * slots); }
@@ -579,7 +580,7 @@ struct Engine::MixGraph {
         const SendTable* table = nullptr;  // the source's routes (alive until the graph has run: flushRetires)
         int k = 0;                         // the route's index there
     };
-    int maxRoutes() const noexcept { return slots * kMaxRoutes; }
+    int maxRoutes() const noexcept { return slots * routesPerSlot; }
     std::vector<int> inFirst, inCount;     // [slots] each: where d's routes start in inRoutes, and how many
     std::vector<InRoute> inRoutes;         // [maxRoutes()]
     // updateRouting builds the next tables here and swaps them in only once the executor accepts the routing they
@@ -589,8 +590,9 @@ struct Engine::MixGraph {
     std::vector<GraphDependency> dependencies;  // [maxRoutes()]
 
     // capacity: layer slots; the graph also routes the audition slot after them.
-    MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget)
-        : slots(capacity + 1), master(capacity + 1),
+    MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget,
+             int routes = kDefaultRoutes)
+        : slots(capacity + 1), master(capacity + 1), routesPerSlot(std::max(routes, static_cast<int>(kDefaultRoutes))),
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
           pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
@@ -1070,9 +1072,11 @@ int Engine::freeSlot() {
 // Control thread, under ctl_: a table of `capacity` layer slots that keeps every existing Slot
 // (layer slots at their indices, the audition moved to the new last one), a mix graph sized for
 // it; sent to the audio thread as one Grow command.
-std::string Engine::grow(int capacity) {
+std::string Engine::grow(int capacity, int routes) {
     SlotTable& old = *ctlTable_;
-    if (capacity <= old.capacity) return {};
+    capacity = std::max(capacity, old.capacity);
+    routes = std::max(routes, old.graph->routesPerSlot);
+    if (capacity == old.capacity && routes == old.graph->routesPerSlot) return {};
     if (capacity > maxLayers_)
         return "the project needs " + std::to_string(capacity) + " layer slots; this device's memory budget allows at most " +
                std::to_string(maxLayers_);
@@ -1097,7 +1101,7 @@ std::string Engine::grow(int capacity) {
             for (int i = 0; i < kScopeSize; ++i) slot.scope[i].store(0);
             t->slots[s] = &slot;
         }
-        t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_));
+        t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_, routes));
         // The budget holds the old graph and the new one at once (maxLayers() allows for that).
         const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + 2 * sizeof(int) +
                                  2 * sizeof(Retired);
@@ -1435,8 +1439,19 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             auto it = layers_.find(l.id);
             if (it == layers_.end() || it->second.slot < 0) ++needed;
         }
-        if (needed > ctlTable_->capacity) {
-            const std::string error = grow(std::min(maxLayers_, std::max(needed, 2 * ctlTable_->capacity)));
+        // Routes per slot (owner, 2026-11-19): the most any one layer feeds, its sends plus the keys it gives.
+        std::map<std::string, int> routesOf;
+        for (const LayerSpec& l : p.layers) {
+            routesOf[l.id] += static_cast<int>(l.sends.size());
+            for (const ComponentSpec& c : l.components)
+                if (c.hasKey) ++routesOf[c.key.layer];
+        }
+        int routes = 0;
+        for (const auto& [id, n] : routesOf) routes = std::max(routes, n);
+        if (needed > ctlTable_->capacity || routes > ctlTable_->graph->routesPerSlot) {
+            const int capacity =
+                needed > ctlTable_->capacity ? std::min(maxLayers_, std::max(needed, 2 * ctlTable_->capacity)) : 0;
+            const std::string error = grow(capacity, routes);
             if (!error.empty()) return "{\"ok\":false,\"error\":\"" + jsonEscape(error) + "\",\"modules\":{}}";
         }
     }
@@ -1991,9 +2006,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 warnings["project"].push_back("layer '" + l.id + "': component '" + c.id + "': its key '" + c.key.layer + "' isn't playing");
                 continue;
             }
-            if (from->second.routes.size() >= static_cast<size_t>(kMaxRoutes)) {
-                warnings["project"].push_back("layer '" + c.key.layer + "' keys more than " + std::to_string(kMaxRoutes - kMaxSends) +
-                                                " components; the rest hear no key");
+            if (from->second.routes.size() >= static_cast<size_t>(ctlTable_->graph->routesPerSlot)) {  // never: sized above
+                warnings["project"].push_back("layer '" + c.key.layer + "' keys more components than its routes hold; the rest hear no key");
                 continue;
             }
             LayerState::Route r;
@@ -2255,7 +2269,7 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
             c.type = Cmd::SetSends;
             c.slot = ls.slot;
             if (!ls.routes.empty()) {
-                c.sends = new SendTable();
+                c.sends = new SendTable(static_cast<int>(ls.routes.size()));
                 for (size_t k = 0; k < ls.routes.size(); ++k) {
                     const LayerState::Route& r = ls.routes[k];
                     SendTable::Route& t = c.sends->routes[k];
@@ -2274,7 +2288,6 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
                     }
                     c.sends->keys = c.sends->keys || (r.key >= 0 && r.dest >= 0);
                 }
-                c.sends->count = static_cast<int>(ls.routes.size());
             }
             if (send(c)) {
                 ls.routesSig = sig;
@@ -3547,8 +3560,9 @@ void Engine::applyCommands() noexcept {
                         // does) and, unless stale, its delay's recent input. A route that now goes elsewhere starts
                         // from silence: its old line holds the old destination's audio.
                         const bool stays = was && was->dest == r.dest && was->key == r.key && was->feedback == r.feedback;
-                        if (!stays) s.routeGain[k] = 0.0;
-                        if (stays && s.routeGain[k] > 0.0) r.tapPre = was->tapPre;
+                        r.gain = stays ? was->gain : 0.0;
+                        r.ok = stays && was->ok;
+                        if (stays && r.gain > 0.0) r.tapPre = was->tapPre;
                         if (r.delay && stays && !s.routesStale) r.delay->takeHistory(was->delay);
                         if (r.ring && stays && was->ring) r.ring->takeHistory(*was->ring);  // a feedback send carries on
                     }
@@ -3565,7 +3579,7 @@ void Engine::applyCommands() noexcept {
                     SendTable::Route& r = s.sends->routes[c.order];
                     r.level = c.master;
                     r.pre = c.flag;  // runRoutes moves the tap over, through silence
-                    if (s.routeGain[c.order] == 0.0) r.tapPre = r.pre;
+                    if (r.gain == 0.0) r.tapPre = r.pre;
                     r.mute = c.sendMute;
                 }
                 break;
@@ -4621,7 +4635,7 @@ void Engine::updateRouting() noexcept {
         if (!s.sends) continue;
         for (int k = 0; k < s.sends->count; ++k) {
             const int d = g.routable[i] ? routeDest(s, k) : -1;
-            s.routeOk[k] = d >= 0 && (s.sends->routes[k].feedback || g.position[i] < g.position[d]);
+            s.sends->routes[k].ok = d >= 0 && (s.sends->routes[k].feedback || g.position[i] < g.position[d]);
         }
     }
     // Each destination's routes (pullRoutes), in the order the sources used to add into it: the sources in the
@@ -4635,7 +4649,7 @@ void Engine::updateRouting() noexcept {
         const Slot& s = slotAt(g.slotOrder[k]);
         if (s.sends)
             for (int j = 0; j < s.sends->count; ++j)
-                if (s.routeOk[j]) ++g.inCountNext[s.sends->routes[j].dest];
+                if (s.sends->routes[j].ok) ++g.inCountNext[s.sends->routes[j].dest];
     }
     int routed = 0;
     for (int k = 0; k < count; ++k) {
@@ -4650,7 +4664,7 @@ void Engine::updateRouting() noexcept {
         const Slot& s = slotAt(x);
         if (!s.sends) continue;
         for (int j = 0; j < s.sends->count; ++j) {
-            if (!s.routeOk[j]) continue;
+            if (!s.sends->routes[j].ok) continue;
             const int d = s.sends->routes[j].dest;
             g.inRoutesNext[static_cast<size_t>(g.inFirstNext[d] + g.inCountNext[d]++)] = MixGraph::InRoute{s.sends, j};
             if (!s.sends->routes[j].feedback) g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
@@ -4683,7 +4697,9 @@ void Engine::updateRouting() noexcept {
     // The old order keeps running, but its pull tables may name route tables freed since (a SetSends retired them),
     // so nothing is pulled and no route is written until a routing update is accepted.
     std::fill(g.inCount.begin(), g.inCount.end(), 0);
-    for (int j = 0; j < liveCount_; ++j) std::fill_n(slotAt(live_[j]).routeOk, kMaxRoutes, false);
+    for (int j = 0; j < liveCount_; ++j)
+        if (SendTable* t = slotAt(live_[j]).sends)
+            for (int k = 0; k < t->count; ++k) t->routes[k].ok = false;
 }
 
 // A track's latency compensation, with the crossfade of a delay change.
@@ -4839,9 +4855,9 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         const float* levelMod = key ? nullptr : modulation_->send(s.index, k);  // project modulation (#161)
         const double level = levelMod ? faderGain(faderPosition(r.level) + levelMod[m - 1]) : r.level;
         const double want = r.mute || (!key && silenced) ? 0.0 : level;
-        const double from = s.routeGain[k];
-        if (!s.routeOk[k]) {
-            s.routeGain[k] = 0.0;  // its destination doesn't run: it starts from silence when it does
+        const double from = r.gain;
+        if (!r.ok) {
+            r.gain = 0.0;  // its destination doesn't run: it starts from silence when it does
             continue;
         }
         if (from == 0.0 && want == 0.0 && !r.delay) {
@@ -4852,7 +4868,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             // Only read here: the destination runs after this slot (routeOk) and takes the key itself (pullRoutes).
             const Slot& d = slotAt(r.dest);
             if (!d.inserts || !d.inserts->keyInput(static_cast<size_t>(r.key))) {
-                s.routeGain[k] = want;
+                r.gain = want;
                 continue;
             }
         }
@@ -4894,7 +4910,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             r.outL[i] = routeSample(static_cast<double>(xl[i]) * g * (faded ? faderL[i] : 1.0));
             r.outR[i] = routeSample(static_cast<double>(xr[i]) * g * (faded ? faderR[i] : 1.0));
         }
-        s.routeGain[k] = g;
+        r.gain = g;
         if (r.delay) r.delay->run(r.outL, r.outR, m);
         r.audio = true;
         if (r.ring) ringWrite(r, true);

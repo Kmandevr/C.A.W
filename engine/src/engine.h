@@ -146,8 +146,10 @@ public:
     // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets
     // the values it names again.
     bool setSend(const std::string& layerId, uint32_t index, double level, bool pre, bool mute);
-    // Most routes (sends, to buses or tracks, feedback or not, and sidechain keys) one layer feeds.
-    static constexpr int kMaxRoutes = 24;
+    // The routes (sends, to buses or tracks, feedback or not, and sidechain keys) each slot's mix graph holds until a
+    // project needs more: setProject then rebuilds the graph for the most any one layer feeds, within the memory
+    // budget (owner, 2026-11-19).
+    static constexpr int kDefaultRoutes = 24;
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only tracks (layers with an
     // instrument) can preview.
@@ -745,7 +747,8 @@ private:
     std::atomic<int> ctlCapacity_{0};  // ctlTable_'s layer capacity, for layerCapacity()
     Slot& ctlSlot(int i) noexcept;
     void readLayerMeter(int index, LayerMeter& out);  // ctl_ held, index a project layer
-    std::string grow(int capacity);  // a larger slot table, sent to the audio thread; "" or an error
+    // A larger slot table (or one whose graph holds more routes per slot), sent to the audio thread; "" or an error.
+    std::string grow(int capacity, int routes = 0);
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
     int ctlLoopSteps_ = 64;
