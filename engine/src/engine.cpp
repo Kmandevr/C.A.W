@@ -94,8 +94,6 @@ struct Engine::Slot {
     ComponentChain* inserts = nullptr;  // native stereo effects after the instrument, before volume and pan
     DelayLine* delay = nullptr;         // latency compensation, after volume and pan
     SendTable* sends = nullptr;         // where the slot's sends and keys go (owned; replaced by SetSends)
-    double routeGain[kMaxRoutes] = {};  // audio thread: each route's gain at the end of the last block
-    bool routeOk[kMaxRoutes] = {};      // updateRouting: the route's destination runs after this slot this chunk
     bool routesStale = false;           // stopped or silent: the routes' delays hold old audio; clear them
     // A bus's input from sends this chunk, summed from its sources' route outputs when it runs (pullRoutes).
     float recvL[kBlock] = {}, recvR[kBlock] = {};
@@ -252,6 +250,8 @@ struct Engine::SendTable {
         // tap at 0 and fades back in, so it never jumps.
         bool pre = false, mute = false, tapPre = false;
         DelayLine* delay = nullptr;  // owned; null: none
+        double gain = 0;   // audio thread: its gain at the end of the last block (a route that stays keeps it)
+        bool ok = false;   // updateRouting: its destination runs after this slot this chunk
         // Audio thread (speed phase 5a): the source writes the route's signal here, and its destination sums its
         // routes from their sources' tables in a fixed order when it runs (pullRoutes). `chunk`: the chunk it
         // reached its destination in (the destination then takes it: a bus marks its input received, a key its
@@ -264,20 +264,20 @@ struct Engine::SendTable {
         bool feedback = false;
         FeedbackRing* ring = nullptr;  // owned; feedback only
     };
-    Route routes[kMaxRoutes];
+    std::unique_ptr<Route[]> routes;  // count, sized from the layer's routes on the control thread
     int count = 0;
     bool keys = false;  // some route keys a component: the slot runs even while muted or soloed out
     // Audio thread: the note-ons the slot played in the chunk its routes last ran (keyNotes), which its key routes'
     // destinations take into their keys.
     Event keyEvents[ComponentChain::kMaxKeyEvents] = {};
     uint32_t keyEventCount = 0;
-    SendTable() = default;
+    explicit SendTable(int n) : routes(new Route[static_cast<size_t>(n)]), count(n) {}
     SendTable(const SendTable&) = delete;
     SendTable& operator=(const SendTable&) = delete;
     ~SendTable() {
-        for (Route& r : routes) {
-            delete r.delay;
-            delete r.ring;
+        for (int k = 0; k < count; ++k) {
+            delete routes[k].delay;
+            delete routes[k].ring;
         }
     }
 };
@@ -541,6 +541,7 @@ struct Engine::MixGraph {
     // The layout depends on the slot count (layer capacity + the audition), fixed at construction.
     const int slots;   // slot count
     const int master;  // the master in slot-level routing scratch (== slots)
+    const int routesPerSlot;  // the most routes one slot's table holds (kDefaultRoutes, or what a project needs)
     uint32_t trackNode(int slot) const noexcept { return static_cast<uint32_t>(slot); }
     uint32_t busNode(int slot) const noexcept { return static_cast<uint32_t>(slots + slot); }
     uint32_t masterNode() const noexcept { return static_cast<uint32_t>(2 * slots); }
@@ -579,7 +580,7 @@ struct Engine::MixGraph {
         const SendTable* table = nullptr;  // the source's routes (alive until the graph has run: flushRetires)
         int k = 0;                         // the route's index there
     };
-    int maxRoutes() const noexcept { return slots * kMaxRoutes; }
+    int maxRoutes() const noexcept { return slots * routesPerSlot; }
     std::vector<int> inFirst, inCount;     // [slots] each: where d's routes start in inRoutes, and how many
     std::vector<InRoute> inRoutes;         // [maxRoutes()]
     // updateRouting builds the next tables here and swaps them in only once the executor accepts the routing they
@@ -589,8 +590,9 @@ struct Engine::MixGraph {
     std::vector<GraphDependency> dependencies;  // [maxRoutes()]
 
     // capacity: layer slots; the graph also routes the audition slot after them.
-    MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget)
-        : slots(capacity + 1), master(capacity + 1),
+    MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget,
+             int routes = kDefaultRoutes)
+        : slots(capacity + 1), master(capacity + 1), routesPerSlot(std::max(routes, static_cast<int>(kDefaultRoutes))),
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
           pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
@@ -1042,7 +1044,7 @@ bool Engine::send(const Cmd& c) {
     for (int tries = 0; !cmds_->push(c); ++tries) {
         drainRetired();
         if (offlineControl_) applyCommands();
-        if (tries > 2000) {
+        if (tries > sendRetries_) {
             delete c.pattern;  // audio stalled; drop rather than hang the app
             delete c.automation;
             delete c.orderList;
@@ -1072,9 +1074,11 @@ int Engine::freeSlot() {
 // Control thread, under ctl_: a table of `capacity` layer slots that keeps every existing Slot
 // (layer slots at their indices, the audition moved to the new last one), a mix graph sized for
 // it; sent to the audio thread as one Grow command.
-std::string Engine::grow(int capacity) {
+std::string Engine::grow(int capacity, int routes) {
     SlotTable& old = *ctlTable_;
-    if (capacity <= old.capacity) return {};
+    capacity = std::max(capacity, old.capacity);
+    routes = std::max(routes, old.graph->routesPerSlot);
+    if (capacity == old.capacity && routes == old.graph->routesPerSlot) return {};
     if (capacity > maxLayers_)
         return "the project needs " + std::to_string(capacity) + " layer slots; this device's memory budget allows at most " +
                std::to_string(maxLayers_);
@@ -1099,7 +1103,7 @@ std::string Engine::grow(int capacity) {
             for (int i = 0; i < kScopeSize; ++i) slot.scope[i].store(0);
             t->slots[s] = &slot;
         }
-        t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_));
+        t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_, routes));
         // The budget holds the old graph and the new one at once (maxLayers() allows for that).
         const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + 2 * sizeof(int) +
                                  2 * sizeof(Retired);
@@ -1437,8 +1441,19 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             auto it = layers_.find(l.id);
             if (it == layers_.end() || it->second.slot < 0) ++needed;
         }
-        if (needed > ctlTable_->capacity) {
-            const std::string error = grow(std::min(maxLayers_, std::max(needed, 2 * ctlTable_->capacity)));
+        // Routes per slot (owner, 2026-11-19): the most any one layer feeds, its sends plus the keys it gives.
+        std::map<std::string, int> routesOf;
+        for (const LayerSpec& l : p.layers) {
+            routesOf[l.id] += static_cast<int>(l.sends.size());
+            for (const ComponentSpec& c : l.components)
+                if (c.hasKey) ++routesOf[c.key.layer];
+        }
+        int routes = 0;
+        for (const auto& [id, n] : routesOf) routes = std::max(routes, n);
+        if (needed > ctlTable_->capacity || routes > ctlTable_->graph->routesPerSlot) {
+            const int capacity =
+                needed > ctlTable_->capacity ? std::min(maxLayers_, std::max(needed, 2 * ctlTable_->capacity)) : 0;
+            const std::string error = grow(capacity, routes);
             if (!error.empty()) return "{\"ok\":false,\"error\":\"" + jsonEscape(error) + "\",\"modules\":{}}";
         }
     }
@@ -1538,6 +1553,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
     std::map<std::string, std::vector<std::string>> warnings;
+    for (std::string& w : modulationCostWarnings(p)) warnings["project"].push_back(std::move(w));  // never a refusal
     if (keepTempo)
         warnings["project"].push_back("the tempo map can't change while recording: it stays until the recording stops");
     // A native component chain's automation lanes: a chain about to be sent takes its table now (the
@@ -1993,9 +2009,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 warnings["project"].push_back("layer '" + l.id + "': component '" + c.id + "': its key '" + c.key.layer + "' isn't playing");
                 continue;
             }
-            if (from->second.routes.size() >= static_cast<size_t>(kMaxRoutes)) {
-                warnings["project"].push_back("layer '" + c.key.layer + "' keys more than " + std::to_string(kMaxRoutes - kMaxSends) +
-                                                " components; the rest hear no key");
+            if (from->second.routes.size() >= static_cast<size_t>(ctlTable_->graph->routesPerSlot)) {  // never: sized above
+                warnings["project"].push_back("layer '" + c.key.layer + "' keys more components than its routes hold; the rest hear no key");
                 continue;
             }
             LayerState::Route r;
@@ -2257,7 +2272,7 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
             c.type = Cmd::SetSends;
             c.slot = ls.slot;
             if (!ls.routes.empty()) {
-                c.sends = new SendTable();
+                c.sends = new SendTable(static_cast<int>(ls.routes.size()));
                 for (size_t k = 0; k < ls.routes.size(); ++k) {
                     const LayerState::Route& r = ls.routes[k];
                     SendTable::Route& t = c.sends->routes[k];
@@ -2276,7 +2291,6 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
                     }
                     c.sends->keys = c.sends->keys || (r.key >= 0 && r.dest >= 0);
                 }
-                c.sends->count = static_cast<int>(ls.routes.size());
             }
             if (send(c)) {
                 ls.routesSig = sig;
@@ -2299,6 +2313,10 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
             c.flag = r.pre;
             c.sendMute = r.mute;
             if (send(c)) was = r;
+            else {
+                ok = false;
+                warnings["project"].push_back("layer '" + *n.id + "': audio command queue rejected a send level");
+            }
         }
     }
     if (capped)
@@ -2503,11 +2521,11 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     writeMix(ls.slot, ls.volume, ls.pan, mute, solo);
 }
 
-void Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
+int Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
     std::lock_guard<std::mutex> lock(ctl_);
-    if (!layerId.empty() && layerId[0] == '\x01') return;  // the audition's internal layer: its slot moves on a grow
+    if (!layerId.empty() && layerId[0] == '\x01') return -1;  // the audition's internal layer: its slot moves on a grow
     auto it = layers_.find(layerId);
-    if (it == layers_.end() || it->second.slot < 0) return;
+    if (it == layers_.end() || it->second.slot < 0) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 0;
@@ -2521,42 +2539,48 @@ void Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double
         Cmd off = c;
         off.previewOp = 2;
         off.slot = old->second;
-        if (!send(off)) return;  // the queue is full: keep the old note's entry, so its off can still reach it
+        if (!send(off)) return 0;  // the queue is full: keep the old note's entry, so its off can still reach it
     }
-    if (send(c)) previewSlots_[id] = c.slot;
+    if (!send(c)) return 0;
+    previewSlots_[id] = c.slot;
+    return 1;
 }
 
-void Engine::notePitch(int32_t id, double pitch) {
+int Engine::notePitch(int32_t id, double pitch) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = previewSlots_.find(id);
-    if (it == previewSlots_.end() || !std::isfinite(pitch)) return;
+    if (it == previewSlots_.end() || !std::isfinite(pitch)) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 1;
     c.slot = it->second;
     c.previewId = id;
     c.pitch = std::clamp(pitch, 0.0, 127.0);
-    send(c);
+    return send(c) ? 1 : 0;
 }
 
-void Engine::noteOff(int32_t id) {
+int Engine::noteOff(int32_t id) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = previewSlots_.find(id);
-    if (it == previewSlots_.end()) return;
+    if (it == previewSlots_.end()) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 2;
     c.slot = it->second;
     c.previewId = id;
-    if (send(c)) previewSlots_.erase(it);  // a full queue keeps the entry, so a later off still ends the note
+    if (!send(c)) return 0;  // a full queue keeps the entry, so a later off still ends the note
+    previewSlots_.erase(it);
+    return 1;
 }
 
-void Engine::notesOff() {
+int Engine::notesOff() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 3;
-    if (send(c)) previewSlots_.clear();
+    if (!send(c)) return 0;
+    previewSlots_.clear();
+    return 1;
 }
 
 // ---- Device MIDI (API 15) ----
@@ -2664,7 +2688,7 @@ void Engine::setMidiOptions(bool mpe, double bendRange, double noteBendRange, do
 }
 
 uint64_t Engine::midiDropped() const noexcept {
-    return midiIn_.dropped() + midiPendingDropped_.load(std::memory_order_relaxed);
+    return midiIn_.dropped();
 }
 
 int64_t Engine::positionAt(int64_t timeNs) const noexcept {
@@ -2674,15 +2698,15 @@ int64_t Engine::positionAt(int64_t timeNs) const noexcept {
     return pos + static_cast<int64_t>(std::floor(static_cast<double>(timeNs - at) * sr_ / 1e9));
 }
 
-void Engine::setMaster(double volume) {
+bool Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::SetMaster;
     c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
-    send(c);
+    return send(c);
 }
 
-void Engine::play(double fromStep) {
+bool Engine::play(double fromStep) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
@@ -2690,12 +2714,13 @@ void Engine::play(double fromStep) {
     c.fromStep = fromStep;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
+    if (!send(c)) return false;  // nothing changed on the audio side, so keep the control side as it was
     playCount_ = c.playCount;
     loudness_->requestReset();  // the integrated loudness measures this play
+    return true;
 }
 
-void Engine::playCountIn(double fromStep, int beats, bool bars) {
+bool Engine::playCountIn(double fromStep, int beats, bool bars) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
@@ -2705,17 +2730,18 @@ void Engine::playCountIn(double fromStep, int beats, bool bars) {
     c.countInBars = bars;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;
+    if (!send(c)) return false;
     playCount_ = c.playCount;
     loudness_->requestReset();
+    return true;
 }
 
-void Engine::setMetronome(bool on) {
+bool Engine::setMetronome(bool on) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Metronome;
     c.flag = on;
-    send(c);
+    return send(c);
 }
 
 void Engine::setMetronomeSound(double volume, int sound) noexcept {
@@ -2825,22 +2851,23 @@ void Engine::mixToneOnly(float* left, float* right, int frames, bool previewTake
     }
 }
 
-void Engine::releaseTouches() {
+bool Engine::releaseTouches() {
     // The same bookkeeping as a Play, without moving the transport: chains drop their touches at their next chunk.
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::ReleaseTouches;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;
+    if (!send(c)) return false;
     playCount_ = c.playCount;
+    return true;
 }
 
-void Engine::stop() {
+bool Engine::stop() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Stop;
-    send(c);
+    return send(c);
 }
 
 void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept {
@@ -2936,11 +2963,11 @@ double Engine::nextClick() noexcept {
     return v;
 }
 
-void Engine::clearOverload() {
+bool Engine::clearOverload() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::ClearOverload;
-    send(c);
+    return send(c);
 }
 
 int64_t Engine::loopLength() {
@@ -3028,6 +3055,10 @@ SongTime Engine::songTime() {
 }
 
 Meters Engine::meters() {
+    {  // the UI reads meters often: values merged under pressure go into the MIDI queue as space returns
+        std::unique_lock<std::mutex> midi(midiPush_, std::try_to_lock);
+        if (midi) midiIn_.flush();
+    }
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Meters m;
@@ -3543,8 +3574,9 @@ void Engine::applyCommands() noexcept {
                         // does) and, unless stale, its delay's recent input. A route that now goes elsewhere starts
                         // from silence: its old line holds the old destination's audio.
                         const bool stays = was && was->dest == r.dest && was->key == r.key && was->feedback == r.feedback;
-                        if (!stays) s.routeGain[k] = 0.0;
-                        if (stays && s.routeGain[k] > 0.0) r.tapPre = was->tapPre;
+                        r.gain = stays ? was->gain : 0.0;
+                        r.ok = stays && was->ok;
+                        if (stays && r.gain > 0.0) r.tapPre = was->tapPre;
                         if (r.delay && stays && !s.routesStale) r.delay->takeHistory(was->delay);
                         if (r.ring && stays && was->ring) r.ring->takeHistory(*was->ring);  // a feedback send carries on
                     }
@@ -3561,7 +3593,7 @@ void Engine::applyCommands() noexcept {
                     SendTable::Route& r = s.sends->routes[c.order];
                     r.level = c.master;
                     r.pre = c.flag;  // runRoutes moves the tap over, through silence
-                    if (s.routeGain[c.order] == 0.0) r.tapPre = r.pre;
+                    if (r.gain == 0.0) r.tapPre = r.pre;
                     r.mute = c.sendMute;
                 }
                 break;
@@ -3734,12 +3766,9 @@ void Engine::takeDeviceMidi(int frames) noexcept {
     cbTimeNs_.store(now, std::memory_order_relaxed);
     cbPos_.store(playing_ ? g_ : -1, std::memory_order_release);
     midiChunkFrom_ = 0;
+    // A full list leaves the rest in the queue for a later callback (the producer drops or merges, never here).
     Midi2Event e;
-    while (midiIn_.pop(e)) {
-        if (midiPendingCount_ == Midi2InputQueue::kCapacity) {
-            midiPendingDropped_.fetch_add(1, std::memory_order_relaxed);
-            continue;
-        }
+    while (midiPendingCount_ < Midi2InputQueue::kCapacity && midiIn_.pop(e)) {
         PendingMidi& p = midiPending_[midiPendingCount_++];
         p.e = e;
         p.done = false;
@@ -3757,10 +3786,26 @@ void Engine::takeDeviceMidi(int frames) noexcept {
                 else s.deviceNotes.reset();
             }
             p.done = true;
+            p.frame = 0;
             continue;
         }
         p.frame = deviceMidiFrame(p.e.timeNs, now, frames, sr_, delay);
-        if (p.frame >= frames) continue;  // a later callback's
+    }
+    // Lower frame first, then lower sequence (a value merged under pressure arrives late with its own). Insertion
+    // sort: bounded by the list, and the list is nearly in order already.
+    for (uint32_t k = 1; k < midiPendingCount_; ++k) {
+        const PendingMidi x = midiPending_[k];
+        uint32_t j = k;
+        for (; j > 0; --j) {
+            const PendingMidi& y = midiPending_[j - 1];
+            if (y.frame < x.frame || (y.frame == x.frame && static_cast<int32_t>(y.e.seq - x.e.seq) < 0)) break;
+            midiPending_[j] = y;
+        }
+        midiPending_[j] = x;
+    }
+    for (uint32_t k = 0; k < midiPendingCount_; ++k) {
+        PendingMidi& p = midiPending_[k];
+        if (p.done || p.frame >= frames) continue;  // an AllOff already applied, or a later callback's
         if (p.e.target < 0 || p.e.target >= slotCount_) {
             p.done = true;
             continue;
@@ -4115,6 +4160,10 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
             continue;
         }
         if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
+        if (n.ratchet > 1) {  // a repeat shorter than a sample is not played: at most the note's samples sound
+            int64_t start = 0, stop = 0;
+            if (noteSpan(s, n, pe.sub, start, stop) && stop <= start) continue;
+        }
         if (pe.sub == 0 && n.slideFrom >= 0) {
             const PatternNote& from = pat->notes[static_cast<size_t>(n.slideFrom)];
             if (NoteEvents::Held* h = notes.findPattern(static_cast<uint32_t>(n.slideFrom), static_cast<uint16_t>(from.ratchet - 1))) {
@@ -4604,7 +4653,7 @@ void Engine::updateRouting() noexcept {
         if (!s.sends) continue;
         for (int k = 0; k < s.sends->count; ++k) {
             const int d = g.routable[i] ? routeDest(s, k) : -1;
-            s.routeOk[k] = d >= 0 && (s.sends->routes[k].feedback || g.position[i] < g.position[d]);
+            s.sends->routes[k].ok = d >= 0 && (s.sends->routes[k].feedback || g.position[i] < g.position[d]);
         }
     }
     // Each destination's routes (pullRoutes), in the order the sources used to add into it: the sources in the
@@ -4618,7 +4667,7 @@ void Engine::updateRouting() noexcept {
         const Slot& s = slotAt(g.slotOrder[k]);
         if (s.sends)
             for (int j = 0; j < s.sends->count; ++j)
-                if (s.routeOk[j]) ++g.inCountNext[s.sends->routes[j].dest];
+                if (s.sends->routes[j].ok) ++g.inCountNext[s.sends->routes[j].dest];
     }
     int routed = 0;
     for (int k = 0; k < count; ++k) {
@@ -4633,7 +4682,7 @@ void Engine::updateRouting() noexcept {
         const Slot& s = slotAt(x);
         if (!s.sends) continue;
         for (int j = 0; j < s.sends->count; ++j) {
-            if (!s.routeOk[j]) continue;
+            if (!s.sends->routes[j].ok) continue;
             const int d = s.sends->routes[j].dest;
             g.inRoutesNext[static_cast<size_t>(g.inFirstNext[d] + g.inCountNext[d]++)] = MixGraph::InRoute{s.sends, j};
             if (!s.sends->routes[j].feedback) g.dependencies[dependencyCount++] = GraphDependency{nodeOf(x), nodeOf(d)};
@@ -4666,7 +4715,9 @@ void Engine::updateRouting() noexcept {
     // The old order keeps running, but its pull tables may name route tables freed since (a SetSends retired them),
     // so nothing is pulled and no route is written until a routing update is accepted.
     std::fill(g.inCount.begin(), g.inCount.end(), 0);
-    for (int j = 0; j < liveCount_; ++j) std::fill_n(slotAt(live_[j]).routeOk, kMaxRoutes, false);
+    for (int j = 0; j < liveCount_; ++j)
+        if (SendTable* t = slotAt(live_[j]).sends)
+            for (int k = 0; k < t->count; ++k) t->routes[k].ok = false;
 }
 
 // A track's latency compensation, with the crossfade of a delay change.
@@ -4822,9 +4873,9 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         const float* levelMod = key ? nullptr : modulation_->send(s.index, k);  // project modulation (#161)
         const double level = levelMod ? faderGain(faderPosition(r.level) + levelMod[m - 1]) : r.level;
         const double want = r.mute || (!key && silenced) ? 0.0 : level;
-        const double from = s.routeGain[k];
-        if (!s.routeOk[k]) {
-            s.routeGain[k] = 0.0;  // its destination doesn't run: it starts from silence when it does
+        const double from = r.gain;
+        if (!r.ok) {
+            r.gain = 0.0;  // its destination doesn't run: it starts from silence when it does
             continue;
         }
         if (from == 0.0 && want == 0.0 && !r.delay) {
@@ -4835,7 +4886,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             // Only read here: the destination runs after this slot (routeOk) and takes the key itself (pullRoutes).
             const Slot& d = slotAt(r.dest);
             if (!d.inserts || !d.inserts->keyInput(static_cast<size_t>(r.key))) {
-                s.routeGain[k] = want;
+                r.gain = want;
                 continue;
             }
         }
@@ -4877,7 +4928,7 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
             r.outL[i] = routeSample(static_cast<double>(xl[i]) * g * (faded ? faderL[i] : 1.0));
             r.outR[i] = routeSample(static_cast<double>(xr[i]) * g * (faded ? faderR[i] : 1.0));
         }
-        s.routeGain[k] = g;
+        r.gain = g;
         if (r.delay) r.delay->run(r.outL, r.outR, m);
         r.audio = true;
         if (r.ring) ringWrite(r, true);

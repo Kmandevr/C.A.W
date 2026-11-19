@@ -96,7 +96,7 @@ TEST(pattern_errors_point_at_the_problem) {
     CHECK(has(patternError("0 C3"), "a note line is"));
     CHECK(has(patternError("0 C3 1 2"), "velocity must be 0 to 1"));
     CHECK(has(patternError("0 C3 1 wobble"), "unknown extra 'wobble'"));
-    CHECK(has(patternError("0 C3 1 ratchet 9"), "ratchet must be 1 to 8"));
+    CHECK(has(patternError("0 C3 1 ratchet 65"), "ratchet must be 1 to 64"));
     CHECK(has(patternError("[kick]\n0 C1 1"), "kit rows"));
     CHECK(has(parsePattern("0 C3 1\n").error, "needs 'kind: pattern'"));
 }
@@ -291,4 +291,14 @@ TEST(pattern_curves_can_exceed_16_points) {
     CHECK_EQ(parsed.pattern->expressions.size(), size_t{1});
     CHECK_EQ(parsed.pattern->expressions[0].bend.points.size(), size_t{20});
     CHECK_NEAR(parsed.pattern->expressions[0].bend.at(1.0), 1.0, 1e-6);
+}
+
+TEST(a_ratchet_takes_up_to_64_repeats) {
+    // Owner, 2026-11-19: up to 64 repeats a note (was 8).
+    PatternResult r = parsePattern(kHead + "0 C3 4 1 ratchet 64\n");
+    CHECK(r.error.empty());
+    if (r.pattern) {
+        CHECK_EQ(r.pattern->notes[0].ratchet, 64);
+        CHECK_EQ(r.pattern->events.size(), 128u);
+    }
 }

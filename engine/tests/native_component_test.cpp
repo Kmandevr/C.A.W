@@ -7,6 +7,7 @@
 #include "project.h"
 #include "native_component_test_path.h"
 
+#include "library_warm.h"
 #include "module_registry.h"
 #include "test.h"
 
@@ -245,4 +246,37 @@ TEST(module_registry_loads_a_component_from_a_bundle_by_id) {
     CHECK(processor->process(block));
     CHECK_EQ(outL[0], 0.5f);
     CHECK_EQ(outR[3], 1.0f);
+}
+
+namespace {
+int warmProbe(int x) { return x * 3 + 1; }  // an address in caw_tests' own code
+}
+
+TEST(native_component_load_warms_the_library_pages_within_a_cap) {
+    // A trusted load reads one byte per page of the library's code and read-only data before any callback runs it.
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    ModuleRegistry registry;
+    const auto loaded = registry.loadSharedLibrary(path ? path : "", kComponentId, NativeModuleTrust::Trusted);
+    CHECK(loaded.success);
+    const LibraryWarmStats warm = lastLibraryWarmForTest();
+#if defined(__linux__) || defined(_WIN32)
+    CHECK(warm.found);
+    CHECK(warm.pages > 0u);
+    CHECK(warm.regions >= 2u);  // code and read-only data
+    CHECK(!warm.executableOnly);  // the fixture is far under the cap
+    CHECK(warm.bytes <= kLibraryWarmCap);
+    // Over the cap: executable ones only, stopping at the cap (here one page).
+    const LibraryWarmStats capped = warmLibrary(reinterpret_cast<const void*>(&warmProbe), 1);
+    CHECK(capped.found);
+    CHECK(capped.executableOnly);
+    CHECK_EQ(capped.pages, 1u);
+    CHECK_EQ(warmProbe(1), 4);
+    // An address in no library: nothing found, nothing touched.
+    const LibraryWarmStats none = warmLibrary(nullptr);
+    CHECK(!none.found);
+    CHECK_EQ(none.pages, 0u);
+#else
+    (void)warm;
+#endif
 }

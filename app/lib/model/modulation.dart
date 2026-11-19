@@ -222,8 +222,9 @@ class ModLinkDoc {
   }
 }
 
-/// The engine's budgets (engine/src/modulation_links.h).
-const kMaxModulators = 64, kMaxModLinks = 256, kMaxLinksPerTarget = 32;
+/// The engine's safety bounds (engine/src/modulation_links.h, kModSafetyLimit; owner, 2026-11-19): modulation is
+/// project-sized, and past the old budgets (64 modulators, 256 links, 32 per target) the engine only warns of the CPU.
+const kMaxModulators = 4096, kMaxModLinks = 4096, kMaxLinksPerTarget = 4096;
 
 extension ProjectModulation on ProjectDoc {
   ModulatorDoc? modulator(String? id) => modulators.where((m) => m.id == id).firstOrNull;

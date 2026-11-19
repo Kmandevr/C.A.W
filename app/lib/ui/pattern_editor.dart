@@ -2878,7 +2878,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                 onChanged: (v) => change((d) => d.setProb(sel, v))),
             const Heading('Ratchet'),
             Wrap(spacing: 6, runSpacing: 4, children: [
-              for (var r = 1; r <= 8; r++)
+              for (var r = 1; r <= kPatternMaxRatchet; r++)
                 ChoiceChip(
                   label: Text('$r'),
                   selected: n.ratchet == r,

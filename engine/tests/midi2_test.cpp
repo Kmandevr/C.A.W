@@ -38,23 +38,128 @@ TEST(midi2_rejects_other_ump_types_and_unknown_statuses) {
 }
 
 
+namespace {
+Midi2Event midiEvent(Midi2EventType type, uint8_t channel, uint8_t note, uint8_t index, double value, int32_t target = 0) {
+    Midi2Event e;
+    e.type = type;
+    e.channel = channel;
+    e.note = note;
+    e.index = index;
+    e.value = value;
+    e.target = target;
+    return e;
+}
+constexpr uint32_t kNormalSlots = Midi2InputQueue::kCapacity - Midi2InputQueue::kReserved;
+}  // namespace
+
 TEST(midi2_input_queue_preserves_order_and_bounds_overflow) {
     Midi2InputQueue queue;
     Midi2Event input;
     input.type = Midi2EventType::NoteOn;
-    input.note = 60;
-    for (uint32_t i = 0; i < Midi2InputQueue::kCapacity; ++i) {
+    for (uint32_t i = 0; i < kNormalSlots; ++i) {
         input.note = static_cast<uint8_t>(i & 0x7F);
         CHECK(queue.push(input));
     }
-    CHECK(!queue.push(input));
+    CHECK(!queue.push(input));  // a note on never takes the reserve
     CHECK_EQ(queue.dropped(), 1u);
     Midi2Event output;
-    for (uint32_t i = 0; i < Midi2InputQueue::kCapacity; ++i) {
+    for (uint32_t i = 0; i < kNormalSlots; ++i) {
         CHECK(queue.pop(output));
         CHECK_EQ(output.note, static_cast<uint8_t>(i & 0x7F));
+        CHECK_EQ(output.seq, i);  // the producer's sequence, in push order
     }
     CHECK(!queue.pop(output));
+}
+
+TEST(midi2_input_queue_flood_keeps_every_release) {
+    // A flood of note ons fills the shared slots; the note offs, a sustain off, All Sound Off and All Notes Off
+    // still all go in, in the reserve.
+    Midi2InputQueue queue;
+    for (uint32_t i = 0; i < 2 * Midi2InputQueue::kCapacity; ++i)
+        queue.push(midiEvent(Midi2EventType::NoteOn, 0, static_cast<uint8_t>(i & 0x7F), 0, 0.8));
+    CHECK_EQ(queue.dropped(), 2 * Midi2InputQueue::kCapacity - kNormalSlots);
+    const uint32_t offs = Midi2InputQueue::kReserved - 3;
+    for (uint32_t n = 0; n < offs; ++n)
+        CHECK(queue.push(midiEvent(Midi2EventType::NoteOff, 0, static_cast<uint8_t>(n & 0x7F), 0, 0)));
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 64, 0.0)));   // sustain off
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 120, 0.0)));  // All Sound Off
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 123, 0.0)));  // All Notes Off
+    CHECK(!queue.push(midiEvent(Midi2EventType::NoteOff, 0, 1, 0, 0)));  // every slot taken
+    Midi2Event out;
+    uint32_t got = 0, offsSeen = 0, releasesSeen = 0, lastSeq = 0;
+    while (queue.pop(out)) {
+        if (got > 0) CHECK(out.seq > lastSeq);  // pushed straight in: ring order is sequence order
+        lastSeq = out.seq;
+        ++got;
+        if (out.type == Midi2EventType::NoteOff) ++offsSeen;
+        if (out.type == Midi2EventType::ControlChange) ++releasesSeen;
+    }
+    CHECK_EQ(got, Midi2InputQueue::kCapacity);
+    CHECK_EQ(offsSeen, offs);
+    CHECK_EQ(releasesSeen, 3u);
+    CHECK(Midi2InputQueue::releases(midiEvent(Midi2EventType::AllOff, 0, 0, 0, 0)));
+    CHECK(Midi2InputQueue::releases(midiEvent(Midi2EventType::ControlChange, 0, 0, 64, 63.0 / 127.0)));
+    CHECK(!Midi2InputQueue::releases(midiEvent(Midi2EventType::ControlChange, 0, 0, 64, 64.0 / 127.0)));
+}
+
+TEST(midi2_input_queue_merges_continuous_values_under_pressure_by_key) {
+    Midi2InputQueue queue;
+    for (uint32_t i = 0; i < kNormalSlots; ++i) CHECK(queue.push(midiEvent(Midi2EventType::NoteOn, 0, 60, 0, 0.5)));
+    // Under pressure: each key keeps its latest value. MPE member channels, notes, kinds, controllers, groups and
+    // targets are separate keys.
+    for (int round = 0; round < 50; ++round) {
+        const double v = round / 49.0;
+        CHECK(queue.push(midiEvent(Midi2EventType::PitchBend, 1, 0, 0, v)));
+        CHECK(queue.push(midiEvent(Midi2EventType::PitchBend, 2, 0, 0, -v)));
+        CHECK(queue.push(midiEvent(Midi2EventType::PolyPressure, 0, 60, 0, v)));
+        CHECK(queue.push(midiEvent(Midi2EventType::PolyPressure, 0, 61, 0, v / 2)));
+        CHECK(queue.push(midiEvent(Midi2EventType::PerNotePitch, 0, 60, 0, v / 4)));
+        CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 1, v)));
+        CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 74, v / 3)));
+        CHECK(queue.push(midiEvent(Midi2EventType::ChannelPressure, 3, 0, 0, v)));
+        CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 1, v, 1)));  // another track
+        Midi2Event grouped = midiEvent(Midi2EventType::ControlChange, 0, 0, 1, v / 5);
+        grouped.group = 2;
+        CHECK(queue.push(grouped));
+    }
+    CHECK_EQ(queue.mergedCount(), 10u);
+    CHECK_EQ(queue.dropped(), 0u);
+    // Never merged: program change and RPN/NRPN (and bank select) are dropped under pressure, not merged.
+    CHECK(!queue.push(midiEvent(Midi2EventType::ProgramChange, 0, 0, 5, 5 / 127.0)));
+    for (uint8_t cc : {0, 6, 32, 38, 98, 99, 100, 101})
+        CHECK(!queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, cc, 0.5)));
+    CHECK_EQ(queue.dropped(), 9u);
+    // A sustain off supersedes a sustain on still waiting, so the pedal can't stick.
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 64, 1.0)));
+    CHECK_EQ(queue.mergedCount(), 11u);
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 64, 0.0)));
+    CHECK_EQ(queue.mergedCount(), 10u);
+    Midi2Event out;
+    uint32_t n = 0;
+    while (queue.pop(out)) ++n;
+    CHECK_EQ(n, kNormalSlots + 1);  // the note ons and the sustain off
+    queue.flush();  // space again: the merged values go in, oldest first, each with its latest sequence
+    CHECK_EQ(queue.mergedCount(), 0u);
+    uint32_t count = 0, lastSeq = 0;
+    while (queue.pop(out)) {
+        if (count > 0) CHECK(out.seq > lastSeq);
+        lastSeq = out.seq;
+        ++count;
+        if (out.type == Midi2EventType::PitchBend && out.channel == 1) CHECK_EQ(out.value, 1.0);
+        if (out.type == Midi2EventType::PitchBend && out.channel == 2) CHECK_EQ(out.value, -1.0);
+        if (out.type == Midi2EventType::PolyPressure) CHECK_EQ(out.value, out.note == 60 ? 1.0 : 0.5);
+        if (out.type == Midi2EventType::PerNotePitch) CHECK_EQ(out.value, 0.25);
+        if (out.type == Midi2EventType::ControlChange && out.index == 1)
+            CHECK_EQ(out.value, out.group == 2 ? 0.2 : 1.0);
+        if (out.type == Midi2EventType::ControlChange && out.index == 74) CHECK_EQ(out.value, 1.0 / 3);
+        CHECK(!(out.type == Midi2EventType::ControlChange && out.index == 64));
+    }
+    CHECK_EQ(count, 10u);
+    // No pressure: nothing merges.
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 1, 0.1)));
+    CHECK(queue.push(midiEvent(Midi2EventType::ControlChange, 0, 0, 1, 0.2)));
+    CHECK_EQ(queue.mergedCount(), 0u);
+    CHECK(queue.pop(out) && queue.pop(out) && !queue.pop(out));
 }
 
 TEST(midi2_control_change_index_is_byte_three) {

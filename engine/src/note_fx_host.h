@@ -203,7 +203,7 @@ private:
     std::vector<ParameterValue> values_;
     std::vector<double> samples_;
     std::unique_ptr<float[]> offsets_;  // kNoteFxMaxBindings x ComponentChain::kMaxFrames
-    int groupGlobal_[kMaxNoteLinks] = {};  // each link group's global binding, or -1
+    int groupGlobal_[kNoteFxMaxBindings] = {};  // each link group's global binding, or -1 (groups past the bindings are not run)
     Event slotEvents_[kNoteFxMaxEvents];
     uint32_t eventsThisCall_ = 0;
     // Stats.
