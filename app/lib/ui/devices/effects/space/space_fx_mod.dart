@@ -291,7 +291,7 @@ class RotaryPage extends StatelessWidget {
             DeviceFeel.tap();
             t.set('speed', speed == 1 ? 0 : 1);
           },
-          child: CustomPaint(size: Size.infinite, painter: _RotorPainter(
+          child: CustomPaint(size: Size.infinite, painter: RotorPainter(
             horn: v?['horn_angle'] ?? secs * const [0.83, 6.75, 0.0][speed.clamp(0, 2)],
             drum: v?['drum_angle'] ?? 0.25 + secs * const [0.67, 5.8, 0.0][speed.clamp(0, 2)],
             width: t.value('width'), color: scope.accent, second: scope.secondary))))),
@@ -302,8 +302,8 @@ class RotaryPage extends StatelessWidget {
   }
 }
 
-class _RotorPainter extends CustomPainter {
-  _RotorPainter({required this.horn, required this.drum, required this.width, required this.color, required this.second});
+class RotorPainter extends CustomPainter {
+  RotorPainter({required this.horn, required this.drum, required this.width, required this.color, required this.second});
   final double horn, drum, width;
   final Color color, second;
 
@@ -339,6 +339,6 @@ class _RotorPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RotorPainter o) =>
+  bool shouldRepaint(covariant RotorPainter o) =>
       paintInputsChanged([o.horn, o.drum, o.width, o.color, o.second], [horn, drum, width, color, second]);
 }

@@ -19,6 +19,7 @@ import 'mod_editors.dart';
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'space/space_fx.dart'; // fx-space
+import 'space/space_devices.dart' show fxSpaceMergedEditors; // fx-space
 import 'utility_editors.dart';
 // fx-creative begin
 import 'creative/creative_catalog.dart';
@@ -80,6 +81,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   ...creativeEditors,  // fx-creative
   // fx-space begin
   ...fxSpaceEditors,
+  ...fxSpaceMergedEditors,  // the merged Space, Modulation, Utility and Pitch pages (every variant's id)
   // fx-space end
   // fx-filters begin
   ...filtersEditors,

@@ -107,7 +107,7 @@ class ImagerPage extends StatelessWidget {
     final scope = DeviceScope.of(context);
     return effectPage('imager', [
       HeroWithMeters(height: 220, gr: false, hero: liveHero(context: context, caption: 'IMAGE', height: 220,
-          readout: const Text('drag a band'), builder: (context, secs, v) => _ImagerHero(values: v))),
+          readout: const Text('drag a band'), builder: (context, secs, v) => ImagerHero(values: v))),
       const KnobRow(['low_freq', 'high_freq', 'mid_gain', 'side_gain', 'output'], size: 48),
       DeviceDisplay(builder: (context, f) => Column(mainAxisSize: MainAxisSize.min, children: [
         SpaceBar(label: 'CORRELATION', value: f?.values['correlation']),
@@ -121,15 +121,15 @@ class ImagerPage extends StatelessWidget {
   }
 }
 
-class _ImagerHero extends StatefulWidget {
-  const _ImagerHero({required this.values});
+class ImagerHero extends StatefulWidget {
+  const ImagerHero({super.key, required this.values});
   final Map<String, double>? values;
 
   @override
-  State<_ImagerHero> createState() => _ImagerHeroState();
+  State<ImagerHero> createState() => _ImagerHeroState();
 }
 
-class _ImagerHeroState extends State<_ImagerHero> {
+class _ImagerHeroState extends State<ImagerHero> {
   static const _bands = ['low_width', 'mid_width', 'high_width'];
   int? _band;
   double _v = 1;
