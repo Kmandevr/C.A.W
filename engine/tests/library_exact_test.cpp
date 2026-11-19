@@ -251,6 +251,25 @@ TEST(library_envelope_skip_and_ladder_and_chorus_fast_paths_match) {
         CHECK_NEAR(b.skip(n), last, 1e-9);
         CHECK_EQ(a.active(), b.active());
     }
+    // Adsr::run(out, n) gives n next() calls' levels, in every stage (a held sustain, an attack ending in a run).
+    for (double sustain : {0.4, 0.0, 1.0}) {
+        lib::Adsr c, d;
+        c.set(0.002, 0.03, sustain, 0.05, 48000);
+        d.set(0.002, 0.03, sustain, 0.05, 48000);
+        c.gateOn();
+        d.gateOn();
+        size_t differ = 0;
+        for (int block = 0; block < 600; ++block) {
+            if (block == 400) c.gateOff(), d.gateOff();
+            if (block == 550) c.gateOn(), d.gateOn();
+            const uint32_t n = 1 + static_cast<uint32_t>(block % 16);
+            double out[16];
+            d.run(out, n);
+            for (uint32_t i = 0; i < n; ++i) differ += out[i] != c.next();
+            differ += c.active() != d.active() || c.level() != d.level();
+        }
+        CHECK_EQ(differ, 0u);
+    }
     // A held note at sustain 0 settles at exactly 0 instead of decaying into denormal numbers.
     lib::Adsr held;
     held.set(0.001, 0.01, 0.0, 0.1, 48000);

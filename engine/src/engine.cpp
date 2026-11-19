@@ -192,15 +192,16 @@ struct Engine::DelayLine {
         }
         pos = 0;
     }
+    // Each frame swaps with the ring's oldest (the frame `n` back comes out, this one goes in): in runs up to the
+    // ring's end, as two plain swaps of arrays (no wrap test per frame).
     void run(float* outL, float* outR, int m) noexcept {
         const size_t n = l.size();
-        for (int i = 0; i < m; ++i) {
-            const float dl = l[pos], dr = r[pos];
-            l[pos] = outL[i];
-            r[pos] = outR[i];
-            outL[i] = dl;
-            outR[i] = dr;
-            pos = pos + 1 == n ? 0 : pos + 1;
+        for (size_t i = 0, frames = static_cast<size_t>(m); i < frames && n > 0;) {
+            const size_t k = std::min(frames - i, n - pos);
+            std::swap_ranges(outL + i, outL + i + k, l.data() + pos);
+            std::swap_ranges(outR + i, outR + i + k, r.data() + pos);
+            i += k;
+            pos = pos + k == n ? 0 : pos + k;
         }
     }
 };
