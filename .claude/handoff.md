@@ -40,10 +40,13 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 ## Rules for continuing (owner, 2026-11-19; the owner is hands-off)
 - **No lost work:** every branch is pushed after each commit, either the session branch or a `caw-backup-*` / `caw-1.1.0-*` backup branch.
 - **Loop guard:**
-  - a step that fails twice the same way goes under "Blocked" here, with the evidence;
+  - never repeat the same attempt; try genuinely different fixes or reasonable workarounds instead (owner);
+  - an item goes under "Blocked" only when the different approaches are used up or it needs the owner, and other work carries on meanwhile;
   - at most one CI re-run per failure;
   - no agent is restarted for the same item more than once.
 - **Check-in:** a recurring check-in every 5 hours resumes work from this file.
+
+- **Efficiency (owner):** the most work per token. Few, well-briefed agents (2–3 at once), short command output, no re-reading. Steady pace, no rushing.
 
 ## Blocked
 - (none)
