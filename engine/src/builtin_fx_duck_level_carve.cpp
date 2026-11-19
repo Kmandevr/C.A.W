@@ -18,7 +18,8 @@
 // Carve: the key's spectrum in 16 (or 24) log-spaced bands, 40 Hz to 16 kHz (fx_bandbank.h: 4th-order band-passes
 //   and followers with Attack and Release), sets a cascade of bell filters on the same centres here: each band dips
 //   by Range x Amount x how far the key's band is above Threshold (full at 30 dB above; 0.05 dB steps), only inside the frequency
-//   window (Low to High, half-octave edges). Linked dips both sides by the key's mid, Stereo each side by its own,
+//   window (Low to High, half-octave edges). The bells overlap, so a key spanning neighbouring bands would add their
+//   dips together: each band's summed dip (every bell's response at its centre) is held to Range. Linked dips both sides by the key's mid, Stereo each side by its own,
 //   Mid/Side the mid and side by the key's. Listen plays what is dipped out. No latency.
 
 namespace caw::fx {
@@ -273,6 +274,7 @@ protected:
                 const double fc = bands::centre(b, count, kLowest, kHighest);
                 logCentre_[b] = std::log2(fc);
             }
+            setupCoupling();
         }
         const double a = param(kCAttack, at) * 0.001, r = param(kCRelease, at) * 0.001;
         if (a != attackFor_ || r != releaseFor_) attackFor_ = a, releaseFor_ = r, an_.setTimes(a, r, sr_);
@@ -288,15 +290,25 @@ protected:
             if (logCentre_[b] > lo - 0.5 && logCentre_[b] < hi + 0.5) first = std::min(first, b), last = b + 1;
         an_.setActive(first, last);
         const double scale = range * amount / 30.0;
+        double want[2][kMaxBands];
         for (uint32_t b = 0; b < count_; ++b) {
             // The window, with half-octave edges.
             const double w = std::clamp((logCentre_[b] - lo) * 2.0 + 1.0, 0.0, 1.0) * std::clamp((hi - logCentre_[b]) * 2.0 + 1.0, 0.0, 1.0);
+            for (int s = 0; s < sides; ++s) {
+                double d = 0.0;
+                if (w > 0.0 && scale > 0.0) {
+                    const double over = lib::gainToDb(an_.env(s, b), -200.0) - thr;  // the key's band above Threshold
+                    d = over <= 0.0 ? 0.0 : -scale * std::min(over, 30.0) * w;
+                }
+                want[s][b] = d;
+            }
+        }
+        for (int s = 0; s < sides; ++s) holdToRange(want[s], range);
+        for (uint32_t b = 0; b < count_; ++b) {
             double db[2] = {0.0, 0.0};
-            for (int s = 0; w > 0.0 && scale > 0.0 && s < sides; ++s) {
-                const double over = lib::gainToDb(an_.env(s, b), -200.0) - thr;  // the key's band above Threshold
-                double d = over <= 0.0 ? 0.0 : -scale * std::min(over, 30.0) * w;
-                d = d > -0.05 ? 0.0 : std::floor(d * 20.0 + 0.5) * 0.05;  // 0.05 dB steps: few coefficient updates
-                db[s] = d;
+            for (int s = 0; s < sides; ++s) {
+                const double d = want[s][b];
+                db[s] = d > -0.05 ? 0.0 : std::floor(d * 20.0 + 0.5) * 0.05;  // 0.05 dB steps: few coefficient updates
             }
             if (sides == 1) db[1] = db[0];
             for (int s = 0; s < 2; ++s) dip_[s][b] = static_cast<float>(db[s]);
@@ -354,9 +366,72 @@ protected:
     }
 
 private:
+    // The bells' coupling: bell j's dB response at band i's centre per dB of its own dip, worked out exactly (the
+    // SVF bell is the bilinear image of the analogue one, so at the warped frequency its response is the analogue
+    // H(jW) = 1 + (A^2 - 1) k jW / (1 - W^2 + jkW)) at dips of kRefDb, between which control() interpolates.
+    static constexpr int kRefs = 4;
+    static constexpr double kRefDb[kRefs] = {3.0, 6.0, 12.0, 24.0};
+    void setupCoupling() noexcept {
+        const double top = 0.49 * sr_;
+        double warped[kMaxBands];
+        for (uint32_t b = 0; b < count_; ++b) {
+            const double fc = bands::centre(b, count_, kLowest, kHighest);
+            warped[b] = std::tan(bands::kPi * (fc > top ? top : fc) / sr_);
+        }
+        for (int r = 0; r < kRefs; ++r) {
+            const double a = lib::dbToGain(-0.5 * kRefDb[r]), k = 1.0 / (kBellQ * a), m = (a * a - 1.0) * k;
+            for (uint32_t j = 0; j < kMaxBands; ++j)
+                for (uint32_t i = 0; i < kMaxBands; ++i) {
+                    if (i >= count_ || j >= count_) {  // past the count: 0, so the sums run the full width
+                        coupling_[r][j][i] = 0.0f;
+                        continue;
+                    }
+                    const double w = warped[i] / warped[j];
+                    // H = 1 + m jw / ((1 - w^2) + jkw) = ((1 - w^2) + j(k + m)w) / ((1 - w^2) + jkw)
+                    const double re = 1.0 - w * w, num = re * re + (k + m) * (k + m) * w * w, den = re * re + k * k * w * w;
+                    coupling_[r][j][i] = static_cast<float>(-10.0 * std::log10(num / den) / kRefDb[r]);
+                }
+        }
+    }
+    // Scales the wanted dips (dB, 0 or less) down so that no band's summed dip passes Range: each pass works out
+    // every band's sum, and a band over Range scales itself and its two neighbours on each side (their bells carry
+    // most of what it hears) by Range over its sum; a few passes settle what the far bells add.
+    void holdToRange(double* d, double range) const noexcept {
+        for (int pass = 0; pass < 4; ++pass) {
+            float sum[kMaxBands] = {};
+            bool any = false;
+            for (uint32_t j = 0; j < count_; ++j) {
+                const double x = -d[j];
+                if (x <= 0.0) continue;
+                any = true;
+                int r = 0;
+                while (r < kRefs - 2 && x > kRefDb[r + 1]) ++r;
+                const double t = std::clamp((x - kRefDb[r]) / (kRefDb[r + 1] - kRefDb[r]), 0.0, 1.0);
+                const float* c0 = coupling_[r][j];
+                const float* c1 = coupling_[r + 1][j];
+                const float w0 = static_cast<float>((1.0 - t) * d[j]), w1 = static_cast<float>(t * d[j]);
+                for (uint32_t i = 0; i < kMaxBands; ++i) sum[i] += c0[i] * w0 + c1[i] * w1;  // the rows' tails are 0
+            }
+            if (!any) return;
+            double f[kMaxBands];
+            bool over = false;
+            for (uint32_t i = 0; i < count_; ++i) {
+                f[i] = sum[i] < -range ? -range / sum[i] : 1.0;
+                over = over || f[i] < 1.0;
+            }
+            if (!over) return;
+            for (uint32_t j = 0; j < count_; ++j) {
+                double m = 1.0;
+                for (uint32_t i = j < 2 ? 0 : j - 2; i < count_ && i <= j + 2; ++i) m = f[i] < m ? f[i] : m;
+                d[j] *= m;
+            }
+        }
+    }
+
     const ModuleDescriptor& d_;
     bands::Analyzer<kMaxBands> an_;
     bands::BellCascade<kMaxBands> bells_;
+    float coupling_[kRefs][kMaxBands][kMaxBands] = {};
     double logCentre_[kMaxBands] = {};
     float dip_[2][kMaxBands] = {};
     uint32_t count_ = 0;

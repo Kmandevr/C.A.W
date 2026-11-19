@@ -268,6 +268,7 @@ public:
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         det_.prepare(sampleRate);
+        read_ = true;
         relFast_ = lib::timeCoefficient(0.1, sampleRate);
         attSlow_ = lib::timeCoefficient(0.3, sampleRate);
         relSlow_ = lib::timeCoefficient(1.2, sampleRate);
@@ -285,6 +286,19 @@ protected:
     }
 
     void control(uint32_t at) noexcept override {
+        // The knobs are read again only when one moved (or the rate did): a held block costs a compare. The ramps
+        // and the trackers' resync run at every grid point either way.
+        const bool same = knobsUnchanged(knobs_, kBCount, at);
+        if (!same || read_ || rate() != rateFor_) readKnobs(at);
+        read_ = false;
+        makeupRamp_.set(makeupGain_, kControlFrames);
+        mix_.set(mixTo_, kControlFrames);
+        track_[0].resync();  // at each grid point (the same frames at any block size)
+        track_[1].resync();
+        out_.set(outGain_, kControlFrames);
+    }
+
+    void readKnobs(uint32_t at) noexcept {
         const double sr = rate();
         thr_ = param(kBThreshold, at);
         ratio_ = kBusRatioValues[std::clamp(choice(kBRatio, at), 0, 3)];
@@ -301,19 +315,15 @@ protected:
         double makeup = param(kBMakeup, at);
         if (on(kBAutoMakeup, at)) makeup -= 0.5 * lib::compressorGainDb(0.0, thr_, ratio_, knee_);
         if (makeup != makeupDb_) makeupDb_ = makeup, makeupGain_ = lib::dbToGain(makeup);
-        makeupRamp_.set(makeupGain_, kControlFrames);
         detect_ = std::clamp(choice(kBDetect, at), 0, 2);
         link_ = std::clamp(param(kBLink, at), 0.0, 1.0);
         key_.set(param(kBScHpf, at), param(kBScLpf, at), sr);
         listen_ = on(kBListen, at);
         external_ = choice(kBSidechain, at) == 1;
         warm_ = choice(kBCharacter, at) == 1;
-        mix_.set(std::clamp(param(kBMix, at), 0.0, 1.0), kControlFrames);
-        track_[0].resync();  // at each grid point (the same frames at any block size)
-        track_[1].resync();
+        mixTo_ = std::clamp(param(kBMix, at), 0.0, 1.0);
         const double o = param(kBOutput, at);
         if (o != outDb_) outDb_ = o, outGain_ = lib::dbToGain(o);
-        out_.set(outGain_, kControlFrames);
         kneeLow_ = thr_ - 0.5 * knee_ - 0.01;  // at or under this the curve is exactly 0 dB
         quietBelow_ = lib::dbToGain(kneeLow_);  // the gain change is never above 0 dB, so under it: no log
     }
@@ -391,23 +401,42 @@ protected:
             gain_[1] = gain_[0], fast_[1] = fast_[0], slow_[1] = slow_[0], prevDb_[1] = prevDb_[0];
             for (uint32_t i = 0; i < n; ++i) gr[1][i] = gr[0][i];
         }
+        // The gains first (the trackers' serial steps, and the meters), then the output in a loop with no mode tests
+        // when Listen and Warm are off (the common case), so it vectorises. The same values in the same order.
+        double gl[kControlFrames], gg[kControlFrames];
+        double grMax = grMax_;
+        dyn::GainTracker t0 = track_[0], t1 = track_[1];
         for (uint32_t i = 0; i < n; ++i) {
             const double rl = gr[0][i], rr = gr[1][i];
             const double g = rl < rr ? rl : rr;
-            grNow_ = g;
-            grMax_ = g < grMax_ ? g : grMax_;
-            gainOf_[0] = track_[0].step(rl);
-            gainOf_[1] = one ? gainOf_[0] : track_[1].step(rr);
-            const double mk = makeupRamp_.next(), m = mix_.next(), o = out_.next();
-            if (listen_) {
-                outL[i] = static_cast<float>(sc[0][i]), outR[i] = static_cast<float>(sc[1][i]);
-                continue;
+            grMax = g < grMax ? g : grMax;
+            gl[i] = t0.step(rl);
+            gg[i] = one ? gl[i] : t1.step(rr);
+        }
+        track_[0] = t0, track_[1] = t1;
+        if (n > 0) {
+            grNow_ = gr[0][n - 1] < gr[1][n - 1] ? gr[0][n - 1] : gr[1][n - 1];
+            gainOf_[0] = gl[n - 1], gainOf_[1] = gg[n - 1];
+        }
+        grMax_ = grMax;
+        double mk[kControlFrames], m[kControlFrames], o[kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) mk[i] = makeupRamp_.next(), m[i] = mix_.next(), o[i] = out_.next();
+        if (listen_) {
+            for (uint32_t i = 0; i < n; ++i) outL[i] = static_cast<float>(sc[0][i]), outR[i] = static_cast<float>(sc[1][i]);
+        } else if (warm_) {
+            for (uint32_t i = 0; i < n; ++i) {
+                const double xl = inL[i], xr = inR[i];
+                const double wl = dyn::warm(xl * gl[i] * mk[i]), wr = dyn::warm(xr * gg[i] * mk[i]);
+                outL[i] = static_cast<float>(o[i] * (xl + (wl - xl) * m[i]));
+                outR[i] = static_cast<float>(o[i] * (xr + (wr - xr) * m[i]));
             }
-            const double xl = inL[i], xr = inR[i];
-            double wl = xl * gainOf_[0] * mk, wr = xr * gainOf_[1] * mk;
-            if (warm_) wl = dyn::warm(wl), wr = dyn::warm(wr);
-            outL[i] = static_cast<float>(o * (xl + (wl - xl) * m));
-            outR[i] = static_cast<float>(o * (xr + (wr - xr) * m));
+        } else {
+            for (uint32_t i = 0; i < n; ++i) {
+                const double xl = inL[i], xr = inR[i];
+                const double wl = xl * gl[i] * mk[i], wr = xr * gg[i] * mk[i];
+                outL[i] = static_cast<float>(o[i] * (xl + (wl - xl) * m[i]));
+                outR[i] = static_cast<float>(o[i] * (xr + (wr - xr) * m[i]));
+            }
         }
     }
 
@@ -444,6 +473,8 @@ private:
     int detect_ = 0;
     bool auto_ = true, listen_ = false, external_ = false, warm_ = false;
     double grNow_ = 0, grMax_ = 0, levelMax_ = 0;
+    double knobs_[kBCount] = {}, mixTo_ = 1;
+    bool read_ = true;  // read the knobs at the next control() whatever they are
 };
 
 const ModuleDescriptor& upBase() {

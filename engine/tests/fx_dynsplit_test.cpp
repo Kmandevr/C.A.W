@@ -521,6 +521,29 @@ TEST(ducks_carve_dips_the_keys_bands_only_inside_its_window) {
     CHECK(sameBits(run(*p, in, &silent, v), in));
 }
 
+TEST(ducks_carve_never_dips_a_band_more_than_range_when_the_key_spans_its_neighbours) {
+    // The key: a tone on every band's centre, all far over Threshold, so each band asks for the full Range. The
+    // bells overlap, so without a clamp a band's neighbours add to its own dip (about 14 dB at Range 9).
+    const size_t n = 48000;
+    for (const double bands : {0.0, 1.0}) {
+        const uint32_t count = bands == 1.0 ? 24 : 16;
+        Stereo key = sine(40, 0.0, n);
+        for (uint32_t b = 0; b < count; ++b) key = add(key, sine(40.0 * std::pow(400.0, b / (count - 1.0)), 0.05, n));
+        for (const double range : {3.0, 9.0, 18.0}) {
+            const Values v = {{"variant", 2}, {"amount", 1}, {"range", range}, {"threshold", -80}, {"bands", bands},
+                              {"low", 20}, {"high", 20000}};
+            for (const uint32_t b : {count / 4, count / 2, count - 4}) {
+                const double hz = 40.0 * std::pow(400.0, b / (count - 1.0)) * (b == count / 2 ? 1.0 : 1.09);
+                const Stereo in = sine(hz, 0.1, n);
+                auto p = make(kDuck, v);
+                const double dip = db(tone(run(*p, in, &key, v).l, hz, 24000, n) / tone(in.l, hz, 24000, n));
+                CHECK(dip > -(range + 0.3));  // never past Range
+                CHECK(dip < -0.6 * range);    // but still about Range
+            }
+        }
+    }
+}
+
 TEST(the_new_variants_report_the_latency_they_have) {
     // Up's look-ahead (5 ms) and Level's (100 ms): the chain's reported latency is the impulse's delay.
     struct Case {
