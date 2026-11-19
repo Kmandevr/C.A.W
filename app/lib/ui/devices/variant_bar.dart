@@ -9,6 +9,7 @@ import '../arrange/long_press_menu.dart';
 import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import 'effects/dyn_drive/catalog.dart' show dynDriveCardDevices; // fam-dyn
 
 /// Shown for a merged device with more than one variant (Drive, Delay...): picking another is one undo step that
 /// resets the knobs the new variant doesn't share ([VariantEdit.setDeviceVariant]). `variant` is set here only: it
@@ -26,6 +27,7 @@ class VariantBar extends StatelessWidget {
     if (base == null || info == null || base.variants.length < 2 || !MergedDevices.isMerged(id!)) {
       return const SizedBox.shrink();
     }
+    if (dynDriveCardDevices.contains(id)) return const SizedBox.shrink();  // fam-dyn: its page shows variant cards
     final names = _names(base.variants.length, base.param(variantParam)?.choices ?? const []);
     final current = _current(t, base.variants.length);
     return SizedBox(height: 40, child: SingleChildScrollView(

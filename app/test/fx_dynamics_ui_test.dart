@@ -110,22 +110,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     }
 
-    testWidgets('dynamics: a handle moves its threshold sideways and its ratio up and down', (tester) async {
-      final s = await open(tester, 'org.caw.dynamics');
-      final t = targetOf(s, 'org.caw.dynamics');
-      final hero = tester.getRect(find.byKey(const ValueKey('dyn-hero')));
-      // The high handle sits at -12 dB in: near the top right of the plot.
-      final plotW = hero.width - 32;
-      final at = Offset(hero.left + 10 + (60 / 72) * plotW, hero.top + 40);
-      await tester.dragFrom(at, const Offset(-30, -40));
-      await tester.pumpAndSettle();
-      expect(t.value('high_threshold'), lessThan(-12));
-      expect(t.value('high_ratio'), lessThan(2), reason: 'up: more output above the threshold');
-      await tester.dragFrom(Offset(hero.left + 10 + (32 / 72) * plotW, hero.bottom - 60), const Offset(0, -40));
-      await tester.pumpAndSettle();
-      expect(t.value('low_ratio'), greaterThan(1), reason: 'up: quiet sound lifted');
-      await close(tester);
-    });
+    // The Dynamics, Clip and Phase variants' pages (Compressor and Drive, 1.0.8) and their drags: dyn_drive_ui_test.dart.
 
     testWidgets('multiband: a crossover drags sideways, a band threshold up and down, and OTT is a tile', (tester) async {
       final s = await open(tester, 'org.caw.multiband');
@@ -159,33 +144,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('mode-mode-1')));
       await tester.pumpAndSettle();
       expect(t.value('mode'), 1);
-      await close(tester);
-    });
-
-    testWidgets('clipper: up drives harder, the ceiling line drags, clip to 0 dB hides the ceiling knob', (tester) async {
-      final s = await open(tester, 'org.caw.clipper');
-      final t = targetOf(s, 'org.caw.clipper');
-      final hero = tester.getRect(find.byKey(const ValueKey('clip-hero')));
-      await tester.dragFrom(Offset(hero.center.dx, hero.center.dy + 30), const Offset(30, -50));
-      await tester.pumpAndSettle();
-      expect(t.value('drive'), greaterThan(0));
-      expect(t.value('softness'), greaterThan(0.5));
-      expect(find.byKey(const ValueKey('dknob-ceiling')), findsOneWidget);
-      await tester.ensureVisible(find.byKey(const ValueKey('toggle-master')));
-      await tester.tap(find.byKey(const ValueKey('toggle-master')));
-      await tester.pumpAndSettle();
-      expect(t.value('master'), 1);
-      expect(find.byKey(const ValueKey('dknob-ceiling')), findsNothing);
-      await close(tester);
-    });
-
-    testWidgets('phase distortion: up adds drive, sideways bias', (tester) async {
-      final s = await open(tester, 'org.caw.phasedist');
-      final t = targetOf(s, 'org.caw.phasedist');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('pd-hero'))), const Offset(40, -40));
-      await tester.pumpAndSettle();
-      expect(t.value('drive'), greaterThan(0.4));
-      expect(t.value('bias'), greaterThan(0));
       await close(tester);
     });
 

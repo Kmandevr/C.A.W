@@ -173,16 +173,7 @@ void main() {
     await close(tester);
   });
 
-  testWidgets('bitcrush: up adds bits, sideways raises the rate', (tester) async {
-    final s = await open(tester, 'org.caw.bitcrush');
-    final t = targetOf(s, 'org.caw.bitcrush');
-    final r = hero(tester, 'bitcrush-hero');
-    await tester.dragFrom(r.center, const Offset(60, -40));
-    await tester.pumpAndSettle();
-    expect(t.value('bits'), greaterThan(9));
-    expect(t.value('rate'), greaterThan(8000));
-    await close(tester);
-  });
+  // Bit distortion's page (org.caw.bits, 1.0.8) and its drags: dyn_drive_ui_test.dart.
 
   testWidgets('ring mod: sideways moves the frequency, up the bias; a tile picks the carrier', (tester) async {
     final s = await open(tester, 'org.caw.ringmod');

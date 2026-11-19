@@ -285,15 +285,7 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('gate: dragging away from the centre raises the threshold', (tester) async {
-      final s = await open(tester, 'org.caw.gate');
-      final t = targetOf(s, 'org.caw.gate');
-      final hero = tester.getRect(find.byKey(const ValueKey('gate-hero')));
-      await tester.dragFrom(Offset(hero.center.dx, hero.top + 50), const Offset(0, -30));
-      await tester.pumpAndSettle();
-      expect(t.value('threshold'), greaterThan(-40));
-      await close(tester);
-    });
+    // The Compressor's Gate variant and its drags: dyn_drive_ui_test.dart.
 
     testWidgets('transient shaper: the left of the envelope is attack, the right sustain', (tester) async {
       final s = await open(tester, 'org.caw.transient');

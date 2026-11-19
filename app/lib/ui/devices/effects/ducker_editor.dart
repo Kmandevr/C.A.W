@@ -52,7 +52,7 @@ class DuckerPage extends StatelessWidget {
     final t = scope.target;
     final mode = t.value('mode').round();
     return effectPage('ducker', [
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles('mode', icon: _modeIcon, height: 50)),
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles('mode', icon: duckModeIcon, height: 50)),
       HeroWithMeters(height: 200, hero: HeroCanvas(
         color: scope.accent,
         height: 200,
@@ -62,15 +62,15 @@ class DuckerPage extends StatelessWidget {
           final gr = f?.values['gr'] ?? 0;
           return Text(f == null ? '' : 'GR −${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.pink));
         }),
-        child: const _DuckHero(),
+        child: const DuckShapeHero(),
       )),
-      watchDevice(context, (_) => const _ShapeChips()), // its own watch (param_watch.dart)
+      watchDevice(context, (_) => const DuckShapeChips()), // its own watch (param_watch.dart)
       const KnobRow(['depth', 'attack', 'hold', 'release', 'tension', 'mix'], size: 48,
         labels: {'tension': 'Curve'}),
       switch (mode) {
         0 => ControlGroup(title: 'KEY · AUDIO', color: scope.secondary, child: Column(children: [
             const KnobRow(['threshold', 'key_hpf', 'key_lpf'], size: 44, labels: {'key_hpf': 'HPF', 'key_lpf': 'LPF'}),
-            const Padding(padding: EdgeInsets.only(top: 4), child: ModeTiles('response', icon: _responseIcon, height: 44)),
+            const Padding(padding: EdgeInsets.only(top: 4), child: ModeTiles('response', icon: duckResponseIcon, height: 44)),
             Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: const [
               DeviceToggle('listen', label: 'Key listen', icon: Icons.hearing),
             ])),
@@ -88,7 +88,7 @@ class DuckerPage extends StatelessWidget {
 void _curve01(Canvas canvas, Rect r, Color c, double Function(double x) f, {double width = 1.8}) =>
     iconCurve(canvas, r, c, (x) => f((x + 1) / 2) * 2 - 1, width: width);
 
-void _modeIcon(Canvas canvas, Rect r, int i, Color c) {
+void duckModeIcon(Canvas canvas, Rect r, int i, Color c) {
   final p = Paint()
     ..color = c
     ..style = PaintingStyle.stroke
@@ -108,13 +108,13 @@ void _modeIcon(Canvas canvas, Rect r, int i, Color c) {
   }
 }
 
-void _responseIcon(Canvas canvas, Rect r, int i, Color c) => i == 0
+void duckResponseIcon(Canvas canvas, Rect r, int i, Color c) => i == 0
     ? _curve01(canvas, r, c, (x) => 1 - duckAt(x * 300, 5, 20, 200, 0.5) * 0.9)
     : _curve01(canvas, r, c, (x) => 0.5 + 0.4 * math.sin(x * 9) * (1 - x));
 
-/// One-tap duck shapes: Pump, Quick, Smooth, Gate (the trigger is left as it is).
-class _ShapeChips extends StatelessWidget {
-  const _ShapeChips();
+/// One-tap duck shapes (the Compressor's Shape page shows them too): Pump, Quick, Smooth, Gate (the trigger is left as it is).
+class DuckShapeChips extends StatelessWidget {
+  const DuckShapeChips({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -177,14 +177,14 @@ enum _Handle { attack, hold, release, depth, tension }
 /// attack's end, the hold's end and the release's end (sideways for their times), the floor (up and down for the
 /// depth) and the middle of the release (up and down for its curve). The playhead rides the curve where the engine
 /// is; the gain reduction it applied lately scrolls behind in pink.
-class _DuckHero extends StatefulWidget {
-  const _DuckHero();
+class DuckShapeHero extends StatefulWidget {
+  const DuckShapeHero({super.key});
 
   @override
-  State<_DuckHero> createState() => _DuckHeroState();
+  State<DuckShapeHero> createState() => _DuckShapeHeroState();
 }
 
-class _DuckHeroState extends State<_DuckHero> {
+class _DuckShapeHeroState extends State<DuckShapeHero> {
   _Handle? _grab;
   double _start = 0;
 

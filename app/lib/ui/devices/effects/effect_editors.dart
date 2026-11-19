@@ -6,6 +6,7 @@ import '../../../model/merged_devices.dart';
 import '../device_registry.dart';
 import '../kit/device_style.dart';
 import 'drive_editors.dart';
+import 'dyn_drive/catalog.dart' show dynDriveEditors; // fam-dyn
 import 'dynamics/catalog.dart' show fxDynamicsEditors; // fx-dynamics
 import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
@@ -34,6 +35,7 @@ bool _has(NativeComponentInfo i, String id) => i.parameters.any((p) => p.id == i
 /// saturation (`drive` with `type` or `shape`); null for anything else (the fallback page).
 DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
   if (info.isInstrument) return null;
+  if (dynDriveEditors[info.id] case final e?) return e;  // fam-dyn: the Dynamics and Drive devices' own pages, every variant
   if (_byId[MergedDevices.pageId(info.id, info.variantIndex)] case final e?) return e;  // a merged device: its variant's
   if (info.parameters.any((p) => _band.hasMatch(p.id)) &&
       ((_has(info, 'band1_freq') && _has(info, 'band1_gain')) || (_has(info, 'b1_freq') && _has(info, 'b1_gain')))) {
