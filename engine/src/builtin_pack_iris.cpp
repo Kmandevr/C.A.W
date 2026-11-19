@@ -20,8 +20,9 @@
 // and the latency is exactly that window, reported per setting (VariableLatency). Each frame, per side and bin:
 // - Gate: a bin under `gate` (dB of a full-scale sine's bin; at -100 off) drops by `gate_range`.
 // - Blur: each bin's magnitude follows a one-pole over up to 3 s (`blur` 0..1, exponential; 0 off), its phase kept.
-// - Freeze: turning `freeze` on captures the next frame's magnitudes (after gate and blur); the frozen layer is
-//   that spectrum times the painted curve (64 log bands 20 Hz-20 kHz, -60..+12 dB, interpolated across bins, scaled
+// - Freeze: turning `freeze` on captures the average of the next kCaptureFrames (6) frames' magnitudes (after gate
+//   and blur; each bin's frequency their magnitude-weighted mean, its phase the last frame's), so a capture is
+//   smoother than one frame's; the frozen layer is that spectrum times the painted curve (64 log bands 20 Hz-20 kHz, -60..+12 dB, interpolated across bins, scaled
 //   by `paint`) with each bin's phase advanced as its centre frequency's and dithered by `drift`, faded in over
 //   `fade` (and out again when it turns off). The painted curve and the captured spectrum are the component's state
 //   (saveState/loadState): a UI paints by writing the state; a state loaded while frozen plays without a new capture.
@@ -38,6 +39,7 @@ using clean::Bins;
 using clean::clampd;
 
 constexpr uint32_t kBands = 64;
+constexpr uint32_t kCaptureFrames = 6;  // frames a freeze averages (about 64 ms at Normal, 48 kHz)
 constexpr uint32_t kMagic = 0x53495249u;  // "IRIS"
 constexpr std::string_view kTiers[] = {"Eco", "Normal", "High"};
 
@@ -193,6 +195,8 @@ protected:
                 for (auto* v : {&ps_[c], &rs_[c], &bs_[c]}) v->assign(maxBins_, 0.0f);
                 freq_[c].assign(maxBins_, 0.0f);
                 pendingFreq_[c].assign(maxBins_, 0.0f);
+                accM_[c].assign(maxBins_, 0.0f);
+                accF_[c].assign(maxBins_, 0.0f);
             }
             paintGain_.assign(maxBins_, 1.0f);
             for (auto& d : dry_) d.assign(maxBins_, 0.0);
@@ -227,6 +231,7 @@ protected:
         wasFrozen_ = false;
         skipCapture_ = captured_;  // a reset keeps a frozen spectrum (it is state): the freeze plays it again
         capture_ = false;
+        gathered_ = 0;
         quarter_ = 0;
         rng_ = 0x2545F491u;
         first_ = true;
@@ -299,7 +304,7 @@ private:
         // Freeze: a capture on the rising edge (unless a loaded or kept spectrum waits), then the fade.
         if (freeze_ && !wasFrozen_) {
             if (skipCapture_ && captured_) skipCapture_ = false;
-            else capture_ = true;
+            else capture_ = true, gathered_ = 0;
         }
         wasFrozen_ = freeze_;
         double* re[2] = {b.lr, b.rr};
@@ -340,15 +345,17 @@ private:
                     loudest = std::max(loudest, re[c][k] * re[c][k] + im[c][k] * im[c][k]);
                     before = std::max(before, prev_[2 * c][k] * prev_[2 * c][k] + prev_[2 * c + 1][k] * prev_[2 * c + 1][k]);
                 }
+        // Each such frame adds to the average (a new window starts it again); the last one completes the capture.
+        if (capture_ && gathered_ > 0 && gatherN_ != b.n) gathered_ = 0;
+        bool done = false;
         if (capture_ && std::min(loudest, before) > ref * ref * 1e-8) {
-            capture_ = false;
-            agen_.fetch_add(1, std::memory_order_acq_rel);
+            if (gathered_ == 0)
+                for (int c = 0; c < 2; ++c)
+                    std::fill_n(accM_[c].data(), count, 0.0f), std::fill_n(accF_[c].data(), count, 0.0f);
+            gatherN_ = b.n;
             for (int c = 0; c < 2; ++c)
                 for (uint32_t k = 0; k < count; ++k) {
                     const double mag = std::sqrt(re[c][k] * re[c][k] + im[c][k] * im[c][k]);
-                    frozen_[c][k] = static_cast<float>(mag);
-                    pc_[c][k] = mag > 0.0 ? static_cast<float>(re[c][k] / mag) : 1.0f;
-                    ps_[c][k] = mag > 0.0 ? static_cast<float>(im[c][k] / mag) : 0.0f;
                     // The bin's frequency from its phase advance over the hop (a phase vocoder's), in bins.
                     const double* pr = prev_[2 * c].data();
                     const double* pi = prev_[2 * c + 1].data();
@@ -360,7 +367,23 @@ private:
                         dev = std::atan2(ai, ar) - 0.5 * kPi * (k & 3u);
                         dev -= kTwoPi * std::floor((dev + kPi) / kTwoPi);
                     }
-                    freq_[c][k] = static_cast<float>(k + dev * 2.0 / kPi);
+                    accM_[c][k] += static_cast<float>(mag);
+                    accF_[c][k] += static_cast<float>(mag * (k + dev * 2.0 / kPi));
+                }
+            done = ++gathered_ >= kCaptureFrames;
+        }
+        if (done) {
+            capture_ = false;
+            gathered_ = 0;
+            agen_.fetch_add(1, std::memory_order_acq_rel);
+            constexpr float inv = 1.0f / kCaptureFrames;
+            for (int c = 0; c < 2; ++c)
+                for (uint32_t k = 0; k < count; ++k) {
+                    const double mag = std::sqrt(re[c][k] * re[c][k] + im[c][k] * im[c][k]);
+                    frozen_[c][k] = accM_[c][k] * inv;
+                    pc_[c][k] = mag > 0.0 ? static_cast<float>(re[c][k] / mag) : 1.0f;
+                    ps_[c][k] = mag > 0.0 ? static_cast<float>(im[c][k] / mag) : 0.0f;
+                    freq_[c][k] = accM_[c][k] > 0.0f ? accF_[c][k] / accM_[c][k] : static_cast<float>(k);
                 }
             updateRotation(count);
             captured_ = true;
@@ -539,7 +562,7 @@ private:
     }
 
     clean::Stft stft_;
-    std::vector<float> frozen_[2], pending_[2], freq_[2], pendingFreq_[2], blur_[2], pc_[2], ps_[2], rc_[2], rs_[2];
+    std::vector<float> frozen_[2], pending_[2], freq_[2], accM_[2], accF_[2], pendingFreq_[2], blur_[2], pc_[2], ps_[2], rc_[2], rs_[2];
     std::vector<float> bc_[2], bs_[2], paintGain_, pos_[3];
     std::vector<uint8_t> band_[3];
     std::vector<double> tmp_;
@@ -551,7 +574,7 @@ private:
     double liveMax_[kBands] = {};
     std::atomic<uint32_t> gen_{0}, agen_{0};
     std::atomic<bool> savedCaptured_{false};
-    uint32_t seen_ = 0, pendingBins_ = 0, pendingN_ = 0, savedBins_ = 0, savedN_ = 0;
+    uint32_t gathered_ = 0, gatherN_ = 0, seen_ = 0, pendingBins_ = 0, pendingN_ = 0, savedBins_ = 0, savedN_ = 0;
     uint32_t maxN_ = 4096, maxBins_ = 2049, n_ = 0, rng_ = 0x2545F491u;
     int tier_ = 1, shiftBins_ = 0, quarter_ = 0;
     double fz_ = 0, fadeStep_ = 0.05, paintAmt_ = 1, paintFor_ = -1, blurTime_ = 0, gateDb_ = -100, gate2_ = 0;
@@ -573,9 +596,9 @@ void registerIris(ModuleRegistry& registry) {
 }
 size_t irisBytes(double sr) noexcept {
     const size_t n = clean::maxWindow(sr), bins = n / 2 + 1;
-    // The STFT (4 float rings, 2 double frames, 4 double half-spectra), 10 float bin arrays, the bin tables (3
+    // The STFT (4 float rings, 2 double frames, 4 double half-spectra), 14 float bin arrays, the bin tables (3
     // tiers) and the shift's scratch.
-    return sizeof(Iris) + 16 * n + 16 * n + 32 * bins + 40 * bins + 5 * (bins / 4 + bins / 2 + bins) + 16 * bins;
+    return sizeof(Iris) + 16 * n + 16 * n + 32 * bins + 56 * bins + 5 * (bins / 4 + bins / 2 + bins) + 16 * bins;
 }
 
 const std::vector<BuiltinPreset>& irisPresets() {
