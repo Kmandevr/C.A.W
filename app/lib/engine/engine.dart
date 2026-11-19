@@ -657,6 +657,10 @@ class Engine implements TempoEngine {
   /// knob moves and bypass reach every slot, the display shows the newest note's slot.
   static const int noteComponentFlag = 0x40000000;
 
+  /// A component index with this bit names one of the layer's MIDI effects (CAW_MIDI_COMPONENT, API 40): its
+  /// "midiComponents", run on the notes before the instrument.
+  static const int midiComponentFlag = 0x20000000;
+
   /// What a layer's per-note FX slots are doing now (CawNoteFxStats), or null (none there, or the engine is busy).
   /// Cheap and never blocks: the voice-budget chip polls it.
   NoteFxStats? noteFxStats(String layerId) {

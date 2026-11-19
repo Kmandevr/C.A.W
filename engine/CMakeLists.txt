@@ -291,6 +291,7 @@ target_include_directories(caw_cli PRIVATE src)
   # fx-filters begin
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   target_sources(caw_tests PRIVATE tests/note_fx_test.cpp)  # per-note FX (#127): slots, overflow, tails, parity
+  target_sources(caw_tests PRIVATE tests/midi_fx_test.cpp)  # 1.1.0: MIDI effects before the instrument
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/fx_merged_test.cpp)  # FX consolidation: merged devices, migration, optional ports
@@ -413,6 +414,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
+  target_sources(caw_rt_tests PRIVATE tests/midi_fx_rt_test.cpp)  # 1.1.0: MIDI effects
   target_sources(caw_rt_tests PRIVATE tests/sample_preview_rt_test.cpp)  # #229: the sample preview
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_sources(caw_rt_tests PRIVATE tests/component_bench_rt_test.cpp)  # #197: the plug-in benchmark's allocation check
@@ -442,7 +444,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -451,6 +453,11 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_patch_bench PRIVATE src)
   target_link_libraries(caw_patch_bench PRIVATE caw_core)
+  # 1.1.0's tools (MIDI effects, Meters, Lo-fi, Phase align) against their cost ceilings: a Release build only (a
+  # Debug or sanitized one is slower by design).
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_test(NAME caw_tools_cost COMMAND caw_bench 0.5 301)
+  endif()
 endif()
 
 # The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no

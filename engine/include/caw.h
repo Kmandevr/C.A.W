@@ -165,13 +165,22 @@ extern "C" {
    from 0 dB at each Play); caw_engine_set_component_auto_gain turns it on or off while playing and
    caw_engine_component_auto_gain reads the trim. caw_engine_component_meter reads and resets an effect's output
    peaks and its clip flag (CawSlotMeter). The Compressor (org.caw.compressor) gains a fifth variant, "Duck" (4).
-   Nothing else changes. */
-#define CAW_API_VERSION 39
+   Nothing else changes.
+   40 (2026-11-19, 1.1.0): MIDI effects. A layer's optional "midiComponents" (absent: none, so older projects play as
+   before): at most 16 event processors (one event input, one event output: org.caw.midi.arp, .chords, .scale, .echo,
+   .humanize, or a loaded one) run in order on the layer's notes before its instrument hears them. Component index
+   CAW_MIDI_COMPONENT | k addresses MIDI effect k in caw_engine_set_component_param, _bypass, _display, _states and
+   _set_component_state; automation lanes "target_type":"midiComponent" with "component" k. New devices
+   org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md). */
+#define CAW_API_VERSION 40
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
    "noteComponents" (per-note FX, #127). */
 #define CAW_NOTE_COMPONENT 0x40000000u
+/* A component index with this bit (API version 40) names MIDI effect (index & ~CAW_MIDI_COMPONENT) of the layer's
+   "midiComponents". */
+#define CAW_MIDI_COMPONENT 0x20000000u
 
 typedef struct CawEngine CawEngine;
 

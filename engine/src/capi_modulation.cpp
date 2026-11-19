@@ -59,3 +59,4 @@ int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, CawNoteFxSt
     return 0;
 }
 static_assert(caw::Engine::kNoteComponentFlag == CAW_NOTE_COMPONENT, "the per-note component bit");
+static_assert(caw::Engine::kMidiComponentFlag == CAW_MIDI_COMPONENT, "the MIDI effect bit");
