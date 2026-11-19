@@ -256,7 +256,10 @@ String scenarioNumbers(ScenarioResult s) {
       '${s.live ? '${s.dropouts} dropouts' : '${s.overBudget} callbacks ran out of time'} in '
       '${s.callbacks} callbacks of ${s.frames} frames '
       '(${(s.meanUs / 1000).toStringAsFixed(2)} ms mean, ${(s.p99Us / 1000).toStringAsFixed(2)} ms p99, '
-      '${(s.budgetUs / 1000).toStringAsFixed(2)} ms budget).';
+      '${(s.budgetUs / 1000).toStringAsFixed(2)} ms budget).'
+      '${s.clockShare == null ? '' : '\nIts core ran at ${(100 * s.clockShare!).round()}% of its top clock: at the top '
+          'clock about ${s.scaledToTopClock(s.p99Pct)!.round()}% at the 99th percentile.'}'
+      '${s.spikes > 0 ? '\n${s.spikes} one-off ${s.spikes == 1 ? 'spike' : 'spikes'} (over twice the 99th percentile).' : ''}';
 }
 
 /// Grows and shrinks to its child through the motion tokens; at Reduced or Off it snaps (an AnimatedSize with no
