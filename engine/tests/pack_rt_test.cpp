@@ -16,6 +16,7 @@ TEST(the_pack_devices_never_allocate_on_the_audio_thread) {
         {"org.caw.pack.granular", {{"spray", 50}, {"spread", 7}}},
         {"org.caw.pack.glitch", {{"chaos", 0.8}}},
         {"org.caw.pack.warp", {{"depth", 200}}},
+        {"org.caw.pack.spectral", {{"blur", 0.3}}},
     };
     ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalLayer("t", cawtest::Shape::Saw, {{"freq", 110}})});
     for (const auto& [id, params] : devices) {
@@ -44,6 +45,10 @@ TEST(the_pack_devices_never_allocate_on_the_audio_thread) {
         e.setComponentParam("t", 2, "mode", round % 2);
         e.setComponentParam("t", 2, "p3", -1.0 + 0.4 * round);
         e.setComponentParam("t", 2, "cycle", round % 5);
+        e.setComponentParam("t", 3, "freeze", round % 2);
+        e.setComponentParam("t", 3, "quality", round % 3);
+        e.setComponentParam("t", 3, "shift", -200.0 + 100 * round);
+        e.setComponentParam("t", 3, "gate", round == 4 ? -40 : -100);
         cawtest::AllocationScope scope;
         for (int k = 0; k < 60; ++k) {
             e.process(left.data(), right.data(), 192);

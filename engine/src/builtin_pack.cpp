@@ -11,6 +11,7 @@ void registerPack(ModuleRegistry& registry) {
     registerMurmur(registry);
     registerPeck(registry);
     registerBend(registry);
+    registerIris(registry);
 }
 
 std::string_view packOf(std::string_view id) noexcept {
@@ -24,6 +25,7 @@ const std::vector<BuiltinPreset>* packPresets(std::string_view id) {
     if (id == "org.caw.pack.granular") return &murmurPresets();
     if (id == "org.caw.pack.glitch") return &peckPresets();
     if (id == "org.caw.pack.warp") return &bendPresets();
+    if (id == "org.caw.pack.spectral") return &irisPresets();
     return nullptr;
 }
 

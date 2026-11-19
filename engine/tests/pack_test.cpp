@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "builtin_pack.h"
+#include "component_chain.h"
 #include "caw/library/grain.hpp"
 #include "engine.h"
 #include "fx_modes_harness.h"
@@ -23,6 +24,7 @@ namespace {
 constexpr const char* kMurmur = "org.caw.pack.granular";
 constexpr const char* kPeck = "org.caw.pack.glitch";
 constexpr const char* kBend = "org.caw.pack.warp";
+constexpr const char* kIris = "org.caw.pack.spectral";
 
 // The error of `out` against `want` delayed by `lag`, from `from` on, in dB of `want`'s power.
 double errorDb(const Stereo& out, const Stereo& want, size_t lag, size_t from) {
@@ -79,7 +81,7 @@ void checkPackPresets(const char* id, size_t least, const Stereo& in) {
 TEST(pack_devices_are_marked_as_the_autostacc_beta_pack) {
     Engine e(48000);
     const std::string json = e.nativeComponentsJson();
-    for (const char* id : {kMurmur, kPeck, kBend}) {
+    for (const char* id : {kMurmur, kPeck, kBend, kIris}) {
         CHECK(fx::packOf(id) == "autostacc-beta");
         const size_t at = json.find(std::string("\"id\":\"") + id + "\"");
         CHECK(at != std::string::npos);
@@ -403,4 +405,166 @@ TEST(bend_matches_its_reference_renders) {
     };
     check("bend_time", {{"depth", 80}, {"cycle", 1}});
     check("bend_speed", {{"mode", 1}, {"cycle", 1}});
+}
+
+namespace {
+uint32_t irisLatency(const Values& v) {
+    auto p = make(kIris, v);
+    const auto* var = p ? dynamic_cast<const VariableLatency*>(p.get()) : nullptr;
+    if (!var) return ~0u;
+    const ModuleDescriptor& d = p->descriptor();
+    std::vector<double> values(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) {
+        values[k] = d.parameters[k].defaultValue;
+        for (const auto& [name, x] : v)
+            if (d.parameters[k].id == name) values[k] = x;
+    }
+    return var->latencyFor(values.data(), d.parameterCount);
+}
+Stereo noise(size_t n, double amp, uint32_t seed = 5) {
+    Stereo s = silence(n);
+    for (size_t i = 0; i < n; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        s.l[i] = static_cast<float>(amp * (static_cast<double>(seed >> 8) / 8388608.0 - 1.0));
+        seed = seed * 1664525u + 1013904223u;
+        s.r[i] = static_cast<float>(amp * (static_cast<double>(seed >> 8) / 8388608.0 - 1.0));
+    }
+    return s;
+}
+}  // namespace
+
+TEST(iris_with_every_stage_off_is_the_input_one_window_late) {
+    const Stereo in = music(48000);
+    const uint32_t windows[] = {1024, 2048, 4096};
+    for (int q = 0; q < 3; ++q) {
+        const Values v = {{"quality", static_cast<double>(q)}};
+        CHECK_EQ(irisLatency(v), windows[q]);
+        const Stereo out = render(kIris, v, in);
+        const double err = errorDb(out, in, windows[q], windows[q] + 100);
+        if (!(err < -90.0)) cawtest::fail(__FILE__, __LINE__, "quality " + std::to_string(q) + ": " + std::to_string(err) + " dB");
+    }
+    const ModuleDescriptor* d = registry().find(kIris);
+    CHECK(d && d->latencyFrames == 2048u);
+}
+
+TEST(iris_freezes_a_spectrum_and_holds_it_over_new_input_and_silence) {
+    const Values live = {{"fade", 20}};
+    Values frozen = live;
+    frozen.emplace_back("freeze", 1);
+    auto p = make(kIris, live);
+    if (!p) return;
+    run(*p, sine(440, 0.3, 48000), live);
+    const Stereo out = run(*p, sine(1000, 0.3, 48000), frozen);
+    const double at440 = goertzelDb(out.l, 440, 9600, 48000), at1k = goertzelDb(out.l, 1000, 9600, 48000);
+    if (!(at440 > -22.0 && at440 - at1k > 40.0)) cawtest::fail(__FILE__, __LINE__, "440 " + std::to_string(at440) + ", 1k " + std::to_string(at1k));
+    const std::vector<float> d = display(*p);
+    CHECK(d.size() == 9 + 3 * 64 && d[3] == 1.0f && d[2] == 1.0f);
+    // The frozen spectrum's loudest band is the one holding 440 Hz.
+    const size_t loud = std::max_element(d.begin() + 73, d.begin() + 137) - (d.begin() + 73);
+    const double band = 64 * std::log(440.0 / 20.0) / std::log(1000.0);
+    CHECK(std::fabs(static_cast<double>(loud) - band) <= 1.0);
+    const Stereo after = run(*p, silence(48000 * 3), frozen, 512);
+    CHECK(rms(after.l, 48000 * 2) > 0.01 && !p->quiet());
+    // Freeze off: it fades out and the input comes back.
+    const Stereo back = run(*p, sine(1000, 0.3, 48000), live);
+    CHECK(goertzelDb(back.l, 1000, 24000, 48000) - goertzelDb(back.l, 440, 24000, 48000) > 30.0);
+}
+
+TEST(iris_paints_its_frozen_spectrum_through_its_state) {
+    const Values frozen = {{"freeze", 1}, {"fade", 20}, {"drift", 0}};
+    const Values live = {{"fade", 20}, {"drift", 0}};
+    auto p = make(kIris, live);
+    if (!p) return;
+    run(*p, sine(440, 0.3, 24000), live);
+    run(*p, sine(440, 0.3, 12000), frozen);
+    std::vector<uint8_t> state(p->descriptor().maxStateBytes);
+    uint32_t written = 0;
+    CHECK(p->saveState(state.data(), static_cast<uint32_t>(state.size()), written) && written == 20 + 256 + 16 * 1025);
+    state.resize(written);
+    // A fresh instance, frozen from the state (no capture): the same 440 Hz over 1 kHz input.
+    auto q = make(kIris, frozen);
+    CHECK(q->loadState(state.data(), written, 1));
+    const Stereo plain = run(*q, sine(1000, 0.3, 48000), frozen);
+    if (!(goertzelDb(plain.l, 440, 9600, 48000) - goertzelDb(plain.l, 1000, 9600, 48000) > 40.0))
+        cawtest::fail(__FILE__, __LINE__, "loaded: 440 " + std::to_string(goertzelDb(plain.l, 440, 9600, 48000)) + ", 1k " + std::to_string(goertzelDb(plain.l, 1000, 9600, 48000)) + ", rms " + std::to_string(rms(plain.l, 9600)));
+    // Paint the bands around 440 Hz down 40 dB: the frozen tone drops by about that.
+    std::vector<uint8_t> painted = state;
+    for (int b = 26; b <= 31; ++b) {
+        const float db = -40.0f;
+        std::memcpy(painted.data() + 20 + 4 * b, &db, 4);
+    }
+    auto r = make(kIris, frozen);
+    CHECK(r->loadState(painted.data(), written, 1));
+    const Stereo dim = run(*r, sine(1000, 0.3, 48000), frozen);
+    const double drop = goertzelDb(plain.l, 440, 9600, 48000) - goertzelDb(dim.l, 440, 9600, 48000);
+    if (!(drop > 30.0 && drop < 45.0)) cawtest::fail(__FILE__, __LINE__, "painted down " + std::to_string(drop) + " dB");
+    const std::vector<float> d = display(*r);
+    CHECK(d.size() > 137 + 31 && d[137 + 28] == -40.0f);
+    // Bad states are refused: a wrong magic, a short buffer, a window that is not a power of two.
+    std::vector<uint8_t> bad = state;
+    bad[0] ^= 1;
+    CHECK(!r->loadState(bad.data(), written, 1));
+    CHECK(!r->loadState(state.data(), written - 4, 1));
+    bad = state;
+    const uint32_t odd = 2000;
+    std::memcpy(bad.data() + 12, &odd, 4);
+    CHECK(!r->loadState(bad.data(), written, 1));
+    CHECK(!r->loadState(state.data(), written, 2));
+    // A state taken at another window plays at this one (resampled by frequency).
+    auto hi = make(kIris, {{"freeze", 1}, {"fade", 20}, {"drift", 0}, {"quality", 2}});
+    CHECK(hi->loadState(state.data(), written, 1));
+    const Stereo h = run(*hi, sine(1000, 0.3, 48000), {{"freeze", 1}, {"fade", 20}, {"drift", 0}, {"quality", 2}});
+    CHECK(goertzelDb(h.l, 440, 9600, 48000) - goertzelDb(h.l, 1000, 9600, 48000) > 30.0);
+    // Nothing painted or captured: no state.
+    auto none = make(kIris, {});
+    CHECK(none->saveState(state.data(), static_cast<uint32_t>(state.size()), written) && written == 0);
+}
+
+TEST(iris_shift_gate_and_blur_do_their_jobs) {
+    // Shift +200 Hz at Normal: 9 bins of 23.4 Hz, 1 kHz to 1210.9 Hz.
+    Stereo out = render(kIris, {{"shift", 200}}, sine(1000, 0.3, 48000));
+    CHECK(goertzelDb(out.l, 1000 + 9 * 48000.0 / 2048, 9600, 48000) - goertzelDb(out.l, 1000, 9600, 48000) > 30.0);
+    CHECK(goertzelDb(out.l, 1000 + 9 * 48000.0 / 2048, 9600, 48000) > -20.0);
+    // Gate -30 dB: low noise (-50 dB) goes, a loud tone stays.
+    const Stereo quiet = noise(48000, 0.005);
+    out = render(kIris, {{"gate", -30}}, quiet);
+    CHECK(db(rms(out.l, 9600)) < db(rms(quiet.l, 9600)) - 30.0);
+    const Stereo loud = sine(440, 0.5, 48000);
+    out = render(kIris, {{"gate", -30}}, loud);
+    CHECK(std::fabs(db(rms(out.l, 9600)) - db(rms(loud.l, 9600))) < 1.0);
+    // Blur: a click's energy is spread over the following second.
+    const Stereo c = click(48000, 4800);
+    const Stereo plain = render(kIris, {}, c), blurred = render(kIris, {{"blur", 0.6}}, c);
+    CHECK(rms(blurred.l, 4800 + 2048 + 4800, 48000) > 10.0 * rms(plain.l, 4800 + 2048 + 4800, 48000) + 1e-6);
+}
+
+TEST(iris_is_block_size_independent_and_survives_bad_input) {
+    const Stereo in = music(48000);
+    const Values all[] = {{}, {{"blur", 0.5}, {"gate", -40}}, {{"shift", -300}, {"quality", 0}}, {{"shift", 150}, {"quality", 2}, {"mix", 0.5}}};
+    for (size_t k = 0; k < std::size(all); ++k) {
+        checkBlockSizes(kIris, all[k], in, "iris " + std::to_string(k));
+        checkBadInput(kIris, all[k], "iris " + std::to_string(k));
+    }
+    // Frozen (a fresh instance each time: a reset keeps the frozen spectrum, which is state).
+    const Values frozen = {{"freeze", 1}, {"drift", 0.7}, {"shift", 100}};
+    const Stereo want = render(kIris, frozen, in, 64);
+    for (uint32_t block : {1u, 37u, 512u}) CHECK(same(want, render(kIris, frozen, in, block)));
+    // NaN into a frozen Iris: finite throughout.
+    Stereo bad = music(9600);
+    bad.l[100] = std::nanf("");
+    bad.r[300] = INFINITY;
+    CHECK(finite(render(kIris, {{"freeze", 1}, {"blur", 0.4}}, bad)));
+}
+
+TEST(iris_presets_render) { checkPackPresets(kIris, 8, music(48000 * 2)); }
+
+TEST(iris_matches_its_reference_renders) {
+    const Stereo in = music(48000 * 2);
+    cawtest::References refs("pack_iris");
+    auto check = [&](const char* name, const Values& v) {
+        const Stereo out = render(kIris, v, in);
+        CHECK_REFERENCE(refs, name, (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);
+    };
+    check("iris_freeze", {{"freeze", 1}, {"fade", 100}});
+    check("iris_blur_shift_gate", {{"blur", 0.4}, {"shift", 120}, {"gate", -50}});
 }

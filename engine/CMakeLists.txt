@@ -230,7 +230,7 @@ target_sources(caw_core PRIVATE src/midi_fx.cpp src/midi_fx_effects.cpp)  # 1.1.
 target_sources(caw_core PRIVATE src/builtin_fx_meters.cpp src/builtin_fx_lofi.cpp src/builtin_fx_phasealign.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
 target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.cpp src/builtin_fx_shift_voices.cpp src/builtin_fx_vocoder.cpp)  # 1.1.0: Glint, Mimic, Soar's Harmonizer and Octaver
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
-target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp)  # 1.1.0: the AutoStacc beta pack
+target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp

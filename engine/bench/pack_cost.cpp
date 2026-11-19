@@ -102,6 +102,8 @@ int packCost(double seconds) {
     const size_t pb = fx::peckBytes(kRate);
     const char* bend = "org.caw.pack.warp";
     const size_t bb = fx::bendBytes(kRate);
+    const char* iris = "org.caw.pack.spectral";
+    const size_t ib = fx::irisBytes(kRate);
     const Case cases[] = {
         {"Murmur: default (80 ms, 20 Hz)", murmur, {}, mb, 8000},
         {"Murmur: dense, Normal cap 32", murmur, {{"size", 300}, {"density", 150}, {"spray", 50}}, mb, 24000},
@@ -113,6 +115,10 @@ int packCost(double seconds) {
         {"Peck: held", peck, {{"hold", 1}}, pb, 2000},
         {"Bend: Time (default wow)", bend, {}, bb, 2000},
         {"Bend: Speed, resync", bend, {{"mode", 1}, {"cycle", 0}}, bb, 2000},
+        {"Iris: Normal, all stages off (43 ms)", iris, {}, ib, 24000},
+        {"Iris: Normal, frozen, blur, shift, gate", iris, {{"freeze", 1}, {"blur", 0.5}, {"shift", 200}, {"gate", -50}}, ib, 24000},
+        {"Iris: Eco, frozen (21 ms)", iris, {{"quality", 0}, {"freeze", 1}}, ib, 24000},
+        {"Iris: High, frozen, blur, shift, gate (85 ms)", iris, {{"quality", 2}, {"freeze", 1}, {"blur", 0.5}, {"shift", 200}, {"gate", -50}}, ib, 24000},
     };
     int over = 0;
     std::printf("AutoStacc beta pack (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");
