@@ -42,9 +42,10 @@ bool sameKnob(ComponentParameterInfo a, ComponentParameterInfo b) =>
 extension VariantEdit on AppState {
   /// Puts device [t] (a merged device, or a merged device in a rack's slot) on [variant] as one undo step. The knobs
   /// the new variant doesn't share with the old one reset ([valuesForVariant]); lanes, modulation links and MIDI
-  /// mappings on them go (their units changed). The engine rebuilds the device, crossfaded. False when [t] is no
-  /// merged device or already plays [variant].
-  bool setDeviceVariant(DeviceTarget t, int variant) {
+  /// mappings on them go (their units changed). The engine rebuilds the device, crossfaded. [also] sets knobs of the
+  /// new variant in the same step (a filter model picked from a strip: the variant and its type at once). False when
+  /// [t] is no merged device or already plays [variant].
+  bool setDeviceVariant(DeviceTarget t, int variant, {Map<String, double> also = const {}}) {
     final id = t.componentId, layer = t.layer;
     final base = id == null ? null : componentInfo(id);
     if (id == null || layer == null || base == null || base.variants.length < 2) return false;
@@ -60,6 +61,7 @@ extension VariantEdit on AppState {
       final from = base.forValues(own);
       if (from.variantIndex == variant) return false;
       final next = valuesForVariant(own, from, base.variants[variant], variant);
+      next.values.addAll(_known(base.variants[variant], also));
       setRackValues(rack, rackValuesWithChildValues(rack, t.rackSlot, next.values, kept: next.kept));
       return true;
     }
@@ -68,6 +70,7 @@ extension VariantEdit on AppState {
     final from = base.forValues(use.params);
     if (from.variantIndex == variant) return false;
     final next = valuesForVariant(use.params, from, base.variants[variant], variant);
+    next.values.addAll(_known(base.variants[variant], also));
     final laneLayer = engineLayerId(layer), mappingLayer = t.layerId, slot = t.slot;
     endUndoStep();
     editProject((p) {
@@ -91,4 +94,10 @@ extension VariantEdit on AppState {
     endUndoStep();
     return true;
   }
+
+  /// [values] that [info] declares (never `variant`).
+  static Map<String, double> _known(NativeComponentInfo info, Map<String, double> values) => {
+        for (final e in values.entries)
+          if (e.key != variantParam && info.param(e.key) != null && e.value.isFinite) e.key: e.value,
+      };
 }

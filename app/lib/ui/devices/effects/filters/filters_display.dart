@@ -16,6 +16,30 @@ DeviceDisplayFrame? decodeFiltersDisplay(String id, List<double> f, int n) {
   Map<String, double> named(List<String> names, int from) =>
       {for (var i = 0; i < names.length && from + i < n; ++i) names[i]: f[from + i]};
   switch (id) {
+    // The EQ's Bands (docs/engine.md "Display data"): the output spectrum as the frame's, the input's as `pre0`..
+    // with `pre_bins`, so the page draws both.
+    case 'org.caw.eq':
+      final bins = at(0).toInt();
+      final watched = at(3) > 0.5 && 4 + 2 * bins <= n;
+      final post = 4 + bins;
+      double unit(double db) => ((db + 90) / 90).clamp(0.0, 1.0).toDouble();
+      return DeviceDisplayFrame(
+        spectrum: watched ? [for (var j = 0; j < bins; ++j) unit(f[post + j])] : null,
+        inputDb: at(4 + 3 * bins + 48 + 1),
+        outputDb: at(4 + 3 * bins + 48 + 2),
+        values: {
+          'output_db': at(4 + 3 * bins + 48),
+          if (watched) ...{'pre_bins': bins.toDouble(), for (var j = 0; j < bins; ++j) 'pre$j': unit(f[4 + j])},
+        });
+    // The filter's Multimode: its modulated cutoffs, LFO and envelope, and the engine's response at the left cutoff
+    // (`r0`.. with `points`; all 0 while nobody watched, then left out).
+    case 'org.caw.filter':
+      final points = at(8).toInt();
+      final live = points > 1 && 9 + points <= n && [for (var j = 0; j < points; ++j) f[9 + j]].any((v) => v != 0);
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: {
+        ...named(['type', 'cutoff_l', 'cutoff_r', 'resonance', 'lfo', 'envelope'], 2),
+        if (live) ...{'points': points.toDouble(), for (var j = 0; j < points; ++j) 'r$j': f[9 + j]},
+      });
     case 'org.caw.ladder':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
           values: named(['mode', 'slope', 'cutoff', 'resonance', 'drive_db', 'oscillating', 'oversampling'], 2));

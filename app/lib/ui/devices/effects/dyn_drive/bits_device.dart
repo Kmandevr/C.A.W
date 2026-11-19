@@ -26,7 +26,7 @@ class BitsDevice extends StatelessWidget {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final inline = DeviceScope.isInline(context);
-    final hero = HeroWithMeters(height: 200, gr: false, hero: HeroCanvas(
+    final hero = HeroCanvas(
       color: scope.accent,
       height: 200,
       caption: 'CRUSH ≈',
@@ -37,7 +37,7 @@ class BitsDevice extends StatelessWidget {
         return Text('${bits.toStringAsFixed(1)} bit · ${formatParamValue(t.param('rate'), rate)}');
       }),
       child: const _CrushHero(),
-    ));
+    );
     if (inline) return effectPage('bits', [hero, const KnobRow(['bits', 'rate', 'jitter', 'dither'], size: 44)]);
     return effectPage('bits', [
       hero,

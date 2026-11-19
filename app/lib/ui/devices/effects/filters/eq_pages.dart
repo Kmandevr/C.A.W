@@ -1,4 +1,4 @@
-// The 3-band EQ's, the tilt EQ's and the graphic EQ's plugin UIs: band regions with crossover handles, a tilting line, and 31 bars drawn with a finger.
+// The EQ's DJ, Tilt and Graphic modes: band regions with crossover handles, a tilting line, and 31 bars drawn with a finger, each on the EQ's own grid.
 import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
@@ -16,35 +16,47 @@ import '../effect_page.dart';
 import 'filters_shared.dart';
 import '../../../../model/device_target.dart' show clampToParam;
 
+/// The height every EQ mode's hero has (Bands' too), so switching mode keeps the page still.
+double eqHeroHeight(double width) => width > 600 ? 300 : 230;
+
+/// dB to y on an EQ hero of height [h] showing ±[range] dB (the Bands' mapping).
+double eqY(double db, double h, double range) => h / 2 - db / range * (h / 2 - 18);
+
 // ---------- 3-band EQ ----------
 
 const _bandIds = ['low', 'mid', 'high'];
 const _killIds = ['kill_low', 'kill_mid', 'kill_high'];
 
-/// The 3-band EQ: its three bands as regions (drag a band up or down for its gain, a crossover line sideways for
-/// the split; double-tap a band to kill it), kill switches, the three gains; the splits and output in MORE.
+/// The EQ's DJ mode: its three bands as regions (drag a band up or down for its gain, a crossover line sideways for
+/// the split; double-tap a band to kill it), kill switches, the three gains; the splits in MORE. [lead] goes above
+/// the hero (the mode cards).
 class Eq3Page extends StatelessWidget {
-  const Eq3Page({super.key});
+  const Eq3Page({super.key, this.lead = const [], this.caption = 'DJ ≈'});
+  final List<Widget> lead;
+  final String caption;
 
   @override
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    final inline = DeviceScope.isInline(context);
     return effectPage('eq.dj', [
-      HeroWithMeters(height: 190, gr: false, hero: HeroCanvas(
+      ...lead,
+      LayoutBuilder(builder: (context, box) => HeroCanvas(
         color: scope.accent,
-        height: 190,
-        caption: '3-BAND ≈',
+        height: eqHeroHeight(box.maxWidth),
+        caption: caption,
         grid: false,
         readout: Builder(builder: (context) => Text('${t.value('low_x').round()} · ${t.value('high_x').round()} Hz')),
         child: const _Eq3Hero(),
       )),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+      const SizedBox(height: 6),
+      Wrap(alignment: WrapAlignment.spaceEvenly, spacing: 6, runSpacing: 6, children: [
         for (var b = 0; b < 3; b++) DeviceToggle(_killIds[b], label: 'KILL ${['LOW', 'MID', 'HIGH'][b]}', icon: Icons.block, color: Neon.pink),
       ]),
       const SizedBox(height: 6),
-      const KnobRow(['low', 'mid', 'high'], size: 56),
-      const DeviceFold(child: ParamGrid(only: ['low_x', 'high_x', 'output'])),
+      KnobRow(const ['low', 'mid', 'high'], size: inline ? 46 : 56),
+      if (!inline) const DeviceFold(child: ParamGrid(only: ['low_x', 'high_x'])),
     ]);
   }
 }
@@ -66,7 +78,7 @@ class _Eq3HeroState extends State<_Eq3Hero> {
     final t = scope.target;
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth, h = box.maxHeight;
-      double y(double db) => h * 0.45 - db / 30 * (h * 0.45 - 22);
+      double y(double db) => eqY(db, h, 24);
       String bandAt(double x) {
         final hz = xToFreq(x, w);
         return hz < t.value('low_x') ? 'low' : (hz < t.value('high_x') ? 'mid' : 'high');
@@ -125,18 +137,18 @@ class _Eq3Painter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    paintFrequencyGrid(canvas, size, y(0));
+    paintEqGrid(canvas, size, y, rangeDb: 24);
     final lx = freqToX(low, w), hx = freqToX(high, w);
     final edges = [0.0, lx, hx, w];
     for (var b = 0; b < 3; b++) {
       final r = Rect.fromLTRB(edges[b], 20, edges[b + 1], h);
       canvas.drawRect(r, Paint()..color = (kills[b] ? Neon.pink : colors[b]).withValues(alpha: kills[b] ? 0.06 : 0.08));
-      paintLabel(canvas, kills[b] ? 'KILLED' : ['LOW', 'MID', 'HIGH'][b], Offset(r.center.dx, h - 22),
+      paintLabel(canvas, kills[b] ? 'KILLED' : ['LOW', 'MID', 'HIGH'][b], Offset(r.center.dx, h - 26),
         kills[b] ? Neon.pink : colors[b], size: 9, align: 0, weight: FontWeight.w800);
-      // The band's level lately (live): a bar at its region's foot.
+      // The band's level lately (live): a bar over its region's foot.
       if (peaks case final p?) {
         final u = ((p[b] + 60) / 60).clamp(0.0, 1.0);
-        canvas.drawRect(Rect.fromLTWH(r.left + 4, h - 6, (r.width - 8) * u, 3), Paint()..color = colors[b].withValues(alpha: 0.7));
+        canvas.drawRect(Rect.fromLTWH(r.left + 4, h - 17, (r.width - 8) * u, 3), Paint()..color = colors[b].withValues(alpha: 0.7));
       }
     }
     final g = math.pow(10, out / 20).toDouble();
@@ -166,39 +178,42 @@ class _Eq3Painter extends CustomPainter {
 
 // ---------- Tilt ----------
 
-/// The tilt EQ: the tilting line (drag: sideways the pivot, up tilts the highs up), then tilt, pivot and
-/// steepness; the channel and output in MORE.
+/// The EQ's Tilt mode: the tilting line (drag: sideways the pivot, up tilts the highs up), then tilt, pivot and
+/// steepness; the channel in MORE. [lead] goes above the hero (the mode cards).
 class TiltPage extends StatelessWidget {
-  const TiltPage({super.key});
+  const TiltPage({super.key, this.lead = const [], this.caption = 'TILT ≈'});
+  final List<Widget> lead;
+  final String caption;
 
   @override
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    final inline = DeviceScope.isInline(context);
     // Read where it is drawn (a lazy read: the hero and readout watch it, not the page; param_watch.dart).
     double tilt() => t.value('tilt');
     return effectPage('tilt', [
-      HeroWithMeters(height: 180, gr: false, hero: HeroCanvas(
+      ...lead,
+      LayoutBuilder(builder: (context, box) => HeroCanvas(
         color: scope.accent,
-        height: 180,
-        caption: 'TILT ≈',
+        height: eqHeroHeight(box.maxWidth),
+        caption: caption,
         grid: false,
         readout: Builder(builder: (context) => Text('${tilt() >= 0 ? '+' : ''}${tilt().toStringAsFixed(1)} dB')),
         child: DragHero(heroKey: 'tilt-hero', xParam: 'freq', yParam: 'tilt', paint: (canvas, size, active, f) {
           final h = size.height, freq = t.value('freq'), q = t.value('q');
-          double y(double db) => h * 0.5 - db / 15 * (h * 0.5 - 22);
-          paintFrequencyGrid(canvas, size, y(0));
+          double y(double db) => eqY(db, h, 15);
+          paintEqGrid(canvas, size, y, rangeDb: 15);
           final path = responsePath(size, (hz) => toDb(tiltResponse(hz, tilt: tilt(), freq: freq, q: q).abs) + t.value('output'), y);
           fillFade(canvas, path, h, size, tilt() >= 0 ? scope.secondary : scope.accent, alpha: 0.28);
           strokeGlow(canvas, path, scope.accent, width: 2.6);
-          paintLabel(canvas, 'DARKER', Offset(10, h - 20), Neon.dim, size: 8, weight: FontWeight.w800);
-          paintLabel(canvas, 'BRIGHTER', Offset(size.width - 10, h - 20), Neon.dim, size: 8, align: 1, weight: FontWeight.w800);
-          paintHandle(canvas, Offset(freqToX(freq, size.width), y(0)), scope.accent, active: active, r: 8);
+          paintLabel(canvas, 'DARKER', Offset(10, h - 24), Neon.dim, size: 8, weight: FontWeight.w800);
+          paintLabel(canvas, 'BRIGHTER', Offset(size.width - 10, h - 24), Neon.dim, size: 8, align: 1, weight: FontWeight.w800);
+          paintHandle(canvas, Offset(freqToX(freq, size.width), y(t.value('output'))), scope.accent, active: active, r: 11);
         }),
       )),
-      const KnobRow(['tilt', 'freq', 'q'], size: 56),
-      Row(children: [fieldLabel('CHANNEL'), const DeviceChoice('channel')]),
-      const DeviceFold(child: ParamGrid(only: ['output'])),
+      KnobRow(const ['tilt', 'freq', 'q'], size: inline ? 46 : 56),
+      if (!inline) DeviceFold(child: Row(children: [fieldLabel('CHANNEL'), const DeviceChoice('channel')])),
     ]);
   }
 }
@@ -209,21 +224,24 @@ const geqCentres = [20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.
   630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 12500.0, 16000.0,
   20000.0];
 
-/// The graphic EQ: 31 bars drawn with a finger (a drag across them sets each it passes to the finger's height; a
-/// double-tap flattens the bar under it), the analyser and the engine's real curve while it plays, Flat, range and
-/// output.
+/// The EQ's Graphic mode: 31 bars at their centres on the EQ's grid, drawn with a finger (a drag across them sets
+/// each it passes to the finger's height; a double-tap flattens the bar under it), the analyser and the engine's real
+/// curve while it plays, Flat and range. [lead] goes above the hero (the mode cards).
 class GraphicEqPage extends StatelessWidget {
-  const GraphicEqPage({super.key});
+  const GraphicEqPage({super.key, this.lead = const [], this.caption = 'GRAPHIC'});
+  final List<Widget> lead;
+  final String caption;
 
   @override
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     return effectPage('geq', [
-      HeroCanvas(color: scope.accent, height: 210, caption: 'GRAPHIC EQ', grid: false,
-        readout: const LevelReadout(), child: const _GeqHero()),
+      ...lead,
+      LayoutBuilder(builder: (context, box) => HeroCanvas(color: scope.accent, height: eqHeroHeight(box.maxWidth),
+        caption: caption, grid: false, readout: const LevelReadout(), child: const _GeqHero())),
       Row(children: [
-        Expanded(child: KnobRow(const ['range', 'output'], size: 52)),
+        Expanded(child: KnobRow(const ['range'], size: DeviceScope.isInline(context) ? 46 : 52)),
         OutlinedButton.icon(
           key: const ValueKey('geq-flat'),
           onPressed: () {
@@ -253,10 +271,10 @@ class _GeqHeroState extends State<_GeqHero> {
     final t = scope.target;
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth, h = box.maxHeight;
-      const top = 24.0, foot = 16.0;
-      double y(double db) => top + (h - top - foot) * (0.5 - db / 24);
-      double dbAt(double py) => ((0.5 - (py - top) / (h - top - foot)) * 24).clamp(-12.0, 12.0);
-      int barAt(double x) => (x / w * 31).floor().clamp(0, 30);
+      double y(double db) => eqY(db, h, 15);
+      double dbAt(double py) => ((h / 2 - py) / (h / 2 - 18) * 15).clamp(-12.0, 12.0);
+      // Bar b sits at its ISO centre on the log grid: 20 Hz at the left edge, 20 kHz at the right, a third-octave apart.
+      int barAt(double x) => (x / w * 30).round().clamp(0, 30);
       void paintTo(Offset p) {
         final b = barAt(p.dx), db = (dbAt(p.dy) * 2).roundToDouble() / 2;
         // A quick swipe skips bars: fill in between from the last one.
@@ -301,31 +319,26 @@ class _GeqPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    for (final db in [-12.0, -6.0, 0.0, 6.0, 12.0]) {
-      canvas.drawLine(Offset(0, y(db)), Offset(w, y(db)), Paint()..color = Neon.ink.withValues(alpha: db == 0 ? 0.12 : 0.04));
-    }
+    paintEqGrid(canvas, size, y, rangeDb: 15);
     // The analyser behind (the output's spectrum while it plays).
     if (spectrum case final s? when s.isNotEmpty) {
       final p = Path()..moveTo(0, h);
       for (var j = 0; j < s.length; j++) {
-        p.lineTo(w * (j + 0.5) / s.length, h - s[j] * (h - 24));
+        p.lineTo(w * (j + 0.5) / s.length, h - s[j] * (h - 24) * 0.92);
       }
       p
         ..lineTo(w, h)
         ..close();
       canvas.drawPath(p, Paint()..color = second.withValues(alpha: 0.1));
     }
-    final bw = w / 31;
+    final bw = w / 30;
     for (var b = 0; b < 31; b++) {
       final g = gains[b].clamp(-18.0, 18.0);
-      final r = Rect.fromLTRB(b * bw + 1.5, math.min(y(0), y(g)), (b + 1) * bw - 1.5, math.max(y(0), y(g)) + 1);
+      final cx = w * b / 30;
+      final r = Rect.fromLTRB(math.max(0, cx - bw / 2 + 1.5), math.min(y(0), y(g)), math.min(w, cx + bw / 2 - 1.5),
+          math.max(y(0), y(g)) + 1);
       canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(2)),
         Paint()..color = (b == active ? second : color).withValues(alpha: b == active ? 0.9 : 0.55));
-      if (b % 3 == 0 || b == 30) {
-        final hz = geqCentres[b];
-        paintLabel(canvas, hz >= 1000 ? '${(hz / 1000).toStringAsFixed(hz >= 10000 ? 0 : 1)}k' : hz.toStringAsFixed(0),
-          Offset((b + 0.5) * bw, h - 7), Neon.dim, size: 7, align: 0);
-      }
     }
     // The engine's curve (the cascade's real response) over the bars while it plays.
     if (curve case final c?) {

@@ -15,6 +15,7 @@ import '../../kit/hero.dart';
 import '../drive_editors.dart' show DriveShape, driveShapeOf, driveCurve;
 import '../dynamics/fx_math.dart' show clipCurve, phaseDistorted;
 import '../effect_page.dart';
+import '../eqfilter/variant_cards.dart' show VariantCards;
 import 'common.dart';
 
 // The spectrum's slots: 0 pink, 1 orange, 2 yellow, 3 green, 4 mint, 5 blue, 6 violet, 7 red.
@@ -146,14 +147,14 @@ class DriveDevice extends StatelessWidget {
       perRow: 6,
       colorOf: (k) => variant == 2 ? _clipColor(k) : driveShapeColor(driveShapeOf(k < mp.choices.length ? mp.choices[k] : '')),
       icon: (canvas, r, i, c) => _modeIcon(canvas, r, variant, i, i < mp.choices.length ? mp.choices[i] : '', c)));
-    final hero = HeroWithMeters(height: 210, gr: false, hero: HeroCanvas(
+    final hero = HeroCanvas(
       color: scope.accent,
       height: 210,
       caption: null,
       grid: false,
       readout: Builder(builder: (context) => Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}')),
       child: const _DriveHero(),
-    ));
+    );
     final crush = shape == DriveShape.crush, bitShape = shape == DriveShape.bitShape;
     final master = variant == 2 && t.value('master') >= 0.5;
     final main = switch (variant) {

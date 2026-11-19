@@ -1,13 +1,9 @@
-// The Dynamics and Drive families' shared page parts (1.0.8 device pages): variant cards, coloured mode cards and choice chips.
+// The Dynamics and Drive families' shared page parts (1.0.8 device pages): coloured mode cards and choice chips (variant cards: eqfilter/variant_cards.dart).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../../../model/arrange_fx.dart';
-import '../../../../model/merged_devices.dart';
-import '../../../../model/variant_edit.dart';
 import '../../../feedback.dart';
-import '../../../haptics.dart';
 import '../../../motion.dart';
 import '../../../theme.dart';
 import '../../device_scope.dart';
@@ -74,45 +70,6 @@ class _CardIcon extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CardIcon o) => o.index != index || o.color != color || o.icon != icon;
-}
-
-/// A merged device's variants as mode cards (they replace the shell's `Variant: <name>` pill on the Compressor and
-/// Drive): a tap is [VariantEdit.setDeviceVariant], one undo step that resets the knobs the new variant doesn't
-/// share. [names] relabels the engine's variant names; [colorOf] gives each card its colour (the accent by default).
-class VariantCards extends StatelessWidget {
-  const VariantCards({super.key, required this.icon, this.names, this.colorOf, this.height = 54});
-  final ChoiceIcon icon;
-  final List<String>? names;
-  final Color Function(int k)? colorOf;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) => watchDevice(context, _body);
-
-  Widget _body(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target, id = t.componentId;
-    final base = id == null || t.isInstrument ? null : t.state.componentInfo(id);
-    if (base == null || base.variants.length < 2) return const SizedBox.shrink();
-    final n = base.variants.length;
-    final engineNames = base.param(variantParam)?.choices ?? const <String>[];
-    final labels = [for (var k = 0; k < n; k++) names != null && k < names!.length ? names![k]
-        : k < engineNames.length ? engineNames[k] : 'Variant ${k + 1}'];
-    final sel = (t.info?.variantIndex ?? 0).clamp(0, n - 1);
-    return cardRows(context, count: n, sel: sel, labels: labels, height: height,
-      colorOf: colorOf ?? (_) => scope.accent,
-      icon: icon,
-      keyOf: (k) => ValueKey('variant-card-$k'),
-      semantics: (k) => '${base.label}: ${k < engineNames.length ? engineNames[k] : labels[k]}',
-      onTap: (k) {
-        if (k == sel) return;
-        if (t.state.setDeviceVariant(t, k)) {
-          DeviceFeel.tap();
-        } else {
-          Haptics.error();
-        }
-      });
-  }
 }
 
 /// A choice parameter as mode cards with a colour each ([colorOf]); keys `mode-<param>-<k>` as the kit's tiles.

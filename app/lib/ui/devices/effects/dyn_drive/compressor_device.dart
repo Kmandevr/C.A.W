@@ -16,6 +16,7 @@ import '../dynamics/fx_math.dart';
 import '../dynamics_editors.dart' show duckRatio;
 import '../ducker_editor.dart';
 import '../effect_page.dart';
+import '../eqfilter/variant_cards.dart' show VariantCards;
 import 'common.dart';
 
 /// The cards' names for the variants (Compressor, Dynamics, Gate, Shape, Duck): the plan's Down for the plain
@@ -58,7 +59,7 @@ class CompressorDevice extends StatelessWidget {
         child: VariantCards(icon: compressorCardIcon, names: compressorCardNames, height: inline ? 46 : 54));
     if (v == 3) return _shape(context, cards, inline);
     final caption = switch (v) { 1 => 'DYNAMICS', 2 => 'GATE', 4 => 'DUCK', _ => 'COMPRESSOR' };
-    final hero = HeroWithMeters(height: 220, hero: HeroCanvas(
+    final hero = HeroCanvas(
       color: scope.accent,
       height: 220,
       caption: caption,
@@ -73,7 +74,7 @@ class CompressorDevice extends StatelessWidget {
         return Text('GR ${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.yellow));
       }),
       child: const _DynHero(),
-    ));
+    );
     final main = switch (v) {
       1 => const ['low_threshold', 'low_ratio', 'high_threshold', 'high_ratio', 'attack', 'release'],
       2 => const ['threshold', 'range', 'attack', 'hold', 'release'],
@@ -107,7 +108,7 @@ class CompressorDevice extends StatelessWidget {
   Widget _shape(BuildContext context, Widget cards, bool inline) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final hero = HeroWithMeters(height: 200, hero: HeroCanvas(
+    final hero = HeroCanvas(
       color: scope.accent,
       height: 200,
       caption: 'SHAPE',
@@ -117,7 +118,7 @@ class CompressorDevice extends StatelessWidget {
         return Text(f == null ? '' : 'GR −${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.yellow));
       }),
       child: const DuckShapeHero(),
-    ));
+    );
     const knobs = ['depth', 'attack', 'hold', 'release', 'tension'];
     if (inline) return effectPage('compressor', [cards, hero, const KnobRow(knobs, size: 44, labels: {'tension': 'Curve'})]);
     final mode = t.value('mode').round();

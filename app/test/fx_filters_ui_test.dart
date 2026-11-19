@@ -150,10 +150,10 @@ void main() {
       });
     }
 
-    testWidgets('ladder: the mode tiles and slope pick the tap', (tester) async {
+    testWidgets('ladder: the model strip and slope pick the tap', (tester) async {
       final s = await open(tester, 'org.caw.ladder');
       final t = targetOf(s, 'org.caw.ladder');
-      await tester.tap(find.byKey(const ValueKey('mode-mode-2')));
+      await tester.tap(find.byKey(const ValueKey('filter-model-1-2')));
       await tester.pumpAndSettle();
       expect(t.value('mode'), 2);
       await tester.tap(find.byKey(const ValueKey('dchoice-slope-0')));

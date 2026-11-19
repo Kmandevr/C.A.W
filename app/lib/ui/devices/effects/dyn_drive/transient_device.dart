@@ -22,7 +22,7 @@ class TransientDevice extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final inline = DeviceScope.isInline(context);
-    final hero = HeroWithMeters(height: 210, gr: false, hero: HeroCanvas(
+    final hero = HeroCanvas(
       color: scope.accent,
       height: 210,
       caption: 'TRANSIENTS ≈',
@@ -33,7 +33,7 @@ class TransientDevice extends StatelessWidget {
           style: Neon.code(size: 10, color: g != null && g >= 0 ? scope.accent : Neon.yellow));
       }),
       child: const _TransientHero(),
-    ));
+    );
     return effectPage('transient', [
       hero,
       KnobRow(const ['attack', 'sustain'], size: inline ? 52 : 76),

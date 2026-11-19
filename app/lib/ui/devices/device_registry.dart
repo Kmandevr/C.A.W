@@ -35,7 +35,7 @@ class DeviceSection {
 /// null: the track's colour).
 class DeviceEditorEntry {
   const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const [], this.inline, this.randomKeeps,
-    this.reset});
+    this.reset, this.ownsVariant = false});
   final List<DeviceSection> Function(DeviceTarget target) sections;
 
   /// The parameters the header's ⋯ › Randomize leaves alone besides the usual ones (the device's own random patch
@@ -50,6 +50,10 @@ class DeviceEditorEntry {
   final WidgetBuilder? inline;
   final Color? accent;
   final DeviceFamily? family;
+
+  /// The page picks a merged device's variant itself (its mode cards), so the shell's "Variant:" pill
+  /// ([VariantBar]) is not shown.
+  final bool ownsVariant;
 
   /// Presets written in Dart for the device (its preset browser lists them after Init and the engine's own).
   final List<DevicePreset> presets;
