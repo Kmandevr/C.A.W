@@ -188,8 +188,14 @@ extern "C" {
    pitch correction). Nothing else changes.
    43 (2026-11-19, 1.1.0): the sampler's tools (docs/engine.md "Sampler tools"): caw_sampler_map (drop and play:
    roots detected, zones over the whole keyboard), caw_sampler_slice (a loop sliced to keys) and caw_sampler_take
-   (a recorded take cut into zones); sampler zones gain "stretch" and "stretch_bpm". Nothing else changes. */
-#define CAW_API_VERSION 43
+   (a recorded take cut into zones); sampler zones gain "stretch" and "stretch_bpm". Nothing else changes.
+   44 (2026-11-19, 1.1.0): around the effects. caw_engine_component_cost (CawSlotCost) gives a slot's measured CPU
+   share, its latency now and whether it plays its armed version: an audio track whose "input" is armed with
+   monitoring on or auto runs its effects' near-zero-delay versions (Linear EQ minimum phase, Preen's and Pitch fix's
+   monitoring windows, look-aheads off...), the full ones in playback of other tracks and in every export, and the
+   latency compensation follows. Every keyed effect takes sc_hpf, sc_lpf and sc_listen (appended; off by default);
+   the Limiter appends target_on and target (a loudness target it reports against; docs/engine.md). */
+#define CAW_API_VERSION 44
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -380,6 +386,22 @@ typedef struct CawSlotMeter {
    instrument; not per-note FX): what it passes on, after its auto gain and bypass. Lock-free on the audio side; 1,
    0 when the engine is busy with a project update (out is zeroed; call again) or -1 when there is no such slot. */
 CAW_API int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t index, CawSlotMeter* out);
+/* An effect slot's cost (API version 44), for a device's header. Versioned: the caller sets struct_size to
+   sizeof(CawSlotCost) (or an older size); the engine writes only the fields that size covers, and fields are only
+   ever appended. */
+typedef struct CawSlotCost {
+    uint32_t struct_size;
+    float cpu_share;          /* the slot's smoothed share of real time (0.01 = 1 % of one core); -1 until measured */
+    uint32_t latency_frames;  /* the latency it reports now (0 while bypassed), which the chain compensates */
+    float latency_ms;         /* the same in milliseconds at the engine's rate */
+    int32_t armed;            /* 1: it plays its armed (near-zero-delay) version now: the header's badge */
+} CawSlotCost;
+/* Reads slot `index`'s cost (addressed as in caw_engine_set_component_param; CAW_INSTRUMENT_INDEX the instrument;
+   not per-note FX). The first read starts the measuring: the audio thread then times each slot of the chain (a clock
+   pair per slot in one block of four, no allocation) until 2 s pass with no read, so cpu_share is -1 on the first read; poll it
+   a few times a second while the header shows. 1, 0 when the engine is busy with a project update (call again;
+   never blocks) or -1 when there is no such slot. */
+CAW_API int32_t caw_engine_component_cost(CawEngine* e, const char* layer_id, uint32_t index, CawSlotCost* out);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
    {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
    index CAW_INSTRUMENT_INDEX). Store "state" and

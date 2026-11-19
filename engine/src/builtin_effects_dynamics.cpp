@@ -3,12 +3,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <new>
 #include <vector>
 
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
+#include "meters.h"
 #include "sample_time.h"
 #include "stereo_pair.h"
 
@@ -349,6 +352,21 @@ const ParamTable& limParams() {
     }();
     return t;
 }
+// The loudness target (1.1.0), appended after the merged Limiter's `variant`: off by default, and only a readout (a
+// ceiling, not auto gain): the display shows the output's short-term and integrated loudness and how far each is
+// from the target. Not automatable (nothing heard depends on them).
+const ParamTable& limTargetParams() {
+    static const ParamTable t = [] {
+        ParamTable p;
+        ParameterDescriptor& on = p.pick("target_on", "Loudness target", 0.0, kOffOn);
+        on.automatable = on.modulatable = on.midiMappable = false;
+        ParameterDescriptor& lufs = p.num("target", "Target", -14.0, -30.0, -5.0, "LUFS");
+        lufs.automatable = lufs.modulatable = lufs.midiMappable = false;
+        return p;
+    }();
+    return t;
+}
+
 const ModuleDescriptor& limDescriptor() {
     static const ModuleDescriptor d = withDomains(effectDescriptor("org.caw.limiter", "Limiter", limParams(), kLookaheadFrames, 0),
                                               kDomainWhole);  // the ceiling is the whole signal's
@@ -360,9 +378,22 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return limDescriptor(); }
 
 protected:
-    bool prepare(double, uint32_t) noexcept override {
+    bool prepare(double sr, uint32_t) noexcept override {
         try {
             min_.prepare(kLookaheadFrames + 8);
+            // The loudness target's meter (about 100 KB: its gating histogram): only where the descriptor has the
+            // target and something can read it (an export shows nothing).
+            targetOnK_ = targetK_ = kNoParam;
+            const ModuleDescriptor& d = descriptor();
+            for (uint32_t k = 0; k < d.parameterCount; ++k) {
+                if (d.parameters[k].id == "target_on") targetOnK_ = k;
+                else if (d.parameters[k].id == "target") targetK_ = k;
+            }
+            if (targetOnK_ != kNoParam && targetK_ != kNoParam && !offlineRender()) {
+                if (!meter_) meter_ = std::make_unique<LoudnessMeter>();
+                meter_->measureTruePeak(false);  // the limiter's own detector has the peaks
+                meter_->prepare(sr);
+            }
         } catch (...) {
             return false;
         }
@@ -380,6 +411,7 @@ protected:
         grMax_ = 0.0, grNow_ = 0.0;
         sinceExact_ = 0;
         gainNow_ = -1.0;
+        if (meter_) meter_->requestReset();
     }
     uint64_t idleFrames() const noexcept override { return kLookaheadFrames + static_cast<uint64_t>(0.01 * rate()); }
 
@@ -401,6 +433,15 @@ protected:
         // delay: d = 241 - window for sample peaks, 237 - window with the true-peak estimate's 4-frame lag.
         detectBack_ = (truePeak_ ? kLookaheadFrames - 3 : kLookaheadFrames + 1) - window_;
         gainStep_ = (gainTarget_ - gainNow_) / kControlFrames;
+        if (meter_) {  // the loudness target: integrated from when it turns on, and again at each Play
+            const bool on = this->on(targetOnK_, at);
+            double beat;
+            const bool playing = beatAt(at, beat);
+            if ((on && !targetOn_) || (playing && !playing_)) meter_->requestReset();
+            targetOn_.store(on, std::memory_order_relaxed);
+            playing_ = playing;
+            targetLufs_.store(static_cast<float>(param(targetK_, at)), std::memory_order_relaxed);
+        }
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
@@ -438,6 +479,22 @@ protected:
             outR[i] = static_cast<float>(r);
             pos_ = (pos_ + 1) & mask;
         }
+        if (meter_ && targetOn_.load(std::memory_order_relaxed)) meter_->process(outL, outR, static_cast<int>(n));
+    }
+
+    // [7..12] (1.1.0, the loudness target): on (1/0), the target (LUFS), the output's short-term and integrated
+    // loudness (LUFS; -200 while unmeasured or off) and each one's distance from the target (LU, + louder; -200 likewise).
+    // The loudness is read here, off the audio thread (LoudnessMeter::read: its integrated value is worked out now).
+    uint32_t readDisplay(float* out, uint32_t max) const noexcept override {
+        const uint32_t n = EffectBase::readDisplay(out, max);
+        if (n < 13 || !meter_ || !targetOn_.load(std::memory_order_relaxed)) return n;
+        const LoudnessMeter::Reading r = meter_->read();
+        const float target = targetLufs_.load(std::memory_order_relaxed);
+        out[9] = r.shortTerm;
+        out[10] = r.integrated;
+        out[11] = r.shortTerm > kMeterNone ? r.shortTerm - target : kMeterNone;
+        out[12] = r.integrated > kMeterNone ? r.integrated - target : kMeterNone;
+        return n;
     }
 
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -449,7 +506,11 @@ protected:
         out[5] = static_cast<float>(lib::gainToDb(gainTarget_));
         out[6] = truePeak_ ? 1.0f : 0.0f;
         grMax_ = 0.0;
-        return 7;
+        if (!meter_) return 7;  // no target (the old id, or an export)
+        out[7] = targetOn_.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+        out[8] = targetLufs_.load(std::memory_order_relaxed);
+        for (int k = 9; k < 13; ++k) out[k] = kMeterNone;  // readDisplay fills them
+        return 13;
     }
 
 private:
@@ -468,6 +529,12 @@ private:
     double gainTarget_ = 1, gainNow_ = -1, gainStep_ = 0, ceiling_ = 0.89, ceilingDb_ = -1, release_ = 0;
     double grMax_ = 0, grNow_ = 0;
     bool truePeak_ = true;
+    static constexpr uint32_t kNoParam = ~0u;
+    uint32_t targetOnK_ = kNoParam, targetK_ = kNoParam;
+    mutable std::unique_ptr<LoudnessMeter> meter_;  // read() from the display's reader (one at a time)
+    std::atomic<bool> targetOn_{false};
+    std::atomic<float> targetLufs_{-14.0f};
+    bool playing_ = false;
 };
 
 // ---------- Gate / expander ----------
@@ -502,11 +569,13 @@ public:
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         detector_.setCoefficients(lib::timeCoefficient(0.0001, sampleRate), lib::timeCoefficient(0.02, sampleRate));
+        sc_.bind(descriptor(), true);  // its own sc_hpf stays as it was; the shared filter adds sc_lpf and Listen
         return true;
     }
     void clearState() noexcept override {
         detector_.clear();
         for (auto& f : hpf_) f.clear();
+        sc_.clear();
         env_ = range_;
         holdLeft_ = 0;
         grMax_ = 0, levelMax_ = 0;
@@ -524,13 +593,18 @@ protected:
         useHpf_ = hpf > 20.5;
         for (auto& f : hpf_) f.set(hpf, 0.70710678118654752, sr);
         external_ = choice(kGSidechain, at) == 1;
+        if (sc_.bound()) sc_.set(20.0, param(sc_.lp, at), on(sc_.li, at), sr);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         // External: the key opens and closes the gate (a hi-hat gated by the kick); with no key it stays shut.
         const float* keyL = external_ ? keyLeft() : nullptr;
         const float* keyR = external_ ? keyRight() : nullptr;
+        const float* srcL = external_ ? keyL : inL;  // the detector's source (null: no key, silence)
+        const float* srcR = external_ ? keyR : inR;
+        sc_.apply(srcL, srcR, n);  // the shared low-pass (nothing while off)
+        const bool listen = sc_.listen;
         for (uint32_t i = 0; i < n; ++i) {
-            double l = external_ ? (keyL ? keyL[i] : 0.0) : inL[i], r = external_ ? (keyR ? keyR[i] : 0.0) : inR[i];
+            double l = srcL ? srcL[i] : 0.0, r = srcR ? srcR[i] : 0.0;
             if (useHpf_) l = hpf_[0].highpass(l), r = hpf_[1].highpass(r);
             const double level = detector_.process(std::max(l < 0 ? -l : l, r < 0 ? -r : r));
             levelMax_ = std::max(levelMax_, level);
@@ -543,8 +617,8 @@ protected:
             if (env_ - target < 1e-9 && target - env_ < 1e-9) env_ = target;  // settled: no subnormal creep
             const double g = lib::dbToGain(env_);
             grMax_ = std::min(grMax_, env_);
-            outL[i] = static_cast<float>(inL[i] * g);
-            outR[i] = static_cast<float>(inR[i] * g);
+            outL[i] = static_cast<float>(listen ? l : inL[i] * g);  // Listen: what the detector hears
+            outR[i] = static_cast<float>(listen ? r : inR[i] * g);
         }
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -564,6 +638,7 @@ protected:
 private:
     lib::EnvelopeFollower detector_;
     lib::Svf hpf_[2];
+    SidechainFilter sc_;  // sc_lpf and sc_listen (1.1.0)
     double threshold_ = -40, range_ = -80, ratio_ = 10, knee_ = 3, attack_ = 0, release_ = 0, env_ = -80;
     double grMax_ = 0, levelMax_ = 0;
     uint32_t hold_ = 0, holdLeft_ = 0;
@@ -698,6 +773,10 @@ ModuleProcessor* makeAs(const ModuleDescriptor& variant) noexcept {
 const ModuleDescriptor& legacyCompressorDescriptor() { return compDescriptor(); }
 const ParamTable& talonDownExtraParams() { return compExtraParams(); }
 const ModuleDescriptor& legacyLimiterDescriptor() { return limDescriptor(); }
+std::span<const ParameterDescriptor> limiterTargetParams() {
+    const ParamTable& t = limTargetParams();
+    return {t.data(), t.size()};
+}
 const ModuleDescriptor& legacyGateDescriptor() { return gateDescriptor(); }
 const ModuleDescriptor& legacyTransientDescriptor() { return transientDescriptor(); }
 ModuleProcessor* makeCompressorAs(const ModuleDescriptor& v) noexcept { return makeAs<AsVariant<Compressor>>(v); }

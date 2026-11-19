@@ -9,6 +9,7 @@
 
 #include "caw/library/dynamics.hpp"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
 #include "presets.h"
 
 // Original code (C.A.W. is Apache-2.0), C.A.W's own design with the controls the owner listed for Kilohearts
@@ -65,6 +66,7 @@ public:
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         rmsCoef_ = lib::timeCoefficient(0.01, sampleRate);
+        sc_.bind(descriptor());
         // ISP's interpolators: window sample 3 itself (phase 0) and the points d = 1/4, 1/2, 3/4 after it, from
         // window samples 0..7 (tap_[phase][tap]).
         for (int k = 0; k < kTaps; ++k) tap_[0][k] = k == 3 ? 1.0f : 0.0f;
@@ -86,6 +88,7 @@ protected:
         ms_ = 0.0;
         env_ = 0.0;
         holdLeft_ = 0;
+        sc_.clear();
         for (auto& h : win_)
             for (float& v : h) v = 0.0f;
         grMax_ = grNow_ = 0.0;
@@ -114,6 +117,7 @@ protected:
         outRamp_.set(outGain_, kControlFrames);
         mixRamp_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
         external_ = choice(kSidechain, at) == 1;
+        if (sc_.bound()) sc_.set(param(sc_.hp, at), param(sc_.lp, at), on(sc_.li, at), sr);
     }
 
     // The detector's level of one frame, linear (RMS: its mean square, returned squared; `squared` says so).
@@ -166,10 +170,14 @@ protected:
         const float* keyR = keyRight();
         // The key when one is asked for and given (the chain gives silence when no track keys it); else the input.
         const bool key = external_ && keyL && keyR;
-        if (detection_ == 2) truePeaks(key ? keyL : inL, key ? keyR : inR, n);
+        // The detector's source through the sidechain filter (unfiltered while it is off).
+        const float* srcL = key ? keyL : inL;
+        const float* srcR = key ? keyR : inR;
+        sc_.apply(srcL, srcR, n);
+        if (detection_ == 2) truePeaks(srcL, srcR, n);
         for (uint32_t i = 0; i < n; ++i) {
             const double xl = inL[i], xr = inR[i];
-            const double sl = key ? keyL[i] : xl, sr = key ? keyR[i] : xr;
+            const double sl = srcL[i], sr = srcR[i];
             if (key) {
                 const double k = std::max(sl < 0 ? -sl : sl, sr < 0 ? -sr : sr);
                 keyMax_ = k > keyMax_ ? k : keyMax_;
@@ -203,6 +211,7 @@ protected:
             outL[i] = static_cast<float>(xl * g);
             outR[i] = static_cast<float>(xr * g);
         }
+        if (sc_.listen) sc_.listenTo(srcL, srcR, outL, outR, n);
     }
 
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -234,6 +243,7 @@ private:
     uint32_t ispAt_ = 0;
     int detection_ = 0;
     bool external_ = false;
+    SidechainFilter sc_;
     double threshold_ = -20, thresholdLin_ = 0.1, thresholdSq_ = 0.01, amount_ = 0.5;
     double attack_ = 0, release_ = 0, attackFor_ = -1, releaseFor_ = -1, rateFor_ = -1, rmsCoef_ = 0;
     double outDb_ = 1e300, outGain_ = 1.0;

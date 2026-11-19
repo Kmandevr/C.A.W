@@ -11,6 +11,7 @@
 #include "caw/library/eq.hpp"
 #include "caw/library/oscillator.hpp"
 #include "fx_bandbank.h"
+#include "fx_sidechain.h"
 #include "presets.h"
 
 // Original code (C.A.W. is Apache-2.0); the channel vocoder is Dudley's (1939), its band design the shared
@@ -69,6 +70,7 @@ const ParamTable& vocoderParams() {
         p.pick("freeze", "Freeze", 0.0, kOffOn);
         p.num("mix", "Mix", 1.0, 0.0, 1.0);
         p.num("output", "Output", 0.0, -24.0, 24.0, "dB");
+        addSidechainParams(p);  // 1.1.0: the key carrier's filter and Listen, appended off
         return p;
     }();
     return t;
@@ -91,11 +93,13 @@ protected:
         const double g = detTan(kPi * 5000.0 / sr), k = 1.4142135623730951;
         hp.set(g, k, 1.0, -k, -1.0);
         sib_ = hp;
+        sc_.bind(descriptor());
         return true;
     }
     void clearState() noexcept override {
         an_.clear(), syn_.clear();
         sibA_.clear(), sibB_.clear();
+        sc_.clear();
         count_ = 0;
         held_ = 0;
         t_ = 0;
@@ -117,6 +121,7 @@ protected:
         const int pick = std::clamp(choice(voBands, at), 0, 3);
         const uint32_t bands = pick == 0 ? kBandCounts[std::clamp(q, 0, 2)] : kBandCounts[pick - 1];
         const bool changed = !knobsUnchanged(knobs_, voCount, at);
+        if (sc_.bound()) sc_.set(param(sc_.hp, at), param(sc_.lp, at), on(sc_.li, at), sr);
         if (changed || first_ || bands != count_) {
             carrier_ = std::clamp(choice(voCarrier, at), 0, 1);
             wave_ = std::clamp(choice(voWave, at), 0, 2);
@@ -193,6 +198,7 @@ protected:
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const float* keyL = keyLeft();
         const float* keyR = keyRight();
+        sc_.apply(keyL, keyR, n);  // the key (the Sidechain carrier) through the sidechain filter (nothing while off)
         const EventInput& notes = keyNotes();
         const uint32_t first = runStart();
         double peak = keyPeak_;
@@ -218,6 +224,7 @@ protected:
             ++t_;
         }
         keyPeak_ = peak;
+        if (sc_.listen) sc_.listenTo(keyL, keyR, outL, outR, n);
     }
 
     uint32_t fillDisplay(float* out, bool) noexcept override {
@@ -304,6 +311,7 @@ private:
     double keyPeak_ = 0;
     float carrierGain_ = 1.0f;
     bool freeze_ = false, first_ = true;
+    SidechainFilter sc_;
     Ramp dry_, wet_, sibGain_;
 };
 

@@ -6,6 +6,7 @@
 #include "builtin_effects.h"
 #include "fx_dyn_common.h"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
 
 // Original code (C.A.W. is Apache-2.0).
 // Expand: below the threshold the level falls `ratio` times as fast (1.5:1 to 4:1, lib::expanderGainDb with its
@@ -189,11 +190,13 @@ protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         follower_.setCoefficients(lib::timeCoefficient(0.0001, sampleRate), lib::timeCoefficient(0.02, sampleRate));
         slopeCoef_ = lib::timeCoefficient(0.05, sampleRate);
+        sc_.bind(descriptor(), true);  // its own sc_hpf stays; the shared filter adds sc_lpf and Listen
         return true;
     }
     void clearState() noexcept override {
         follower_.clear();
         for (auto& f : hpf_) f.clear();
+        sc_.clear();
         open_ = false;
         holdLeft_ = 0;
         env_ = range_;
@@ -225,6 +228,7 @@ protected:
         useHpf_ = hpf > 20.5;
         if (useHpf_) for (auto& f : hpf_) f.set(hpf, 0.70710678118654752, sr);
         external_ = choice(kPSidechain, at) == 1;
+        if (sc_.bound()) sc_.set(20.0, param(sc_.lp, at), on(sc_.li, at), sr);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const float* kl = external_ ? keyLeft() : nullptr;
@@ -237,6 +241,7 @@ protected:
         if (useHpf_)
             for (int c = 0; c < 2; ++c)
                 for (uint32_t i = 0; i < n; ++i) sc[c][i] = hpf_[c].highpass(sc[c][i]);
+        sc_.filter(sc[0], sc[1], n);  // the shared low-pass (nothing while off)
         for (uint32_t i = 0; i < n; ++i) {
             const double l = sc[0][i] < 0 ? -sc[0][i] : sc[0][i], r = sc[1][i] < 0 ? -sc[1][i] : sc[1][i];
             const double level = follower_.process(l > r ? l : r);
@@ -262,6 +267,7 @@ protected:
             outL[i] = static_cast<float>(inL[i] * gain_);
             outR[i] = static_cast<float>(inR[i] * gain_);
         }
+        if (sc_.listen) sc_.listenTo(sc[0], sc[1], outL, outR, n);
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();
@@ -282,6 +288,7 @@ private:
     const ModuleDescriptor& d_;
     lib::EnvelopeFollower follower_;
     lib::Svf hpf_[2];
+    SidechainFilter sc_;  // sc_lpf and sc_listen (1.1.0)
     double openDb_ = -50, closeDb_ = -56, openLin_ = 0, closeLin_ = 0, range_ = -80, env_ = -80;
     double attack_ = 0, release_ = 0, attackFor_ = -1, rateFor_ = -1, releaseMs_ = 80;
     double gainDb_ = 1e300, gain_ = 1, lastDb_ = -200, slope_ = 0, slopeCoef_ = 0;

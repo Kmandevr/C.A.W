@@ -1,6 +1,7 @@
 // Merged devices, part A (Compressor, Gate, Ducker, Limiter, Transient): their variants, the old dynamics classes unchanged and 1.1.0's new ones (the Talon/Hatch/Duck split).
 #include "fx_dyn_common.h"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
 
 // 1.1.0's split (owner, 2026-11-19; the private sound plan's "Talon / Hatch / Duck split"):
 // Compressor (org.caw.compressor): Down (0, the old compressor class: its 1.0.8 parameters, `variant`, then the key's
@@ -24,6 +25,7 @@ const ParamTable& talonDownExtraParams();
 const ModuleDescriptor& legacyLimiterDescriptor();
 const ModuleDescriptor& legacyGateDescriptor();
 const ModuleDescriptor& legacyTransientDescriptor();
+std::span<const ParameterDescriptor> limiterTargetParams();  // builtin_effects_dynamics.cpp (1.1.0)
 ModuleProcessor* makeCompressorAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeLimiterAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeGateAs(const ModuleDescriptor& variant) noexcept;
@@ -103,18 +105,34 @@ struct Plain {
     static constexpr Variant variant() { return {Labels[Index], &descriptor, &create}; }
 };
 
+// A variant with parameters appended after `variant` (1.1.0: the sidechain filter, the Limiter's target), so the
+// base's indices and `variant`'s place hold.
+template <const std::string_view& Id, const std::string_view& Name, const auto& Labels, uint32_t Index,
+          const ModuleDescriptor& (*Base)(), ModuleProcessor* (*MakeAs)(const ModuleDescriptor&) noexcept,
+          std::span<const ParameterDescriptor> (*After)()>
+struct Extended {
+    static const ModuleDescriptor& descriptor() {
+        static const ModuleDescriptor& d = extendedVariantDescriptor(Base(), Id, Name, Labels, Index, After());
+        return d;
+    }
+    static ModuleProcessor* create() noexcept { return MakeAs(descriptor()); }
+    static constexpr Variant variant() { return {Labels[Index], &descriptor, &create}; }
+};
+std::span<const ParameterDescriptor> keyFilterAll() { return sidechainParamList(true); }
+std::span<const ParameterDescriptor> keyFilterNoHighPass() { return sidechainParamList(false); }
+
 const Variant kCompressor[] = {Talon<0, &legacyCompressorDescriptor, &makeCompressorAs>::variant(),
                                Talon<1, &legacyDynamicsDescriptor, &makeDynamicsAs>::variant(),
                                Talon<2, &talonUpBaseDescriptor, &makeTalonUpAs>::variant(),
                                Talon<3, &talonBusBaseDescriptor, &makeTalonBusAs>::variant()};
-const Variant kGate[] = {Plain<kGateId, kGateName, kGateVariants, 0, &legacyGateDescriptor, &makeGateAs>::variant(),
+const Variant kGate[] = {Extended<kGateId, kGateName, kGateVariants, 0, &legacyGateDescriptor, &makeGateAs, &keyFilterNoHighPass>::variant(),
                          Plain<kGateId, kGateName, kGateVariants, 1, &hatchExpandBaseDescriptor, &makeHatchExpandAs>::variant(),
-                         Plain<kGateId, kGateName, kGateVariants, 2, &hatchPedalBaseDescriptor, &makeHatchPedalAs>::variant()};
-const Variant kDuck[] = {Plain<kDuckId, kDuckName, kDuckVariants, 0, &duckBaseVariantDescriptor, &makeDuckAs>::variant(),
+                         Extended<kGateId, kGateName, kGateVariants, 2, &hatchPedalBaseDescriptor, &makeHatchPedalAs, &keyFilterNoHighPass>::variant()};
+const Variant kDuck[] = {Extended<kDuckId, kDuckName, kDuckVariants, 0, &duckBaseVariantDescriptor, &makeDuckAs, &keyFilterAll>::variant(),
                          Plain<kDuckId, kDuckName, kDuckVariants, 1, &duckLevelBaseDescriptor, &makeDuckLevelAs>::variant(),
-                         Plain<kDuckId, kDuckName, kDuckVariants, 2, &duckCarveBaseDescriptor, &makeDuckCarveAs>::variant()};
+                         Extended<kDuckId, kDuckName, kDuckVariants, 2, &duckCarveBaseDescriptor, &makeDuckCarveAs, &keyFilterAll>::variant()};
 const Variant kLimiter[] = {
-    Plain<kLimiterId, kLimiterName, kLimiterVariants, 0, &legacyLimiterDescriptor, &makeLimiterAs>::variant()};
+    Extended<kLimiterId, kLimiterName, kLimiterVariants, 0, &legacyLimiterDescriptor, &makeLimiterAs, &limiterTargetParams>::variant()};
 const Variant kTransient[] = {
     Plain<kTransientId, kTransientName, kTransientVariants, 0, &legacyTransientDescriptor, &makeTransientAs>::variant()};
 

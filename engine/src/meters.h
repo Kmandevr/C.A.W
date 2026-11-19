@@ -62,6 +62,9 @@ public:
     // a light effect (2026-11-11 performance pass).
     static constexpr double kUnreadSeconds = 30.0;
     void sleepWhenUnread(bool on) noexcept { sleepWhenUnread_ = on; }
+    // Before the audio thread runs it: off, the true peaks are not measured (they read as 0, -inf dBTP), which saves
+    // the 4x interpolation on every sample (the Limiter's loudness target reads only the loudness). On by default.
+    void measureTruePeak(bool on) noexcept { truePeakOn_ = on; }
     // Off the audio thread (one reader at a time): the momentary and short-term values as last published, the
     // integrated loudness worked out now, and the true peaks (those since the last read are reset by reading).
     Reading read() noexcept;
@@ -110,6 +113,7 @@ private:
     std::atomic<uint32_t> resetAsked_{0};
     std::atomic<uint32_t> reads_{0};  // bumped by read()
     bool sleepWhenUnread_ = false;
+    bool truePeakOn_ = true;
     uint32_t readsSeen_ = 0;          // audio thread
     double unreadFrames_ = 0;         // audio thread: frames since a read() was last seen
     bool asleep_ = false;             // audio thread: not measuring (no read lately)

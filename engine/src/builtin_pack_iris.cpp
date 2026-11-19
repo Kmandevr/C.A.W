@@ -104,12 +104,15 @@ const Phasors& phasors() noexcept {
     return t;
 }
 
-class Iris final : public EffectBase, public VariableLatency {
+class Iris final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return irisDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
         const int q = count > irQuality ? static_cast<int>(values[irQuality] + 0.5) : 1;
-        return clean::tierWindow(q, false, rate());
+        return clean::tierWindow(armed() ? 0 : q, false, rate());  // armed: Eco's window, the shortest it has tables for
+    }
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return (count > irQuality ? static_cast<int>(values[irQuality] + 0.5) : 1) > 0;
     }
     uint64_t idleFrames() const noexcept override {
         if (captured_ && (freeze_ || fz_ > 0.0)) return ~0ull >> 2;  // a frozen spectrum plays on over silence
@@ -239,11 +242,12 @@ protected:
 
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        const uint32_t n = clean::tierWindow(std::clamp(choice(irQuality, at), 0, 2), false, sr);
+        const int tier = armed() ? 0 : std::clamp(choice(irQuality, at), 0, 2);
+        const uint32_t n = clean::tierWindow(tier, false, sr);
         if (n != n_) {
             const uint32_t old = n_;
             n_ = n;
-            tier_ = std::clamp(choice(irQuality, at), 0, 2);
+            tier_ = tier;
             stft_.setSize(n);
             for (auto& b : blur_) std::fill(b.begin(), b.end(), 0.0f);
             if (captured_ && old) resampleFrozen(old, n), frozenBandsFrom(n / 2 + 1, n / kPi);

@@ -230,11 +230,16 @@ TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
     for (const fx::MergedDevice* d : fx::mergedDevices()) {
         const ModuleDescriptor* listed = registry().find(d->id);
         CHECK(listed == &d->variants[0].descriptor());
-        // `variant` last, but for Talon (1.1.0), whose list goes on with Down's extras and the talon_layout marker.
+        // `variant` last, but for Talon (1.1.0), whose list goes on with Down's extras and the talon_layout marker, and
+        // the devices 1.1.0's "Around the effects" appended to (the sidechain filter, the Limiter's target).
         bool has = false;
         for (uint32_t k = 0; listed && k < listed->parameterCount; ++k) has = has || listed->parameters[k].id == fx::kVariantParam;
         CHECK(has);
-        if (d->id != "org.caw.compressor")
+        const bool appended = d->id == "org.caw.gate" || d->id == "org.caw.duck" || d->id == "org.caw.limiter";
+        if (appended && listed) {
+            const ParameterDescriptor& last = listed->parameters[listed->parameterCount - 1];
+            CHECK(last.id == std::string("sc_listen") || last.id == std::string("target"));
+        } else if (d->id != "org.caw.compressor")
             CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
     }
     // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.

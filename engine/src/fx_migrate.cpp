@@ -119,6 +119,18 @@ uint32_t variantAt(const ModuleDescriptor& d) noexcept {
 
 double rackLayoutOf(const Values& values) noexcept { return valueOf(values, kRackLayoutParam, 0.0); }
 
+// The parameters rack layout 4 (1.1.0's "Around the effects") appended to a child's list: a rack older than that
+// listed its child without them, so its routes' destinations count past them.
+bool appendedInLayout4(std::string_view child, double variant, std::string_view param) noexcept {
+    const bool filter = param == "sc_hpf" || param == "sc_lpf" || param == "sc_listen";
+    const int v = static_cast<int>(std::floor(variant + 0.5));
+    if (child == "org.caw.duck") return filter && (v == 0 || v == 2);
+    if (child == "org.caw.gate") return (param == "sc_lpf" || param == "sc_listen") && (v == 0 || v == 2);
+    if (child == "org.caw.ringmod" || child == "org.caw.vocoder") return filter;
+    if (child == "org.caw.limiter") return param == "target_on" || param == "target";
+    return false;
+}
+
 // A current rack child's descriptor: the built-in with that hash (a merged device's `variant`'s).
 const ModuleDescriptor* currentChild(uint32_t hash, double variant) {
     for (const ModuleDescriptor* d : builtins().builtinComponents()) {
@@ -175,7 +187,7 @@ std::vector<std::string> rackLayout(std::string_view rackId, const Values& value
         const ModuleDescriptor* child = nullptr;
         const std::string prefix = slot + ".";
         const double variant = valueOf(values, prefix + std::string(kVariantParam), 0.0);
-        const bool older = legacy && rackLayoutOf(values) < kRackLayoutCurrent;  // before 1.1.0's split
+        const bool older = legacy && rackLayoutOf(values) < kRackLayoutSplit;  // before 1.1.0's split
         bool merged = false;
         if (const LegacyEffect* e = legacy ? legacyByHash(hash) : nullptr) {
             child = e->legacy ? &e->legacy() : builtins().find(e->from);
@@ -199,7 +211,13 @@ std::vector<std::string> rackLayout(std::string_view rackId, const Values& value
         if (older && merged) count = std::min(count, variantAt(*child) + 1);
         if (legacy && std::find(preVariant.begin(), preVariant.end(), slot) != preVariant.end())
             count = std::min(count, variantAt(*child));
-        for (uint32_t c = 0; c < count; ++c) ids.push_back(slot + "." + std::string(child->parameters[c].id));
+        const bool before4 = legacy && rackLayoutOf(values) < kRackLayoutCurrent;
+        for (uint32_t c = 0; c < count; ++c) {
+            if (before4 && appendedInLayout4(child->id, valueOf(values, prefix + std::string(kVariantParam), 0.0),
+                                             child->parameters[c].id))
+                continue;
+            ids.push_back(slot + "." + std::string(child->parameters[c].id));
+        }
     }
     for (uint32_t k = own; k < d->parameterCount; ++k) ids.emplace_back(d->parameters[k].id);
     return ids;
@@ -226,7 +244,7 @@ bool migrateRack(ComponentSpec& spec, ParamRenames& renames) {
     }
     for (const std::string& slot : preVariant) set(spec.params, slot + "." + std::string(kVariantParam), 0.0);
     // 1.1.0's split: an older rack's Compressor child whose variant left becomes the device it is now.
-    if (!currentLayout(spec.params)) {
+    if (rackLayoutOf(spec.params) < kRackLayoutSplit) {
         for (uint32_t k = 0; k < d->parameterCount; ++k) {
             const std::string_view id = d->parameters[k].id;
             if (!endsWith(id, "_fx")) continue;
