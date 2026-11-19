@@ -182,8 +182,11 @@ extern "C" {
    .humanize, or a loaded one) run in order on the layer's notes before its instrument hears them. Component index
    CAW_MIDI_COMPONENT | k addresses MIDI effect k in caw_engine_set_component_param, _bypass, _display, _states and
    _set_component_state; automation lanes "target_type":"midiComponent" with "component" k. New devices
-   org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md). */
-#define CAW_API_VERSION 41
+   org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md).
+   42 (2026-11-19, 1.1.0): the clip pitch editor's engine (Lark, one voice): caw_pitch_clip_analyse,
+   caw_pitch_clip_curve, caw_pitch_clip_render and caw_pitch_clip_free (below). New device org.caw.pitchfix (live
+   pitch correction). Nothing else changes. */
+#define CAW_API_VERSION 42
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -1064,6 +1067,35 @@ typedef struct CawComponentBenchRequest {
    "sample_rate"} ([x, % of a block] pairs), "thresholds"}. Keys, measurements and thresholds: docs/engine.md, "The
    plug-in benchmark". A failed job's caw_job_error says why ("cancelled" when cancelled); its progress is 0..1000. */
 CAW_API CawJob* caw_worker_pool_submit_component_bench(CawWorkerPool* pool, const CawComponentBenchRequest* request);
+
+/* API 42: the clip pitch editor's engine (Lark; docs/engine.md "Lark"). Monophonic. Call these off the audio thread
+   (a worker isolate); they allocate, take no lock the audio thread holds, and are deterministic: the same audio,
+   options and edits give the same notes and the same samples on every run.
+   caw_pitch_clip_analyse: `frames` (1..30 minutes) of `left` and `right` (NULL: mono) at `sample_rate`
+   (8000..192000), options {"low_hz" 50..400 (60), "high_hz" 200..2000 (1000; above 1.5 x low_hz)} (NULL for the
+   defaults; at most 4096 bytes; an unknown key or a value out of range fails with an error naming it). On success
+   *out is the clip (free it with caw_pitch_clip_free) and the result is {"ok":true, "error", "sample_rate",
+   "frames", "hop_frames" (hop k is centred on frame k x hop_frames), "hops", "notes": [{"start", "end" (frames,
+   [start, end)), "pitch" (the centre, a MIDI note, fractional), "drift_cents" (the slow wander's rms),
+   "vibrato_rate" (Hz; 0 when none), "vibrato_cents" (depth), "transition_in_ms", "transition_out_ms", "gain_db"}]};
+   on failure *out is NULL and {"ok":false, "error"}. Free the result with caw_free. */
+typedef struct CawPitchClip CawPitchClip;
+CAW_API char* caw_pitch_clip_analyse(const float* left, const float* right, int64_t frames, int32_t sample_rate,
+                                     const char* options_json, CawPitchClip** out);
+/* The pitch curve, one value a hop: midi (0 when unvoiced), voicing (0..1) and rms_db, each written for
+   min(max, hops) hops when not NULL. Returns the hops (-1: no clip). */
+CAW_API int64_t caw_pitch_clip_curve(const CawPitchClip* clip, float* midi, float* voicing, float* rms_db, int64_t max);
+/* Renders `clip`'s audio (the same `left`, `right` and `frames` it analysed: another is refused) with the edits
+   {"edits": [{"note" (its index), "pitch" -24..24 semitones (0), "drift" 0..1 (1 keeps the drift, 0 flattens it),
+   "vibrato" 0..2 (the depth scale, 1), "formant" -12..12 semitones (0), "formant_keep" (true; false: the formant
+   follows the pitch), "time_frames" (the move, at most 10 s either way, 0), "stretch" 0.25..4 (1), "gain_db"
+   -60..24 (0), "transition_ms" 0..500 (30: the ramps at the note's changes)}]} (NULL: none; at most 8 MiB; a note
+   edited twice, an unknown key or a value out of range fails naming it) into out_left (and out_right when right is
+   given), each `frames` long. The source is never changed; where no edit reaches, the output is the input exactly.
+   Result {"ok", "error", "notes_edited"}; free with caw_free. */
+CAW_API char* caw_pitch_clip_render(const CawPitchClip* clip, const float* left, const float* right, int64_t frames,
+                                    const char* edits_json, float* out_left, float* out_right);
+CAW_API void caw_pitch_clip_free(CawPitchClip* clip);
 
 #ifdef __cplusplus
 }
