@@ -311,8 +311,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('sampler-record')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('rec-start')));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100))); // the recordings folder (real I/O)
-    await tester.pump();
+    // The recordings folder is real I/O: wait for the request (up to 5 s; a busy CI runner can take more than 100 ms).
+    for (var i = 0; i < 50 && io.lastRecordRequest == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+    }
     expect(io.lastRecordRequest?['tracks'], [{'layer': 'a', 'channel': 0, 'channels': 1}]);
     expect(find.text('NEXT'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 2500));
