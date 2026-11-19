@@ -348,6 +348,12 @@ class ComponentUseDoc {
   /// Passes its input through and is not run.
   bool bypass;
 
+  /// Auto gain (API 39, a listening aid): the engine trims the effect's output to its input's loudness. Saved as
+  /// `"auto_gain": true` only when on, so a file without it saves byte for byte; an older build ignores the key
+  /// (no file version needed). A track's or the master's effects only (the engine has none on an instrument or
+  /// per-note effect).
+  bool autoGain = false;
+
   /// What the component's save_state wrote, base64 (`Engine.componentStates`), so a reload or an export starts
   /// from it; null for none.
   String? state;
@@ -364,7 +370,7 @@ class ComponentUseDoc {
 
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
-  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && state == null && preset == null &&
+  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && !autoGain && state == null && preset == null &&
           (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack)
       ? id
       : {
@@ -373,6 +379,7 @@ class ComponentUseDoc {
           if (_isRack && !legacyRack) 'params': {...params, rackLayoutParam: rackLayoutCurrent}
           else if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
+          if (autoGain) 'auto_gain': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
           if (key != null && withKey) 'key': key!.toJson(),
           if (samples.isNotEmpty) 'samples': [for (final x in samples) x.toJson()],
@@ -406,6 +413,7 @@ class ComponentUseDoc {
       version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
       switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
     )
+      ..autoGain = j['auto_gain'] == true
       ..key = ComponentKeyDoc.fromJson(j['key'])
       ..samples = ComponentSampleDoc.listFromJson(j['samples'])
       ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent;

@@ -6,11 +6,14 @@
 // for now), whether a saved project needs the file version that holds merged devices, and where a user preset keyed
 // by an old id now belongs.
 
-/// One old effect id: the merged device it became and its `variant` there.
+/// One old effect id: the merged device it became and its `variant` there. A variant that no old effect was (the
+/// Compressor's Duck, 1.0.8) has a page id of its own in [oldId] and [retired] false: it names the page and display
+/// layout the app gives that variant and is never read from a file.
 class MergedVariant {
-  const MergedVariant(this.oldId, this.id, this.variant);
+  const MergedVariant(this.oldId, this.id, this.variant, {this.retired = true});
   final String oldId, id;
   final int variant;
+  final bool retired;
 }
 
 /// The reserved choice parameter that picks a merged device's variant. Set by hand only: not automatable,
@@ -41,6 +44,7 @@ class MergedDevices {
     MergedVariant('org.caw.dynamics', 'org.caw.compressor', 1),
     MergedVariant('org.caw.gate', 'org.caw.compressor', 2),
     MergedVariant('org.caw.ducker', 'org.caw.compressor', 3),
+    MergedVariant(duckPageId, 'org.caw.compressor', 4, retired: false),  // Duck (engine/src/builtin_fx_duck.cpp)
     MergedVariant('org.caw.limiter', 'org.caw.limiter', 0),
     MergedVariant('org.caw.transient', 'org.caw.transient', 0),
     MergedVariant('org.caw.distortion', 'org.caw.drive', 0),
@@ -78,7 +82,10 @@ class MergedDevices {
     MergedVariant('org.caw.freqshift', 'org.caw.shift', 1),
   ];
 
-  static final Map<String, MergedVariant> _byOld = {for (final v in variants) v.oldId: v};
+  /// The page id of the Compressor's Duck variant (4), which no old effect was.
+  static const duckPageId = 'org.caw.compressor.duck';
+
+  static final Map<String, MergedVariant> _byOld = {for (final v in variants) if (v.retired) v.oldId: v};
   static final Map<String, MergedVariant> _byVariant = {for (final v in variants) '${v.id}#${v.variant}': v};
 
   /// Whether [id] is a merged device.
@@ -101,8 +108,8 @@ class MergedDevices {
     return v.round().clamp(0, count - 1);
   }
 
-  /// The old effect [id]'s variant [variant] plays (its device page and display layout), or [id] itself for any
-  /// other id.
+  /// The old effect [id]'s variant [variant] plays (its device page and display layout; a new variant's page id, the
+  /// Duck's [duckPageId]), or [id] itself for any other id.
   static String pageId(String id, int variant) => _byVariant['$id#$variant']?.oldId ?? id;
 
   /// The engine's caw_migrate_component (`Engine.resolveComponent`), once the engine has loaded (AppState sets it);

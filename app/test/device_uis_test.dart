@@ -242,6 +242,34 @@ void main() {
       await close(tester);
     });
 
+    testWidgets('the Compressor\'s Duck opens the compressor page: its curve from amount, up in the knee graph lowers it',
+        (tester) async {
+      const id = MergedDevices.duckPageId;
+      expect(DeviceEditors.custom('org.caw.compressor', builtinInfo(id)), isNotNull);
+      final s = await open(tester, id);
+      final t = targetOf(s, id);
+      expect(t.info!.variantIndex, 4);
+      expect(find.byKey(const ValueKey('device-fallback')), findsNothing);
+      expect(find.text('DUCK'), findsWidgets);
+      expect(find.byKey(const ValueKey('dknob-amount')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dknob-hold')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dknob-ratio')), findsNothing);
+      final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
+      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('threshold'), greaterThan(-20));
+      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('amount'), lessThan(0.5));
+      expect(tester.takeException(), isNull);
+      await close(tester);
+      for (final size in const [Size(844, 390), Size(360, 740)]) {
+        await open(tester, id, size: size, live: false);
+        expect(tester.takeException(), isNull, reason: '$size');
+        await close(tester);
+      }
+    });
+
     testWidgets('limiter: the ceiling line drags; elsewhere drags the gain', (tester) async {
       final s = await open(tester, 'org.caw.limiter');
       final t = targetOf(s, 'org.caw.limiter');

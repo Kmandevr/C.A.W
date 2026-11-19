@@ -27,6 +27,8 @@ import 'sample_use.dart' show SampleUse;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
+import 'device_slot_audio.dart';
+import 'engine_slot_audio.dart';
 import 'freeze.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
@@ -556,6 +558,7 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       try {
         engine = await createEngine(settings.sampleRate);
+        DeviceSlotAudio.current = EngineSlotAudio.instance;  // per-slot meters and auto gain (device shell)
         MergedDevices.resolver = Engine.resolveComponent;  // old presets' effects as merged devices (user_presets.dart)
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
         hardwareProfile = EngineExecutionPolicy.hardwareProfile;
@@ -700,6 +703,7 @@ class AppState extends ChangeNotifier implements StressHost {
     revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
+    if (engine != null && identical(DeviceSlotAudio.current, EngineSlotAudio.instance)) DeviceSlotAudio.current = null;
     engine?.dispose();
     super.dispose();
   }

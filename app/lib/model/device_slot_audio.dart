@@ -5,7 +5,8 @@ import 'device_target.dart';
 
 /// What the engine offers per device slot: its output level and its auto gain (a trim that keeps the device's output
 /// as loud as its input). The device shell (header, footer, FX chain rows) reads it through [current]; the engine's
-/// implementation is set once the C API has it. Every method is cheap and called from the UI thread only.
+/// implementation (EngineSlotAudio, lib/model/engine_slot_audio.dart) is set while an engine runs. Every method is
+/// cheap and called from the UI thread only.
 abstract class DeviceSlotAudio {
   const DeviceSlotAudio();
 
@@ -34,16 +35,23 @@ abstract class DeviceSlotAudio {
   /// The trim auto gain applies to [t] now, in dB (null while it is off or has no reading yet).
   double? autoGainTrimDb(DeviceTarget t);
 
+  /// Whether [t] in particular has a meter (default [hasMeter]; the engine's: a plain device while an engine runs).
+  bool meterAvailable(DeviceTarget t) => hasMeter;
+
+  /// Whether [t] in particular takes auto gain (default [hasAutoGain]; the engine's: a track's or the master's
+  /// effect, not an instrument, a per-note effect or a rack's child).
+  bool autoGainAvailable(DeviceTarget t) => hasAutoGain;
+
   /// Whether the shell can show [t]'s meter now.
-  static bool meterFor(DeviceTarget t) => current?.hasMeter ?? false;
+  static bool meterFor(DeviceTarget t) => current?.meterAvailable(t) ?? false;
 
   /// Whether the shell shows [t]'s ear icon now.
-  static bool autoGainFor(DeviceTarget t) => current?.hasAutoGain ?? false;
+  static bool autoGainFor(DeviceTarget t) => current?.autoGainAvailable(t) ?? false;
 
   /// Switches [t]'s auto gain through [current] and tells the shell.
   static void toggleAutoGain(DeviceTarget t) {
     final a = current;
-    if (a == null || !a.hasAutoGain) return;
+    if (a == null || !a.autoGainAvailable(t)) return;
     a.setAutoGain(t, !a.autoGain(t));
     changes.value++;
   }

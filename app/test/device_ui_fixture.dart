@@ -51,8 +51,14 @@ List<NativeComponentInfo> builtinInfos() => _infos ??= [
       flagshipFixture(),
     ];
 
+/// The merged device and variant an old id ([MergedDevices.isRetired]) or a new variant's page id (the Compressor's
+/// Duck, [MergedDevices.duckPageId]) names, or null.
+MergedVariant? mergedVariantOf(String id) => MergedDevices.isRetired(id)
+    ? MergedDevices.of(id)
+    : MergedDevices.variants.where((v) => !v.retired && v.oldId == id).firstOrNull;
+
 NativeComponentInfo builtinInfo(String id) {
-  final merged = MergedDevices.isRetired(id) ? MergedDevices.of(id) : null;
+  final merged = mergedVariantOf(id);
   if (merged != null) return builtinInfos().firstWhere((c) => c.id == merged.id).variants[merged.variant];
   // A reused id is its device's first variant (what a device on it shows: that variant's presets only).
   return builtinInfos().firstWhere((c) => c.id == id).forValues(const {});
@@ -117,7 +123,7 @@ AppState stateWith(String id, {AppState Function()? make}) {
 /// Adds built-in effect [id] to [layer]: a retired old id as its merged device on that variant (the app never adds
 /// an old id now, FX consolidation).
 void addBuiltinEffect(AppState s, LayerDoc layer, String id) {
-  final merged = MergedDevices.isRetired(id) ? MergedDevices.of(id) : null;
+  final merged = mergedVariantOf(id);
   final use = s.addNativeEffect(layer, merged?.id ?? id);
   if (merged != null) use?.params[variantParam] = merged.variant.toDouble();
 }

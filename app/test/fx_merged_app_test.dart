@@ -6,6 +6,7 @@ import 'package:caw/engine/component_info.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/midi_mapping.dart';
@@ -69,7 +70,12 @@ void main() {
 
   group('the table', () {
     test('every old id maps to a merged device and its variant, and each variant to one old page', () {
-      expect(MergedDevices.variants.where((v) => v.oldId != v.id), hasLength(30));
+      expect(MergedDevices.variants.where((v) => v.retired && v.oldId != v.id), hasLength(30));
+      // The Compressor's Duck is a new variant: a page id of its own, never an old id read from a file.
+      expect(MergedDevices.pageId('org.caw.compressor', 4), MergedDevices.duckPageId);
+      expect(MergedDevices.isRetired(MergedDevices.duckPageId), isFalse);
+      expect(MergedDevices.of(MergedDevices.duckPageId), isNull);
+      expect(MergedDevices.variantOf('org.caw.compressor', {'variant': 4}), 4);
       expect(MergedDevices.of('org.caw.saturator')!.id, 'org.caw.drive');
       expect(MergedDevices.of('org.caw.saturator')!.variant, 1);
       expect(MergedDevices.isRetired('org.caw.saturator'), isTrue);
@@ -78,6 +84,13 @@ void main() {
       expect(MergedDevices.pageId('org.caw.compressor', 0), 'org.caw.compressor');
       expect(MergedDevices.pageIdOf('org.caw.delay', {'variant': 1}), 'org.caw.delay.pingpong');
       expect(MergedDevices.pageIdOf('org.caw.comb', {'variant': 1}), 'org.caw.comb');
+    });
+
+    test('the Duck\'s ten display floats decode: input and key level, reduction, its settings', () {
+      final f = decodeDisplay(MergedDevices.duckPageId, [-6, -9, -14, -12, 4.5, 7, -20, 0.5, 1, 1], 10);
+      expect((f.inputDb, f.outputDb, f.gainReductionDb), (-6, -9, -4.5));
+      expect(f.values, {'detector_db': -14, 'key_db': -12, 'gr': 4.5, 'gr_max': 7, 'threshold': -20, 'amount': 0.5,
+          'detection': 1, 'sidechain': 1});
     });
 
     test('the table matches the fixture the engine dumped: each merged device\'s variants in order', () {

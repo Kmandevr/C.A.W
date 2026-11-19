@@ -163,6 +163,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
     case 'org.caw.compressor':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
           values: named(['gr_max', 'gr', 'detector_db', 'threshold', 'ratio', 'knee', 'makeup_db', 'lookahead_ms'], 2));
+    case MergedDevices.duckPageId:  // the Compressor's Duck variant (docs/engine.md, "The Compressor's Duck variant")
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(4),
+          values: named(['detector_db', 'key_db', 'gr', 'gr_max', 'threshold', 'amount', 'detection', 'sidechain'], 2));
     case 'org.caw.limiter':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
           values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak'], 2));

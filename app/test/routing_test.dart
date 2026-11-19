@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
 import 'package:caw/model/routing_edit.dart';
@@ -96,6 +97,22 @@ void main() {
     expect(s.setComponentKey(bass, 1, 'grp'), isFalse);  // its own folder: a loop
     expect(s.keySources(bass).map((l) => l.id), isNot(contains('grp')));
     s.setComponentKey(bass, 0, null);
+    expect(bass.components[0].key, isNull);
+    expect(bass.components[0].params['sidechain'], 0);
+  });
+
+  test('a key on the Compressor\'s Duck turns its sidechain to External, and back to Internal without', () {
+    final s = AppState(settings: Settings());
+    s.project = _project();
+    final bass = s.project.layers[1];
+    bass.components.add(ComponentUseDoc('org.caw.compressor', {'variant': 4}));
+    expect(MergedDevices.pageIdOf('org.caw.compressor', bass.components[0].params), MergedDevices.duckPageId);
+    expect(s.setComponentKey(bass, 0, 'kick'), isTrue);
+    expect(bass.components[0].params['sidechain'], 1);
+    expect(bass.components[0].key?.layer, 'kick');
+    expect(s.setComponentKey(bass, 0, 'kick', pre: false), isTrue);  // pre or post: still External
+    expect(bass.components[0].params['sidechain'], 1);
+    expect(s.setComponentKey(bass, 0, null), isTrue);
     expect(bass.components[0].key, isNull);
     expect(bass.components[0].params['sidechain'], 0);
   });

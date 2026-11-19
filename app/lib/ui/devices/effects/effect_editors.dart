@@ -58,6 +58,8 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
 final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
   'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
+  // The Compressor's Duck variant: the compressor's page, its curve drawn from `amount`.
+  MergedDevices.duckPageId: singlePage('duck', 'DUCK', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
   'org.caw.reverb.pro': singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage()),
   'org.caw.delay.pro': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
   'org.caw.delay.pingpong': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
