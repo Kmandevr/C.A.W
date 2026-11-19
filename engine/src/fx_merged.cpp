@@ -2,6 +2,7 @@
 #include "fx_merged.h"
 #include "builtin_fx_tools.h"
 #include "builtin_fx_voice.h"
+#include "builtin_timber.h"
 
 #include <cmath>
 #include <deque>
@@ -20,7 +21,7 @@ const std::vector<const MergedDevice*>& mergedDevices() {
         for (std::span<const MergedDevice> family : {mergedDynamicsDevices(), mergedDriveDevices(), mergedEqFilterDevices(),
                                                      mergedStereoModDevices(), mergedSpaceDevices(),
                                                      mergedMeterDevices(), mergedVoiceDevices(), mergedPreenDevices(),
-                                                     mergedHushDevices()})
+                                                     mergedHushDevices(), timber::mergedTimberDevices()})
             for (const MergedDevice& d : family) v.push_back(&d);
         return v;
     }();

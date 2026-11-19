@@ -232,6 +232,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.
 target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 1.1.0: Lark (org.caw.pitchfix) and the clip pitch editor's engine
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
+target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp
@@ -318,6 +319,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/lark_test.cpp src/capi_pitch_clip.cpp)  # 1.1.0: Lark (live correction, the clip pitch editor, API 42)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
+  target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/fx_merged_test.cpp)  # FX consolidation: merged devices, migration, optional ports
@@ -446,6 +448,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
   target_sources(caw_rt_tests PRIVATE tests/fx_clean_rt_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
+  target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing
@@ -490,6 +493,7 @@ target_include_directories(caw_cli PRIVATE src)
 add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp bench/pack_cost.cpp bench/raven_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
   target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
+  target_sources(caw_bench PRIVATE bench/timber_cost.cpp)  # 1.1.0: Timber's cost ceilings
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -511,6 +515,7 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
     add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
     add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
+    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
   endif()
 endif()
 

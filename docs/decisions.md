@@ -6,6 +6,14 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: Timber's piano excitation is synthesised; Timber is one merged instrument (Claude, within the owner's Timber decisions)
+
+**Context:** the owner settled (2026-11-19) the commuted-waveguide piano designed around Modartt's US7915515B2 claims, and allowed a soundboard excitation derived from a CC-BY recording to ship built in, with credit.
+- **Decision (Claude):** this build ships **no recorded material**. The 24 soundboard excitations (Grand, Upright, Felt × 8 zones) are designed by Timber itself at registration (`engine/src/timber_tables.cpp`: decaying band noise, longer in the low bands, and six low body resonances), so no credit or NOTICE line is needed. Extracting a residual from the Salamander Grand (CC-BY 3.0) was not attempted in this session: it needs the samples fetched and an inverse-filtering pass whose ringing partials are the design's named risk. It stays the open option the owner allowed; if it is taken, its source, licence and credit go here and in NOTICE.
+- **Decision (Claude):** `org.caw.timber` is one merged device (`fx_merged.h`) whose `variant`, shown as "Model", picks one of seven classes, so only the chosen model's voices and memory exist (the design's "fx_merged's variant pattern").
+- **Departures from the design (Claude):** the bowed body is five resonators after the voices' sum, not a 2,048-tap convolution (no latency, a fraction of the cost); the sax is the clarinet's reed with its even harmonics folded in (an assumption, by ear); the brass model speaks from about C3 up; the organ's leakage is not modelled; phantom partials and sostenuto are not built.
+- **[Fact]** No new dependency: everything is the engine's own code and its Library (`lib::Reverb`, `org.caw.rotary`'s class).
+
 ## 2026-11-19: The brand is protected; the code stays Apache 2.0 (owner)
 
 **Decision (owner):** the code, engine and SDK stay open under Apache 2.0. The brand belongs to Kmandevr, doing business as AutoStacc, and is not licensed with the code ([brand and trademark policy](../TRADEMARKS.md)).
