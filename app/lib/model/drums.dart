@@ -33,7 +33,7 @@ class DrumLayer {
   /// The suffix of its on switch: `body_on`, or the choice whose first value is Off (`drive_type`, `flt`); null when
   /// the layer has none (its knobs at their neutral values leave the sound alone).
   String? get power => switch (id) {
-        'body' || 'sub' || 'click' || 'noise' || 'metal' || 'res' || 'smp' => '${id}_on',
+        'body' || 'sub' || 'click' || 'noise' || 'metal' || 'res' || 'smp' || 'fm' || 'phys' || 'tex' => '${id}_on',
         'drive' => 'drive_type',
         'filter' => 'flt',
         _ => null,
@@ -44,11 +44,12 @@ class DrumLayer {
 const drumLayerNames = {
   'pad': 'Pad', 'press': 'Pressure', 'body': 'Body', 'penv': 'Pitch shape', 'sub': 'Sub', 'click': 'Click',
   'noise': 'Noise', 'metal': 'Metal', 'res': 'Resonator', 'smp': 'Sample', 'drive': 'Drive', 'filter': 'Filter',
-  'eq': 'EQ', 'dyn': 'Dynamics', 'space': 'Space', 'macro': 'Character', 'var': 'Variation',
+  'eq': 'EQ', 'dyn': 'Dynamics', 'space': 'Space', 'macro': 'Character', 'var': 'Variation', 'fm': 'FM',
+  'phys': 'Physical', 'tex': 'Texture', 'fx': 'Pad FX', 'groove': 'Groove',
 };
 
 /// The layers that make sound (a pad with all of them off is empty and costs nothing).
-const drumSoundLayers = ['body', 'sub', 'click', 'noise', 'metal', 'res', 'smp'];
+const drumSoundLayers = ['body', 'sub', 'click', 'noise', 'metal', 'res', 'smp', 'fm', 'phys', 'tex'];
 
 /// The Character macros' suffixes, in the strip's order.
 const drumMacros = ['punch', 'tone', 'snap', 'length', 'dirt', 'pitch'];

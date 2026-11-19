@@ -6,6 +6,15 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: Drums 1.1.0 (Rook): settings that say when they are heard, appended layers, groove and the one-screen editor (Claude, building the owner's plan)
+
+**Owner (2026-11-19):** the drums were "finicky, some settings don't work… one big list"; plug and play with the advanced controls kept, and Raven's one-screen layout. **Built** ([engine](engine.md#drums-orgcawdrums), [app](app.md)):
+- **The audit found one setting that did nothing:** Noise mode Snappy without the Body (fixed: a shell of its own). Every other setting changed the sound, but many only in a context (a filter's resonance on LP 6 dB, Clap's bursts outside Clap, glide without Mono and tracking, Room send with the kit's room off). Choice: the engine publishes those contexts (`needs`) and the editor dims each such setting with what it needs, instead of hiding it; a test checks every rule both ways. Out 2..9 stay a known limit (one stereo output), said beside the choice.
+- **Append-only:** 51 pad and 6 kit-wide parameters after the old ones; every old preset renders bit-identically (hashes recorded from 20bcb8b).
+- **Groove only delays:** a hit can't play before its note arrives, so swing, the groove tables, humanize and flams move hits late (no look-ahead latency added). [Open question for the owner] a small look-ahead would let a groove push hits early too.
+- **No new dependencies.** The FM, waveguide and texture layers, the ring modulator and the echo are original code.
+- **Dawn chorus kit: left for later.** It needs real bird and nature recordings under CC0 or CC-BY with their licences checked; none were verified and fetched in this session, so no kit ships with them yet.
+
 ## 2026-11-19: The brand is protected; the code stays Apache 2.0 (owner)
 
 **Decision (owner):** the code, engine and SDK stay open under Apache 2.0. The brand belongs to Kmandevr, doing business as AutoStacc, and is not licensed with the code ([brand and trademark policy](../TRADEMARKS.md)).
