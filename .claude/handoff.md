@@ -37,6 +37,17 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
   - Bitwise maps silence to silence;
   - CI should run caw_bench mode 300 for the cost ceilings, added with 1.1.0.
 
+## Rules for continuing (owner, 2026-11-19; the owner is hands-off)
+- **No lost work:** every branch is pushed after each commit, either the session branch or a `caw-backup-*` / `caw-1.1.0-*` backup branch.
+- **Loop guard:**
+  - a step that fails twice the same way goes under "Blocked" here, with the evidence;
+  - at most one CI re-run per failure;
+  - no agent is restarted for the same item more than once.
+- **Check-in:** a recurring check-in every 5 hours resumes work from this file.
+
+## Blocked
+- (none)
+
 ## Next
 - Merge each finished part; run `ctest` and the full `CAW_LIB=… flutter test` (roll_preview flakes under load; rerun it alone).
 - Then the 1.0.9 version bump, CHANGELOG, PR and release.
