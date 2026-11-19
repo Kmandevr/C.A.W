@@ -13,6 +13,7 @@
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
 #include "builtin_timber.h"
+#include "builtin_flock.h"
 #include "builtin_fx_space.h"  // fx-space
 // fx-filters begin
 #include "builtin_fx_filters.h"
@@ -291,6 +292,7 @@ const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId
     if (const auto* p = fx::packPresets(componentId)) return *p;  // the AutoStacc beta pack (1.1.0)
     if (const auto* p = fx::larkPresets(componentId)) return *p;  // Lark (1.1.0)
     if (const auto* p = timber::timberPresets(componentId)) return *p;  // Timber (1.1.0)
+    if (const auto* p = flock::presets(componentId)) return *p;  // Flock (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();

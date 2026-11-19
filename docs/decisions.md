@@ -6,6 +6,12 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: Flock's mips read at most at rate 1; its sample is read in place (Claude, within the sound plan)
+
+**Context:** the sound design (grain engine, Flock) asks for half-band mip copies for reads more than an octave up (+50 % RAM) and a sample read from the sample store, read-only and shared.
+- **Decision (Claude):** a grain over rate 2 reads the copy that brings its rate to at most 1 (not 2), so no content folds over; reaching 48 st takes four copies, about 94 % more RAM than the sample, and a sample over 120 s gets none. The sample is read in place from the asset store (no copy), its first frame kept for the cubic read. The filter defaults to Off (presets that want it turn it on), which keeps the design point inside the medium budget.
+- **[Fact]** No new dependency.
+
 ## 2026-11-19: Drums 1.1.0 (Rook): settings that say when they are heard, appended layers, groove and the one-screen editor (Claude, building the owner's plan)
 
 **Owner (2026-11-19):** the drums were "finicky, some settings don't work… one big list"; plug and play with the advanced controls kept, and Raven's one-screen layout. **Built** ([engine](engine.md#drums-orgcawdrums), [app](app.md)):

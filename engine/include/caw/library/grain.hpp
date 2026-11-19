@@ -174,6 +174,11 @@ struct Settings {
     double panSpread = 0.0;    // 0..1: each grain's pan up to this far left or right, at random
     uint32_t window = kHann;
     float gain = 1.0f;         // each grain's level
+    // Flock (a sample, read through renderVoices): the half-band mip copies the source has above its own frames
+    // (a grain more than an octave up reads the copy that brings its rate to at most 2), and `fit`: each grain
+    // starts where its whole read lies inside the sample when it can. Murmur leaves both off.
+    uint32_t levels = 0;
+    bool fit = false;
 };
 
 struct Grain {
@@ -187,6 +192,12 @@ struct Grain {
     uint32_t window = kHann;
     float pan = 0.0f;
     float semitones = 0.0f;
+    uint8_t voice = 0;     // Flock: the voice that spawned it (renderVoices adds it into that voice's buffer)
+    uint8_t level = 0;     // Flock: the mip copy it reads (its pos and rate are in that copy's frames)
+    // Flock's reads step these (exact integer sums, so any split into chunks gives the same frames): the position
+    // and rate in 32.32 fixed point, the window phase in 0.32; pos and phase follow them for the display.
+    int64_t fpos = 0, fstep = 0;
+    uint32_t wph = 0, wstep = 0;
 };
 
 class Engine {
@@ -203,15 +214,51 @@ public:
         spawned_ = 0;
     }
     // Control rate: spawns the grains whose start falls in the next `frames` frames.
-    void schedule(const Source& s, const Settings& st, uint32_t frames) noexcept {
+    void schedule(const Source& s, const Settings& st, uint32_t frames) noexcept { schedule(s, st, frames, next_, 0); }
+    // The same with the scheduler's own clock `next` (frames to its next grain) and its grains tagged `voice`:
+    // Flock's voices each schedule into the one shared pool.
+    void schedule(const Source& s, const Settings& st, uint32_t frames, double& next, uint8_t voice) noexcept {
         if (s.length < 8) return;
         const double interval = std::max(1.0, st.interval);
-        for (uint32_t guard = 0; next_ < frames && guard < frames + 1; ++guard) {
-            spawn(s, st, static_cast<uint32_t>(next_ < 0.0 ? 0.0 : next_));
-            next_ += interval * (1.0 + std::clamp(st.jitter, 0.0, 1.0) * bipolar());
-            if (next_ < 0.0) next_ = 0.0;
+        for (uint32_t guard = 0; next < frames && guard < frames + 1; ++guard) {
+            spawn(s, st, static_cast<uint32_t>(next < 0.0 ? 0.0 : next), voice);
+            next += interval * (1.0 + std::clamp(st.jitter, 0.0, 1.0) * bipolar());
+            if (next < 0.0) next = 0.0;
         }
-        next_ -= frames;
+        next -= frames;
+    }
+    // Flock: adds each grain's next n frames into its voice's buffers (outL[voice], outR[voice], n frames each),
+    // reading the source copy its level names (levels[level]: a sample and its mip copies). A grain that runs off
+    // either end of its copy ends there (spawn shortens it). Finished grains stay in the pool, silent, until retire()
+    // (at the end of a control period), so the order grains are summed in never depends on how a period is split.
+    template <bool Hermite>
+    void renderVoices(const Source* levels, float* const* outL, float* const* outR, uint32_t n) noexcept {
+        for (uint32_t g = 0; g < alive_; ++g) {
+            Grain& gr = pool_[g];
+            if (gr.left == 0) continue;
+            const uint32_t start = std::min(gr.wait, n);
+            gr.wait -= start;
+            const uint32_t stop = std::min<uint32_t>(n, start + gr.left);
+            if (stop == start) continue;
+            const Source& s = levels[gr.level];
+            if (s.r == s.l) readGrain<Hermite, true>(gr, s, outL[gr.voice], outR[gr.voice], start, stop);
+            else readGrain<Hermite, false>(gr, s, outL[gr.voice], outR[gr.voice], start, stop);
+            gr.left -= stop - start;
+        }
+    }
+    // Flock: drops the finished grains (renderVoices leaves them in place).
+    void retire() noexcept {
+        for (uint32_t g = 0; g < alive_;) {
+            if (pool_[g].left == 0) pool_[g] = pool_[--alive_];
+            else ++g;
+        }
+    }
+    // Flock: ends every grain of `voice` now (its voice ended, or its slot is taken by a new note).
+    void endVoice(uint8_t voice) noexcept {
+        for (uint32_t g = 0; g < alive_;) {
+            if (pool_[g].voice == voice) pool_[g] = pool_[--alive_];
+            else ++g;
+        }
     }
     // Adds every grain's next n frames into outL/outR (which hold n frames), and retires the finished ones.
     // Hermite: a cubic read (Normal, High); else linear (Eco).
@@ -280,6 +327,42 @@ private:
         return static_cast<double>(hash32(rng_) >> 8) / 16777216.0;
     }
     double bipolar() noexcept { return 2.0 * uniform() - 1.0; }
+    // Flock: frames [start, stop) of one grain into oL/oR (its frames all lie inside the source: spawn's fit).
+    template <bool Hermite, bool Mono>
+    static void readGrain(Grain& gr, const Source& s, float* oL, float* oR, uint32_t start, uint32_t stop) noexcept {
+        static_assert(kWindowPoints == 1024, "the window index is the phase's top 10 bits");
+        const float* w = windows().w[gr.window];
+        const float* xl = s.l;
+        const float* xr = s.r;
+        int64_t pos = gr.fpos;
+        uint32_t ph = gr.wph;
+        const int64_t rate = gr.fstep;
+        const uint32_t dph = gr.wstep;
+        const float gl = gr.gl, gR = gr.gr;
+        constexpr float kFrac22 = 1.0f / 4194304.0f, kFrac32 = 1.0f / 4294967296.0f;
+        for (uint32_t i = start; i < stop; ++i) {
+            const uint32_t j = ph >> 22;
+            const float f = static_cast<float>(ph & 0x3FFFFFu) * kFrac22;
+            const float win = w[j] + f * (w[j + 1] - w[j]);
+            const uint32_t k = static_cast<uint32_t>(pos >> 32);
+            const float t = static_cast<float>(static_cast<uint32_t>(pos)) * kFrac32;
+            float l, r;
+            if constexpr (Hermite) {
+                l = cubic(xl + k, t);
+                r = Mono ? l : cubic(xr + k, t);
+            } else {
+                l = xl[k] + t * (xl[k + 1] - xl[k]);
+                r = Mono ? l : xr[k] + t * (xr[k + 1] - xr[k]);
+            }
+            oL[i] += win * gl * l;
+            oR[i] += win * gR * r;
+            ph += dph;
+            pos += rate;
+        }
+        gr.fpos = pos, gr.wph = ph;
+        gr.pos = static_cast<double>(pos) * (1.0 / 4294967296.0);
+        gr.phase = static_cast<double>(ph) * (1.0 / 4294967296.0);
+    }
     // Catmull-Rom through x[-1], x[0], x[1], x[2] at t.
     static float cubic(const float* x, float t) noexcept {
         const float a = x[-1], b = x[0], c = x[1], d = x[2];
@@ -288,7 +371,7 @@ private:
         const float c3 = 0.5f * (d - a) + 1.5f * (b - c);
         return ((c3 * t + c2) * t + c1) * t + b;
     }
-    void spawn(const Source& s, const Settings& st, uint32_t wait) noexcept {
+    void spawn(const Source& s, const Settings& st, uint32_t wait, uint8_t voice) noexcept {
         // The random choices are made whether or not the grain fits, so a full pool doesn't shift later grains'.
         const double u1 = bipolar(), u2 = bipolar(), u3 = uniform(), u4 = bipolar();
         if (alive_ >= cap_) {
@@ -319,12 +402,29 @@ private:
         } else {
             pos = std::clamp(st.position * (len - 1.0) + st.sprayFrames * u1, 0.0, len - 1.0);
         }
+        uint8_t level = 0;
+        if (!s.ring) {
+            // More than an octave up: the mip copy that brings the rate to at most 1 of its frames a frame (none
+            // of its content can then fold over), or the highest there is.
+            if (std::fabs(rate) > 2.0)
+                for (; level < st.levels && std::fabs(rate) > 1.0; ++level) rate *= 0.5, pos *= 0.5;
+        }
+        uint32_t frames = static_cast<uint32_t>(size);
+        if (!s.ring && st.fit) {
+            const double last = std::floor((len - 1.0) / static_cast<double>(1u << level));
+            const double reach = size * std::fabs(rate);
+            pos = rate > 0.0 ? std::min(pos, std::max(0.0, last - reach)) : std::max(pos, std::min(last, reach));
+            // A read that would still run off an end (a long grain far up) sounds only while inside, half a frame
+            // in, so a cubic read never leaves the copy's padding.
+            const double room = rate > 0.0 ? (last - 0.5 - pos) / rate : (pos - 0.5) / -rate;
+            frames = static_cast<uint32_t>(std::clamp(std::floor(room) + 1.0, 0.0, size));
+        }
         Grain& g = pool_[alive_++];
         g.pos = pos;
         g.rate = rate;
         g.phase = 0.0;
         g.dphase = 1.0 / size;
-        g.left = static_cast<uint32_t>(size);
+        g.left = frames;
         g.wait = wait;
         const double pan = std::clamp(st.panSpread, 0.0, 1.0) * u4;
         g.gl = static_cast<float>(st.gain * std::min(1.0, 1.0 - pan));  // balance: unity in the centre
@@ -332,6 +432,14 @@ private:
         g.window = st.window < kWindowCount ? st.window : kHann;
         g.pan = static_cast<float>(pan);
         g.semitones = static_cast<float>(rate < 0 ? -semis : semis);
+        g.voice = voice;
+        g.level = level;
+        if (!s.ring) {
+            g.fpos = static_cast<int64_t>(std::llround(pos * 4294967296.0));
+            g.fstep = static_cast<int64_t>(std::llround(rate * 4294967296.0));
+            g.wph = 0;
+            g.wstep = static_cast<uint32_t>(std::floor(4294967296.0 / size));  // never wraps within the grain
+        }
         ++spawned_;
     }
 
