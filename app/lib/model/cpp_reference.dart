@@ -425,8 +425,10 @@ const cppBuiltins = <CppBuiltin>[
       ['variant', 'size', 'decay', 'predelay', 'predelay_sync', 'damping', 'low_cut', 'high_cut', 'width', 'mod', 'mod_rate', 'freeze', 'duck', 'mix']),
   CppBuiltin('org.caw.shift', 'Pitch/Shift', false,
       'Variants (`variant`): Pitch (semitones and cents by crossfaded grains; latency half a grain), Frequency '
-      '(single-sideband shift).',
-      ['variant', 'semitones', 'cents', 'grain', 'jitter', 'mix']),
+      '(single-sideband shift), Harmonizer (up to 4 voices on scale steps from the tracked pitch; about 21 ms latency), '
+      'Octaver (a sub and an octave up: Mono tracking, Poly shifters or Auto).',
+      ['variant', 'semitones', 'cents', 'grain', 'jitter', 'mix', 'voices', 'v1_degree', 'key', 'scale', 'formant',
+       'tracking', 'sub', 'up']),
   // fx-dynamics begin (engine/src/builtin_fx_dynamics.cpp, builtin_fx_drive.cpp)
   CppBuiltin('org.caw.multiband', 'Multiband dynamics', false,
       'Three bands (Linkwitz-Riley crossovers), each compressed upward and downward; an OTT mode. Band knobs b1_..b3_ '
@@ -473,6 +475,21 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.phasealign', 'Phase align', false,
       'Delays (sub-sample) and inverts a track to line it up with its key; Auto learns the delay; 1 frame of latency.',
       ['mode', 'delay', 'invert', 'learn', 'window']),
+  CppBuiltin('org.caw.exciter', 'Exciter', false,
+      'Variants (`variant`): Exciter (harmonics of the highs, oversampled 2x), Bass (harmonics of the lows, so small '
+      'speakers suggest them); harmonics follow the band\'s level.',
+      ['variant', 'freq', 'amount', 'character', 'tone', 'density', 'cut', 'listen', 'output']),
+  CppBuiltin('org.caw.vocoder', 'Vocoder', false,
+      'A channel vocoder keyed by a track: its built-in carrier plays the key\'s notes (or a drone), or the key\'s '
+      'audio is the carrier; 12 to 32 bands, no latency.',
+      ['carrier', 'wave', 'note', 'bands', 'formant', 'sibilance', 'width', 'freeze', 'mix', 'output']),
+  CppBuiltin('org.caw.clean', 'Preen', false,
+      'Variants (`variant`): Denoise (learned or adaptive), De-hum (50/60 Hz and harmonics), De-reverb; the spectral '
+      'ones have one window of latency by `quality`.',
+      ['variant', 'reduction', 'sensitivity', 'adaptive', 'learn', 'quality', 'monitor', 'harmonics', 'decay']),
+  CppBuiltin('org.caw.vocalclean', 'Hush', false,
+      'Variants (`variant`): De-click, De-plosive, Breath, for voices; a few ms of latency each.',
+      ['variant', 'sensitivity', 'length', 'mode', 'amount', 'range', 'fade', 'keep', 'listen']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
   CppBuiltin('org.caw.rack.fx', 'FX rack', false,
       'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '

@@ -113,6 +113,8 @@ class MergedDevices {
     MergedVariant('org.caw.reverb.reverse', 'org.caw.reverb', 6, retired: false),
     MergedVariant('org.caw.pitchshift', 'org.caw.shift', 0),
     MergedVariant('org.caw.freqshift', 'org.caw.shift', 1),
+    MergedVariant('org.caw.shift.harmonizer', 'org.caw.shift', 2, retired: false),  // Soar (builtin_fx_shift_voices.cpp)
+    MergedVariant('org.caw.shift.octaver', 'org.caw.shift', 3, retired: false),
     MergedVariant('org.caw.convolver', 'org.caw.convolver', 0),
     MergedVariant('org.caw.convolver.cab', 'org.caw.convolver', 1, retired: false),
   ];
@@ -123,7 +125,7 @@ class MergedDevices {
     'org.caw.drive.amp', 'org.caw.drive.pedal', 'org.caw.drive.bands', 'org.caw.bits.bitwise', 'org.caw.eq.linear',
     'org.caw.eq.match', 'org.caw.filter.wah', 'org.caw.delay.tape', 'org.caw.delay.reverse', 'org.caw.delay.multitap',
     'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
-    'org.caw.reverb.reverse', 'org.caw.convolver.cab',
+    'org.caw.reverb.reverse', 'org.caw.convolver.cab', 'org.caw.shift.harmonizer', 'org.caw.shift.octaver',
   };
 
   /// The page id of the Ducker's Duck variant (org.caw.duck 0; 1.0.8-1.0.9 the Compressor's variant 4), which no
