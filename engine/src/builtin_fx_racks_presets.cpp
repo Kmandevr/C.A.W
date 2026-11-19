@@ -29,6 +29,9 @@ Owned child(const std::string& slot, std::string_view id, int variant = 0) {
     return {{slot + "_fx", fx(id)}, {slot + ".variant", variant}};
 }
 
+// A slot's child that is not a merged device: its `_fx` only.
+Owned plainChild(const std::string& slot, std::string_view id) { return {{slot + "_fx", fx(id)}}; }
+
 Owned with(Owned a, const Owned& b) {
     a.insert(a.end(), b.begin(), b.end());
     return a;
@@ -103,6 +106,29 @@ std::vector<BuiltinPreset> fxRackPresets() {
         route(id, v, 1, kEnv1, "s1.cutoff", 0.45, false);
         out.push_back({"Note sweep", "The key track's notes open a resonant filter; a phaser on top", frozen(v)});
     }
+    // 1.1.0: job-named chains, the purpose first (the last one playful, as each device's last preset).
+    {  // a compressor, a de-esser and a short reverb: a lead vocal's usual chain
+        Owned v = with(child("s1", "org.caw.compressor"), {{"s1.threshold", -20}, {"s1.ratio", 3}, {"s1.attack", 5},
+                   {"s1.release", 120}});
+        v = with(with(v, plainChild("s2", "org.caw.deesser")), {{"s2.freq", 6500}, {"s2.threshold", -30}, {"s2.range", 8}});
+        v = with(with(v, child("s3", "org.caw.reverb")), {{"s3.decay", 1.5}, {"s3.mix", 0.15}});  // Hall
+        out.push_back({"Vocal chain", "Vocals: compression, then the esses tamed, then a little room", frozen(v)});
+    }
+    {  // saturation into a fast compressor, mixed in parallel: drum bus weight
+        Owned v = with(child("s1", "org.caw.drive", 1), {{"s1.mode", 0}, {"s1.drive", 6}, {"s1.mix", 0.5}});  // Saturate
+        v = with(with(v, child("s2", "org.caw.compressor")), {{"s2.threshold", -18}, {"s2.ratio", 4}, {"s2.attack", 10},
+                   {"s2.release", 100}, {"s2.mix", 0.6}});
+        out.push_back({"Drum bus crunch", "Drums: saturated, then squeezed in parallel for a heavier bus", frozen(v)});
+    }
+    {  // a dark filter that drifts on a slow LFO into eighth echoes and a reverb
+        Owned v = with(child("s1", "org.caw.filter"), {{"s1.cutoff", 2500}, {"s1.resonance", 0.3}, {"lfo1_shape", 0},
+                   {"lfo1_rate", 0.2}});
+        v = with(with(v, child("s2", "org.caw.delay")), {{"s2.sync", 6}, {"s2.feedback", 0.55}, {"s2.mix", 0.4},
+                   {"s2.high_cut", 2500}});  // Digital
+        v = with(with(v, child("s3", "org.caw.reverb")), {{"s3.decay", 3.0}, {"s3.mix", 0.3}});  // Hall
+        route(id, v, 1, kLfo1, "s1.cutoff", 0.2, true);
+        out.push_back({"Crow's nest", "Lo-fi: a dark, wobbling echo chamber", frozen(v)});
+    }
     return out;
 }
 
@@ -128,6 +154,29 @@ std::vector<BuiltinPreset> multibandPresets() {
                                {{"b1s1.threshold", -24}, {"b1s1.ratio", 6}, {"b1s1.attack", 3}, {"b1s1.release", 80}}))});
     out.push_back({"Split space", "Dry lows, a reverb on the mids and highs",
                    frozen(with(with({{"bands", 2}, {"xover1", 300}}, child("b2s1", "org.caw.reverb")), {{"b2s1.mix", 0.3}}))});
+    // 1.1.0: job-named chains, the purpose first (the last one playful).
+    {  // gentle low compression, warmth on the top
+        Owned v = {{"bands", 3}, {"xover1", 120}, {"xover2", 6000}};
+        v = with(with(v, child("b1s1", "org.caw.compressor")), {{"b1s1.threshold", -18}, {"b1s1.ratio", 2},
+                   {"b1s1.attack", 30}, {"b1s1.release", 200}});
+        v = with(with(v, child("b3s1", "org.caw.drive", 1)), {{"b3s1.mode", 1}, {"b3s1.drive", 4}, {"b3s1.mix", 0.3}});  // Saturate
+        out.push_back({"Master band polish", "Mastering: the lows held gently, a little warmth on the air", frozen(v)});
+    }
+    {  // a vocal's harsh presence and esses compressed on their own
+        Owned v = {{"bands", 3}, {"xover1", 2000}, {"xover2", 7000}};
+        v = with(with(v, child("b2s1", "org.caw.compressor")), {{"b2s1.threshold", -24}, {"b2s1.ratio", 3},
+                   {"b2s1.attack", 2}, {"b2s1.release", 80}});
+        v = with(with(v, child("b3s1", "org.caw.compressor")), {{"b3s1.threshold", -28}, {"b3s1.ratio", 4},
+                   {"b3s1.attack", 1}, {"b3s1.release", 60}});
+        out.push_back({"Vocal de-harsh", "Vocals: the 2-7 kHz bite and the esses above each compressed alone", frozen(v)});
+    }
+    {  // a different effect in each band
+        Owned v = {{"bands", 3}, {"xover1", 200}, {"xover2", 3000}};
+        v = with(with(v, child("b1s1", "org.caw.drive", 1)), {{"b1s1.mode", 0}, {"b1s1.drive", 8}});  // Saturate
+        v = with(with(v, child("b2s1", "org.caw.phaser")), {{"b2s1.mix", 0.5}});
+        v = with(with(v, child("b3s1", "org.caw.delay")), {{"b3s1.sync", 6}, {"b3s1.feedback", 0.4}, {"b3s1.mix", 0.4}});
+        out.push_back({"Caw, caw, caw", "Sound design: lows driven, mids phased, highs echoed", frozen(v)});
+    }
     return out;
 }
 

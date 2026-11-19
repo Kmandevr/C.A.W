@@ -10,6 +10,7 @@ import '../../../../model/mod_matrix.dart';
 import '../../../../model/racks.dart';
 import '../../../files/asset_picker.dart';
 import '../../../frame/sections.dart';
+import '../../../caw_icons.dart';
 import '../../../theme.dart';
 import '../../device_controls.dart';
 import '../../device_inline.dart';
@@ -28,7 +29,7 @@ import '../effect_page.dart';
 /// The two racks' editor entries (effect_editors.dart lists them).
 final Map<String, DeviceEditorEntry> rackEditors = {
   fxRackId: DeviceEditorEntry((_) => [
-        DeviceSection('rack', 'RACK', Icons.view_agenda_outlined, (_) => const FxRackPage(), showsSources: true),
+        DeviceSection('rack', 'RACK', CawIcons.nest, (_) => const FxRackPage(), showsSources: true),
         DeviceSection('routes', 'ROUTES', Icons.hub_outlined, (_) => const _RoutesPage()),
       ], family: DeviceFamily.modulation),
   multibandRackId: singlePage('mbrack', 'BANDS', Icons.view_week_outlined, DeviceFamily.eq, () => const MultibandRackPage()),

@@ -1,7 +1,7 @@
 // The flagship's panels: an oscillator (its wavetable in depth and its knobs), a filter (its curve), the switch between the two filters, the voice, and the panel frame and knobs they share.
 import 'package:flutter/material.dart';
 
-import '../../../model/flagship_shapes.dart' show warpNames;
+import '../../../model/flagship_shapes.dart' show Warp, sourceWarps, warpNames;
 import '../../../model/mod_matrix.dart';
 import '../../motion.dart';
 import '../../theme.dart';
@@ -159,6 +159,10 @@ class _OscPanelState extends State<OscPanel> {
     final p = 'osc${n}_';
     final on = t.value('${p}on') >= 0.5;
     final fold = t.value('${p}warp').round() == warpNames.indexOf('Fold') && t.param('${p}fold_mode') != null;
+    final warpNow = t.value('${p}warp').round();
+    // Osc FM, RM, AM and sync hear another oscillator or noise (1.1.0): their source shows beside the warp.
+    final heard = warpNow >= 0 && warpNow < Warp.values.length && sourceWarps.contains(Warp.values[warpNow]) &&
+        t.param('${p}mod_src') != null;
     final k = widget.knobSize;
     final main = FKnobRow(key: ValueKey('osc$n-main'), ['${p}level', '${p}pan', '${p}unison', '${p}detune', '${p}semi'],
       size: k, labels: {'${p}semi': 'Semitones'});
@@ -202,12 +206,16 @@ class _OscPanelState extends State<OscPanel> {
         // Warp, where it goes and MAIN / MORE; on a narrow panel the toggle wraps under them.
         Wrap(alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 2,
           children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              fLabel('WARP'),
-              DeviceChoice('${p}warp', maxSegments: 0, labels: warpNames),
-              const SizedBox(width: 6),
-              fLabel('TO'),
-              DeviceChoice('${p}dest', maxSegments: 0, labels: const ['Filter 1', 'Filter 2', 'Both', 'No filter']),
+            // The warp, its source (the warps that hear another oscillator) and where it goes: a wrap, as 1.1.0's
+            // longer warp names and the source can outgrow a narrow panel.
+            Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 2, children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                fLabel('WARP'), DeviceChoice('${p}warp', maxSegments: 0, labels: warpNames)]),
+              if (heard) Row(mainAxisSize: MainAxisSize.min, children: [
+                fLabel('FROM'), DeviceChoice('${p}mod_src', maxSegments: 0)]),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                fLabel('TO'),
+                DeviceChoice('${p}dest', maxSegments: 0, labels: const ['Filter 1', 'Filter 2', 'Both', 'No filter'])]),
             ]),
             _PageToggle(key: ValueKey('osc$n-toggle'), more: _more, onTap: () => setState(() => _more = !_more)),
           ]),

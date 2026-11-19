@@ -9,6 +9,7 @@ import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_history.dart';
 import 'package:caw/model/device_slot_audio.dart';
+import 'package:caw/ui/devices/kit/device_header.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/modulation.dart';
 import 'package:caw/model/project.dart';
@@ -51,6 +52,20 @@ class FakeSlotAudio extends DeviceSlotAudio {
   void setAutoGain(DeviceTarget t, bool v) => v ? on.add('${t.layerId}/${t.slot}') : on.remove('${t.layerId}/${t.slot}');
   @override
   double? autoGainTrimDb(DeviceTarget t) => autoGain(t) ? -2.4 : null;
+}
+
+/// [FakeSlotAudio] with the engine's per-slot cost (API 44): slot 0 at [share] and [latencyMs], [armed] its badge.
+class CostSlotAudio extends FakeSlotAudio {
+  double? share = 0.012;
+  double latencyMs = 48;
+  bool armed = false;
+  int costReads = 0;
+  @override
+  DeviceCost? cost(DeviceTarget t) {
+    if (t.slot != 0) return null;
+    costReads++;
+    return DeviceCost(cpuShare: share, latencyMs: latencyMs, armed: armed);
+  }
 }
 
 void main() {
@@ -405,6 +420,49 @@ void main() {
       await settle(tester);
       expect(audio.autoGain(chorus()), isFalse);
       await done(tester);
+    });
+
+    testWidgets('the header shows CPU and latency, quiet, read a few times a second; the Live badge while armed',
+        (tester) async {
+      final audio = CostSlotAudio()..share = null;
+      DeviceSlotAudio.current = audio;
+      await pumpStack(tester);
+      await settle(tester);
+      expect(tester.widget<Text>(inDevice('0', 'device-cost-text')).data, '– CPU · 48 ms', reason: 'not measured yet');
+      expect(inDevice('1', 'device-cost'), findsNothing, reason: 'no cost for that slot: nothing');
+      expect(inDevice('0', 'device-armed-badge'), findsNothing);
+      final before = audio.costReads;
+      await tester.pump(const Duration(seconds: 1));
+      expect(audio.costReads - before, inInclusiveRange(3, 5), reason: 'about four reads a second, not per frame');
+      audio
+        ..share = 0.012
+        ..latencyMs = 0
+        ..armed = true;
+      await tester.pump(const Duration(milliseconds: 300));
+      await settle(tester);
+      expect(tester.widget<Text>(inDevice('0', 'device-cost-text')).data, '1.2% · 0 ms');
+      expect(inDevice('0', 'device-armed-badge'), findsOneWidget);
+      final tip = tester.widget<Tooltip>(find.ancestor(of: inDevice('0', 'device-armed-badge'), matching: find.byType(Tooltip)).first);
+      expect(tip.message, DeviceCostReadout.armedTip);
+      audio.armed = false;
+      await tester.pump(const Duration(milliseconds: 300));
+      await settle(tester);
+      expect(inDevice('0', 'device-armed-badge'), findsNothing);
+      // Gone from screen: no more reads.
+      await done(tester);
+      final after = audio.costReads;
+      await tester.pump(const Duration(seconds: 1));
+      expect(audio.costReads, after);
+    });
+
+    test('the header\'s numbers: CPU and latency', () {
+      expect(formatCpu(null), '– CPU');
+      expect(formatCpu(0.0001), '<0.1%');
+      expect(formatCpu(0.0123), '1.2%');
+      expect(formatCpu(0.234), '23%');
+      expect(formatLatency(0), '0 ms');
+      expect(formatLatency(4.93), '4.9 ms');
+      expect(formatLatency(47.99), '48 ms');
     });
 
     test('Settings › Sound keeps "Auto gain on new devices"', () {

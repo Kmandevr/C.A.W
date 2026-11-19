@@ -1,30 +1,70 @@
-// The Compressor device page (org.caw.compressor, 1.0.8): variant cards, a transfer curve with handles beside a scrolling level trace, per-variant knobs.
+// The Compressor device page (org.caw.compressor; 1.1.0's Talon variants): variant cards, a transfer curve with handles beside a scrolling level trace, per-variant knobs.
 import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../../model/device_display.dart';
+import '../../../../model/merged_devices.dart';
 import '../../../theme.dart';
 import '../../device_scope.dart';
 import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
-import '../../kit/param_watch.dart';
 import '../../visuals/fx_visuals.dart' show CompressorGraph;
 import '../dynamics/fx_math.dart';
 import '../dynamics_editors.dart' show duckRatio;
-import '../ducker_editor.dart';
+import '../ducker_editor.dart' show duckAt;
 import '../effect_page.dart';
 import '../eqfilter/variant_cards.dart' show VariantCards;
+import '../../sidechain_bar.dart' show KeyFilterControls;
 import 'common.dart';
+import 'dynamics_modes.dart';
 
-/// The cards' names for the variants (Compressor, Dynamics, Gate, Shape, Duck): the plan's Down for the plain
-/// compressor. Upward compression and the expander as engine modes of their own come later (1.0.9).
-const compressorCardNames = ['Down', 'Dynamics', 'Gate', 'Shape', 'Duck'];
+/// The cards' names for the variants (1.1.0: Down, Dynamics, Up, Bus). Gate, Shape and Duck left for Gate,
+/// Tremolo/Pan and Ducker, which open their own pages ([MergedDevices.pageId]).
+const compressorCardNames = ['Down', 'Dynamics', 'Up', 'Bus'];
 
-/// Each variant's card: its transfer curve (Shape: the drawn duck; Duck: the pump).
+/// The Bus variant's stepped ratios (its `ratio` choice; the engine's builtin_fx_talon.cpp).
+const busRatios = [1.5, 2.0, 4.0, 10.0];
+
+/// Gate's and Ducker's cards (1.1.0: their own devices, sharing this page's language).
+const gateCardNames = ['Gate', 'Expand', 'Pedal gate'];
+const duckCardNames = ['Duck', 'Level', 'Carve'];
+
+/// What this page draws for a device's variant: 0 Down, 1 Dynamics, 2 a gate or expander (Gate, Expand), 4 Duck,
+/// 5 Up, 6 Bus (the 1.0.9 Compressor's numbers kept for those it had); -1 a page of its own (Pedal gate, Level,
+/// Carve: dynamics_modes.dart).
+int compressorPageKind(String? id, int v) => switch (id) {
+      'org.caw.gate' => v <= 1 ? 2 : -1,
+      'org.caw.duck' => v == 0 ? 4 : -1,
+      _ => const [0, 1, 5, 6][v.clamp(0, 3)],
+    };
+
+void gateCardIcon(Canvas canvas, Rect r, int i, Color c) {
+  final rr = r.deflate(2);
+  if (i == 0) {
+    iconCurve(canvas, rr, c, (x) => x < -0.2 ? math.max(-1.0, -0.2 + (x + 0.2) * 4) : x);
+  } else if (i == 1) {
+    iconCurve(canvas, rr, c, (x) => x < -0.2 ? -0.2 + (x + 0.2) * 2 : x);
+  } else {
+    iconCurve(canvas, rr, c, (x) => x < 0 ? -1.0 : x);
+  }
+}
+
+void duckCardIcon(Canvas canvas, Rect r, int i, Color c) {
+  final rr = r.deflate(2);
+  if (i == 0) {
+    iconCurve(canvas, rr, c, (x) => 0.8 - 1.5 * duckAt(((x + 1) % 1) * 200, 3, 10, 150, 0.6), steps: 60);
+  } else if (i == 1) {
+    iconCurve(canvas, rr, c, (x) => 0.3 * math.sin(x * math.pi));
+  } else {
+    iconCurve(canvas, rr, c, (x) => (x - 0.1).abs() < 0.25 ? -0.6 : 0.2);
+  }
+}
+
+/// Each variant's card: its transfer curve.
 void compressorCardIcon(Canvas canvas, Rect r, int i, Color c) {
   final rr = r.deflate(2);
   switch (i) {
@@ -33,20 +73,17 @@ void compressorCardIcon(Canvas canvas, Rect r, int i, Color c) {
     case 1:
       iconCurve(canvas, rr, c, (x) => x < -0.4 ? -0.4 + (x + 0.4) * 0.45 : x > 0.3 ? 0.3 + (x - 0.3) * 0.35 : x);
     case 2:
-      iconCurve(canvas, rr, c, (x) => x < -0.2 ? math.max(-1.0, -0.2 + (x + 0.2) * 4) : x);
-    case 3:
-      iconCurve(canvas, rr, c, (x) => 0.8 - 1.6 * duckAt((x + 1) / 2 * 300, 5, 20, 220, 0.5));
+      iconCurve(canvas, rr, c, (x) => x < 0 ? x * 0.5 : x);
     default:
-      iconCurve(canvas, rr, c, (x) => 0.8 - 1.5 * duckAt(((x + 1) % 1) * 200, 3, 10, 150, 0.6), steps: 60);
+      iconCurve(canvas, rr, c, (x) => x < -0.1 ? x : -0.1 + (x + 0.1) * 0.5);
   }
 }
 
-/// The Compressor: Down, Dynamics, Gate, Shape and Duck as cards (one undo step each, resetting the knobs the new
-/// variant doesn't share). Down, Dynamics, Gate and Duck draw the transfer curve with its handles (threshold and
-/// ratio; Down's knee bracket; Dynamics' low and high thresholds; the Gate's range) beside a scrolling trace of the
-/// input with the gain reduction hanging from the top in yellow; up and down on the trace drags a threshold line.
-/// Shape keeps the ducker's drawn shape as its hero. Detection and Sidechain are chips where the variant has them
-/// (the key itself is the shell's Key bar); Mix and Output are the footer's.
+/// The Compressor: Down, Dynamics, Up and Bus as cards (one undo step each, resetting the knobs the new variant
+/// doesn't share). Each draws the transfer curve with its handles (threshold and ratio; Down's knee bracket;
+/// Dynamics' low and high thresholds) beside a scrolling trace of the input with the gain change hanging from the
+/// top in yellow; up and down on the trace drags a threshold line. Detection and Sidechain are chips where the
+/// variant has them (the key itself is the shell's Key bar); Mix and Output are the footer's.
 class CompressorDevice extends StatelessWidget {
   const CompressorDevice({super.key});
 
@@ -54,12 +91,28 @@ class CompressorDevice extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final v = t.info?.variantIndex ?? 0;
+    final id = t.componentId;
+    final v = compressorPageKind(id, t.info?.variantIndex ?? 0);
     final inline = DeviceScope.isInline(context);
+    final (names, icon) = switch (id) {
+      'org.caw.gate' => (gateCardNames, gateCardIcon),
+      'org.caw.duck' => (duckCardNames, duckCardIcon),
+      _ => (compressorCardNames, compressorCardIcon),
+    };
     final cards = Padding(padding: const EdgeInsets.only(bottom: 8),
-        child: VariantCards(icon: compressorCardIcon, names: compressorCardNames, height: inline ? 46 : 54));
-    if (v == 3) return _shape(context, cards, inline);
-    final caption = switch (v) { 1 => 'DYNAMICS', 2 => 'GATE', 4 => 'DUCK', _ => 'COMPRESSOR' };
+        child: VariantCards(icon: icon, names: names, height: inline ? 46 : 54));
+    if (v < 0) {
+      // Pedal gate, Level and Carve: pages of their own (dynamics_modes.dart).
+      return switch ((id, t.info?.variantIndex ?? 0)) {
+        ('org.caw.gate', _) => PedalGatePage(cards: cards),
+        ('org.caw.duck', 1) => LevelPage(cards: cards),
+        _ => CarvePage(cards: cards),
+      };
+    }
+    final caption = switch (v) {
+      1 => 'DYNAMICS', 2 => (t.info?.variantIndex ?? 0) == 1 ? 'EXPAND' : 'GATE',
+      4 => 'DUCK', 5 => 'UP', 6 => 'BUS', _ => 'COMPRESSOR',
+    };
     final hero = HeroCanvas(
       color: scope.accent,
       height: 220,
@@ -72,6 +125,7 @@ class CompressorDevice extends StatelessWidget {
           return Text('${g >= 0 ? '+' : ''}${g.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: g >= 0 ? scope.accent : Neon.yellow));
         }
         final gr = f.gainReductionDb ?? 0;
+        if (v == 5) return Text('LIFT +${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: scope.accent));
         return Text('GR ${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.yellow));
       }),
       child: const _DynHero(),
@@ -80,15 +134,19 @@ class CompressorDevice extends StatelessWidget {
       1 => const ['low_threshold', 'low_ratio', 'high_threshold', 'high_ratio', 'attack', 'release'],
       2 => const ['threshold', 'range', 'attack', 'hold', 'release'],
       4 => const ['threshold', 'amount', 'attack', 'hold', 'release'],
+      5 => const ['threshold', 'ratio', 'range', 'attack', 'release'],
+      6 => const ['threshold', 'attack', 'knee', 'makeup'],
       _ => const ['threshold', 'ratio', 'attack', 'release', 'makeup'],
     };
     const labels = {'low_threshold': 'Low thr', 'high_threshold': 'High thr', 'low_ratio': 'Low ratio', 'high_ratio': 'High ratio'};
     if (inline) return effectPage('compressor', [cards, hero, KnobRow(main, size: 44, labels: labels)]);
     final more = switch (v) {
       1 => const ['knee', 'range', 'in_gain'],
-      2 => const ['ratio', 'knee', 'sc_hpf'],
+      2 => const ['ratio', 'knee'],
       4 => const <String>[],
-      _ => const ['knee', 'lookahead', 'link', 'sc_hpf', 'sc_listen'],
+      5 => const ['floor', 'knee', 'lookahead', 'link'],
+      6 => const ['link'],
+      _ => const ['knee', 'lookahead', 'link'],
     };
     return effectPage('compressor', [
       cards,
@@ -98,52 +156,17 @@ class CompressorDevice extends StatelessWidget {
         if (t.param('detect') != null) const ChoiceChips('detect', title: 'DETECT'),
         if (t.param('detection') != null) const ChoiceChips('detection', title: 'DETECT'),
         if (t.param('sidechain') != null) const ChoiceChips('sidechain', title: 'SIDECHAIN', labels: ['Self', 'Key']),
+        if (v == 6) const ChoiceChips('ratio', title: 'RATIO'),
+        if (v == 6) const ChoiceChips('release', title: 'RELEASE'),
+        if (t.param('character') != null) const ChoiceChips('character', title: 'CHARACTER'),
         if (v == 0) const DeviceToggle('auto_makeup', label: 'Auto makeup', icon: Icons.auto_fix_high),
         if (v == 0) const DeviceToggle('auto_release', label: 'Auto release', icon: Icons.auto_mode),
       ]),
       if (more.isNotEmpty) DeviceFold(child: ParamGrid(only: more)),
+      const KeyFilterControls(),
     ]);
   }
 
-  /// Shape (the drawn duck, the old ducker): its shape as the hero, its trigger cards under it, then its knobs.
-  Widget _shape(BuildContext context, Widget cards, bool inline) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final hero = HeroCanvas(
-      color: scope.accent,
-      height: 200,
-      caption: 'SHAPE',
-      grid: false,
-      readout: DeviceDisplay(builder: (context, f) {
-        final gr = f?.values['gr'] ?? 0;
-        return Text(f == null ? '' : 'GR −${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.yellow));
-      }),
-      child: const DuckShapeHero(),
-    );
-    const knobs = ['depth', 'attack', 'hold', 'release', 'tension'];
-    if (inline) return effectPage('compressor', [cards, hero, const KnobRow(knobs, size: 44, labels: {'tension': 'Curve'})]);
-    final mode = t.value('mode').round();
-    return effectPage('compressor', [
-      cards,
-      hero,
-      Padding(padding: const EdgeInsets.only(bottom: 6), child: ModeTiles('mode', icon: duckModeIcon, height: 46)),
-      watchDevice(context, (_) => const DuckShapeChips()), // its own watch (param_watch.dart)
-      const KnobRow(knobs, size: 48, labels: {'tension': 'Curve'}),
-      switch (mode) {
-        0 => ControlGroup(title: 'KEY · AUDIO', color: scope.secondary, child: Column(children: [
-            const KnobRow(['threshold', 'key_hpf', 'key_lpf'], size: 44, labels: {'key_hpf': 'HPF', 'key_lpf': 'LPF'}),
-            const Padding(padding: EdgeInsets.only(top: 4), child: ModeTiles('response', icon: duckResponseIcon, height: 44)),
-            Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: const [
-              DeviceToggle('listen', label: 'Key listen', icon: Icons.hearing),
-            ])),
-          ])),
-        1 => ControlGroup(title: 'KEY · NOTES', color: scope.secondary,
-            child: const KnobRow(['velocity'], size: 44, labels: {'velocity': 'Velocity'})),
-        _ => ControlGroup(title: 'TEMPO', color: scope.secondary, child: const ParamGrid(only: ['rate', 'offset'])),
-      },
-      const DeviceFold(child: ParamGrid(only: ['bands', 'crossover', 'link', 'lookahead'])),
-    ]);
-  }
 }
 
 /// One way a drag on a handle moves a parameter: [move] gives the new value from the one at the drag's start
@@ -237,6 +260,22 @@ class _DynHeroState extends State<_DynHero> {
               y: _Axis('amount', (s, d) => (1 - 1 / _ratioUp(duckRatio(s), d).clamp(1.0, 20.0)).clamp(0.0, 1.0))),
         ], [_Line('threshold', thr, accent, 'THR ${thr.toStringAsFixed(1)}')], f?.values['detector_db'] ?? f?.inputDb,
             '${(amount * 100).round()}%');
+      case 5:  // Up: below the threshold the level rises (thr - x)(1 - 1/ratio), at most Range, fading under Floor
+        final thr = v('threshold', -30), ratio = v('ratio', 2), range = v('range', 12), floor = v('floor', -60);
+        double lift(double x) => math.min(range, math.max(0.0, (thr - x) * (1 - 1 / ratio)));
+        double out(double x) => x + (x >= floor ? lift(x) : math.max(0.0, lift(floor) - (floor - x)));
+        return _Model(80, out, [
+          _Grip('thr', thr, accent, x: _Axis('threshold', (s, d) => clampTo('threshold', s + d)),
+              y: _Axis('ratio', (s, d) => clampTo('ratio', _ratioUp(s, -d)))),
+        ], [_Line('threshold', thr, accent, 'THR ${thr.toStringAsFixed(1)}')], f?.values['detector_db'] ?? f?.inputDb,
+            '${ratio.toStringAsFixed(1)}:1 UP');
+      case 6:  // Bus: the stepped ratio (a choice), the threshold handle only
+        final thr = v('threshold', -12), knee = v('knee', 6);
+        final ratio = busRatios[v('ratio', 1).round().clamp(0, busRatios.length - 1)];
+        return _Model(60, (x) => CompressorGraph.outputDb(x, thr, ratio, knee), [
+          _Grip('thr', thr, accent, x: _Axis('threshold', (s, d) => clampTo('threshold', s + d))),
+        ], [_Line('threshold', thr, accent, 'THR ${thr.toStringAsFixed(1)}')], f?.values['detector_db'] ?? f?.inputDb,
+            '${ratio.toStringAsFixed(ratio < 10 && ratio != ratio.roundToDouble() ? 1 : 0)}:1');
       default:
         final thr = v('threshold', -18), ratio = v('ratio', 4), knee = v('knee', 6);
         // With auto makeup the engine's own makeup (display) lifts the curve; else the knob's.
@@ -255,7 +294,7 @@ class _DynHeroState extends State<_DynHero> {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final variant = t.info?.variantIndex ?? 0;
+    final variant = compressorPageKind(t.componentId, t.info?.variantIndex ?? 0);
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth, h = box.maxHeight;
       // The curve's box: square where the hero is wide, taller than wide on a phone (the hero grows there).
@@ -328,7 +367,7 @@ class _DynHeroState extends State<_DynHero> {
           }),
           child: CustomPaint(size: Size(w, h), painter: _DynPainter(
             hist: hist, trace: trace, plot: plot, model: m, pt: pt, gripAt: gripAt, lineY: lineY,
-            gate: variant == 2, lift: variant == 1, color: scope.accent, second: scope.secondary,
+            gate: variant == 2, lift: variant == 1 || variant == 5, color: scope.accent, second: scope.secondary,
             active: _grip == 'trace' ? 'trace:$_traceParam' : _grip)),
         );
       });

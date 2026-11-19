@@ -122,7 +122,7 @@ void main() {
     wtest('the FX stack opens the instrument\'s editor full screen on a phone; close returns', (tester) async {
       await openSynth(tester);
       expect(find.byKey(const ValueKey('device-editor')), findsOneWidget);
-      expect(find.text('Flagship'), findsWidgets);
+      expect(find.text('Raven · Wavetable synth'), findsWidgets);
       expect(find.byKey(const ValueKey('flagship-synth')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('device-close')));
       await tester.pumpAndSettle();
@@ -579,9 +579,10 @@ void main() {
   test('the fixture matches the engine\'s flagship descriptor', () async {
     final e = Engine.create();
     final real = (await e.nativeComponents()).firstWhere((c) => c.id == flagshipComponentId);
-    expect(real.parameters.length, 215);
+    expect(real.parameters.length, 230); // 1.0's 215, then 1.1.0's 15 (Raven's synthesis)
     // The engine's presets reach the browser (DevicePresets.engine reads the descriptor's list).
-    expect(real.presets.map((p) => p.name), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic', 'Pluck', 'FM bell']);
+    expect(real.presets.map((p) => p.name).take(7), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic', 'Pluck', 'FM bell']);
+    expect(real.presets.length, 25); // then 1.1.0's 18 for Raven's synthesis
     expect([for (final p in real.parameters) p.id], [for (final p in flagship.parameters) p.id]);
     for (var i = 0; i < real.parameters.length; i++) {
       final a = real.parameters[i], b = flagship.parameters[i];

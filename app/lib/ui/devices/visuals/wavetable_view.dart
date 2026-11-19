@@ -48,8 +48,10 @@ class _WavetableViewState extends State<WavetableView> {
     Float32List? modulator;
     var modRatio = 1.0;
     final n = int.tryParse(widget.prefix.replaceAll(RegExp(r'[^0-9]'), ''));
-    if (warp == Warp.oscFm && n != null && t.param('osc${oscFmSource(n)}_table') != null) {
-      final m = 'osc${oscFmSource(n)}_';
+    final heard = n == null ? null
+        : modSourceOsc(n, t.param('${widget.prefix}mod_src') == null ? 0 : t.value('${widget.prefix}mod_src').round());
+    if (warp == Warp.oscFm && heard != null && t.param('osc${heard}_table') != null) {
+      final m = 'osc${heard}_';
       if (t.value('${m}on') >= 0.5) {
         final mt = t.value('${m}table').round().clamp(0, wavetableFrames.length - 1);
         modulator = oscillatorCycle(mt, t.value('${m}frame'), Warp.none, 0, points: _points,

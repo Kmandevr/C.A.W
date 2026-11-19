@@ -36,8 +36,10 @@ const builtinEffects = [
   'org.caw.convolver', 'org.caw.shimmer', 'org.caw.haas', 'org.caw.ensemble', 'org.caw.doubler', 'org.caw.vibrato',
   'org.caw.tremolo', 'org.caw.autopan', 'org.caw.rotary', 'org.caw.imager', 'org.caw.channelmixer',
   // fx-space end
+  // The AutoStacc pack (1.1.0)
+  'org.caw.pack.granular', 'org.caw.pack.glitch', 'org.caw.pack.warp', 'org.caw.pack.spectral',
 ];
-const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drums'];
+const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drums', 'org.caw.flock'];
 /// The instruments the engine has now. The old drums (org.caw.drum.*) migrate to org.caw.drums (2026-11-11).
 const engineInstruments = builtinInstruments;
 const retiredDrums = ['org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit'];

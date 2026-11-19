@@ -274,13 +274,21 @@ void LoudnessMeter::process(const float* left, const float* right, int frames) n
             continue;
         }
         double sum = 0.0;
-        for (int j = i; j < i + n; ++j) {
-            const double l = finite(left[j]), r = finite(right[j]);
-            const double kl = high_[0].run(shelf_[0].run(l)), kr = high_[1].run(shelf_[1].run(r));
-            sum += kl * kl + kr * kr;  // channel weights 1 for left and right
-            tpPos_ = (tpPos_ + 1) % 12;
-            tp[0] = std::max(tp[0], truePeak(0, l));
-            tp[1] = std::max(tp[1], truePeak(1, r));
+        if (truePeakOn_) {
+            for (int j = i; j < i + n; ++j) {
+                const double l = finite(left[j]), r = finite(right[j]);
+                const double kl = high_[0].run(shelf_[0].run(l)), kr = high_[1].run(shelf_[1].run(r));
+                sum += kl * kl + kr * kr;  // channel weights 1 for left and right
+                tpPos_ = (tpPos_ + 1) % 12;
+                tp[0] = std::max(tp[0], truePeak(0, l));
+                tp[1] = std::max(tp[1], truePeak(1, r));
+            }
+        } else {
+            for (int j = i; j < i + n; ++j) {
+                const double l = finite(left[j]), r = finite(right[j]);
+                const double kl = high_[0].run(shelf_[0].run(l)), kr = high_[1].run(shelf_[1].run(r));
+                sum += kl * kl + kr * kr;
+            }
         }
         for (int c = 0; c < 2; ++c) {  // settle at 0 instead of decaying through denormals on silence
             for (Filter* f : {&shelf_[c], &high_[c]}) {

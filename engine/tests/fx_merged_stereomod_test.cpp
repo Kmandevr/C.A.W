@@ -58,6 +58,8 @@ const Old kOld[] = {
     {"org.caw.phaser", kPhaser, 0, &fx::legacyPhaserDescriptor, &fx::makePhaserAs},
     {"org.caw.tremolo", kTremolo, 0, &fx::legacyTremoloDescriptor, &fx::makeTremoloAs},
     {"org.caw.autopan", kTremolo, 1, &fx::legacyAutopanDescriptor, &fx::makeAutopanAs},
+    // 1.1.0: the drawn-shape ducker (1.0.8-1.0.9: the Compressor's variant 3) is Tremolo/Pan's Shape.
+    {"org.caw.ducker", kTremolo, 2, &fx::legacyDuckerDescriptor, &fx::makeDuckerAs},
 };
 
 bool reused(const Old& o) { return std::string(o.id) == o.device; }
@@ -230,7 +232,7 @@ Stereo renderProject(const std::string& json, int blocks = 240) {
 }  // namespace
 
 TEST(stereomod_devices_list_their_variants_as_the_old_effects_descriptors) {
-    const std::map<std::string, size_t> counts = {{kUtility, 6}, {kChorus, 6}, {kPhaser, 1}, {kTremolo, 2}};
+    const std::map<std::string, size_t> counts = {{kUtility, 6}, {kChorus, 6}, {kPhaser, 1}, {kTremolo, 3}};
     for (const auto& [id, count] : counts) {
         const fx::MergedDevice* m = fx::findMergedDevice(id);
         CHECK(m != nullptr);
@@ -322,11 +324,15 @@ TEST(stereomod_devices_hold_every_old_preset_with_equal_values) {
             for (const auto& [k, x] : merged->values) got[std::string(k)] = x;
             CHECK(want == got);
         }
-    for (const auto& [device, n] : total) CHECK_EQ(builtinPresets(device).size(), n);
-    // The reused Tremolo id keeps its own presets (variant 0) and gains Auto-pan's (variant 1).
+    // Then 1.1.0's appended ones (the Phaser's, which had none), last.
+    for (const auto& [device, n] : total) CHECK_EQ(builtinPresets(device).size(), n + fx::appendedVariantPresets(device).size());
+    CHECK(fx::appendedVariantPresets(kPhaser).size() >= 8u);
+    if (!total.count(kPhaser)) CHECK_EQ(builtinPresets(kPhaser).size(), fx::appendedVariantPresets(kPhaser).size());
+    // The reused Tremolo id keeps its own presets (variant 0) and gains Auto-pan's (variant 1) and the ducker's (2).
     CHECK(!ownBuiltinPresets("org.caw.tremolo").empty() && !ownBuiltinPresets("org.caw.autopan").empty());
-    CHECK_EQ(builtinPresets(kTremolo).size(),
-             ownBuiltinPresets("org.caw.tremolo").size() + ownBuiltinPresets("org.caw.autopan").size());
+    CHECK_EQ(builtinPresets(kTremolo).size(), ownBuiltinPresets("org.caw.tremolo").size() +
+                                                  ownBuiltinPresets("org.caw.autopan").size() +
+                                                  ownBuiltinPresets("org.caw.ducker").size());
     Values applied;
     CHECK(applyBuiltinPreset(kTremolo, builtinPresets(kTremolo).back().name, applied));
     CHECK_EQ(valueOf(applied, "variant"), 1.0);

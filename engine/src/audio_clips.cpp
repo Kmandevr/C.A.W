@@ -8,6 +8,7 @@
 
 #include "asset_store.h"
 #include "audio_input.h"
+#include "builtin_flock.h"
 #include "builtin_sampler.h"
 #include "clip_stretch.h"
 #include "handover.h"
@@ -901,6 +902,7 @@ void applyComponentHostData(ModuleProcessor& processor, const ComponentSpec& spe
     try {
         applyAudioTrack(processor, spec, sampleRate);
         applySamplerProjectState(processor, spec);
+        flock::applyProjectState(processor, spec);
     } catch (...) {  // out of memory: the component keeps what it had
     }
 }

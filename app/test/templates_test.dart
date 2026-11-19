@@ -42,7 +42,7 @@ void main() {
   tearDown(() => s.dispose());
 
   test('the bundled starters: Mid tempo and Song sketch, and five track templates', () {
-    expect(s.projectTemplates.map((t) => t.name), ['Mid tempo', 'Song sketch']);
+    expect(s.projectTemplates.map((t) => t.name), ['Mid tempo', 'Song sketch', 'Guitar recording', 'Podcast', 'Beat', 'Sound design']);
     expect(s.trackTemplates.map((t) => t.name), ['Drums', 'Bass', 'Keys', 'Pad', 'Reverb bus']);
     final sketch = s.projectFromTemplate(s.templateById('builtin:song-sketch')!);
     expect(sketch.layers.map((l) => l.name), ['Drums', 'Bass', 'Keys', 'Pad', 'Reverb bus']);
@@ -166,6 +166,9 @@ void main() {
   });
 
   testWidgets('New from template lists the starters; the star makes one the default', (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);  // every starter and the saved one on screen
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     late BuildContext ctx;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (context) {
       ctx = context;

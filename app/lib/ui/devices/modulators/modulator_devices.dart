@@ -14,6 +14,7 @@ import '../../../model/modulation.dart';
 import '../../../model/project.dart';
 import '../../../model/routing_edit.dart';
 import '../../arrange/long_press_menu.dart';
+import '../../caw_icons.dart';
 import '../../glass.dart';
 import '../../feedback.dart';
 import '../../theme.dart';
@@ -71,7 +72,7 @@ class ModOutputChip extends StatelessWidget {
         boxShadow: on ? Neon.glow(c) : null,
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(active ? Icons.touch_app : Icons.waves, size: 14, color: c),
+        Icon(active ? Icons.touch_app : CawIcons.quill, size: 14, color: c),
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: c, decoration: TextDecoration.none)),
         if (count > 0) ...[

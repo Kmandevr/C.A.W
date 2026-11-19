@@ -1,4 +1,4 @@
-// The Pitch/Shift merged device's page: Pitch (the spectrum before and after, a semitone dial and a fine knob) and Frequency (the partials moved by the same hertz), as cards.
+// The Pitch/Shift merged device's page: Pitch (the spectrum before and after, a semitone dial and a fine knob), Frequency (the partials moved by the same hertz), Harmonizer and Octaver (space_voice_modes.dart), as cards.
 import '../../kit/repaint.dart';
 import 'dart:math' as math;
 
@@ -14,6 +14,7 @@ import '../../kit/hero.dart';
 import '../creative/pitch_editors.dart' show ShiftHero;
 import '../effect_page.dart';
 import 'space_devices.dart';
+import 'space_voice_modes.dart';
 
 /// Pitch/Shift: Pitch and Frequency as cards. Pitch: a harmonic series before (grey) and after the shift (drag
 /// sideways: whole semitones with a tick, a second finger for cents), a ±24 semitone ruler under it, then the
@@ -26,8 +27,10 @@ class ShiftDevicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
-    final pitch = variantOf(context) == 0;
+    final variant = variantOf(context);
+    final pitch = variant == 0;
     final cards = VariantCards(height: 48, icon: (c, r, i, col) {
+      if (i >= 2) return _voiceIcon(c, r, i, col);
       for (var k = 1; k <= 4; k++) {
         final x = r.left + r.width * (i == 0 ? math.log(k) / math.log(5) * 0.8 + 0.08 : 0.08 + 0.2 * (k - 1) + 0.06);
         c.drawLine(Offset(x, r.bottom), Offset(x, r.bottom - r.height * (1.1 - k * 0.2)), Paint()
@@ -36,6 +39,8 @@ class ShiftDevicePage extends StatelessWidget {
           ..strokeCap = StrokeCap.round);
       }
     });
+    if (variant == 2) return HarmonizerPage(cards: cards);
+    if (variant == 3) return OctaverPage(cards: cards);
     if (!pitch) {
       return mergedPage(context, 'shift',
         cards: cards,
@@ -72,6 +77,23 @@ class ShiftDevicePage extends StatelessWidget {
       ]),
       more: const ParamGrid(only: ['grain', 'jitter']),
     );
+  }
+}
+
+/// The Harmonizer's card (three stacked notes) and the Octaver's (a bar an octave under and over).
+void _voiceIcon(Canvas c, Rect r, int i, Color col) {
+  final p = Paint()..color = col;
+  if (i == 2) {
+    for (var k = 0; k < 3; k++) {
+      c.drawCircle(Offset(r.left + r.width * (0.3 + 0.2 * k), r.bottom - r.height * (0.2 + 0.3 * k)), 3.2, p);
+    }
+    return;
+  }
+  for (final (x, h) in [(0.25, 0.9), (0.5, 0.6), (0.75, 0.45)]) {
+    c.drawLine(Offset(r.left + r.width * x, r.bottom), Offset(r.left + r.width * x, r.bottom - r.height * h), Paint()
+      ..color = x == 0.5 ? col.withValues(alpha: 0.5) : col
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round);
   }
 }
 

@@ -16,7 +16,7 @@ NativeComponentInfo flagshipFixture() {
   for (var o = 1; o <= 3; o++) {
     final p = 'osc${o}_', n = 'Osc $o ';
     pick('${p}on', '${n}on', o == 1 ? 1 : 0, offOn);
-    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User']);
+    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User', 'Additive']);
     num('${p}frame', '${n}frame', 1 / 3, 0, 1);
     num('${p}level', '${n}level', 0.7, 0, 1);
     num('${p}pan', '${n}pan', 0, -1, 1);
@@ -25,7 +25,8 @@ NativeComponentInfo flagshipFixture() {
     num('${p}fine', '${n}fine', 0, -100, 100, 'ct');
     num('${p}phase', '${n}phase', 0, 0, 1);
     num('${p}phase_rand', '${n}phase randomness', 1, 0, 1);
-    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM']);
+    pick('${p}warp', '${n}warp', 0, const ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM',
+      'Osc RM', 'Osc AM', 'Osc sync', 'Stretch', 'Shift', 'Odd/even', 'Formant', 'Smear', 'Disperse', 'Low/high cut', 'Comb']);
     num('${p}warp_amt', '${n}warp amount', 0, 0, 1);
     whole('${p}unison', '${n}unison', o == 1 ? 7 : 1, 1, 16);
     num('${p}detune', '${n}detune', 25, 0, 100, 'ct');
@@ -39,7 +40,8 @@ NativeComponentInfo flagshipFixture() {
     final p = 'flt${f}_', n = 'Filter $f ';
     pick('${p}on', '${n}on', f == 1 ? 1 : 0, offOn);
     pick('${p}type', '${n}type', f == 1 ? 0 : 3,
-        const ['Ladder LP', 'Ladder HP', 'Ladder BP', 'SVF LP', 'SVF HP', 'SVF BP', 'SVF notch', 'Comb', 'Formant']);
+        const ['Ladder LP', 'Ladder HP', 'Ladder BP', 'SVF LP', 'SVF HP', 'SVF BP', 'SVF notch', 'Comb', 'Formant',
+          'Diode LP', 'Sallen-Key', 'Phaser', 'Neg comb', 'Vowel']);
     expo('${p}cutoff', '${n}cutoff', f == 1 ? 2400 : 1200, 20, 20000, 'Hz');
     num('${p}resonance', '${n}resonance', 0.15, 0, 1);
     expo('${p}drive', '${n}drive', 1, 1, 10);
@@ -94,7 +96,8 @@ NativeComponentInfo flagshipFixture() {
   num('fx_reverb_mix', 'Reverb mix', 0.18, 0, 1);
   final targets = ['None', for (final p in ps) p.label];
   const sources = ['None', 'Env 1', 'Env 2', 'Env 3', 'LFO 1', 'LFO 2', 'LFO 3', 'Random', 'Velocity', 'Note', 'Pitch bend',
-    'Pressure', 'Timbre', 'Mod wheel', 'Accent'];
+    'Pressure', 'Timbre', 'Mod wheel', 'Accent', 'LFO 4', 'Macro 1', 'Macro 2', 'Macro 3', 'Macro 4', 'Macro 5', 'Macro 6',
+    'Macro 7', 'Macro 8'];
   final cutoff1 = ps.indexWhere((p) => p.id == 'flt1_cutoff');
   for (var s = 1; s <= 16; s++) {
     final p = 'mod${s}_', n = 'Mod $s ';
@@ -116,6 +119,17 @@ NativeComponentInfo flagshipFixture() {
   // After the FM ratios (#197, 2026-11-13): each oscillator's fold mode (the fold warp only).
   for (var o = 1; o <= 3; o++) {
     pick('osc${o}_fold_mode', 'Osc $o fold mode', 0, const ['Per copy', 'Whole stack']);
+  }
+  // 1.1.0 (Raven), after the 215: each oscillator's mod source, LFO 4, the eight macros.
+  for (var o = 1; o <= 3; o++) {
+    pick('osc${o}_mod_src', 'Osc $o mod source', 0, const ['Prev', 'Osc 1', 'Osc 2', 'Osc 3', 'Noise']);
+  }
+  pick('lfo4_shape', 'LFO 4 shape', 0, const ['Sine', 'Triangle', 'Saw up', 'Saw down', 'Square', 'Sample & hold', 'Smooth random']);
+  expo('lfo4_rate', 'LFO 4 rate', 2, 0.01, 40, 'Hz');
+  pick('lfo4_sync', 'LFO 4 sync', 0, const ['Off', '1/32', '1/16', '1/8', '1/4', '1/2', '1 bar', '2 bars', '4 bars', '8 bars']);
+  pick('lfo4_mode', 'LFO 4 mode', 0, const ['Free', 'Retrigger', 'Running']);
+  for (var m = 1; m <= 8; m++) {
+    num('macro$m', 'Macro $m', 0, 0, 1);
   }
   return NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', role: 'instrument', builtin: true,
       ports: const [

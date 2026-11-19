@@ -61,6 +61,10 @@ struct Audio {
     bool exclusive = false;
     bool lowLatency = false;
     bool modesReadBack = false;  // AAudio: the two above were read from the stream
+    // The user's choice, not what AAudio granted: the low-latency profile (anything but Battery). The load
+    // stabilizer follows this; the S22+ granted no low-latency mode at 960-1024 frames, where it is needed most
+    // (Benchmark, 2026-11-19: "stabilizer":"off" with the callback core at 634 MHz).
+    bool lowLatencyAsked = false;
     // The chosen device, size or exclusive mode did not open, so the system default did (shared, its own size).
     bool fallback = false;
     std::string fallbackReason;
@@ -484,15 +488,15 @@ constexpr bool kStabilizerPlatform = false;
 #endif
 
 // The load stabilizer, at the callback's end, after its timing (the meter, the performance hint and the Benchmark
-// see only the real work): on where the platform takes it, with the low-latency profile (not Battery: the user chose
-// the power), no hint session open (the system then knows the deadline itself), something sounding, the app in
+// see only the real work): on where the platform takes it, with the low-latency profile asked (not Battery: the user
+// chose the power; whatever performance mode AAudio granted), no hint session open (the system then knows the deadline itself), something sounding, the app in
 // front and the callback's own work a big enough share of its period for the clock to matter (LoadStabilizer::
 // wanted); idle otherwise, its epoch reset so it starts afresh.
 void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 frames, ma_uint32 rate) {
     caw::Engine& e = *a->owner->engine;
     caw::StabilizerState state = caw::StabilizerState::Off;
     int64_t spun = 0;
-    if (kStabilizerPlatform && a->lowLatency && !e.hintOn()) {
+    if (kStabilizerPlatform && a->lowLatencyAsked && !e.hintOn()) {
         state = caw::StabilizerState::Idle;
         if (e.audible() && !a->owner->behind.load(std::memory_order_relaxed)) {
             auto now = [] {
@@ -740,6 +744,7 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     // Android 12 and later (`ma_android_sdk_version() > 30`, ma_create_and_configure_AAudioStreamBuilder__aaudio):
     // on Android 11 and older the chosen size is ignored and the device picks its own; the status shows what it gave.
     a->lowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
+    a->lowLatencyAsked = a->lowLatency;
     // AAUDIO_USAGE_GAME (#236): [Fact, developer.android.com/games/sdk/oboe/low-latency-audio, read 2026-11-17] the
     // low-latency guide asks for it "to take full advantage of latency optimizations, especially when connected to
     // Bluetooth headsets". [Fact, AOSP AudioAttributes.java main, read 2026-11-17] USAGE_GAME's volume stream is

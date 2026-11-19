@@ -14,7 +14,9 @@ import 'live_midi.dart';
 import 'midi_clips.dart';
 import 'modulation.dart';
 import 'mixer_fx.dart';
+import 'chain_templates.dart';
 import 'cpp_component.dart';
+import 'device_names.dart';
 import 'freeze.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
@@ -25,9 +27,11 @@ import 'user_presets.dart';
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
 bool isBuiltinComponent(String id) => id.startsWith('org.caw.');
 
-/// A readable name for a built-in before its descriptor arrives: `org.caw.delay.pingpong` → "Delay pingpong".
+/// A readable name for a built-in before its descriptor arrives: its [DeviceNames] title ("Talon · Compressor"), else
+/// one made from its id (`org.caw.test.osc` → "Test osc").
 String builtinComponentName(String id) {
   if (!isBuiltinComponent(id)) return id;
+  if (DeviceNames.of(id) case final n?) return n.title;
   final text = id.substring('org.caw.'.length).split('.').join(' ');
   return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
 }
@@ -232,6 +236,37 @@ extension ArrangeFx on AppState {
     return true;
   }
 
+  /// The saved state native effect [index] of [layer] has now: the engine's (as the playing effect saves it), else
+  /// the project's copy; null when it has none.
+  Uint8List? savedEffectState(LayerDoc layer, int index) {
+    if (index < 0 || index >= layer.components.length) return null;
+    final e = engine;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (e != null && engineIndex != null) {
+      if (e.componentStates(engineLayerId(layer))[engineIndex] case final s?) return base64Decode(s.state);
+    }
+    final kept = layer.components[index].state;
+    return kept == null || kept.isEmpty ? null : base64Decode(kept);
+  }
+
+  /// Writes a state the device's own page made (Iris's painted curve) to native effect [index]: to the engine at
+  /// once (when there is one; it rebuilds the chain off the UI thread), and with [keep] into the project as one
+  /// undo step, so a reload starts from it. Unlike [loadNativeEffectState] the project keeps it without an engine:
+  /// the page built it, so it is valid.
+  void writeNativeEffectState(LayerDoc layer, int index, Uint8List bytes, {int version = 1, bool keep = true}) {
+    if (guardFrozen(layer)) return;
+    if (index < 0 || index >= layer.components.length) return;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (engineIndex != null) engine?.setComponentState(engineLayerId(layer), engineIndex, bytes, version);
+    if (!keep) return;
+    endUndoStep();
+    editLayer(layer, (l) {
+      l.components[index].state = base64Encode(bytes);
+      l.components[index].stateVersion = version;
+    });
+    endUndoStep();
+  }
+
   /// The C++ instruments a track can play: the engine's built-ins and the project's loaded (trusted) ones.
   List<NativeComponentInfo> get nativeInstruments =>
       [for (final c in componentCatalog.value.values) if (c.isInstrument && componentPlayable(c.id)) c];
@@ -273,6 +308,10 @@ extension ArrangeFx on AppState {
   /// and a pattern becomes a clip at [atStep] (snapped). True when something changed.
   bool dropAsset(LayerDoc layer, AssetDrag asset, {int? atStep}) {
     // The master's chain holds C++ effects only (the engine's `master_components`).
+    if (asset.kind == AssetKind.chainTemplate) {
+      final t = ChainTemplates.byId(asset.id);
+      return t != null && (isMasterLayer(layer) || !layer.isFolder || layer.busEnabled) && applyChainTemplate(layer, t);
+    }
     if (isMasterLayer(layer)) {
       return asset.kind == AssetKind.nativeEffect && !isInstrumentAsset(asset) && addNativeEffect(layer, asset.id) != null;
     }
@@ -299,6 +338,8 @@ extension ArrangeFx on AppState {
         return p != null && applyTrackPreset(layer, p);
       case AssetKind.audioFile:
         return dropAudio(layer, asset.id, atStep: atStep);
+      case AssetKind.chainTemplate:
+        return false;  // handled above
     }
   }
 

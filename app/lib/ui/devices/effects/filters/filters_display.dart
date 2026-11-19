@@ -19,6 +19,7 @@ DeviceDisplayFrame? decodeFiltersDisplay(String id, List<double> f, int n) {
     // The EQ's Bands (docs/engine.md "Display data"): the output spectrum as the frame's, the input's as `pre0`..
     // with `pre_bins`, so the page draws both.
     case 'org.caw.eq':
+    case 'org.caw.eq.linear':  // Linear: Bands' block, then its latency, taps and design state (raw 456..458)
       final bins = at(0).toInt();
       final watched = at(3) > 0.5 && 4 + 2 * bins <= n;
       final post = 4 + bins;
@@ -26,6 +27,7 @@ DeviceDisplayFrame? decodeFiltersDisplay(String id, List<double> f, int n) {
       return DeviceDisplayFrame(
         spectrum: watched ? [for (var j = 0; j < bins; ++j) unit(f[post + j])] : null,
         inputDb: at(4 + 3 * bins + 48 + 1),
+        raw: id == 'org.caw.eq.linear' ? List.of(f.take(n)) : null,
         outputDb: at(4 + 3 * bins + 48 + 2),
         values: {
           'output_db': at(4 + 3 * bins + 48),

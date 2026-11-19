@@ -13,6 +13,7 @@ import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 import 'privacy_pages.dart';
+import '../crow.dart';
 
 /// F1's notice, word for word apart from naming the repository (H, as updated 2026-11-12).
 const feedbackNotice = 'Feedback is posted publicly on GitHub, as an issue in Kmandevr/C.A.W-Telemetry; don\'t include '
@@ -215,7 +216,7 @@ class _FeedbackFormState extends State<FeedbackForm> {
           icon: AnimatedSwitcher(
             duration: Motion.fade(Motion.small, Motion.of(context)),
             child: _sending
-                ? const SizedBox(key: ValueKey('sending'), width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const CrowLoader(key: ValueKey('sending'), size: 16)
                 : const Icon(Icons.send, key: ValueKey('send'), size: 18),
           ),
           label: const Text('Send'),

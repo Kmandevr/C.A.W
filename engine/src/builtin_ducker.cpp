@@ -87,12 +87,15 @@ double bend(double x, double tension) noexcept {
     return (detExp(c * x) - 1.0) / (detExp(c) - 1.0);  // detExp: the same bits on every platform (golden renders)
 }
 
-class Ducker : public EffectBase, public VariableLatency {
+class Ducker : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return duckDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
-        if (count <= kLookahead) return 0;
+        if (count <= kLookahead || armed()) return 0;  // armed: no look-ahead
         return lookaheadFrames(static_cast<int>(values[kMode] + 0.5), static_cast<int>(values[kLookahead] + 0.5), rate());
+    }
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return count > kLookahead && lookaheadFrames(static_cast<int>(values[kMode] + 0.5), static_cast<int>(values[kLookahead] + 0.5), rate()) > 0;
     }
 
 protected:
@@ -168,7 +171,7 @@ protected:
             hpf_[c].set(hpf, 0.70710678118654752, sr);
             lpf_[c].set(lpf, 0.70710678118654752, sr);
         }
-        lookahead_ = lookaheadFrames(mode_, choice(kLookahead, at), sr);
+        lookahead_ = armed() ? 0 : lookaheadFrames(mode_, choice(kLookahead, at), sr);
         bands_ = std::clamp(choice(kBands, at), 0, 2);
         const double xo = param(kCrossover, at);
         for (int c = 0; c < 2; ++c)

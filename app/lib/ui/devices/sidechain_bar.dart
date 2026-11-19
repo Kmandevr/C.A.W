@@ -1,5 +1,5 @@
 // The sidechain picker under a device's header (devices with a sidechain input: the ducker, compressor, gate):
-// "Key: <track>" to pick what it listens to, and pre or post fader (the ducker's trigger tiles sit right under it).
+// "Key: <track>" to pick what it listens to, and pre or post fader; and the key filter every keyed page shares.
 import 'package:flutter/material.dart';
 
 import '../../model/merged_devices.dart';
@@ -11,6 +11,8 @@ import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
 import '../../model/mixer_fx.dart' show isMasterLayer;
+import 'device_scope.dart';
+import 'kit/controls.dart';
 
 /// One slim row, or nothing when [target]'s device has no sidechain input (or is an instrument).
 class SidechainBar extends StatelessWidget {
@@ -110,3 +112,29 @@ class _Pill extends StatelessWidget {
     )),
   ));
 }
+
+/// The key filter every keyed page shows the same way (1.1.0, the engine's `fx_sidechain.h`): the detector's
+/// high-pass (`sc_hpf`, 20 Hz off) and low-pass (`sc_lpf`, 20 kHz off) as knobs and Listen (`sc_listen`: the output is
+/// what the detector hears), folded under "KEY FILTER". Nothing for a device without them (an older engine, or a
+/// variant that has no key).
+class KeyFilterControls extends StatelessWidget {
+  const KeyFilterControls({super.key});
+
+  /// The three parameters, as every keyed effect declares them.
+  static const ids = ['sc_hpf', 'sc_lpf', 'sc_listen'];
+
+  /// Whether [t] has any of them.
+  static bool has(DeviceTarget t) => ids.any((id) => t.param(id) != null);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = DeviceScope.of(context).target;
+    if (!has(t)) return const SizedBox.shrink();
+    return DeviceFold(key: const ValueKey('key-filter'), title: 'KEY FILTER', child: Row(children: [
+      const Expanded(child: KnobRow(['sc_hpf', 'sc_lpf'], size: 44, labels: {'sc_hpf': 'Key HPF', 'sc_lpf': 'Key LPF'})),
+      const DeviceToggle('sc_listen', label: 'Listen', icon: Icons.headphones),
+      const SizedBox(width: 6),
+    ]));
+  }
+}
+

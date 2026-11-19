@@ -216,7 +216,7 @@ class ArrangeLane {
   if (id == null) return null;
   final info = state.componentInfo(id);
   final param = info?.parameters.where((p) => p.id == target).firstOrNull;
-  final device = info?.label ?? state.componentLabel(id);
+  final device = info?.shortLabel ?? state.componentLabel(id);
   return (name: '$device · ${param?.name.isNotEmpty == true ? param!.name : target}', color: Neon.violet,
       min: param?.min ?? 0.0, max: param?.max ?? 1.0);
 }
@@ -252,13 +252,13 @@ List<(String, String)> addableClipLanes(AppState state, LayerDoc layer, ClipDoc 
   if (instrument != null) {
     final info = state.componentInfo(instrument.id);
     for (final p in info?.parameters ?? const []) {
-      if (p.automatable && !has('instrument', p.id, null)) out.add(('instrument|${p.id}', '${info!.label} · ${p.name.isEmpty ? p.id : p.name}'));
+      if (p.automatable && !has('instrument', p.id, null)) out.add(('instrument|${p.id}', '${info!.shortLabel} · ${p.name.isEmpty ? p.id : p.name}'));
     }
   }
   for (var i = 0; i < layer.components.length; i++) {
     final info = state.useInfo(layer.components[i]);
     for (final p in info?.parameters ?? const []) {
-      if (p.automatable && !has('component', p.id, i)) out.add(('component|$i|${p.id}', '${info!.label} · ${p.name.isEmpty ? p.id : p.name}'));
+      if (p.automatable && !has('component', p.id, i)) out.add(('component|$i|${p.id}', '${info!.shortLabel} · ${p.name.isEmpty ? p.id : p.name}'));
     }
   }
   return out;

@@ -44,6 +44,7 @@ import 'glass.dart';
 import 'haptics.dart';
 import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
+import 'frame/headroom_notices.dart';
 import 'frame/live_keys.dart';
 import 'frame/record_tools.dart';
 import 'frame/sections.dart';
@@ -57,6 +58,7 @@ import 'music_video/video_setup_sheet.dart';
 import 'privacy/feedback_sheet.dart';
 import 'startup_screen.dart';
 import 'music_video/video_render_chip.dart';
+import 'egg_layer.dart' show TempoLeet;
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -404,6 +406,7 @@ class _ShellState extends State<Shell> {
           child: Column(children: [
             Selected(select: _transportLook, builder: (_) => _TransportBar(state: s, dock: _dock)),
             ?_banner(),
+            HeadroomNotices(state: s),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, box) => Stack(children: [
@@ -509,6 +512,7 @@ class _ShellState extends State<Shell> {
             child: Column(children: [
               SizedBox(height: pad.top),
               ?_banner(),
+              HeadroomNotices(state: s),
               Expanded(child: Padding(padding: lefty ? EdgeInsets.only(left: pad.left) : EdgeInsets.only(right: pad.right),
                   child: body)),
               if (!keyboard)
@@ -543,6 +547,7 @@ class _ShellState extends State<Shell> {
           child: status,
         ),
       ?_banner(),
+      HeadroomNotices(state: s),
       Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
@@ -887,7 +892,7 @@ class _BpmButton extends StatelessWidget {
             child: mapped
                 ? LiveIsland(child: ValueListenableBuilder<int>(valueListenable: state.tick,
                     builder: (context, _, _) => text(here())))
-                : text(bpm),
+                : TempoLeet(bpm: bpm, style: Neon.code(size: 14, color: Neon.blue), child: text(bpm)),
           ),
         ),
       ),

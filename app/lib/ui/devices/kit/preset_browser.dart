@@ -311,6 +311,28 @@ class _PresetBrowserState extends State<PresetBrowser> {
       builder: (context, _) => _build(context),
     ));
 
+  /// Scrolled well past the list's end: the device's hidden preset shows (if it has one).
+  bool _found = false;
+  double _past = 0;
+
+  bool _pastTheEnd(ScrollNotification n) {
+    if (_found) return false;
+    final m = n.metrics;
+    switch (n) {
+      // A clamping list (Android, desktop) reports the pull past its end; a bouncing one scrolls past it.
+      case OverscrollNotification(:final overscroll) when overscroll > 0:
+        _past += overscroll;
+      case ScrollUpdateNotification() when m.pixels > m.maxScrollExtent:
+        if (m.pixels - m.maxScrollExtent > _past) _past = m.pixels - m.maxScrollExtent;
+      case ScrollEndNotification():
+        _past = 0;
+      default:
+        break;
+    }
+    if (_past > 72 && DevicePresets.hiddenOf(t).isNotEmpty) setState(() => _found = true);
+    return false;
+  }
+
   bool _passes(DevicePreset p, String componentId) {
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty && !p.name.toLowerCase().contains(q) && !p.category.toLowerCase().contains(q)) return false;
@@ -331,6 +353,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
     }.toList();
     final shownMine = [for (final p in mine) if (_passes(p, id)) p];
     final shownFactory = [for (final p in factory) if (_passes(p, id)) p];
+    final found = _found ? DevicePresets.hiddenOf(t) : const <DevicePreset>[];
     final current = DevicePresets.current(t);
     final colors = spectrumColors();
     final color = widget.color;
@@ -451,7 +474,9 @@ class _PresetBrowserState extends State<PresetBrowser> {
           ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(
               _filter is _Favourites ? 'Tap a star to keep a preset here.' : 'Nothing matches.',
               textAlign: TextAlign.center, style: const TextStyle(color: Neon.dim))))
-          : ListView(padding: const EdgeInsets.only(bottom: 16), children: [
+          : NotificationListener<ScrollNotification>(
+              onNotification: _pastTheEnd,
+              child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.only(bottom: 16), children: [
               if (shownMine.isNotEmpty || (_filter is _All && _query.isEmpty)) header('MY PRESETS', shownMine.length),
               if (shownMine.isEmpty && _filter is _All && _query.isEmpty) const Padding(
                 key: ValueKey('preset-mine-empty'),
@@ -461,7 +486,8 @@ class _PresetBrowserState extends State<PresetBrowser> {
               for (final p in shownMine) row(p),
               if (shownFactory.isNotEmpty) header('FACTORY', shownFactory.length),
               for (final p in shownFactory) row(p),
-            ])),
+              for (final p in found) row(p),
+            ]))),
     ]));
   }
 

@@ -99,6 +99,9 @@ public:
     // A component index with this bit names component (index & ~kNoteComponentFlag) of the layer's per-note FX
     // (#127): knob moves and bypass fan out to every slot, the display reads the newest note's slot.
     static constexpr uint32_t kNoteComponentFlag = 0x40000000u;
+    // A component index with this bit names MIDI effect (index & ~kMidiComponentFlag) of the layer's "midiComponents"
+    // (1.1.0, midi_fx.h): entry 1 + that of its instrument's chain.
+    static constexpr uint32_t kMidiComponentFlag = 0x20000000u;
     // Per-note FX (#127): the layer's voice budget, active slots and overflow (any thread; false: none there).
     bool noteFxStats(const std::string& layerId, NoteFxStats& out);
     // Play after Stop: an instrument still ringing fades out over its next 5 ms, rendered at Play (inside one
@@ -141,6 +144,10 @@ public:
     // Per-slot output meter (1.0.8, API 39; ComponentChain::readSlotMeter): read and reset. 1, 0 busy, -1 none.
     // The instrument (kInstrumentIndex) has one too.
     int32_t componentMeter(const std::string& layerId, uint32_t index, float& peakL, float& peakR, bool& clipped);
+    // Per-slot cost and the armed badge (1.1.0, API 44; ComponentChain::readSlotCost, slotArmed): the slot's smoothed
+    // CPU share (-1 until measured; a read starts the timing), its latency now in frames, and whether it plays its
+    // armed (near-zero-delay) version. 1, 0 busy, -1 none. The instrument (kInstrumentIndex) has one too.
+    int32_t componentCost(const std::string& layerId, uint32_t index, double& share, uint32_t& latency, bool& armed);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // A send while it plays (send `index` of the layer's project "sends"): its level (linear, 0..+12 dB), pre- or
     // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets

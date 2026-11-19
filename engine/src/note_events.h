@@ -225,6 +225,13 @@ public:
         unsorted_ = false;
     }
     const Event* events() const noexcept { return events_.data(); }
+    // MIDI effects (midi_fx.h): the block's events as storage they may write their output into (kCapacity events),
+    // and the count and order of what is there now (sorted by frame: their output is).
+    Event* storage() noexcept { return events_.data(); }
+    void setCount(uint32_t n) noexcept {
+        count_ = n < kCapacity ? n : kCapacity;
+        unsorted_ = false;
+    }
     uint32_t count() const noexcept { return count_; }
     // After a block: its events are gone and the ended notes are packed away.
     void clearEvents() noexcept {

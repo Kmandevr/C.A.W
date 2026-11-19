@@ -28,6 +28,7 @@ import 'plugin_screen.dart';
 import '../adaptive_sheet.dart';
 import '../benchmark/plugin_bench_screen.dart';
 import '../panel_motion.dart';
+import '../crow.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
 class CppFileView {
@@ -1224,7 +1225,7 @@ class _BuildButton extends StatelessWidget {
                   onBuild();
                 },
           icon: building
-              ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: Neon.green))
+              ? const CrowLoader(size: 13, color: Neon.green)
               : Icon(built ? Icons.check : Icons.play_arrow, size: 17),
           label: Text(building ? 'Building' : 'Build', style: Neon.code(size: 12, color: building ? Neon.dim : color)),
         ),
@@ -1318,7 +1319,7 @@ class _StatusChip extends StatelessWidget {
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (building)
-            const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Neon.green))
+            const CrowLoader(size: 10, color: Neon.green)
           else if (icon != null)
             Icon(icon, size: 12, color: color),
           if (building || icon != null) const SizedBox(width: 4),

@@ -82,6 +82,41 @@ TEST(audio_clips_sampler_monitoring_and_recording_never_allocate_on_the_audio_th
     std::filesystem::remove_all(dir);
 }
 
+TEST(the_sampler_s_stretched_zones_never_allocate_on_the_audio_thread) {
+    const auto dir = std::filesystem::temp_directory_path() / "caw_magpie_rt";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string p = noiseWav((dir / "n.wav").generic_string(), 48000);
+    // Six notes at once (more than the 4 Signalsmith stretchers: two play WSOLA), one zone following the tempo, notes
+    // replaced as they end.
+    const std::string zones = "{\"zones\":[{\"path\":\"" + jsonEscape(p) + "\",\"hikey\":64,\"stretch\":true,"
+        "\"loop_mode\":\"loop_continuous\",\"loop_start\":1000,\"loop_end\":20000},{\"path\":\"" + jsonEscape(p) +
+        "\",\"lokey\":65,\"stretch\":true,\"stretch_bpm\":90}]}";
+    const std::string json =
+        "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":1,\"master\":0.5,\"modules\":[{\"id\":\"pt\",\"source\":"
+        "\"---\\nkind: pattern\\nlength: 16\\n---\\n0 C4,E4,G4,B4,D5,F5 3 1\\n4 A3,C5 6 0.7\\n9 E4,G5 5 1\\n\"}],"
+        "\"layers\":[{\"id\":\"s\",\"name\":\"S\",\"pattern\":\"pt\",\"instrument\":{\"id\":\"org.caw.sampler\","
+        "\"params\":{\"filter\":1,\"cutoff\":800},\"state\":\"" + b64(zones) + "\"}}]}";
+    Engine e(48000);
+    CHECK(e.setProjectJson(json).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    e.play();
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    float peak = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 600; ++k) {  // 2.4 s: loop wraps, every note on and off, stretchers handed on
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = std::fabs(v) > peak ? std::fabs(v) : peak;
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    std::filesystem::remove_all(dir);
+}
+
 TEST(the_input_bridge_never_allocates_on_the_capture_or_output_thread) {
     caw::InputBridge bridge;
     bridge.open(2, 640, 768, 12000);

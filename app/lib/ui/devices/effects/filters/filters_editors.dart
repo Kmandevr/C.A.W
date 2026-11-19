@@ -20,8 +20,9 @@ final _filter = _merged('filter', 'FILTER', Icons.filter_alt_outlined, DeviceFam
 
 /// Every editor of the group, by id (a merged variant is found by its old id: [MergedDevices.pageId]).
 final Map<String, DeviceEditorEntry> filtersEditors = {
-  'org.caw.eq': _eq, 'org.caw.geq': _eq, 'org.caw.eq.dj': _eq, 'org.caw.tilt': _eq,
-  'org.caw.filter': _filter, 'org.caw.ladder': _filter, 'org.caw.nlfilter': _filter,
+  'org.caw.eq': _eq, 'org.caw.geq': _eq, 'org.caw.eq.dj': _eq, 'org.caw.tilt': _eq, 'org.caw.eq.linear': _eq,
+  'org.caw.eq.match': _eq,
+  'org.caw.filter': _filter, 'org.caw.ladder': _filter, 'org.caw.nlfilter': _filter, 'org.caw.filter.wah': _filter,
   'org.caw.comb': singlePage('comb', 'COMB', Icons.view_week_outlined, DeviceFamily.filter, () => const CombFilterPage()),
   'org.caw.resonator': singlePage('resonator', 'RESONATOR', Icons.music_note_outlined, DeviceFamily.filter, () => const ResonatorPage()),
   'org.caw.formant': singlePage('formant', 'FORMANT', Icons.record_voice_over_outlined, DeviceFamily.filter, () => const FormantPage()),

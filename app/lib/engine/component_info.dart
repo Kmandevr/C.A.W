@@ -1,4 +1,6 @@
 // Typed descriptors of loaded native components, parsed from caw_engine_components (engine/include/caw.h).
+import '../model/device_names.dart';
+
 class ComponentPortInfo {
   const ComponentPortInfo({
     required this.id,
@@ -141,6 +143,7 @@ class NativeComponentInfo {
     this.cpuClass = 'unspecified',
     this.variants = const [],
     this.variantIndex = 0,
+    this.pack = '',
   });
 
   final String id, name;
@@ -156,6 +159,12 @@ class NativeComponentInfo {
 
   /// Part of the engine (the Library's stereo tools): always there, no trust choice, can't be unloaded.
   final bool builtin;
+
+  /// The pack a built-in belongs to (`"autostacc-beta"`: the AutoStacc beta pack, 1.1.0), or '' for none.
+  final String pack;
+
+  /// One of the AutoStacc beta pack's devices (Murmur, Peck, Bend, Iris): the AutoStacc badge marks it.
+  bool get isAutoStacc => pack.startsWith('autostacc');
 
   /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.
   final List<ComponentPresetInfo> presets;
@@ -190,7 +199,12 @@ class NativeComponentInfo {
 
   bool get runsPerNote => domains.contains('per_note') || domains.contains('per_voice');
 
-  String get label => name.isEmpty ? id : name;
+  /// What the app shows: a built-in's crow-family name and plain subtitle ("Talon · Compressor", [DeviceNames]),
+  /// else its descriptor's name, else its id.
+  String get label => DeviceNames.title(id, name.isEmpty ? id : name);
+
+  /// The short name for names the app makes up ("Talon 2"): a built-in's crow-family name, else [label].
+  String get shortLabel => DeviceNames.name(id, name.isEmpty ? id : name);
 
   /// Parameter [id], or null. A long list is indexed on first use, so a descriptor with thousands of knobs (the
   /// drums' 10392) costs one hash lookup per knob, not a scan; a short one (or a rack's, rebuilt per read) is scanned.
@@ -228,6 +242,7 @@ class NativeComponentInfo {
           for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
         ],
         builtin: j['builtin'] == true,
+        pack: j['pack'] as String? ?? '',
         presets: [
           for (final p in (j['presets'] as List? ?? const [])) ComponentPresetInfo.fromJson(p as Map<String, dynamic>)
         ],

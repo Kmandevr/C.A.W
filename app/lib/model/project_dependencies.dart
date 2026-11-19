@@ -5,6 +5,7 @@ import 'dart:io';
 
 import '../ui/theme.dart';
 import 'cpp_component.dart';
+import 'flock.dart';
 import 'audio_clips.dart' show isSessionPath;
 import 'project.dart';
 import 'sampler.dart';
@@ -101,6 +102,7 @@ int quarantineUnsafePaths(ProjectDoc p, String missingDir, {void Function(String
         if (bad(z.path)) unsafe.add(z.path);
       }
     }
+    if (flockSampleOf(use) case final path? when bad(path)) unsafe.add(path);
   }
   final taken = <String>{};
   for (final from in unsafe) {
@@ -228,6 +230,7 @@ List<ProjectDependency> scanProjectDependencies(
         file(DependencyKind.sample, z.path, owner);
       }
     }
+    if (flockSampleOf(use) case final path?) file(DependencyKind.sample, path, owner);
     for (final s in use.samples) {
       if (s.path case final path?) file(DependencyKind.sample, path, owner);
     }
@@ -307,6 +310,7 @@ Future<List<ProjectDependency>> findMissingFiles(ProjectDoc p) async {
         add(z.path, DependencyKind.sample, owner);
       }
     }
+    if (flockSampleOf(use) case final path?) add(path, DependencyKind.sample, owner);
     for (final s in use.samples) {
       if (s.path case final path?) add(path, DependencyKind.sample, owner);
     }
@@ -327,7 +331,8 @@ Future<List<ProjectDependency>> findMissingFiles(ProjectDoc p) async {
   return missing;
 }
 
-/// Points every reference in [p] to the file [from] at [to] instead: audio assets, sample slots and sampler zones.
+/// Points every reference in [p] to the file [from] at [to] instead: audio assets, sample slots, sampler zones and
+/// Flock's sample.
 /// Returns how many references moved.
 int relinkProjectPath(ProjectDoc p, String from, String to) {
   var moved = 0;
@@ -355,6 +360,10 @@ int relinkProjectPath(ProjectDoc p, String from, String to) {
         }
       }
       if (changed) use.state = zones.toBase64();
+    }
+    if (flockSampleOf(use) == from) {
+      use.state = flockStateFor(to);
+      moved++;
     }
   }
   return moved;

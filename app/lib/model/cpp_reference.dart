@@ -371,8 +371,11 @@ class CppBuiltin {
 const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
       'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects; poly, '
-      'mono or legato with glide. Its 215 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
-      'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303, Basic, Pluck and FM bell.',
+      'mono or legato with glide. 1.1.0 adds oscillator RM, AM and sync with a mod source each, spectral and additive warps, '
+      'an Additive table, Diode, Sallen-Key, Phaser, Neg comb and Vowel filters, LFO 4 and eight macros. Its 230 knobs are '
+      'grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, lfo1_..lfo4_, rnd_, mod1_..mod16_, macro1..8 '
+      'and fx_. Presets: the seven 1.0 ones (Init, Morph pad, Mono bass, Acid 303, Basic, Pluck, FM bell) and 18 for the new '
+      'synthesis.',
       ['voice_mode', 'glide', 'flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
        'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
        'fx_chorus_rate', 'fx_chorus_depth', 'fx_chorus_mix', 'fx_delay_on', 'fx_delay_sync', 'fx_delay_time', 'fx_delay_feedback',
@@ -390,9 +393,13 @@ const cppBuiltins = <CppBuiltin>[
       'Variants (`variant`): Bands, Graphic, DJ, Tilt; these knobs are the first\'s. 8 bands (bell, shelves, cuts at 12/24/48 dB, notch, band-pass, tilt), each stereo, mid, side, left or right; '
       'knobs b1_..b8_ on, type, freq, gain, q, channel; a live spectrum.',
       ['variant', 'output']),
-  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Compressor, Dynamics, Gate, Shape; these knobs are the first\'s. Soft knee, auto release and makeup, RMS or peak, link, sidechain filter.',
+  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Down, Dynamics, Up, Bus; these knobs are Down\'s. Soft knee, auto release and makeup, peak, RMS or ISP, link, sidechain filters, character, output. Always send talon_layout 1 (an entry without it is read as 1.0.9\'s).',
       ['variant', 'threshold', 'ratio', 'knee', 'attack', 'release', 'auto_release', 'makeup', 'auto_makeup', 'mix', 'lookahead', 'detect',
-       'link', 'sc_hpf', 'sc_listen', 'sidechain']),
+       'link', 'sc_hpf', 'sc_listen', 'sidechain', 'sc_lpf', 'character', 'output']),
+  CppBuiltin('org.caw.gate', 'Gate', false, 'Variants (`variant`): Gate, Expand, Pedal gate; these knobs are the first\'s. Threshold, range, ratio, hold, sidechain filter and key.',
+      ['variant', 'threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf', 'sidechain']),
+  CppBuiltin('org.caw.duck', 'Ducker', false, 'Variants (`variant`): Duck, Level, Carve; these knobs are the first\'s. Ducks under a key (or levels its own input) by an amount above a threshold.',
+      ['variant', 'threshold', 'amount', 'attack', 'hold', 'release', 'detection', 'output', 'mix', 'sidechain']),
   CppBuiltin('org.caw.limiter', 'Limiter', false, 'A look-ahead limiter with a true-peak estimate.',
       ['gain', 'ceiling', 'release', 'lookahead', 'true_peak']),
   CppBuiltin('org.caw.transient', 'Transient shaper', false, 'More or less attack and sustain.', ['attack', 'sustain', 'output', 'mix']),
@@ -421,8 +428,10 @@ const cppBuiltins = <CppBuiltin>[
       ['variant', 'size', 'decay', 'predelay', 'predelay_sync', 'damping', 'low_cut', 'high_cut', 'width', 'mod', 'mod_rate', 'freeze', 'duck', 'mix']),
   CppBuiltin('org.caw.shift', 'Pitch/Shift', false,
       'Variants (`variant`): Pitch (semitones and cents by crossfaded grains; latency half a grain), Frequency '
-      '(single-sideband shift).',
-      ['variant', 'semitones', 'cents', 'grain', 'jitter', 'mix']),
+      '(single-sideband shift), Harmonizer (up to 4 voices on scale steps from the tracked pitch; about 21 ms latency), '
+      'Octaver (a sub and an octave up: Mono tracking, Poly shifters or Auto).',
+      ['variant', 'semitones', 'cents', 'grain', 'jitter', 'mix', 'voices', 'v1_degree', 'key', 'scale', 'formant',
+       'tracking', 'sub', 'up']),
   // fx-dynamics begin (engine/src/builtin_fx_dynamics.cpp, builtin_fx_drive.cpp)
   CppBuiltin('org.caw.multiband', 'Multiband dynamics', false,
       'Three bands (Linkwitz-Riley crossovers), each compressed upward and downward; an OTT mode. Band knobs b1_..b3_ '
@@ -447,7 +456,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.convolver', 'Convolver', false,
       'Convolution reverb: generated rooms, halls, plates, springs, chambers and odd spaces, or a loaded WAV; 512 frames of latency.',
       ['source', 'decay', 'size', 'damping', 'length', 'reverse', 'predelay', 'low_cut', 'high_cut', 'width', 'mix']),
-  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan; these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
+  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan, Shape (the drawn duck); these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
       ['variant', 'rate', 'sync', 'depth', 'shape', 'smooth', 'stereo', 'mode']),
   // fx-space end
   // fx-filters begin
@@ -460,6 +469,49 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.disperser', 'Disperser', false, 'Up to 64 all-pass stages that smear transients into a chirp.',
       ['amount', 'freq', 'pinch', 'spread', 'mix']),
   // fx-filters end
+  // 1.1.0's tools (engine/src/builtin_fx_meters.cpp, builtin_fx_lofi.cpp, builtin_fx_phasealign.cpp)
+  CppBuiltin('org.caw.meters', 'Meters', false,
+      'Variants (`variant`): Analyzer, Tuner, Loudness (only the chosen one runs); the output is the input bit for bit.',
+      ['source', 'tilt', 'variant']),
+  CppBuiltin('org.caw.lofi', 'Lo-fi', false, 'Worn media: the Age macro over crackle, wear, hiss, wobble, a band limit and grit.',
+      ['age', 'crackle', 'wear', 'hiss', 'wobble', 'band', 'grit', 'seed', 'mix', 'output']),
+  CppBuiltin('org.caw.phasealign', 'Phase align', false,
+      'Delays (sub-sample) and inverts a track to line it up with its key; Auto learns the delay; 1 frame of latency.',
+      ['mode', 'delay', 'invert', 'learn', 'window']),
+  CppBuiltin('org.caw.exciter', 'Exciter', false,
+      'Variants (`variant`): Exciter (harmonics of the highs, oversampled 2x), Bass (harmonics of the lows, so small '
+      'speakers suggest them); harmonics follow the band\'s level.',
+      ['variant', 'freq', 'amount', 'character', 'tone', 'density', 'cut', 'listen', 'output']),
+  CppBuiltin('org.caw.vocoder', 'Vocoder', false,
+      'A channel vocoder keyed by a track: its built-in carrier plays the key\'s notes (or a drone), or the key\'s '
+      'audio is the carrier; 12 to 32 bands, no latency.',
+      ['carrier', 'wave', 'note', 'bands', 'formant', 'sibilance', 'width', 'freeze', 'mix', 'output']),
+  // The AutoStacc beta pack (1.1.0).
+  CppBuiltin('org.caw.pack.granular', 'Murmur', false,
+      'Granular texture from the last 0.5 to 4 s: grains sprayed around a position, pitched, reversed and panned; '
+      'freeze holds the recording and scan moves through it.',
+      ['buffer', 'position', 'spray', 'size', 'density', 'sync', 'jitter', 'pitch', 'spread', 'scale', 'reverse', 'window',
+        'pan', 'glide', 'width', 'feedback', 'freeze', 'scan', 'seed', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.glitch', 'Peck', false,
+      'Glitch on the song\'s grid: per slice, by seeded chance, a repeat, stutter, reverse, gate or pitch jump; hold repeats.',
+      ['grid', 'chaos', 'repeat', 'stutter', 'stutters', 'reverse', 'gate', 'pitch', 'range', 'seed', 'hold', 'smooth', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.warp', 'Bend', false,
+      'Warp: a curve of 4, 8 or 16 points (p0..p15) bends the delay (Time) or the speed (Speed) through each cycle.',
+      ['mode', 'cycle', 'depth', 'range', 'points', 'shape', 'smooth', 'resync', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.spectral', 'Iris', false,
+      'Spectral effects on an STFT: freeze (a captured spectrum, painted through its state), blur, shift and gate; '
+      'a window of latency.',
+      ['quality', 'freeze', 'fade', 'drift', 'paint', 'blur', 'shift', 'gate', 'gate_range', 'mix', 'output']),
+  CppBuiltin('org.caw.clean', 'Preen', false,
+      'Variants (`variant`): Denoise (learned or adaptive), De-hum (50/60 Hz and harmonics), De-reverb; the spectral '
+      'ones have one window of latency by `quality`.',
+      ['variant', 'reduction', 'sensitivity', 'adaptive', 'learn', 'quality', 'monitor', 'harmonics', 'decay']),
+  CppBuiltin('org.caw.vocalclean', 'Hush', false,
+      'Variants (`variant`): De-click, De-plosive, Breath, for voices; a few ms of latency each.',
+      ['variant', 'sensitivity', 'length', 'mode', 'amount', 'range', 'fade', 'keep', 'listen']),
+  CppBuiltin('org.caw.pitchfix', 'Lark', false,
+      'Pitch correction to a key and scale (or the key track\'s notes), with Keep vibrato and formant keep; 25 ms of latency, 10 ms with `monitor`.',
+      ['key', 'scale', 'target', 'speed', 'humanize', 'keep_vibrato', 'formant_keep', 'formant', 'mix', 'output', 'monitor']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
   CppBuiltin('org.caw.rack.fx', 'FX rack', false,
       'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '

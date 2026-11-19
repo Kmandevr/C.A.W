@@ -1,0 +1,371 @@
+// Timber's mallets and bells (modal: marimba, vibraphone, xylophone, glockenspiel, chimes, bell) and winds (blown-pipe waveguides: clarinet, flute, sax, brass) models.
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <new>
+
+#include "caw/library/fastmath.hpp"
+#include "timber_core.h"
+
+namespace caw::timber {
+
+// ---------- Mallets and bells ----------
+
+// Modal synthesis: up to eight decaying sines per strike (complex one-poles, run 4-wide), at the instrument's mode
+// ratios: the tuned bars of a marimba and vibraphone (1 : 4 : 10, the first two by the maker's tuning), the
+// xylophone's (1 : 3 : 6), a glockenspiel's free bar (1 : 2.76 : 5.40 : 8.93, Euler-Bernoulli), tubular chimes'
+// free tube ((2k + 1)^2, its strike note an octave under the 4th mode) and a church bell's partials (hum, prime,
+// tierce, quint, nominal..., as caw/library/modal.hpp). The mallet's hardness and the velocity tilt the modes'
+// loudness toward the high ones (a hard mallet's short contact excites more of them); `position` weights them by
+// where the bar is struck; `damping` shortens the high modes against the low; `dampen` is how much a released key
+// damps (a vibraphone's pedal, 0 for a marimba that rings out); `motor` is the vibraphone's tremolo (0 off).
+// [Assumption] the weights and decays are typical, chosen by ear, not measured.
+struct Mallet {
+    static constexpr uint32_t kEcoCap = 16, kNormalCap = 32, kHighCap = 32, kPool = kHighCap + 8;
+    static constexpr bool kRestrike = true, kHeldSilenceEnds = true;
+    static constexpr double kMinLife = 0.02, kSpread = 0.5;
+    enum P : uint32_t { kInstrument, kHardness, kDecay, kPosition, kDamping, kDampen, kMotor, kModelParams };
+    static constexpr int kModes = 8;
+
+    struct Voice : VoiceBase {
+        F4 c[2], s[2], zr[2], zi[2];
+        double hz = 0, t60 = 1, tunedPitch = -1;
+        bool damped = false;
+        uint32_t clickLeft = 0;
+        Noise noise;
+    };
+
+    int instrument = 0;
+    double hardness = 0.5, decay = 1, position = 0.3, damping = 0.4, dampen = 0, motor = 0;
+    double sr = 48000, phase = 0;
+
+    size_t allocBytes() const noexcept { return 0; }
+    static lib::ReverbSettings room() noexcept {
+        lib::ReverbSettings r;
+        r.size = 0.6, r.decay = 1.8, r.damping = 0.4, r.mix = 1.0, r.width = 1.0;
+        return r;
+    }
+    bool prepare(double rate, Voice*, uint32_t) noexcept {
+        sr = rate;
+        return true;
+    }
+    void reset() noexcept { clearPost(); }
+    void control(const double* p, const Shared&) noexcept {
+        instrument = static_cast<int>(clampd(p[kInstrument], 0, 5) + 0.5);
+        hardness = clampd(p[kHardness], 0, 1);
+        decay = clampd(p[kDecay], 0.25, 4);
+        position = clampd(p[kPosition], 0, 1);
+        damping = clampd(p[kDamping], 0, 1);
+        dampen = clampd(p[kDampen], 0, 1);
+        motor = clampd(p[kMotor], 0, 10);
+    }
+    struct Table {
+        double ratio[kModes], weight[kModes], t60;
+        int modes;
+    };
+    static const Table& table(int instrument) noexcept {
+        static const Table kTables[6] = {
+            {{1, 4.0, 9.9, 17.2}, {1, 0.35, 0.15, 0.06}, 1.6, 4},                                // Marimba
+            {{1, 4.0, 10.0, 16.9}, {1, 0.3, 0.12, 0.05}, 6.0, 4},                                // Vibraphone
+            {{1, 3.0, 6.0, 10.2}, {1, 0.5, 0.25, 0.1}, 0.7, 4},                                  // Xylophone
+            {{1, 2.756, 5.404, 8.933}, {1, 0.6, 0.35, 0.15}, 3.0, 4},                            // Glockenspiel
+            {{0.617, 1.21, 2.0, 2.99, 4.17, 5.53}, {0.3, 0.7, 1.0, 0.7, 0.4, 0.2}, 5.0, 6},     // Chimes
+            {{0.5, 1.0, 1.183, 1.506, 2.0, 2.514, 2.662, 3.011}, {0.6, 1.0, 0.8, 0.45, 0.9, 0.35, 0.3, 0.4}, 6.0, 8},  // Bell
+        };
+        return kTables[instrument];
+    }
+    void setModes(Voice& v, double t60) const noexcept {
+        const Table& t = table(instrument);
+        for (int k = 0; k < kModes; ++k) {
+            const double hz = v.hz * t.ratio[k];
+            double c = 0, s = 0;
+            if (k < t.modes && hz < 0.45 * sr) {
+                const double r = std::max(1.0, t.ratio[k] / t.ratio[0]);
+                const double life = t60 * detPow(r, -1.5 * damping);
+                const double rr = detExp(-6.907755278982137 / (life * sr));
+                const double w = kTwoPi * hz / sr;
+                c = rr * std::cos(w), s = rr * std::sin(w);
+            }
+            v.c[k / 4][k % 4] = static_cast<float>(c), v.s[k / 4][k % 4] = static_cast<float>(s);
+        }
+    }
+    void start(Voice& v, const Shared&) noexcept {
+        const Table& t = table(instrument);
+        v.hz = noteHz(clampd(v.pitch, 0, 127));
+        v.tunedPitch = v.pitch;
+        v.t60 = t.t60 * decay * clampd(detPow(2.0, -(v.pitch - 60.0) / 24.0), 0.15, 4.0);
+        v.damped = false;
+        setModes(v, v.t60);
+        const double vel = v.velocity;
+        const double tilt = -1.4 + 2.2 * hardness * (0.35 + 0.65 * vel);
+        double sum = 0, w[kModes] = {};
+        for (int k = 0; k < t.modes; ++k) {
+            const double r = t.ratio[k] / t.ratio[0];
+            const double place = 0.3 + 0.7 * std::fabs(std::sin(kPi * (k + 1) * (0.1 + 0.4 * position)));
+            w[k] = t.weight[k] * detPow(r, tilt) * place;
+            sum += w[k] * w[k];
+        }
+        const double amp = (0.12 + 0.88 * detPow(vel, 1.5)) * 0.5 / std::sqrt(sum + 1e-12);
+        for (int k = 0; k < kModes; ++k) {
+            v.zr[k / 4][k % 4] = static_cast<float>(w[k] * amp);
+            v.zi[k / 4][k % 4] = 0.0f;
+        }
+        v.clickLeft = static_cast<uint32_t>(0.0008 * sr * hardness);
+        v.noise.s = 0x9E37u + v.key;
+    }
+    void release(Voice& v, const Shared& s) noexcept {
+        if (dampen <= 0.0) return;
+        v.damped = true;
+        // Toward `release` seconds by `dampen` (a log blend: half-way is the geometric mean).
+        setModes(v, v.t60 * detPow(std::min(1.0, s.release / v.t60), dampen));
+    }
+    void voiceControl(Voice& v, const Shared&) noexcept {
+        if (v.pitch != v.tunedPitch) v.tunedPitch = v.pitch, v.hz = noteHz(clampd(v.pitch, 0, 127)), setModes(v, v.t60);
+        for (int b = 0; b < 2; ++b)
+            for (int k = 0; k < 4; ++k) v.zr[b][k] = flushf(v.zr[b][k]), v.zi[b][k] = flushf(v.zi[b][k]);
+    }
+    void render(Voice& v, float* out, uint32_t n) noexcept {
+        const int blocks = table(instrument).modes > 4 ? 2 : 1;
+        for (uint32_t i = 0; i < n; ++i) {
+            float y = 0;
+            for (int b = 0; b < blocks; ++b) {
+                const F4 r = v.c[b] * v.zr[b] - v.s[b] * v.zi[b], im = v.s[b] * v.zr[b] + v.c[b] * v.zi[b];
+                v.zr[b] = r, v.zi[b] = im;
+                y += im[0] + im[1] + im[2] + im[3];
+            }
+            if (v.clickLeft) --v.clickLeft, y += 0.05f * static_cast<float>(hardness * v.velocity) * v.noise.next();
+            out[i] = y;
+        }
+    }
+    void post(float* l, float* r, uint32_t n, const Shared&) noexcept {
+        if (motor <= 0.0) return;
+        const double inc = motor / sr;
+        for (uint32_t i = 0; i < n; ++i) {
+            const float g = 1.0f - 0.25f * (1.0f + static_cast<float>(lib::fastSinCycles(phase)));
+            phase += inc;
+            if (phase >= 1.0) phase -= 1.0;
+            l[i] *= g, r[i] *= g;
+        }
+    }
+    bool postQuiet() const noexcept { return true; }
+    void clearPost() noexcept { phase = 0; }
+    void display(float* out) const noexcept {
+        out[0] = static_cast<float>(instrument);
+        out[1] = static_cast<float>(phase);
+        out[2] = static_cast<float>(motor);
+    }
+};
+
+// ---------- Winds ----------
+
+// Blown pipes, each a bore delay line with the published excitation for its kind (Smith's and Cook's waveguide
+// wind models; STK, MIT-like licence, read for ideas, no code taken):
+// - Clarinet: a cylindrical bore closed at the reed (half a period of delay, inverted at the bell through a
+//   one-pole loss); the reed is a table of the pressure difference, r = offset + slope x dp held to -1..1, stiffer
+//   (a steeper slope) with `reed`.
+// - Flute: an open bore (a whole period) and a jet delay (`reed` sets its length, 0.32-0.52 of the bore's): the
+//   jet's sigmoid x - x^3 drives the bore.
+// - Sax: the clarinet's reed on a whole-period bore without the inversion, so every harmonic sounds (a cone's
+//   series). [Assumption] a simplification of a conical bore, chosen by ear.
+// - Brass: a lip resonator (a resonant biquad near the note, `reed` its tension) whose squared output is the
+//   valve between the mouth and the bore.
+// Breath is an envelope (`attack`, the shared `release`) times `breath`, the velocity, poly pressure and the mod
+// wheel; `noise` adds breath noise; `vibrato` moves the breath and a little the pitch; `growl` modulates it at
+// about 35 Hz (a growled sax). Each kind's pitch pull is corrected by a factor measured in timber_test.
+struct Wind {
+    static constexpr uint32_t kEcoCap = 8, kNormalCap = 8, kHighCap = 8, kPool = 16 + 8;
+    static constexpr bool kRestrike = true, kHeldSilenceEnds = false;
+    static constexpr double kMinLife = 0.05, kSpread = 0.25;
+    enum P : uint32_t { kInstrument, kBreath, kNoise, kReed, kVibrato, kVibRate, kGrowl, kAttack, kModelParams };
+
+    struct Voice : VoiceBase {
+        Line bore, jet;
+        float d = 2, dj = 2, lp = 0, dcx = 0, dcy = 0, ox = 0, oy = 0;
+        float env = 0, envStep = 0;
+        double vib = 0, growl = 0;
+        float g = 1, gStep = 0;  // the growl's gain, in a straight line over each control block
+        float lipA1 = 0, lipA2 = 0, lipG = 0, lip1 = 0, lip2 = 0;
+        Noise noise;
+        double tunedPitch = -1, baseHz = 440;
+    };
+
+    int instrument = 0;
+    double breath = 0.6, noise = 0.15, reed = 0.5, vibrato = 0.2, vibRate = 5, growl = 0, attack = 0.04;
+    double sr = 48000, modWheel = 0;
+    std::unique_ptr<float[]> memory;
+    uint32_t lineLen = 0, count = 0;
+    Voice* voices = nullptr;
+
+    size_t allocBytes() const noexcept { return static_cast<size_t>(count) * 2 * lineLen * sizeof(float); }
+    static lib::ReverbSettings room() noexcept {
+        lib::ReverbSettings r;
+        r.size = 0.6, r.decay = 1.7, r.damping = 0.5, r.mix = 1.0, r.width = 1.0, r.preDelay = 0.01;
+        return r;
+    }
+    bool prepare(double rate, Voice* v, uint32_t n) noexcept {
+        sr = rate;
+        voices = v, count = n;
+        lineLen = pow2At(static_cast<uint32_t>(sr / 30.0) + 16);
+        memory.reset(new (std::nothrow) float[static_cast<size_t>(n) * 2 * lineLen]());
+        if (!memory) return false;
+        bindAll();
+        return true;
+    }
+    void bindAll() noexcept {
+        for (uint32_t k = 0; k < count; ++k) {
+            voices[k].bore.bind(memory.get() + static_cast<size_t>(2 * k) * lineLen, lineLen);
+            voices[k].jet.bind(memory.get() + static_cast<size_t>(2 * k + 1) * lineLen, lineLen);
+        }
+    }
+    void reset() noexcept { bindAll(); }
+    void control(const double* p, const Shared& s) noexcept {
+        instrument = static_cast<int>(clampd(p[kInstrument], 0, 3) + 0.5);
+        breath = clampd(p[kBreath], 0, 1);
+        noise = clampd(p[kNoise], 0, 1);
+        reed = clampd(p[kReed], 0, 1);
+        vibrato = clampd(p[kVibrato], 0, 1);
+        vibRate = clampd(p[kVibRate], 2, 9);
+        growl = clampd(p[kGrowl], 0, 1);
+        attack = clampd(p[kAttack], 0.005, 2);
+        modWheel = s.modWheel;
+    }
+    // The measured pull of each kind's excitation on its pitch, as a period factor (timber_test checks the result).
+    static double periodFactor(int instrument) noexcept {
+        static constexpr double kF[4] = {1.0, 1.0, 1.0, 1.053};
+        return kF[instrument];
+    }
+    // What is left of the flute's and the brass's pitch pull, measured at five keys (cents; linear between, held outside).
+    static double residualPull(int instrument, double pitch) noexcept {
+        static constexpr double kKey[5] = {45, 50, 62, 74, 81};
+        static constexpr double kPull[4][5] = {{0, 0, 0, 0, 0}, {31, 14, 4, -1, -6}, {0, 0, 0, 0, 0}, {9, 9, 0, 7, 16}};
+        const double* p = kPull[instrument];
+        if (pitch <= kKey[0]) return p[0];
+        for (int i = 1; i < 5; ++i)
+            if (pitch <= kKey[i]) return p[i - 1] + (p[i] - p[i - 1]) * (pitch - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);
+        return p[4];
+    }
+    void tune(Voice& v, double cents) noexcept {
+        // Brass: the lips pull the pitch by a measured amount that grows down the range; it is aimed off by that.
+        if (v.pitch != v.tunedPitch) {  // the note's own pitch, aimed off by its kind's pull (worked out once)
+            double aim = -residualPull(instrument, v.pitch);
+            if (instrument == 3) aim -= 6.0 - 3.4 * (clampd(v.pitch, 34.0, 100.0) - 62.0);
+            v.baseHz = noteHz(clampd(v.pitch, 34.0, 100.0) + aim / 100.0);
+        }
+        const double f0 = v.baseHz * lib::fastExp(cents * 5.776226504666211e-4);  // ln 2 / 1200
+        const double period = sr / f0 * periodFactor(instrument);
+        // Clarinet and sax: half a period (closed at the reed, inverted at the bell). Flute: the model speaks at 1.5x
+        // its bore's lowest mode, so the bore is 1.5 periods. Brass: the lips pick the bore's 2nd mode (2 periods).
+        static constexpr double kBore[4] = {0.5, 1.5, 0.5, 2.0};
+        const float cap = static_cast<float>(v.bore.mask - 4);
+        v.d = std::min(cap, static_cast<float>(std::max(2.0, kBore[instrument] * period - 1.0)));
+        v.dj = std::min(cap, static_cast<float>(std::max(2.0, v.d * (0.28 + 0.1 * reed))));
+        if (instrument == 3) {  // the lips: a two-pole resonance at the note
+            const double w = kTwoPi * f0 * (0.92 + 0.02 * reed) / sr, r = 0.997;
+            v.lipA1 = static_cast<float>(2.0 * r * std::cos(w)), v.lipA2 = static_cast<float>(-r * r);
+            v.lipG = static_cast<float>(0.002 * std::sin(w) / 0.043);  // the same peak gain at every pitch
+        }
+        v.tunedPitch = v.pitch;
+    }
+    void start(Voice& v, const Shared&) noexcept {
+        v.bore.clear();
+        v.jet.clear();
+        v.lp = v.dcx = v.dcy = v.ox = v.oy = 0;
+        v.env = 0;
+        v.envStep = static_cast<float>(1.0 / std::max(1.0, attack * sr));
+        v.vib = v.growl = 0;
+        v.g = 1, v.gStep = 0;
+        v.lip1 = v.lip2 = 0;
+        v.noise.s = 0xB1ABu + 31u * v.key;
+        v.tunedPitch = -1;
+        tune(v, 0);
+    }
+    void release(Voice& v, const Shared& s) noexcept {
+        v.envStep = -static_cast<float>(1.0 / std::max(1.0, std::max(0.01, s.release) * sr));
+    }
+    void voiceControl(Voice& v, const Shared&) noexcept {
+        const double dt = kControlFrames / sr;
+        v.vib += vibRate * dt;
+        v.vib -= std::floor(v.vib);
+        tune(v, 8.0 * vibrato * lib::fastSinCycles(v.vib));
+        // The growl (about 35 Hz): its gain now and at the next control point, in a line between.
+        const double amt = 0.4 * growl;
+        v.g = static_cast<float>(1.0 + amt * lib::fastSinCycles(v.growl));
+        v.growl += 35.0 * dt;
+        v.growl -= std::floor(v.growl);
+        v.gStep = static_cast<float>((1.0 + amt * lib::fastSinCycles(v.growl) - v.g) / kControlFrames);
+        v.lp = flushf(v.lp), v.dcx = flushf(v.dcx), v.dcy = flushf(v.dcy), v.ox = flushf(v.ox), v.oy = flushf(v.oy);
+        v.lip1 = flushf(v.lip1), v.lip2 = flushf(v.lip2);
+    }
+    // Each kind speaks only in a window of mouth pressure (its excitation's own regime), so `breath` moves the
+    // pressure within that window, and the velocity, poly pressure and mod wheel set the loudness.
+    void render(Voice& v, float* out, uint32_t n) noexcept {
+        const float expr = static_cast<float>(std::max(v.pressure, modWheel));
+        static constexpr float kOut[4] = {0.5f, 0.2f, 0.45f, 0.8f};  // about level with each other
+        static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
+        const float base = kLow[instrument] + kSpan[instrument] * static_cast<float>(breath);
+        const float loud = static_cast<float>(0.35 + 0.65 * v.velocity) * (1.0f + 0.6f * expr);
+        const float vibAm = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
+        const float noiseAmt = static_cast<float>(0.2 * noise + 0.004);  // a breath is never still: it also starts the tone
+        // The reed: the product of pressure and slope sets whether it speaks; `reed` moves it within the window.
+        const float slope = -static_cast<float>(0.19 + 0.06 * reed) / base;
+        for (uint32_t i = 0; i < n; ++i) {
+            v.env = std::clamp(v.env + v.envStep, 0.0f, 1.0f);
+            float pm = v.env * base * (1.0f + vibAm);
+            v.g += v.gStep;
+            const float g = v.g;
+            pm *= 1.0f + noiseAmt * v.noise.next();
+            const float b = v.bore.frac(v.d);
+            float w, y;
+            switch (instrument) {
+                case 0:    // clarinet
+                case 2: {  // sax
+                    v.lp += 0.5f * (b - v.lp);
+                    const float dp = -0.95f * v.lp - pm;
+                    const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
+                    w = pm + dp * r;
+                    y = instrument == 0 ? w : w + 0.45f * w * w;  // [Assumption] the cone's even harmonics, folded in
+                    break;
+                }
+                case 1: {  // flute
+                    v.lp += 0.3f * (b - v.lp);
+                    float t = -v.lp;
+                    const float d = t - v.dcx + 0.995f * v.dcy;  // the reflection's DC blocked
+                    v.dcx = t, v.dcy = d, t = d;
+                    const float j = v.jet.frac(v.dj);
+                    v.jet.push(pm - 0.5f * t);
+                    w = std::clamp(j * (j * j - 1.0f), -1.0f, 1.0f) + 0.5f * t;
+                    y = b;
+                    break;
+                }
+                default: {  // brass
+                    const float dp = pm - 0.85f * b;
+                    const float lip = v.lipG * dp + v.lipA1 * v.lip1 + v.lipA2 * v.lip2;
+                    v.lip2 = v.lip1, v.lip1 = lip;
+                    const float m = std::min(1.0f, lip * lip);
+                    const float x = pm * m + (1.0f - m) * 0.85f * b;
+                    const float d = x - v.dcx + 0.995f * v.dcy;  // a DC blocker in the loop
+                    v.dcx = x, v.dcy = d;
+                    w = y = d;
+                    break;
+                }
+            }
+            v.bore.push(w);
+            const float o = y - v.ox + 0.995f * v.oy;  // the breath's pressure is DC: only its motion sounds
+            v.ox = y, v.oy = o;
+            out[i] = o * loud * g * kOut[instrument];
+        }
+    }
+    void post(float*, float*, uint32_t, const Shared&) noexcept {}
+    bool postQuiet() const noexcept { return true; }
+    void clearPost() noexcept {}
+    void display(float* out) const noexcept {
+        out[0] = static_cast<float>(instrument);
+        out[1] = static_cast<float>(breath);
+        out[2] = static_cast<float>(reed);
+    }
+};
+
+}  // namespace caw::timber

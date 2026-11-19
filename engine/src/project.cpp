@@ -430,6 +430,16 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             const std::string layerName = "layer '" + spec.id + "'";
             if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
             if (!componentList(l.get("noteComponents"), layerName + " noteComponents", spec.noteComponents, error)) return false;
+            if (!componentList(l.get("midiComponents"), layerName + " midiComponents", spec.midiComponents, error)) return false;
+            if (spec.midiComponents.size() > 16) {
+                error = layerName + " midiComponents: at most 16 MIDI effects";
+                return false;
+            }
+            for (const ComponentSpec& c : spec.midiComponents)
+                if (c.hasKey) {
+                    error = layerName + " midiComponents: component '" + c.id + "' can't take a sidechain key";
+                    return false;
+                }
             for (const ComponentSpec& c : spec.noteComponents)
                 if (c.hasKey) {
                     error = layerName + " noteComponents: component '" + c.id + "' can't take a sidechain key per note";
@@ -562,6 +572,14 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 lane.moduleId = laneJson.string("layer");
                 lane.component = 0;
                 if (lane.moduleId.empty()) continue;
+            } else if (lane.targetType == "midiComponent") {
+                // {"target_type":"midiComponent","layer":id,"component":index,"target":param}: one of the layer's MIDI
+                // effects, which follow the instrument in its chain: an instrument lane on entry index + 1
+                lane.moduleId = laneJson.string("layer");
+                const double index = laneJson.number("component", -1);
+                if (lane.moduleId.empty() || !(index >= 0 && index < 16 && index == std::floor(index))) continue;
+                lane.targetType = "instrument";
+                lane.component = static_cast<int>(index) + 1;
             } else if (lane.targetType == "component" || lane.targetType == "noteComponent") {
                 // {"target_type":"component","layer":id (absent: the master),"component":index,"target":param}
                 lane.moduleId = laneJson.string("layer");

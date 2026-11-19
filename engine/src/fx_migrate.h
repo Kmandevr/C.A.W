@@ -48,6 +48,36 @@ struct LegacyEffect {
     const ModuleDescriptor& (*legacy)() = nullptr;
 };
 
+// A variant that left a device in a later layout (1.1.0's split: the Compressor's Gate, Shape and Duck): where it
+// went. Its parameters keep their ids and values.
+struct LayoutMove {
+    std::string_view to;  // the device it is now
+    uint32_t variant;     // its `variant` there
+};
+
+// A device whose entries carry a layout marker (talon_layout on org.caw.compressor, fx_dyn_common.h): an entry
+// without it is older, its `variant` read among `oldCount` variants, and variants from `firstMove` on move by
+// `moves` (in order); the others stay and get the marker. A rack older than kRackLayoutCurrent counts as older too.
+struct LayoutDevice {
+    std::string_view id;
+    std::string_view marker;
+    double current;
+    uint32_t oldCount;
+    uint32_t firstMove;
+    std::span<const LayoutMove> moves;
+};
+std::span<const LayoutDevice> layoutDevices();  // fx_migrate_dynamics.cpp
+
+// For an id with a layout marker and the values of an entry without it ("<slot>." for a rack's child): the move
+// its old variant makes, or null when it stays (or `id` has no marker).
+const LayoutMove* findLayoutMove(std::string_view id, const std::vector<std::pair<std::string, double>>& values,
+                                 const std::string& prefix = {}) noexcept;
+
+// A preset `name` that 1.0.9 listed under a device a variant later left (a Duck preset under org.caw.compressor):
+// the values as 1.0.9 had them (its old `variant`, no marker), so the migration then moves the entry. False when
+// no such preset exists. applyBuiltinPreset falls back to it.
+bool applyMovedPreset(std::string_view id, std::string_view name, std::vector<std::pair<std::string, double>>& params);
+
 // The families' tables (each family file defines its own; empty until its part is built).
 std::span<const LegacyEffect> legacyDynamicsEffects();   // fx_migrate_dynamics.cpp
 std::span<const LegacyEffect> legacyDriveEffects();      // fx_migrate_drive.cpp

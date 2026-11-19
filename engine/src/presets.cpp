@@ -1,12 +1,21 @@
 // Built-in presets (named parameter sets of built-in components) and the migration of the retired synths to Flagship presets.
 #include "presets.h"
+#include "builtin_fx_tools.h"
+#include "builtin_fx_voice.h"
+#include "builtin_pack.h"
+#include "builtin_fx_lark.h"
+#include "midi_fx.h"
 
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <map>
+#include <span>
 
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
+#include "builtin_timber.h"
+#include "builtin_flock.h"
 #include "builtin_fx_space.h"  // fx-space
 // fx-filters begin
 #include "builtin_fx_filters.h"
@@ -130,12 +139,17 @@ Values basic() {
     return v;
 }
 
+}  // namespace
+void appendRavenPresets(std::vector<BuiltinPreset>& out);  // builtin_flagship_presets.cpp
+namespace {
+
 // The .caw synth voices' presets (#122): defined in the parity block at the end of this file.
 Values pluck();
 Values fmBell();
 
 const std::vector<BuiltinPreset>& flagshipPresets() {
-    static const std::vector<BuiltinPreset> p = {
+    static const std::vector<BuiltinPreset> p = [] {
+        std::vector<BuiltinPreset> v = {
         {"Init", "Flagship's own default: a warm, wide saw stack", {}},
         {"Morph pad", "A sine-to-square morph with unison and a slow drift (the Morph synth)", morphPad()},
         {"Mono bass", "A saw and a sub an octave down, a low-pass and legato glide (the Bass)", monoBass()},
@@ -143,7 +157,10 @@ const std::vector<BuiltinPreset>& flagshipPresets() {
         {"Basic", "Two oscillators, a low-pass and an ADSR (the Basic synth)", basic()},
         {"Pluck", "A bright saw whose low-pass closes as it fades: a plucked string (the .caw synth.pluck)", pluck()},
         {"FM bell", "A sine phase-modulated at three times its pitch, the index falling with the note (the .caw synth.fm)", fmBell()},
-    };
+        };
+        appendRavenPresets(v);  // 1.1.0's synthesis (builtin_flagship_presets.cpp)
+        return v;
+    }();
     return p;
 }
 
@@ -269,8 +286,41 @@ const std::vector<BuiltinPreset>* fxDynamicsPresets(std::string_view id);  // bu
 const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
 // fx-creative end
 
+// 1.1.0's presets appended to the devices that had fewer than 8 (builtin_more_presets.cpp).
+const std::vector<BuiltinPreset>* appendedPresets(std::string_view id);
+std::span<const std::string_view> appendedPresetIds();
+
+namespace {
+const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId);
+}  // namespace
+
 const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId) {
+    // A device with appended presets: its table's list, then the new ones (built once, on first use).
+    static const std::map<std::string, std::vector<BuiltinPreset>, std::less<>> joined = [] {
+        std::map<std::string, std::vector<BuiltinPreset>, std::less<>> m;
+        for (std::string_view id : appendedPresetIds()) {
+            std::vector<BuiltinPreset> v = tablePresets(id);
+            const auto* more = appendedPresets(id);
+            if (more) v.insert(v.end(), more->begin(), more->end());
+            m.emplace(std::string(id), std::move(v));
+        }
+        return m;
+    }();
+    if (const auto it = joined.find(componentId); it != joined.end()) return it->second;
+    return tablePresets(componentId);
+}
+
+namespace {
+
+const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
+    if (const auto* p = midifx::presets(componentId)) return *p;  // MIDI effects (1.1.0)
+    if (const auto* p = fx::toolsPresets(componentId)) return *p;  // Meters, Lo-fi, Phase align (1.1.0)
+    if (const auto* p = fx::voicePresets(componentId)) return *p;  // Glint, Mimic (1.1.0)
+    if (const auto* p = fx::packPresets(componentId)) return *p;  // the AutoStacc beta pack (1.1.0)
+    if (const auto* p = fx::larkPresets(componentId)) return *p;  // Lark (1.1.0)
+    if (const auto* p = timber::timberPresets(componentId)) return *p;  // Timber (1.1.0)
+    if (const auto* p = flock::presets(componentId)) return *p;  // Flock (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();
@@ -286,6 +336,8 @@ const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId
     // fx-racks end
     return kNone;
 }
+
+}  // namespace
 
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     // A merged device (fx_merged.h): its own presets (an id it reuses) and its old effects', migrated.
@@ -303,7 +355,7 @@ const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string
 bool applyBuiltinPreset(std::string_view componentId, std::string_view name,
                         std::vector<std::pair<std::string, double>>& params) {
     const BuiltinPreset* preset = findBuiltinPreset(componentId, name);
-    if (!preset) return false;
+    if (!preset) return fx::applyMovedPreset(componentId, name, params);  // a 1.0.9 preset whose variant moved
     std::vector<std::pair<std::string, double>> out;
     out.reserve(preset->values.size() + params.size());
     for (const auto& [k, v] : preset->values) out.emplace_back(std::string(k), v);

@@ -286,10 +286,20 @@ TEST(a_whole_rack_saves_and_loads_as_one_set_of_values_and_state) {
 TEST(rack_factory_presets_build_and_sound) {
     for (std::string_view id : {kFxRackId, kMultibandRackId}) {
         const auto& presets = builtinPresets(id);
-        CHECK(presets.size() >= 3);
+        CHECK(presets.size() >= 8);  // 1.1.0: 8 or more on every device
         for (const BuiltinPreset& p : presets) {
             std::vector<std::pair<std::string, double>> values;
             CHECK(applyBuiltinPreset(id, p.name, values));
+            {  // every child is found (strict) and every value names one of the configured rack's knobs
+                auto rack = registry().create(id);
+                std::string error;
+                CHECK(rack && dynamic_cast<RackContainer*>(rack.get())->configure(registry(), values, false, error));
+                for (const auto& [k, v] : values) {
+                    bool known = false;
+                    for (uint32_t i = 0; rack && i < rack->descriptor().parameterCount; ++i) known = known || rack->descriptor().parameters[i].id == k;
+                    if (!known) cawtest::fail(__FILE__, __LINE__, std::string(p.name) + ": " + k);
+                }
+            }
             for (const auto& [k, v] : values)
                 if (k.size() > 4 && k.compare(k.size() - 4, 4, "_dst") == 0) CHECK(v > 0.0);  // every route found its knob
             auto c = chainOf(spec(std::string(id), values));

@@ -228,6 +228,8 @@ protected:
     double rate() const noexcept { return rate_; }
     // The Engine's quality now (quality.h): Eco, Normal or High.
     int quality() const noexcept { return qualityNow(quality_); }
+    // Built for an offline render (an export or stems: BuildingOffline), where listening aids stay off.
+    bool offlineRender() const noexcept { return offline_; }
     // Peaks since the last publish, in dB (floored at -120).
     float inPeakDb() const noexcept { return static_cast<float>(lib::gainToDb(inPeak_)); }
     float outPeakDb() const noexcept { return static_cast<float>(lib::gainToDb(outPeak_)); }
@@ -245,6 +247,7 @@ private:
     float* optR_[kMaxOptionalPorts] = {};
     bool optOutputs_ = false;                     // an optional output is connected (zeroed while asleep)
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (activate)
+    bool offline_ = false;                       // built for an offline render (activate)
     bool skipPublish_ = false;                   // Eco publishes every other display tick (30 a second)
     double rate_ = 48000.0, tempo_ = 120.0;
     uint32_t left_ = 0;         // frames until the next control

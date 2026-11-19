@@ -302,7 +302,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(layer.components.map((c) => c.id), ['org.caw.stereo.width', 'org.caw.chorus']);
 
-      await tester.tap(find.byTooltip('Remove Chorus'));
+      await tester.tap(find.byTooltip('Remove Flutter · Chorus/Flanger'));
       await tester.pumpAndSettle();
       expect(layer.components.map((c) => c.id), ['org.caw.stereo.width']);
 

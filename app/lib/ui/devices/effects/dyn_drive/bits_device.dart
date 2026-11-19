@@ -12,12 +12,14 @@ import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
 import '../creative/creative_common.dart' show dragAlongTaper;
 import '../effect_page.dart';
+import '../eqfilter/variant_cards.dart' show VariantCards;
+import 'bitwise_device.dart';
 
 /// Bit distortion (Crush): two cycles of a 400 Hz sine (≈) as the crusher holds and rounds it: the levels the bits
 /// allow as faint lines on the left (when few enough to see), each sample the rate takes as a tick along the bottom,
 /// the staircase in the family's colour over the clean wave, smoothed back toward it by Anti-image. Drag up and
 /// down for the bits, sideways for the rate. Bits and rate as big knobs, jitter and dither under them, the
-/// converter filters under MORE (Output and Mix are the footer's). The bitwise modes come later (1.0.9).
+/// converter filters under MORE (Output and Mix are the footer's). Bitwise is its own page ([BitwiseDevice]).
 class BitsDevice extends StatelessWidget {
   const BitsDevice({super.key});
 
@@ -26,6 +28,10 @@ class BitsDevice extends StatelessWidget {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final inline = DeviceScope.isInline(context);
+    final cards = Padding(padding: const EdgeInsets.only(bottom: 8), child: VariantCards(height: inline ? 44 : 50,
+        icon: (canvas, r, i, c) => i == 1 ? bitwiseIcon(canvas, r.deflate(2), c)
+            : iconCurve(canvas, r.deflate(2), c, (x) => (math.sin(x * math.pi) * 3).roundToDouble() / 3.3)));
+    if ((t.info?.variantIndex ?? 0) == 1) return BitwiseDevice(cards: cards);
     final hero = HeroCanvas(
       color: scope.accent,
       height: 200,
@@ -38,8 +44,9 @@ class BitsDevice extends StatelessWidget {
       }),
       child: const _CrushHero(),
     );
-    if (inline) return effectPage('bits', [hero, const KnobRow(['bits', 'rate', 'jitter', 'dither'], size: 44)]);
+    if (inline) return effectPage('bits', [cards, hero, const KnobRow(['bits', 'rate', 'jitter', 'dither'], size: 44)]);
     return effectPage('bits', [
+      cards,
       hero,
       const KnobRow(['bits', 'rate'], size: 66),
       const KnobRow(['jitter', 'dither'], size: 46),

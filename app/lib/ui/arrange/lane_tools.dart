@@ -264,14 +264,14 @@ List<AutomationChoice> automationChoices(AppState state, LayerDoc layer) {
   final instrument = layer.instrument;
   if (instrument != null) {
     final info = state.componentInfo(instrument.id);
-    final group = info?.label ?? state.componentLabel(instrument.id);
+    final group = info?.shortLabel ?? state.componentLabel(instrument.id);
     for (final p in info?.parameters ?? const []) {
       if (p.automatable) add(AutomationTarget('instrument', p.id, layerId: layer.id), p.name.isEmpty ? p.id : p.name, group);
     }
   }
   for (var i = 0; i < layer.components.length; i++) {
     final info = state.useInfo(layer.components[i]);
-    final group = '${info?.label ?? state.componentLabel(layer.components[i].id)} · ${i + 1}';
+    final group = '${info?.shortLabel ?? state.componentLabel(layer.components[i].id)} · ${i + 1}';
     for (final p in info?.parameters ?? const []) {
       if (p.automatable) {
         add(AutomationTarget('component', p.id, layerId: layer.id, component: i), p.name.isEmpty ? p.id : p.name, group);

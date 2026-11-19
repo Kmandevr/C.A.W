@@ -214,6 +214,7 @@ bool RackBase::configure(const ModuleRegistry& registry, const std::vector<std::
         for (uint32_t k = 0; k < own.portCount; ++k)
             slots_[s].keyEvents = slots_[s].keyEvents || (own.ports[k].type == PortType::Event && own.ports[k].input);
         slots_[s].variable = dynamic_cast<const VariableLatency*>(slots_[s].processor.get());
+        slots_[s].armed = dynamic_cast<ArmedVersion*>(slots_[s].processor.get());
     }
     built_.make(L, descs);
     for (size_t s = 0; s < slots_.size(); ++s) {
@@ -528,6 +529,17 @@ bool RackBase::run(const AudioProcessBlock& b) noexcept {
 
 uint32_t RackBase::latencyFor(const double* values, uint32_t count) const noexcept {
     return latencyOf(values, count);
+}
+
+void RackBase::setArmed(bool armed) noexcept {
+    for (Slot& s : slots_)
+        if (s.armed) s.armed->setArmed(armed);
+}
+
+bool RackBase::armedDiffers(const double* values, uint32_t count) const noexcept {
+    for (const Slot& s : slots_)
+        if (s.armed && s.first + s.count <= count && s.armed->armedDiffers(values + s.first, s.count)) return true;
+    return false;
 }
 
 double RackBase::paramAt(uint32_t k, uint32_t at) const noexcept {

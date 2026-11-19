@@ -1,85 +1,46 @@
-// The drums' KIT page: mode and MIDI (channel, first note, volume, variation seed), the note map of a bank with Learn, the kit effects (glue, drive, room, EQ, clip) and Explode to tracks.
+// The drums' kit cards: mode and MIDI (channel, first note, volume, variation seed), the note map of a bank with Learn, the kit effects (glue, drive, room, echo, EQ, clip) and Explode to tracks.
 import 'package:flutter/material.dart';
 
 import '../../../model/drums.dart';
 import '../../feedback.dart';
 import '../../theme.dart';
-import '../../widgets.dart' show LiveIsland;
 import '../device_controls.dart';
 import '../device_scope.dart';
 import '../flagship/flagship_editor.dart' show LabeledRow;
 import '../kit/controls.dart';
 import '../kit/feel.dart';
-import '../kit/hero.dart';
+import '../flagship/flagship_panels.dart' show FPanel;
+import 'drums_cards.dart';
 import 'drums_pads.dart';
 import 'drums_voice.dart';
 
-/// The kit page: MIDI, the note map, the kit's effects and Explode, as cards that open in place.
-class DrumsKitPage extends StatelessWidget {
-  const DrumsKitPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final layout = drumsLayout(t);
-    final c = scope.accent, c2 = scope.secondary;
-    String f(String id) => formatParamValue(t.param(id), t.value(id));
-    Map<String, String> labels(List<String> ids) =>
-        {for (final id in ids) id: t.param(id) == null ? id : drumKnobLabel(t.param(id)!).replaceFirst(RegExp(r'^(Kit|Glue|Room) '), '')};
-    Widget knobs(List<String> ids) => KnobRow(ids, size: 44, labels: labels(ids));
-    return ListView(key: const ValueKey('drums-kit'), padding: const EdgeInsets.fromLTRB(8, 8, 8, 32), children: [
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-midi'),
-        storageId: 'drums-kit-midi', title: 'MODE & MIDI', color: c, initiallyOpen: true,
-        summary: '${f('mode')} · ch ${f('channel')} · from ${noteName(t.value('base_note').round())}',
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          const LabeledRow('MODE', DeviceChoice('mode', labels: ['Kit · pads on notes', 'Single · A1 plays all'])),
-          const LabeledRow('CHANNEL', DeviceChoice('channel', maxSegments: 0)),
-          knobs(const ['base_note', 'volume', 'seed']),
-        ])),
-      DrumNoteMapCard(layout: layout),
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-glue'),
-        storageId: 'drums-kit-glue', title: 'GLUE', color: c, dimmed: t.value('glue') <= 0,
-        summary: t.value('glue') <= 0 ? 'Off' : '${f('glue')} · ${f('glue_ratio')}:1',
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: knobs(layout.kitGroups['glue'] ?? const [])),
-          SizedBox(width: 24, height: 110, child: LiveIsland(child: DeviceDisplay(builder: (context, fr) => LevelMeter(
-            db: fr is DrumsDisplayFrame ? -fr.glueGr : null, label: 'GR', reduction: true, height: 110)))),
-        ])),
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-drive'),
-        storageId: 'drums-kit-drive', title: 'DRIVE', color: c2, dimmed: t.value('kit_drive_type') < 0.5,
-        summary: t.value('kit_drive_type') < 0.5 ? 'Off' : '${f('kit_drive_type')} · ${f('kit_drive')}',
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          const LabeledRow('TYPE', DeviceChoice('kit_drive_type')),
-          knobs(const ['kit_drive', 'kit_drive_mix']),
-        ])),
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-room'),
-        storageId: 'drums-kit-room', title: 'ROOM', color: Neon.violet, dimmed: t.value('room') <= 0,
-        summary: t.value('room') <= 0 ? 'Off' : '${f('room')} · ${f('room_decay')}',
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          knobs(layout.kitGroups['room'] ?? const []),
-          const Text('Each pad sends to the room by its Space card\'s Room send.', style: TextStyle(fontSize: 10, color: Neon.dim)),
-        ])),
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-eq'),
-        storageId: 'drums-kit-eq', title: 'EQ', color: Neon.blue,
-        summary: 'Low ${f('kit_low')} · High ${f('kit_high')}',
-        child: knobs(const ['kit_low', 'kit_high'])),
-      DeviceExpandCard(
-        key: const ValueKey('drum-kit-clip'),
-        storageId: 'drums-kit-clip', title: 'CLIP', color: c2, dimmed: t.value('kit_clip') < 0.5,
-        summary: t.value('kit_clip') < 0.5 ? 'Off' : '${f('kit_clip')} · ${f('kit_clip_gain')}',
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          const LabeledRow('CLIPPER', DeviceChoice('kit_clip')),
-          knobs(const ['kit_clip_gain']),
-        ])),
-      const DrumExplodeCard(),
-    ]);
-  }
+/// The kit's cards (the third panel's lower half): mode and MIDI, the note map, glue, drive, room, echo, EQ, clip and
+/// Explode, each with its picture.
+List<Widget> drumKitCards(BuildContext context) {
+  final scope = DeviceScope.of(context);
+  final t = scope.target;
+  final layout = drumsLayout(t);
+  final c = scope.accent, c2 = scope.secondary;
+  List<String> group(String g) => layout.kitGroups[g] ?? const [];
+  return [
+    FPanel(key: const ValueKey('drum-kit-midi'), title: 'MODE & MIDI', color: c, child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        const LabeledRow('MODE', DeviceChoice('mode', labels: ['Kit · pads on notes', 'Single · A1 plays all'])),
+        const LabeledRow('CHANNEL', DeviceChoice('channel', maxSegments: 0)),
+        KnobRow(const ['base_note', 'volume', 'seed'], size: 40,
+          labels: {'base_note': 'First note', 'volume': 'Volume', 'seed': 'Variation seed'}),
+      ])),
+    DrumNoteMapCard(layout: layout),
+    DrumKitCard(id: 'glue', title: 'GLUE', color: c, visual: 'kit_glue', on: 'glue', ids: group('glue')),
+    DrumKitCard(id: 'drive', title: 'KIT DRIVE', color: c2, visual: 'kit_drive', on: 'kit_drive_type', ids: group('drive')),
+    DrumKitCard(id: 'room', title: 'ROOM', color: Neon.violet, visual: 'kit_room', on: 'room', ids: group('room'),
+      note: 'Each pad sends to it by its Space card\'s Room send.'),
+    DrumKitCard(id: 'echo', title: 'ECHO', color: Neon.blue, visual: 'kit_echo', on: 'echo', ids: group('echo'),
+      note: 'Each pad sends to it by its Pad FX card\'s Echo send.'),
+    DrumKitCard(id: 'eq', title: 'KIT EQ', color: Neon.blue, visual: 'kit_eq', ids: group('eq')),
+    DrumKitCard(id: 'clip', title: 'CLIP', color: c2, visual: 'kit_clip', on: 'kit_clip', ids: group('clip')),
+    const DrumExplodeCard(),
+  ];
 }
 
 /// The note map of the selected bank: each pad's note (a picker) and channel, and Learn.

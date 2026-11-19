@@ -1,4 +1,4 @@
-// The look: themes (the five built-in families, each light and dark), the readable theme file, the active theme behind Neon.*, fonts.
+// The look: themes (the four built-in bird families, each light and dark, and the hidden Parrot), the readable theme file, the active theme behind Neon.*, fonts.
 import 'dart:ui' show ColorSpace;
 
 import 'package:flutter/material.dart';
@@ -44,7 +44,7 @@ class CawTheme {
   final bool light;
   final bool glow;
 
-  /// The plain look of a standard DAW (the Flat family, owner 2026-11-11): no glow and no glass whatever the
+  /// The plain look of a standard DAW (the Jackdaw family, owner 2026-11-11): no glow and no glass whatever the
   /// settings say, solid fills instead of gradients. Kept in both modes.
   final bool flat;
 
@@ -251,21 +251,21 @@ final Map<String, Color> _neonDark = _palette(const [
   0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, 0xFFFF8A1F, 0xFF2BFFB0, 0xFFFF4D5E,
 ]);
 
-/// The built-in families (owner, 2026-11-11), in the picker's order. Each has a dark and a light palette; the
-/// light ones are made by [lightFrom] (Dawn, designed light first, makes its dark one by [darkFrom]), so a custom
-/// theme's "Make light version" is the same algorithm.
-const themeFamilies = ['Neon', 'Flat', 'Dusk', 'Dawn', 'Amber'];
+/// The built-in families (owner, 2026-11-19: bird names), in the picker's order. Each has a dark and a light palette;
+/// the light ones are made by [lightFrom] (Jay, designed light first, makes its dark one by [darkFrom]), so a custom
+/// theme's "Make light version" is the same algorithm. Parrot ([parrotTheme]) is hidden until it is found.
+const themeFamilies = ['Raven', 'Jackdaw', 'Magpie', 'Jay'];
 
-/// Neon (was Calm neon), the default: near-black, thin neon lines, glow only on what's active.
-final calmNeon = CawTheme(name: 'Neon', colors: _neonDark);
+/// Raven (was Neon, and Calm neon before it), the default: deep dark, thin neon lines, glow only on what's active.
+final calmNeon = CawTheme(name: 'Raven', colors: _neonDark);
 
-/// Neon in its light palette.
+/// Raven in its light palette.
 CawTheme get neonLight => calmNeon.shown(true);
 
-/// Flat (owner, 2026-11-11): Neon's counterpart, a standard DAW look. Flat neutral greys, muted accents at ordinary
-/// saturation, no glow and no glass, solid fills and thin borders. Its own palette, not any one DAW's theme.
+/// Jackdaw (was Flat): soft greys, a standard DAW look. Flat neutral greys, muted accents at ordinary saturation, no
+/// glow and no glass, solid fills and thin borders. Its own palette, not any one DAW's theme.
 final flatTheme = CawTheme(
-  name: 'Flat',
+  name: 'Jackdaw',
   glow: false,
   flat: true,
   colors: _palette(const [
@@ -275,44 +275,66 @@ final flatTheme = CawTheme(
   ]),
 );
 
-/// Dusk (was Night): dim, muted and without glow, for late sessions.
-final duskTheme = CawTheme(
-  name: 'Dusk',
+/// Magpie: high contrast. Black and white with strong lines and bright accents, no glow.
+final magpieTheme = CawTheme(
+  name: 'Magpie',
   glow: false,
   colors: _palette(const [
-    0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF7E7E93, //
-    0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
-    0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, 0xFFD68A4C, 0xFF4CC3A6, 0xFFC45B66,
+    0xFF000000, 0xFF0A0A0A, 0xFF181818, 0xFF7A7A7A, 0xFFFFFFFF, 0xFFD0D0D0, //
+    0xFF4DFF88, 0xFFFF6AB0, 0xFFFFE14D, 0xFF4DC8FF, 0xFFC79BFF, //
+    0xFF4DFF88, 0xFFFF6AB0, 0xFFFFE14D, 0xFF4DC8FF, 0xFFC79BFF, 0xFFFFA64D, 0xFF4DFFD8, 0xFFFF6464,
   ]),
 );
 
-/// Dawn (new): Dusk's light-hearted counterpart, a warm sunrise. Designed light first (cream and peach surfaces,
-/// coral, honey, sky and lavender accents); its dark palette is made from the light one ([darkFrom]).
-final dawnTheme = () {
+/// Jay: a blue accent on cool, light surfaces. Designed light first; its dark palette is made from the light one
+/// ([darkFrom]).
+final jayTheme = () {
   final light = withSafeContrast(_palette(const [
-    0xFFFCF5EB, 0xFFF6EADB, 0xFFEFDFCB, 0xFFDDC7AC, 0xFF2E1F16, 0xFF715A49, //
-    0xFF2E7D52, 0xFFC23D62, 0xFF9A5F00, 0xFF2D6CA5, 0xFF7B4DB0, //
-    0xFF2E7D52, 0xFFC23D62, 0xFF9A5F00, 0xFF2D6CA5, 0xFF7B4DB0, 0xFFC0561A, 0xFF1F7F70, 0xFFBE3B3B,
+    0xFFF4F7FC, 0xFFE9EFF8, 0xFFDCE5F3, 0xFFC3D0E6, 0xFF0F1B2E, 0xFF4A5B78, //
+    0xFF1E7A4E, 0xFFB8326A, 0xFF8A6100, 0xFF1F5FD1, 0xFF5B48B8, //
+    0xFF1F5FD1, 0xFFB8326A, 0xFF8A6100, 0xFF1E7A4E, 0xFF5B48B8, 0xFFB85A12, 0xFF16786F, 0xFFB83434,
   ]));
-  return CawTheme(name: 'Dawn', colors: darkFrom(light), lightColors: light);
+  return CawTheme(name: 'Jay', colors: darkFrom(light), lightColors: light);
 }();
 
-/// Amber (was Amber terminal): a warm monochrome terminal.
-final amberTheme = CawTheme(
-  name: 'Amber',
+/// Parrot: the joke theme, a gamer-RGB rainbow (owner, 2026-11-19). Never the default and hidden until found; its
+/// animation (parrot.dart) holds still with Motion Off and Reduced and never flashes more than three times a second.
+final parrotTheme = CawTheme(
+  name: 'Parrot',
   colors: _palette(const [
-    0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
-    0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
-    0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066, 0xFFB68AE0, 0xFFFF8A3D, 0xFFE0C060, 0xFFD96650,
+    0xFF0A0614, 0xFF140C24, 0xFF1E1236, 0xFF5A2D91, 0xFFF6F0FF, 0xFFB7A6D9, //
+    0xFF2BFF4E, 0xFFFF2B6B, 0xFFFFE01F, 0xFF1FB8FF, 0xFFB43BFF, //
+    0xFFFF2B2B, 0xFFFF8A1F, 0xFFFFE01F, 0xFF2BFF4E, 0xFF1FFFE0, 0xFF1F8AFF, 0xFF8A2BFF, 0xFFFF2BD6,
   ]),
 );
 
 /// The themes that ship with the app, in [themeFamilies] order (they can be duplicated, not changed).
-final starterThemes = [calmNeon, flatTheme, duskTheme, dawnTheme, amberTheme];
+final starterThemes = [calmNeon, flatTheme, magpieTheme, jayTheme];
 
-/// The family a saved theme name from before the families stands for (2026-11-11: Calm neon, Night and Amber
-/// terminal became Neon, Dusk and Amber, all dark).
-const legacyThemeNames = {'Calm neon': 'Neon', 'Night': 'Dusk', 'Amber terminal': 'Amber'};
+/// The family a saved theme name from before stands for: the 2026-11-11 families (Neon, Flat, Dusk, Dawn, Amber)
+/// became the bird families on 2026-11-19, and the names before those (Calm neon, Night, Amber terminal) follow.
+const legacyThemeNames = {
+  'Neon': 'Raven',
+  'Flat': 'Jackdaw',
+  'Dusk': 'Jackdaw',
+  'Dawn': 'Jay',
+  'Amber': 'Magpie',
+  'Calm neon': 'Raven',
+  'Night': 'Jackdaw',
+  'Amber terminal': 'Magpie',
+};
+
+/// The theme a saved settings file names, as it is called now. [birdFamilies]: the file was written with the bird
+/// names (`theme_families: 2`), so its name is taken as it is. From an older file a family's old name becomes its
+/// bird name; a custom theme that took a bird name before those existed was loaded as "NAME (mine)" ([customNames])
+/// and stays chosen under that name. Null when nothing was saved.
+String? migrateThemeName(String? saved, {required bool birdFamilies, Set<String> customNames = const {}}) {
+  if (saved == null || saved.isEmpty) return null;
+  if (birdFamilies) return saved;
+  final isBird = themeFamilies.contains(saved) || saved == parrotTheme.name;
+  if (isBird && customNames.contains('$saved (mine)')) return '$saved (mine)';
+  return legacyThemeNames[saved] ?? saved;
+}
 
 /// A colour that always shows the active theme's slot, so `const` uses of Neon.* follow the theme.
 class _ThemeColor extends Color {
@@ -372,7 +394,7 @@ class Neon {
   /// True while the active theme shows its light palette.
   static bool get isLight => active.light;
 
-  /// True while the active theme is flat (the Flat family): solid fills, no glow, no glass.
+  /// True while the active theme is flat (the Jackdaw family): solid fills, no glow, no glass.
   static bool get flat => active.flat;
 
   /// A gradient's colours, or with a [flat] theme one solid colour (the middle of them) in their place.

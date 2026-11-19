@@ -1,10 +1,12 @@
-// The Limiter device page (org.caw.limiter, 1.0.8): the ceiling over the level history, a big gain-reduction meter, ceiling, release and ISP.
+// The Limiter device page (org.caw.limiter, 1.0.8): the ceiling over the level history, a big gain-reduction meter, ceiling, release, ISP and (1.1.0) the loudness target.
 import '../../kit/repaint.dart';
 
 import 'package:flutter/material.dart';
 
 import '../../../../model/device_display.dart';
+import '../../../motion.dart';
 import '../../../theme.dart';
+import '../../device_controls.dart';
 import '../../device_scope.dart';
 import '../../kit/controls.dart';
 import '../../kit/feel.dart';
@@ -14,8 +16,8 @@ import '../effect_page.dart';
 
 /// The Limiter: its level history with the ceiling line (drag it; elsewhere up and down pushes the input gain),
 /// and beside it a big gain-reduction meter (now in yellow, the most since the last publish as a tick, the number
-/// under it). Then gain, ceiling and release, the ISP (true peak) switch, and look-ahead under MORE. The engine's
-/// limiter publishes no loudness, and the app reads no master loudness yet, so there is no LUFS readout.
+/// under it). Then gain, ceiling and release, the ISP (true peak) switch, the loudness area ([LimiterLoudness]: a
+/// LUFS target the engine only reports against, never applies) and look-ahead under MORE.
 class LimiterDevice extends StatelessWidget {
   const LimiterDevice({super.key});
 
@@ -42,9 +44,86 @@ class LimiterDevice extends StatelessWidget {
       Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, children: const [
         DeviceToggle('true_peak', label: 'ISP (true peak)', icon: Icons.insights),
       ])),
+      const LimiterLoudness(),
       const DeviceFold(child: ParamGrid(only: ['lookahead'])),
     ]);
   }
+}
+
+/// The Limiter's loudness area (1.1.0): the target switch and its LUFS, and the output's short-term and integrated
+/// loudness with how far each is from the target (display floats 7-12; the engine sends -200 while off or not yet
+/// measured, shown as "—"). Integrated counts from when the target turned on or the last Play. Only a readout: the
+/// Limiter never moves its gain for it. Nothing on an engine without the target.
+class LimiterLoudness extends StatelessWidget {
+  const LimiterLoudness({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = DeviceScope.of(context);
+    final t = scope.target;
+    if (t.param('target_on') == null) return const SizedBox.shrink();
+    final on = t.value('target_on') >= 0.5;
+    return Padding(padding: const EdgeInsets.only(top: 8), child: Container(
+      key: const ValueKey('limiter-loudness'),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scope.accent.withValues(alpha: 0.25))),
+      child: Row(children: [
+        Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('LOUDNESS', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)),
+          const SizedBox(height: 4),
+          const DeviceToggle('target_on', label: 'Target', icon: Icons.track_changes),
+        ]),
+        const SizedBox(width: 8),
+        AnimatedOpacity(duration: Motion.fade(Motion.small, Motion.of(context)), opacity: on ? 1 : 0.45,
+          child: const DeviceKnob('target', size: 44, label: 'LUFS')),
+        const SizedBox(width: 10),
+        Expanded(child: DeviceDisplay(builder: (context, f) {
+          final v = f?.values ?? const <String, double>{};
+          final live = on && (v['target_on'] ?? 0) >= 0.5;
+          return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _LoudnessLine(key: const ValueKey('limiter-lufs-short'), label: 'Short-term',
+              lufs: live ? v['short_lufs'] : null, from: live ? v['short_from_target'] : null),
+            const SizedBox(height: 4),
+            _LoudnessLine(key: const ValueKey('limiter-lufs-integrated'), label: 'Integrated',
+              lufs: live ? v['integrated_lufs'] : null, from: live ? v['integrated_from_target'] : null),
+          ]);
+        })),
+      ]),
+    ));
+  }
+}
+
+/// One loudness reading: "Short-term  −15.2 LUFS  +0.8 LU" (the distance green within 1 LU of the target).
+class _LoudnessLine extends StatelessWidget {
+  const _LoudnessLine({super.key, required this.label, required this.lufs, required this.from});
+  final String label;
+  final double? lufs, from;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = loudnessDistance(from);
+    final near = from != null && from! > -100 && from!.abs() <= 1;
+    return FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Row(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(width: 62, child: Text(label, style: const TextStyle(fontSize: 9.5, color: Neon.dim))),
+      Text(formatLufs(lufs), style: Neon.code(size: 11, color: Neon.text)),
+      const SizedBox(width: 8),
+      Text(d, style: Neon.code(size: 10, color: d == '' ? Neon.dim : near ? Neon.green : Neon.yellow)),
+    ]));
+  }
+}
+
+/// A loudness as the Limiter shows it: "−14.2 LUFS", "—" for none (the engine's −200, or no reading).
+String formatLufs(double? lufs) {
+  if (lufs == null || !lufs.isFinite || lufs <= -100) return '— LUFS';
+  return '${lufs < 0 ? '−' : ''}${lufs.abs().toStringAsFixed(1)} LUFS';
+}
+
+/// The distance from the target as the Limiter shows it: "+0.8 LU", "−2.1 LU", '' for none.
+String loudnessDistance(double? lu) {
+  if (lu == null || !lu.isFinite || lu <= -100) return '';
+  final v = (lu * 10).round() / 10;
+  return '${v > 0 ? '+' : v < 0 ? '−' : '±'}${v.abs().toStringAsFixed(1)} LU';
 }
 
 /// The gain reduction now as a tall bar from the top (0..12 dB), the most since the last frame as a tick, and the

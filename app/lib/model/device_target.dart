@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'device_names.dart';
 import 'mixer_fx.dart';
 import 'merged_devices.dart';
 import 'project.dart';
@@ -51,9 +52,16 @@ class DeviceTarget {
   /// Which of the component's children its live display is (0: the component itself; a rack's child: its slot + 1).
   int get displayChild => 0;
 
+  /// What the device is called on screen ("Talon · Compressor").
   String get label {
     final id = componentId;
     return id == null ? 'Device' : state.componentLabel(id);
+  }
+
+  /// Its short name, for names made from it ("Talon 1").
+  String get shortLabel {
+    final id = componentId;
+    return id == null ? 'Device' : info?.shortLabel ?? DeviceNames.name(id, label);
   }
 
   /// Fires when a value of the track's devices changes (live edits, undo, redo).

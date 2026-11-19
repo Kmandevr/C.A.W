@@ -2,6 +2,7 @@
 import 'arrange_fx.dart';
 import 'app_state.dart';
 import 'audio_clips.dart';
+import 'device_names.dart';
 import 'project.dart';
 import 'settings.dart';
 
@@ -24,10 +25,10 @@ extension TrackDefaults on AppState {
       };
 
   /// A new track's name: [numbered] (the kind and number the caller gives, "Track 3", "Audio 3"), or with
-  /// [TrackNaming.byInstrument] its instrument's name and the next number free for it ("Flagship 2").
+  /// [TrackNaming.byInstrument] its instrument's short name and the next number free for it ("Raven 2").
   String newTrackName(String numbered, {String? instrumentId}) {
     if (settings.trackNaming != TrackNaming.byInstrument || instrumentId == null || instrumentId.isEmpty) return numbered;
-    final label = componentLabel(instrumentId);
+    final label = componentInfo(instrumentId)?.shortLabel ?? DeviceNames.name(instrumentId, componentLabel(instrumentId));
     if (label.isEmpty) return numbered;
     var n = 1;
     final names = {for (final l in project.layers) l.name};

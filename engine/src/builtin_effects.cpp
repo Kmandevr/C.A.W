@@ -1,5 +1,9 @@
 // The built-in effects suite (#173): the shared EffectBase (control grid, sleep, display) and registration.
 #include "builtin_effects.h"
+#include "builtin_fx_tools.h"
+#include "builtin_fx_voice.h"
+#include "builtin_pack.h"
+#include "builtin_fx_lark.h"
 #include "fx_merged.h"
 // fx-creative begin
 #include "builtin_fx_creative.h"
@@ -108,6 +112,7 @@ bool EffectBase::activate(double sampleRate, uint32_t maxFrames) noexcept {
     const ModuleDescriptor& d = descriptor();
     for (uint32_t k = 0; k < d.portCount; ++k) keyed_ = keyed_ || (d.ports[k].input && d.ports[k].id == "sidechain");
     quality_ = buildingQuality();
+    offline_ = buildingOffline();
     clock_.prepare(rate_, 60.0);
     display_.clear();
     if (!prepare(rate_, maxFrames)) return false;
@@ -263,6 +268,10 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     // fx-racks begin
     fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
     // fx-racks end
+    fx::registerPack(registry);  // builtin_pack.h: the AutoStacc beta pack (Murmur, Peck, Bend, Iris)
+    fx::registerLark(registry);  // builtin_fx_lark.h: Lark, org.caw.pitchfix (1.1.0)
+    fx::registerVoice(registry);  // builtin_fx_voice.h: Mimic (1.1.0; Glint is a merged device)
+    fx::registerTools(registry);  // builtin_fx_tools.h: Lo-fi and Phase align (1.1.0; Meters is a merged device)
     fx::registerMergedDevices(registry);  // fx_merged.h: the FX consolidation's merged devices (Pitch/Shift...)
 }
 

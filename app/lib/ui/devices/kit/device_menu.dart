@@ -1,4 +1,4 @@
-// The device header's ⋯ menu (device shell): copy and paste settings, randomize by an amount, this device's undo history, auto gain and reset.
+// The device header's ⋯ menu (device shell): copy and paste settings, Happy accident, randomize by an amount, this device's undo history, auto gain and reset.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -88,6 +88,13 @@ void randomizeDevice(DeviceTarget t, double amount, {math.Random? random}) {
   t.state.endUndoStep();
 }
 
+/// How far Happy accident nudges the knobs (a small Randomize: 0..1 of each knob's travel).
+const happyAccidentAmount = 0.08;
+
+/// The header's ⋯ › Happy accident: the sound nudged a small random step ([randomizeDevice] with
+/// [happyAccidentAmount]), as one undo step, on any device or instrument.
+void happyAccident(DeviceTarget t, {math.Random? random}) => randomizeDevice(t, happyAccidentAmount, random: random);
+
 /// The header's ⋯ › Reset: the device's own when its editor has one (Flagship: Init), else every knob to its
 /// default; one undo step.
 void resetDevice(DeviceTarget t) {
@@ -111,6 +118,7 @@ Future<void> showDeviceMenu(BuildContext context, DeviceTarget t, Color color) a
   final v = await showLongPressMenu<String>(context, at: menuAnchorOf(context), title: t.label, actions: [
     const MenuAction('copy', 'Copy settings', Icons.copy),
     MenuAction('paste', 'Paste settings', Icons.content_paste, enabled: paste == null, hint: paste),
+    const MenuAction('accident', 'Happy accident', Icons.auto_awesome_outlined),
     const MenuAction('random', 'Randomize…', Icons.casino_outlined),
     const MenuAction('history', 'Undo history…', Icons.history),
     if (gain) MenuAction('gain', 'Auto gain', Icons.hearing, checked: audio!.autoGain(t)),
@@ -124,6 +132,9 @@ Future<void> showDeviceMenu(BuildContext context, DeviceTarget t, Color color) a
       _say(context, 'Copied ${t.label}\'s settings');
     case 'paste':
       if (DeviceClipboard.paste(t)) _say(context, 'Pasted into ${t.label}');
+    case 'accident':
+      happyAccident(t);
+      _say(context, 'Nudged ${t.shortLabel} a little. Undo puts it back.');
     case 'random':
       await showRandomize(context, t, color);
     case 'history':
