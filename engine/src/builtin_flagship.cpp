@@ -35,6 +35,8 @@
 #include "caw/library/stereo.hpp"
 #include "caw/library/unison.hpp"
 #include "caw/library/wavetable.hpp"
+#include "flagship_banks.h"
+#include "flagship_filters.h"
 
 // Original code (C.A.W. is Apache-2.0). The controls follow what a modern wavetable synth offers, reproduced from
 // general synthesis knowledge and public descriptions of what such controls do; no other synth's code, presets
@@ -137,15 +139,26 @@ constexpr uint32_t fmRatioParam(uint32_t o) { return kFmRatioBase + o; }
 // it loads Per copy, the default); not mod destinations.
 constexpr uint32_t kFoldModeBase = kFmRatioBase + kOscs;
 constexpr uint32_t foldModeParam(uint32_t o) { return kFoldModeBase + o; }
-constexpr uint32_t kParamCount = kFoldModeBase + kOscs;
-static_assert(kParamCount == 215, "the parameter list's size is part of the documented layout");
+static_assert(kFoldModeBase + kOscs == 215, "the 1.0 parameter list's size is part of the documented layout");
+// 1.1.0 (Raven's synthesis), appended after the 215 so every saved index keeps its meaning; none is a mod destination.
+// Each oscillator's modulation source, for the warps that hear another oscillator (Osc FM, Osc RM, Osc AM, Osc sync):
+// Prev (round the ring, as Osc FM always did: the default), Osc 1..3 (itself counts as Prev) or Noise.
+constexpr uint32_t kModSrcBase = kFoldModeBase + kOscs;
+constexpr uint32_t modSrcParam(uint32_t o) { return kModSrcBase + o; }
+constexpr uint32_t kParamCount = kModSrcBase + kOscs;
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
     kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent, kSourceCount
 };
 enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
-enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpFmOsc, kWarpCount };
+enum Warp : int {
+    kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpFmOsc,
+    // 1.1.0, appended: another oscillator (or noise) multiplying this one (ring and amplitude modulation) or
+    // restarting its phase (hard sync).
+    kWarpOscRm, kWarpOscAm, kWarpOscSync,
+    kWarpCount
+};
 enum Dest : int { kToFilter1, kToFilter2, kToBoth, kToBypass };
 // Osc FM's modulator: the oscillator before it, round the ring (osc 1 hears osc 3, 2 hears 1, 3 hears 2).
 constexpr uint32_t fmSource(uint32_t o) { return (o + kOscs - 1) % kOscs; }
@@ -154,7 +167,12 @@ enum VoiceMode : int { kPoly, kMono, kLegato };
 constexpr std::string_view kOffOn[] = {"Off", "On"};
 constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic", "User"};
 static_assert(sizeof(kTables) / sizeof(kTables[0]) == kTableChoices);
-constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM"};
+constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM",
+                                       "Osc RM", "Osc AM", "Osc sync"};
+constexpr std::string_view kModSources[] = {"Prev", "Osc 1", "Osc 2", "Osc 3", "Noise"};
+constexpr uint32_t kNoiseRow = kOscs;  // the voice's noise, after the oscillators' copies in Voice::fmBuf
+// The warps that hear the source's mono copy (rendered for them into Voice::fmBuf).
+constexpr bool hearsSource(int w) { return w == kWarpFmOsc || w == kWarpOscRm || w == kWarpOscAm; }
 static_assert(sizeof(kWarps) / sizeof(kWarps[0]) == kWarpCount);
 constexpr std::string_view kFoldModes[] = {"Per copy", "Whole stack"};
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
@@ -291,6 +309,9 @@ public:
         for (uint32_t o = 0; o < kOscs; ++o)
             pick("osc" + std::to_string(o + 1) + "_fold_mode", "Osc " + std::to_string(o + 1) + " fold mode", 0.0, kFoldModes,
                  count(kFoldModes));
+        for (uint32_t o = 0; o < kOscs; ++o)
+            pick("osc" + std::to_string(o + 1) + "_mod_src", "Osc " + std::to_string(o + 1) + " mod source", 0.0, kModSources,
+                 count(kModSources));
     }
 
 private:
@@ -798,6 +819,8 @@ struct OscVoice {
     int dest = kToFilter1;
     int count = 0;  // copies in the stack
     int warpMode = kWarpNone;
+    int modSrc = 0;     // the row of Voice::fmBuf (or the oscillator, for sync) its source warps hear
+    bool blep = true;   // Osc sync's jumps band-limited (not at Eco)
     float w1 = 0.0f, w2 = 0.0f, w3 = 0.0f, mix = 0.0f;  // the warp's constants; the morph between frames a and b
     int f0 = -1, f1 = -1;                              // the frames a and b read
     double faster = 1.0;                               // how much faster than the note the warp reads the table
@@ -1358,14 +1381,107 @@ bool foldTwiceFor(double hz, double drive) noexcept {
 #endif
 }
 
+// Osc RM and Osc AM (1.1.0): the stack, unwarped, times its source's mono copy m (held to +-2, as Osc FM holds it):
+// ring 1 - a + a m (at full amount the plain product, the sum and difference tones), amplitude 1 - a / 2 + a m / 2
+// (the carrier kept). The product is taken once on the stack's sum, not per copy: about two operations a sample.
+template <bool Am>
+void addRing(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
+             const float* fm, bool mono) noexcept {
+    alignas(16) float tL[kControlFrames] = {}, tR[kControlFrames] = {};
+    float* const sR = mono ? tL : tR;
+    addStackWarp<kWarpNone>(o, gL, gR, tL, sR, n, first, nullptr);
+    const float a = Am ? 0.5f * o.w1 : o.w1, dry = 1.0f - a;
+    for (uint32_t i = 0; i < n; ++i) {
+        float m = fm[first + i];
+        m = m < -2.0f ? -2.0f : (m > 2.0f ? 2.0f : m);
+        const float g = dry + a * m;
+        L[i] += tL[i] * g;
+        if (!mono) R[i] += tR[i] * g;
+    }
+}
+
+// Osc sync (1.1.0): hard sync to the source oscillator. Each copy's phase is the source's matching copy's phase (the
+// centre one for a copy the source lacks) times this copy's speed over the source's, times w1 (1..8, the amount: the
+// classic sync sweep), so it restarts with each of the source's cycles. No state of its own: the phase comes from the
+// source's, which every block size steps alike. Blep: each restart's jump h (the table at 0 less the table at the
+// phase the cycle reached) band-limited by a two-sample polyBLEP, the sample before the restart and the one after.
+template <bool Morph, bool Blep>
+void addSync(const OscVoice& o, const OscVoice& M, const float* gL, const float* gR, float* L, float* R, uint32_t n,
+             uint32_t first) noexcept {
+    const float mix = o.mix;
+    for (int c = 0; c < o.count; ++c) {
+        if (!o.a[c]) continue;
+        const int mc = c < M.count ? c : 0;
+        if (mc >= M.count || !M.a[mc] || !(M.dt[mc] > 0.0)) {  // no source copy sounding: the copy plays free
+            const uint32_t step = o.step[c];
+            addCopy<Morph, 0>(o.a[c], o.b[c], o.phase[c] + first * step, step, o.shift[c], gL[c], gR[c], mix, L, R, n);
+            continue;
+        }
+        const float* A = o.a[c];
+        const float* B = o.b[c];
+        const float m = o.size[c], gl = gL[c], gr = gR[c];
+        const uint32_t ms = M.step[mc];
+        uint32_t pm = M.phase[mc] + first * ms;
+        const float r = static_cast<float>(o.dt[c] * o.w1 / M.dt[mc]);
+        const auto read = [&](float t) noexcept {
+            const float x = t * m;
+            const int32_t k = static_cast<int32_t>(x);
+            const float fr = x - static_cast<float>(k);
+            float v = A[k] + (A[k + 1] - A[k]) * fr;
+            if constexpr (Morph) {
+                const float u = B[k] + (B[k + 1] - B[k]) * fr;
+                v += (u - v) * mix;
+            }
+            return v;
+        };
+        float half = 0.0f, inv = 0.0f;
+        if constexpr (Blep) {
+            float end = r - whole(r);
+            end = end < 0.99999994f ? end : 0.99999994f;
+            half = 0.5f * (read(0.0f) - read(end));
+            inv = 1.0f / static_cast<float>(ms);
+        }
+        for (uint32_t i = 0; i < n; ++i, pm += ms) {
+            float t = static_cast<float>(pm) * 2.3283064365386963e-10f * r;
+            t -= whole(t);
+            t = t < 0.99999994f ? t : 0.99999994f;
+            float v = read(t);
+            if constexpr (Blep) {
+                const float after = static_cast<float>(pm) * inv;              // samples since the restart
+                const uint32_t left = 0u - pm;                                  // to the next restart (0: one now)
+                const float before = left ? -static_cast<float>(left) * inv : -2.0f;
+                const float pa = after < 1.0f ? after + after - after * after - 1.0f : 0.0f;
+                const float pb = before > -1.0f ? before * before + before + before + 1.0f : 0.0f;
+                v += half * (pa + pb);
+            }
+            L[i] += v * gl;
+            R[i] += v * gr;
+        }
+    }
+}
+
 // The oscillator's stack into L and R (its gains, its level), or with `mono` into L alone at its pre-level mono
-// gains (what Osc FM hears of it). `fm`: Osc FM's modulator, period-indexed.
+// gains (what Osc FM hears of it). `fm`: the source's copy a hearing warp reads, period-indexed; `master`: Osc
+// sync's source oscillator.
 void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, const float* fm,
-                   bool mono = false) noexcept {
+                   bool mono = false, const OscVoice* master = nullptr) noexcept {
     const float* gL = mono ? o.monoGain : o.gainL;
     const float* gR = mono ? o.monoGain : o.gainR;
     if (mono) R = L;  // two half gains into one buffer: the mono sum
     switch (o.warpMode) {
+        case kWarpOscRm:
+        case kWarpOscAm:
+            if (!fm) addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
+            else if (o.warpMode == kWarpOscAm) addRing<true>(o, gL, gR, L, R, n, first, fm, mono);
+            else addRing<false>(o, gL, gR, L, R, n, first, fm, mono);
+            break;
+        case kWarpOscSync:
+            if (!master || master->count == 0) addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
+            else if (o.mix != 0.0f) o.blep ? addSync<true, true>(o, *master, gL, gR, L, R, n, first)
+                                           : addSync<true, false>(o, *master, gL, gR, L, R, n, first);
+            else o.blep ? addSync<false, true>(o, *master, gL, gR, L, R, n, first)
+                        : addSync<false, false>(o, *master, gL, gR, L, R, n, first);
+            break;
         case kWarpBend: addStackWarp<kWarpBend>(o, gL, gR, L, R, n, first, fm); break;
         case kWarpSync: addStackWarp<kWarpSync>(o, gL, gR, L, R, n, first, fm); break;
         case kWarpMirror: addStackWarp<kWarpMirror>(o, gL, gR, L, R, n, first, fm); break;
@@ -1615,7 +1731,8 @@ struct Voice {
     // Each oscillator's latest mono output (before its level) at each frame of the control period, for the one
     // Osc FM modulates from it. Oscillators render in order, so 2 and 3 hear 1 and 2 in the same frames and 1
     // hears 3 one period (16 frames) late: the same for any block size.
-    float fmBuf[kOscs][kControlFrames] = {};
+    float fmBuf[kOscs + 1][kControlFrames] = {};  // then the voice's noise (kNoiseRow), drawn at each control
+    uint32_t noise = 1;                            // its generator's state
     VoiceFilter filter[kFilters];
     bool parallel = false;
     double gain0 = 0.0, gain1 = 0.0;  // the level ramps from gain0 to gain1 over the control period
@@ -2063,6 +2180,8 @@ private:
         if (knobsChanged_) {
             buildMatrix();
             configureShared();
+            noiseUsed_ = false;
+            for (uint32_t o = 0; o < kOscs; ++o) noiseUsed_ = noiseUsed_ || clampi(base_[modSrcParam(o)], 0, 4) == 4;
         }
 
         // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
@@ -2086,6 +2205,7 @@ private:
         const double bendRange = clampd(base_[kBendRange], 1.0, 48.0);
         voices_.forEachActive([&](Voice& v) noexcept {
             if (v.starting) startVoice(v);
+            if (noiseUsed_) drawNoise(v);
             if (v.mono) v.pitch = v.glide.next();
             double offsets[kSlots] = {};
             for (uint32_t s = 0; s < slotCount_; ++s) {
@@ -2146,6 +2266,17 @@ private:
                     clampi(base_[kVoiceMode], 0, 2) == kPoly;
     }
 
+    // A control period of white noise (-1..1, xorshift) for the oscillators whose mod source is Noise: drawn on the
+    // control grid, so every block size hears the same.
+    static void drawNoise(Voice& v) noexcept {
+        uint32_t x = v.noise;
+        for (float& y : v.fmBuf[kNoiseRow]) {
+            x ^= x << 13, x ^= x >> 17, x ^= x << 5;
+            y = static_cast<float>(static_cast<int32_t>(x)) * 4.656612873077393e-10f;
+        }
+        v.noise = x;
+    }
+
     void buildMatrix() noexcept {
         std::memset(targetOf_, 0, sizeof targetOf_);
         slotCount_ = targetCount_ = 0;
@@ -2180,6 +2311,7 @@ private:
         v.random.setSeed(v.seed ^ 0xA511E9B3U);
         v.random.retrigger();
         std::memset(v.fmBuf, 0, sizeof v.fmBuf);
+        v.noise = (v.seed ^ 0x6C8E9CF5U) | 1U;
         if (!v.fresh) return;
         for (OscVoice& o : v.osc) o.foldL.clear(), o.foldR.clear(), o.foldM.clear(), o.clearFold();
         v.shared = true;  // until its filter 1 is set unlike the shared one (then its own, to the note's end)
@@ -2322,6 +2454,12 @@ private:
             return;
         }
         o.dest = clampi(at(kOscDest), 0, 3);
+        {
+            const int src = clampi(P(modSrcParam(index)), 0, 4);  // Prev, Osc 1..3 (itself: Prev), Noise
+            o.modSrc = src == 4 ? static_cast<int>(kNoiseRow)
+                                : (src == 0 || src - 1 == static_cast<int>(index) ? static_cast<int>(fmSource(index)) : src - 1);
+        }
+        o.blep = !v.ecoWarps;
         OscKey key;
         key.table = clampi(at(kOscTable), 0, kTableChoices - 1);
         key.position = clampd(at(kOscFrame), 0.0, 1.0);
@@ -2340,8 +2478,8 @@ private:
         key.foldWhole = key.warp == kWarpFold && P(foldModeParam(index)) >= 0.5;
         // A high note's fold at twice the rate (the voice's choice from its start); Eco folds every note with ADAA.
         key.foldTwice = key.warp == kWarpFold && v.foldTwice[index] && !v.ecoWarps;
-        if (key.warp == kWarpFmOsc) {  // the modulator's tuning against this one's (both follow the note)
-            const uint32_t m = fmSource(index);
+        if (key.warp == kWarpFmOsc && o.modSrc < static_cast<int>(kOscs)) {  // the modulator's tuning against this one's
+            const uint32_t m = static_cast<uint32_t>(o.modSrc);
             const double offset = 12.0 * clampi(P(oscParam(m, kOscOctave)), -4, 4) + clampi(P(oscParam(m, kOscSemi)), -12, 12) +
                                   clampd(P(oscParam(m, kOscFine)), -100.0, 100.0) / 100.0;
             key.modRatio = exp2((offset - o.pitchOffset[0] - o.pitchOffset[1] - o.pitchOffset[2]) / 12.0);
@@ -2433,6 +2571,12 @@ private:
                 // oversampled fold read (half the drive: #197 kept the table's brightness; ADAA, not the mip
                 // level, keeps the aliases down).
                 faster = 0.5 * o.w1 > 1.0 ? 0.5 * o.w1 : 1.0;
+                break;
+            case kWarpOscRm:
+            case kWarpOscAm: o.w1 = static_cast<float>(amount); break;
+            case kWarpOscSync:
+                o.w1 = static_cast<float>(1.0 + 7.0 * amount);  // the sync sweep: up to 8 times the copy's own speed
+                faster = o.w1;
                 break;
             case kWarpFmOsc:
                 // Up to one cycle of phase per unit of the modulator (an index of 2 pi for a full-scale sine). The
@@ -2609,7 +2753,7 @@ private:
             if (!o.on || o.count == 0) continue;
             bypass = bypass || o.dest == kToBypass;
             second = second || o.dest == kToFilter2 || (v.parallel && o.dest == kToBoth);
-            if (o.warpMode == kWarpFmOsc) feeds[fmSource(k)] = true;
+            if (hearsSource(o.warpMode) && o.modSrc < static_cast<int>(kOscs)) feeds[o.modSrc] = true;
         }
         w.v = &v;
         w.second = second;
@@ -2624,19 +2768,23 @@ private:
                 if (feeds[k]) std::memset(v.fmBuf[k] + first, 0, n * sizeof(float));  // nothing to hear
                 continue;
             }
-            const float* fm = o.warpMode == kWarpFmOsc ? v.fmBuf[fmSource(k)] : nullptr;
+            const float* fm = hearsSource(o.warpMode) ? v.fmBuf[o.modSrc] : nullptr;
+            const OscVoice* master = o.warpMode == kWarpOscSync && o.modSrc < static_cast<int>(kOscs) &&
+                                             o.modSrc != static_cast<int>(k) && v.osc[o.modSrc].on
+                                         ? &v.osc[o.modSrc]
+                                         : nullptr;
             if (feeds[k]) {
                 float* M = v.fmBuf[k] + first;
                 std::memset(M, 0, n * sizeof(float));
-                addOscillator(o, M, nullptr, n, first, fm, true);
+                addOscillator(o, M, nullptr, n, first, fm, true, master);
             }
             switch (o.dest) {
-                case kToFilter2: addOscillator(o, f2L, f2R, n, first, fm); break;
-                case kToBypass: addOscillator(o, byL, byR, n, first, fm); break;
+                case kToFilter2: addOscillator(o, f2L, f2R, n, first, fm, false, master); break;
+                case kToBypass: addOscillator(o, byL, byR, n, first, fm, false, master); break;
                 case kToBoth:
                     if (v.parallel) {
                         float tL[kControlFrames] = {}, tR[kControlFrames] = {};
-                        addOscillator(o, tL, tR, n, first, fm);
+                        addOscillator(o, tL, tR, n, first, fm, false, master);
                         for (uint32_t i = 0; i < n; ++i) {
                             f1L[i] += tL[i];
                             f1R[i] += tR[i];
@@ -2646,7 +2794,7 @@ private:
                         break;
                     }
                     [[fallthrough]];  // in series, filter 1 feeds filter 2 anyway
-                default: addOscillator(o, f1L, f1R, n, first, fm); break;
+                default: addOscillator(o, f1L, f1R, n, first, fm, false, master); break;
             }
         }
         // Filter 1 linear and set like every other voice's (no slot moves it for this voice, no key tracking):
@@ -2992,6 +3140,7 @@ private:
     uint32_t slotCount_ = 0, targetCount_ = 0, used_ = 0;
     uint32_t moved_ = 0;          // the voice sections (sectionOf) a slot moves this control
     bool knobsChanged_ = true;    // a knob, the tempo or the quality moved since the last control
+    bool noiseUsed_ = false;      // an oscillator's mod source is Noise: each voice draws it at each control
     double lastTempo_ = 0.0;
     int lastQuality_ = -1;  // used_: bit s set when a slot listens to source s
     uint32_t targetParam_[kSlots] = {};

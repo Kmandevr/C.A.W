@@ -301,7 +301,10 @@ TEST(the_flagship_lists_its_parameters_grouped_by_section_with_good_descriptors)
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.synth.flagship"));
     CHECK_EQ(d.name, std::string_view("Flagship"));
-    CHECK_EQ(d.parameterCount, 215u);
+    // 1.0's 215 in their places, then 1.1.0's appended (Raven's synthesis: each oscillator's mod source).
+    CHECK_EQ(d.parameterCount, 218u);
+    CHECK_EQ(d.parameters[214].id, std::string_view("osc3_fold_mode"));
+    CHECK_EQ(d.parameters[215].id, std::string_view("osc1_mod_src"));
     const char* prefixes[] = {"osc1_", "osc2_", "osc3_", "flt1_", "flt2_", "flt_", "env1_", "env2_", "env3_", "lfo1_",
                               "lfo2_", "lfo3_", "rnd_", "volume", "velocity", "bend_range", "fx_", "mod", "voice_mode", "glide"};
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
