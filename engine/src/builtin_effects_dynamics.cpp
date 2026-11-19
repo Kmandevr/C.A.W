@@ -10,6 +10,7 @@
 #include "caw/library/filter.hpp"
 #include "fx_merged.h"
 #include "sample_time.h"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). The compressor's soft knee is the textbook curve (Giannoulis, Massberg and
 // Reiss, JAES 2012); the limiter is the classic look-ahead design (a sliding minimum of the gain each sample needs,
@@ -119,62 +120,137 @@ protected:
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        // In passes over the run (each sample's arithmetic as frame by frame, in its order; speed phase 6): the
+        // rings and the detector's reads; each side's level; the static curve, which has no state, two samples at
+        // a time (its log as two-wide vectors, stereo_pair.h); the envelope and the gains, sample by sample; the
+        // output. A ring entry written in this run is read in it only from 240 or more frames on, so writing all of
+        // them first reads what frame by frame did.
         const uint32_t mask = kRing - 1;
         const uint32_t detectBack = kLookaheadFrames - lookahead_;
         const float* keyL = keyLeft();
         const float* keyR = keyRight();
         for (uint32_t i = 0; i < n; ++i) {
-            ring_[0][pos_] = inL[i];
-            ring_[1][pos_] = inR[i];
-            keyRing_[0][pos_] = keyL ? keyL[i] : 0.0f;  // the key runs through the same look-ahead
-            keyRing_[1][pos_] = keyR ? keyR[i] : 0.0f;
-            const uint32_t d = (pos_ - detectBack) & mask, a = (pos_ - kLookaheadFrames) & mask;
-            const float (*src)[kRing] = external_ ? keyRing_ : ring_;
-            double sc[2] = {src[0][d], src[1][d]};
-            double level[2];
-            for (int c = 0; c < 2; ++c) {
-                if (useHpf_) sc[c] = hpf_[c].highpass(sc[c]);
-                if (rms_) {
-                    ms_[c] = sc[c] * sc[c] + (ms_[c] - sc[c] * sc[c]) * rmsCoef_;
+            const uint32_t at = (pos_ + i) & mask;
+            ring_[0][at] = inL[i];
+            ring_[1][at] = inR[i];
+            keyRing_[0][at] = keyL ? keyL[i] : 0.0f;  // the key runs through the same look-ahead
+            keyRing_[1][at] = keyR ? keyR[i] : 0.0f;
+        }
+        const float (*src)[kRing] = external_ ? keyRing_ : ring_;
+        double sc[2][kControlFrames], level[2][kControlFrames], most[kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint32_t d = (pos_ + i - detectBack) & mask;
+            sc[0][i] = src[0][d];
+            sc[1][i] = src[1][d];
+        }
+        for (int c = 0; c < 2; ++c) {
+            if (useHpf_)
+                for (uint32_t i = 0; i < n; ++i) sc[c][i] = hpf_[c].highpass(sc[c][i]);
+            if (rms_) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    const double x = sc[c][i];
+                    ms_[c] = x * x + (ms_[c] - x * x) * rmsCoef_;
                     if (ms_[c] < 1e-30) ms_[c] = 0.0;
-                    level[c] = std::sqrt(ms_[c] < 0.0 ? 0.0 : ms_[c]);
-                } else {
-                    level[c] = sc[c] < 0.0 ? -sc[c] : sc[c];
+                    level[c][i] = std::sqrt(ms_[c] < 0.0 ? 0.0 : ms_[c]);
                 }
+            } else {
+                for (uint32_t i = 0; i < n; ++i) level[c][i] = sc[c][i] < 0.0 ? -sc[c][i] : sc[c][i];
             }
-            const double most = std::max(level[0], level[1]);
-            levelMax_ = std::max(levelMax_, most);
-            double gain[2];
-            const int channels = link_ >= 1.0 ? 1 : 2;
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            most[i] = std::max(level[0][i], level[1][i]);
+            levelMax_ = std::max(levelMax_, most[i]);
+        }
+        const int channels = link_ >= 1.0 ? 1 : 2;
+        double target[2][kControlFrames];
+        for (int c = 0; c < channels; ++c) {
+            double* lv = target[c];  // the level, then (in place) the curve's gain change
+            if (channels == 1) std::copy(most, most + n, lv);
+            else
+                for (uint32_t i = 0; i < n; ++i) lv[i] = level[c][i] + (most[i] - level[c][i]) * link_;
+            curve(lv, n);
+        }
+        double gain[2][kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) {
             for (int c = 0; c < channels; ++c) {
-                const double lv = channels == 1 ? most : level[c] + (most - level[c]) * link_;
-                const double target =
-                    lv < quietBelow_ ? 0.0 : lib::compressorGainDb(lib::gainToDb(lv, -200.0), threshold_, ratio_, knee_);
-                const double coef = target < env_[c] ? attack_ : release_;
-                env_[c] = target + (env_[c] - target) * coef;
-                if (env_[c] - target < 1e-9 && target - env_[c] < 1e-9) env_[c] = target;  // settled: no subnormal creep
+                const double t = target[c][i];
+                const double coef = t < env_[c] ? attack_ : release_;
+                env_[c] = t + (env_[c] - t) * coef;
+                if (env_[c] - t < 1e-9 && t - env_[c] < 1e-9) env_[c] = t;  // settled: no subnormal creep
                 if (env_[c] > -1e-9) env_[c] = 0.0;  // back to no reduction: no subnormal creep
                 const double db = env_[c] + makeupDb_;  // the same dB as last sample (no reduction, say): the same gain
                 if (db != gainDb_[c]) gainDb_[c] = db, gainOf_[c] = lib::dbToGain(db);
-                gain[c] = gainOf_[c];
+                gain[c][i] = gainOf_[c];
             }
-            if (channels == 1) env_[1] = env_[0], gain[1] = gain[0];
+            if (channels == 1) env_[1] = env_[0], gain[1][i] = gain[0][i];
             const double gr = std::min(env_[0], env_[1]);
             grMax_ = std::min(grMax_, gr);
             grNow_ = gr;
             const double held = gr < -1.0 ? 1.0 : 0.0;
             sustained_ = held + (sustained_ - held) * sustainCoef_;
             if (sustained_ - held < 1e-12 && held - sustained_ < 1e-12) sustained_ = held;
-            if (listen_) {
-                outL[i] = static_cast<float>(sc[0]);
-                outR[i] = static_cast<float>(sc[1]);
-            } else {
-                const double xl = ring_[0][a], xr = ring_[1][a];
-                outL[i] = static_cast<float>(xl * (1.0 + (gain[0] - 1.0) * mix_));
-                outR[i] = static_cast<float>(xr * (1.0 + (gain[1] - 1.0) * mix_));
-            }
-            pos_ = (pos_ + 1) & mask;
         }
+        if (listen_) {
+            for (uint32_t i = 0; i < n; ++i) {
+                outL[i] = static_cast<float>(sc[0][i]);
+                outR[i] = static_cast<float>(sc[1][i]);
+            }
+        } else {
+            for (uint32_t i = 0; i < n; ++i) {
+                const uint32_t a = (pos_ + i - kLookaheadFrames) & mask;
+                const double xl = ring_[0][a], xr = ring_[1][a];
+                outL[i] = static_cast<float>(xl * (1.0 + (gain[0][i] - 1.0) * mix_));
+                outR[i] = static_cast<float>(xr * (1.0 + (gain[1][i] - 1.0) * mix_));
+            }
+        }
+        pos_ = (pos_ + n) & mask;
+    }
+
+    // The static curve's gain change in dB for each level of x[0..n), in place: 0 below quietBelow_ (no log), else
+    // compressorGainDb(gainToDb(level, -200)). Two at a time: gainToDb's log as fastLogNormalPair and the curve's
+    // selects lane by lane, for levels in the log's normal range; a pair with any other level (0 under a quietBelow_
+    // of 0, a NaN, an infinity) is worked out one sample at a time.
+    void curve(double* x, uint32_t n) const noexcept {
+        const auto one = [&](double lv) noexcept {
+            return lv < quietBelow_ ? 0.0 : lib::compressorGainDb(lib::gainToDb(lv, -200.0), threshold_, ratio_, knee_);
+        };
+        bool loud = false;  // any level at or above quietBelow_ (or a NaN)
+        for (uint32_t i = 0; i < n; ++i) loud |= !(x[i] < quietBelow_);
+        if (!loud) {  // the usual run below the knee: no log at all
+            for (uint32_t i = 0; i < n; ++i) x[i] = 0.0;
+            return;
+        }
+        uint32_t i = 0;
+#if defined(__GNUC__)
+        const double r = ratio_ < 1.0 ? 1.0 : ratio_, w = knee_ < 0.0 ? 0.0 : knee_;
+        const double slope = 1.0 / r - 1.0;  // compressorGainDb's, from the same operands
+        const Pair quiet = splat(quietBelow_), floor = splat(-200.0), thr = splat(threshold_), wv = splat(w),
+                   halfW = splat(0.5 * w), twoW = splat(2.0 * w), sl = splat(slope), zero = splat(0.0);
+        for (; i + 2 <= n; i += 2) {
+            const Pair lv = pairOf(x[i], x[i + 1]);
+            const auto normal = (lv >= splat(2.2250738585072014e-308)) & (lv <= splat(1.7976931348623157e308));
+            const auto quietLane = lv < quiet;
+            if ((quietLane[0] & quietLane[1]) != 0) {  // both below the knee
+                x[i] = x[i + 1] = 0.0;
+                continue;
+            }
+            const auto other = ~quietLane & ~normal;  // a level the pair form does not cover (a NaN among them)
+            if ((other[0] | other[1]) != 0) {
+                x[i] = one(x[i]), x[i + 1] = one(x[i + 1]);
+                continue;
+            }
+            Pair db = fastLogNormalPair(lv) * 8.6858896380650366;  // gainToDb: 20 / ln(10)
+            db = db < floor ? floor : db;
+            const Pair over = db - thr;
+            const Pair t = over + halfW;
+            const Pair knee = sl * t * t / twoW;
+            Pair g = splat(2.0) * over < wv ? knee : sl * over;
+            g = splat(2.0) * over <= -wv ? zero : g;
+            g = quietLane ? zero : g;
+            x[i] = lane(g, 0), x[i + 1] = lane(g, 1);
+        }
+#endif
+        for (; i < n; ++i) x[i] = one(x[i]);
     }
 
     uint32_t fillDisplay(float* out, bool) noexcept override {

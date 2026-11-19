@@ -16,11 +16,14 @@
 
 namespace caw {
 
-// Budgets (docs/engine.md, Modulation). A target takes up to kMaxLinksPerTarget links (the resolver's own links
-// stop at 8; project links are summed by the host, so this is a CPU budget, not a format limit).
-constexpr int kMaxModulators = 64;
-constexpr int kMaxModLinks = 256;
-constexpr int kMaxLinksPerTarget = 32;
+// Sizes (docs/engine.md, Modulation; owner, 2026-11-19): project-sized, prepared off the audio thread. Past the
+// kCpu* counts a project still plays, with a warning that it costs much CPU (modulationCostWarnings); only past
+// kModSafetyLimit (modulators, links, links per target, note-source links per layer) is an untrusted file refused.
+constexpr int kModSafetyLimit = 4096;
+constexpr int kMaxModulators = kModSafetyLimit;
+constexpr int kMaxModLinks = kModSafetyLimit;
+constexpr int kMaxLinksPerTarget = kModSafetyLimit;
+constexpr int kCpuModulators = 64, kCpuModLinks = 256, kCpuLinksPerTarget = 32, kCpuNoteLinks = 64;
 // Modulators run in blocks of kModGridFrames on a grid counted from Play, and their output is applied
 // kModLookBehindFrames later (2 ms at 48 kHz): by then every input they read (a track's notes or audio, which
 // tracks play anywhere in the mix graph's order) is known, so the result is the same for every buffer size, live
@@ -32,6 +35,8 @@ constexpr uint32_t kModLookBehindFrames = 96;
 // lists do. Refuses unknown sources, duplicate ids, budgets, and loops between modulators.
 using ComponentEntryParser = std::function<bool(const Json&, const std::string&, ComponentSpec&, std::string&)>;
 bool parseModulation(const Json& root, const ComponentEntryParser& entry, ProjectSpec& out, std::string& error);
+// What a parsed project's modulation costs, as warnings: past the kCpu* counts (never a refusal).
+std::vector<std::string> modulationCostWarnings(const ProjectSpec& p);
 // The routing edges modulation adds for validateRouting: a modulator that hears a layer's audio (a follower) makes
 // that layer feed every layer its links reach (directly or through other modulators). Notes make none (a track's
 // notes don't depend on its sound). False and a message for a link back to the layer it listens to.
@@ -48,7 +53,7 @@ enum class ModChainKind : uint8_t { Inserts, Instrument, Master, Modulators, Not
 // "noteComponent" moves every slot alike, worked out once per chunk.
 enum class NoteSource : uint8_t { Pitch, Velocity, Pressure, Timbre, Gate, Age };
 constexpr double kNoteAgeSeconds = 2.0;
-constexpr int kMaxNoteLinks = 64;  // note-source links per layer
+constexpr int kMaxNoteLinks = kModSafetyLimit;  // note-source links per layer
 bool noteSourceNamed(const std::string& source, NoteSource& out) noexcept;
 struct NoteSourceState {
     double pitch = 60.0, velocity = 0.0, pressure = 0.0, timbre = 0.0;

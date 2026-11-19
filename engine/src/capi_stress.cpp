@@ -55,6 +55,8 @@ std::string resultJson(const Job& j) {
                     ",\"mean_last_us\":" + num(r.meanLastUs) + ",\"mean_pct\":" + num(100 * r.meanUs / b) +
                     ",\"p99_pct\":" + num(100 * r.p99Us / b) + ",\"worst_pct\":" + num(100 * r.worstUs / b) +
                     ",\"callbacks\":" + std::to_string(r.callbacks) + ",\"over_budget\":" + std::to_string(r.overBudget) +
+                    // Callbacks over twice the p99 (stalls apart from the steady load; local only).
+                    ",\"spikes\":" + std::to_string(r.spikes) +
                     ",\"dropouts\":" + std::to_string(dropouts) + ",\"xruns\":" + std::to_string(j.xruns) +
                     ",\"limit\":" + std::to_string(r.limit) + ",\"first_failed\":" + std::to_string(r.firstFailed) +
                     ",\"steps\":" + std::to_string(r.steps) + ",\"seconds\":" + num(r.seconds) +
@@ -271,6 +273,7 @@ RunResult runLive(Job& j) {
         out.meanUs = st.meanUs;
         out.p99Us = st.p99Us;
         out.worstUs = st.maxUs;
+        out.spikes = static_cast<int64_t>(st.spikes);
         out.worstAtS = out.warmupS + static_cast<double>(startFrame[st.maxAt]) / r.rate;  // from Play
         if (us.size() >= 20) {
             const size_t tenth = us.size() / 10;

@@ -58,6 +58,9 @@ struct CawEngine {
     // records into `stress` while it is set. Both are the stress run's own engine's, never the app's.
     std::atomic<bool> muteOutput{false};
     std::atomic<CawStressStats*> stress{nullptr};
+    // The app is behind another (caw_audio_set_background), kept across device reopens: the device callback's
+    // load stabilizer (load_stabilizer.h) does not run then.
+    std::atomic<bool> behind{false};
     // The device buffer (caw_audio_set_buffer_mode): CAW_BUFFER_*, and whether the app is recording. Only the
     // control thread touches them, under engine/platform's device lock.
     int bufferMode = 0;

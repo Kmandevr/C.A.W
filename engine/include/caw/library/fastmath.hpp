@@ -19,6 +19,42 @@ inline double floorSmall(double x) noexcept {
     const double t = static_cast<double>(static_cast<int64_t>(x));
     return t > x ? t - 1.0 : t;
 }
+
+// v, rounded where it stands: the compiler can neither fuse it into a multiply-add nor reassociate across it (an
+// empty asm that may change it). For code that must give the same bits under any floating-point flags, such as
+// fastLog and its two-lane form (engine/src/stereo_pair.h), which share fastLogSeries. A double or a 16-byte vector.
+template <class T>
+inline T pinned(T v) noexcept {
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__aarch64__)
+    __asm__("" : "+w"(v));
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(__SSE2__)
+    __asm__("" : "+x"(v));
+#elif defined(__GNUC__) || defined(__clang__)
+    __asm__("" : "+m"(v));
+#endif  // MSVC's cl: /fp:precise, which neither contracts nor reassociates
+    return v;
+}
+
+// ln(m) + k ln 2 for m in [sqrt(1/2), sqrt(2)) and an integer k: 2 atanh(s), s = (m - 1) / (m + 1), as its odd
+// series. T is double (fastLog) or a two-lane vector (stereo_pair.h's fastLogNormalPair), the one source for both, and
+// every product and sum is pinned, so the engine's -ffp-contract=fast and -fassociative-math cannot build them
+// differently (or differently from a strict build): the bits are those of the plain operations in this order, on
+// every platform and with any flags.
+template <class T>
+inline T fastLogSeries(T m, T k) noexcept {
+    const T s = pinned((m - 1.0) / (m + 1.0)), s2 = pinned(s * s);
+    T p = pinned(s2 * (1.0 / 17.0)) + 1.0 / 15.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 13.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 11.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 9.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 7.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 5.0;
+    p = pinned(pinned(p) * s2) + 1.0 / 3.0;
+    const T twoS = pinned(s * 2.0);
+    const T series = pinned(twoS + pinned(pinned(pinned(twoS * s2) * pinned(p))));
+    const T hi = pinned(k * 6.93147180369123816490e-01), lo = pinned(k * 1.90821492927058770002e-10);
+    return pinned(hi + series) + lo;
+}
 }  // namespace fast_detail
 
 // e^x with a relative error below 3e-10; 0 for NaN and below -708, held at e^709 above 709.
@@ -41,7 +77,8 @@ inline double fastExp(double x) noexcept {
 
 // ln(x) within 1e-15 (relative to 1, for x near 1, absolute elsewhere); -746 (below ln of the smallest double) for
 // x <= 0 or NaN, ln(DBL_MAX) for +inf. Basic operations only: the exponent from the bits, the mantissa folded into
-// [sqrt(1/2), sqrt(2)), then ln(m) = 2 atanh(s), s = (m - 1) / (m + 1), as its odd series (|s| <= 0.172).
+// [sqrt(1/2), sqrt(2)), then ln(m) = 2 atanh(s), s = (m - 1) / (m + 1), as its odd series (|s| <= 0.172;
+// fast_detail::fastLogSeries, the same bits under any flags).
 inline double fastLog(double x) noexcept {
     if (!(x > 0.0)) return -746.0;
     if (x > 1.7976931348623157e308) return 709.782712893384;
@@ -57,17 +94,7 @@ inline double fastLog(double x) noexcept {
         m *= 0.5;
         ++e;
     }
-    const double s = (m - 1.0) / (m + 1.0), s2 = s * s;
-    double p = 1.0 / 17.0;
-    p = p * s2 + 1.0 / 15.0;
-    p = p * s2 + 1.0 / 13.0;
-    p = p * s2 + 1.0 / 11.0;
-    p = p * s2 + 1.0 / 9.0;
-    p = p * s2 + 1.0 / 7.0;
-    p = p * s2 + 1.0 / 5.0;
-    p = p * s2 + 1.0 / 3.0;
-    const double k = static_cast<double>(e);
-    return k * 6.93147180369123816490e-01 + (2.0 * s + 2.0 * s * s2 * p) + k * 1.90821492927058770002e-10;
+    return fast_detail::fastLogSeries(m, static_cast<double>(e));
 }
 
 // Decibels to a gain and back (20 log10), on fastExp and fastLog. A gain of 0 (or less, or NaN) is `floorDb`.

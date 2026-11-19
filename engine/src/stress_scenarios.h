@@ -130,8 +130,9 @@ struct SuiteStats {
     double meanUs = 0, p99Us = 0, maxUs = 0;
     size_t callbacks = 0;
     size_t maxAt = 0;  // the callback the worst case was, counted from Play
+    size_t spikes = 0; // callbacks over twice the p99: one-off stalls (a preemption, an interrupt), not steady load
 };
-// Mean, 99th percentile and worst of us[from, to).
+// Mean, 99th percentile, worst and spikes of us[from, to).
 SuiteStats stats(const std::vector<double>& us, size_t from, size_t to);
 double median(std::vector<double> v);
 

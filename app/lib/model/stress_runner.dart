@@ -19,7 +19,8 @@ enum StressPlanKind {
 
 /// One step of a plan: a request and the words the screen shows for it.
 class StressStep {
-  const StressStep(this.request, this.label, {required this.estimateSeconds, this.warmUp = false, this.buffer});
+  const StressStep(this.request, this.label,
+      {required this.estimateSeconds, this.warmUp = false, this.buffer, this.cooldown = Duration.zero});
   final StressRequest request;
   final String label;
 
@@ -29,8 +30,12 @@ class StressStep {
   /// Live: the buffer it asks for (StressBuffer).
   final String? buffer;
 
-  /// About how long it takes, for the overall progress.
+  /// About how long it takes, for the overall progress (its cooldown included).
   final double estimateSeconds;
+
+  /// A pause after it, the device left idle (an Extreme scenario or a ramp runs the phone hot), so the next step
+  /// starts cooler ([StressRunner.cooldownScale] scales it; tests set 0).
+  final Duration cooldown;
 }
 
 /// What the Benchmark sets aside while it runs: the app's own transport and audio device (AppState).
@@ -46,28 +51,25 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
   final full = kind == StressPlanKind.full;
   final plain = full ? 4.0 : 1.5, rampStep = full ? 1.5 : 0.5;
   const warm = 1.7; // the engine's warm-up after Play (stress_run.h, warmupSeconds)
+  const cool = Duration(seconds: stressCooldownSeconds);
   final first = scenarios.any((s) => s.id == 'song8') ? 'song8' : scenarios.isEmpty ? '' : scenarios.first.id;
   final listed = {for (final s in scenarios) s.id};
+  StressStep playing(StressScenarioInfo s) {
+    final extreme = s.tier == 'extreme';
+    return StressStep(StressRequest(scenario: s.id, seconds: plain, workDir: workDir), 'Playing ${s.name}',
+        estimateSeconds: plain + 0.5 + warm + (extreme ? stressCooldownSeconds : 0), cooldown: extreme ? cool : Duration.zero);
+  }
+
+  // Heat (2026-11-19): the S22+'s clock fell from 2.28 to 1.65 GHz by the last scenarios, so the order runs coolest
+  // first: the light and heavy scenarios, then the live checks (the device's own callbacks, the numbers the app
+  // plays with), then the Extreme scenarios and the ramps, each with a pause after, then the profiles and the heat
+  // test (which wants the heat). Each row also records its thermal state and core clock.
   return [
     if (first.isNotEmpty)
       StressStep(StressRequest(scenario: first, seconds: 1, workDir: workDir), 'Getting ready',
           estimateSeconds: 1 + warm, warmUp: true),
     for (final s in scenarios)
-      StressStep(StressRequest(scenario: s.id, seconds: plain, workDir: workDir), 'Playing ${s.name}',
-          estimateSeconds: plain + 0.5 + warm),
-    StressStep(StressRequest(kind: StressKind.rampTracks, seconds: rampStep, workDir: workDir), 'Adding tracks',
-        estimateSeconds: (rampStep + warm) * 12),
-    StressStep(StressRequest(kind: StressKind.rampVoices, seconds: rampStep, workDir: workDir), 'Adding Flagship voices',
-        estimateSeconds: (rampStep + warm) * 11),
-    StressStep(StressRequest(kind: StressKind.rampEffects, seconds: rampStep, workDir: workDir), 'Adding effects to one track',
-        estimateSeconds: (rampStep + warm) * 11),
-    for (final id in [
-      'song8',
-      if (full) ...['song16', 'flagship_heavy16', ...profiledFeatureScenarios.where(listed.contains)] else
-        if (listed.contains('worst_all')) 'worst_all',
-    ])
-      StressStep(StressRequest(scenario: id, kind: StressKind.profile, seconds: full ? 3 : 2, workDir: workDir),
-          'Finding what takes the time', estimateSeconds: (full ? 3 : 2) + 1.5),
+      if (s.tier != 'extreme') playing(s),
     // Live: at the playing buffer (Auto while not recording), then at Low latency (the device's own burst).
     for (final id in full ? const ['song8', 'song16'] : const ['song8']) ...[
       StressStep(
@@ -81,6 +83,21 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
           estimateSeconds: (full ? 10 : 5) + 0.5 + warm,
           buffer: StressBuffer.lowLatency),
     ],
+    for (final s in scenarios)
+      if (s.tier == 'extreme') playing(s),
+    StressStep(StressRequest(kind: StressKind.rampTracks, seconds: rampStep, workDir: workDir), 'Adding tracks',
+        estimateSeconds: (rampStep + warm) * 12 + stressCooldownSeconds, cooldown: cool),
+    StressStep(StressRequest(kind: StressKind.rampVoices, seconds: rampStep, workDir: workDir), 'Adding Flagship voices',
+        estimateSeconds: (rampStep + warm) * 11 + stressCooldownSeconds, cooldown: cool),
+    StressStep(StressRequest(kind: StressKind.rampEffects, seconds: rampStep, workDir: workDir), 'Adding effects to one track',
+        estimateSeconds: (rampStep + warm) * 11 + stressCooldownSeconds, cooldown: cool),
+    for (final id in [
+      'song8',
+      if (full) ...['song16', 'flagship_heavy16', ...profiledFeatureScenarios.where(listed.contains)] else
+        if (listed.contains('worst_all')) 'worst_all',
+    ])
+      StressStep(StressRequest(scenario: id, kind: StressKind.profile, seconds: full ? 3 : 2, workDir: workDir),
+          'Finding what takes the time', estimateSeconds: (full ? 3 : 2) + 1.5),
     // The heat test: live, in real time, at the playing buffer.
     if (full)
       StressStep(
@@ -96,6 +113,11 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
           buffer: StressBuffer.playing),
   ];
 }
+
+/// The pause after an Extreme scenario or a ramp, in seconds ([StressStep.cooldown]). [Assumption] a few seconds
+/// idle let a phone's clock recover from a short burst (it does not undo minutes of heat: the rows' thermal state
+/// shows that).
+const int stressCooldownSeconds = 3;
 
 /// The scenarios a Full run also profiles when the engine lists them (API 30), so the parts' drill-down shows where
 /// each part mattered most: one per feature that has a part of its own.
@@ -138,6 +160,9 @@ class StressRunner extends ChangeNotifier {
 
   /// The redos a step gets when the app leaves the foreground while it runs.
   static const int maxBackgroundRedos = 2;
+
+  /// Scales each step's [StressStep.cooldown] (tests set 0, so they don't wait).
+  static double cooldownScale = 1;
 
   final StressBackend backend;
   final StressHost? host;
@@ -298,21 +323,23 @@ class StressRunner extends ChangeNotifier {
         }
         phase = step.label;
         notifyListeners();
-        final heat = r.kind == StressKind.sustained;
         // A step the app leaves the foreground during runs again once it is back (#234), so background time never
         // counts as engine load; after maxBackgroundRedos redos it is skipped.
         var redos = 0;
         var gaveUp = false, ran = false;
         Map<String, dynamic> json = const {};
         var thermalStart = const <String, Object?>{}, thermalEnd = const <String, Object?>{};
+        var startedAt = 0.0;
         for (;;) {
           await _waitForFront();
           if (_cancelled || _safetyStop != null) break;
           _stepBackgrounded = false;
-          thermalStart = heat ? await _thermal() : const <String, Object?>{};
+          // The thermal state around every measured step (2026-11-19): the heat each row ran at.
+          thermalStart = step.warmUp ? const <String, Object?>{} : await _thermal();
+          startedAt = watch.elapsedMilliseconds / 1000;
           json = await _runStep(step, done / total, step.estimateSeconds / total);
           ran = true;
-          thermalEnd = heat ? await _thermal() : const <String, Object?>{};
+          thermalEnd = step.warmUp ? const <String, Object?>{} : await _thermal();
           if (!_stepBackgrounded || _cancelled || _safetyStop != null) break;
           result.backgroundedSteps++;
           if (redos++ >= maxBackgroundRedos) {
@@ -334,9 +361,11 @@ class StressRunner extends ChangeNotifier {
                 skipped: 'Skipped: the app kept leaving the foreground'));
           }
         } else if (ran && !step.warmUp && !_stepBackgrounded) {
-          _take(result, step, json, info, thermalStart: thermalStart, thermalEnd: thermalEnd, backgrounded: redos > 0);
+          _take(result, step, json, info,
+              thermalStart: thermalStart, thermalEnd: thermalEnd, backgrounded: redos > 0, startedAtS: startedAt);
         }
         notifyListeners();
+        if (ran && !gaveUp) await _coolDown(step.cooldown * cooldownScale);
       }
       result.stoppedBecause = _safetyStop ?? (_cancelled ? 'You stopped it' : null);
       return result;
@@ -406,6 +435,19 @@ class StressRunner extends ChangeNotifier {
     }
   }
 
+  // The pause after a hot step, in slices so Stop, a safety stop or the app leaving ends it at once.
+  Future<void> _coolDown(Duration d) async {
+    if (d <= Duration.zero) return;
+    final prev = phase;
+    phase = 'Letting the device cool';
+    notifyListeners();
+    final until = DateTime.now().add(d);
+    while (!_cancelled && _safetyStop == null && DateTime.now().isBefore(until)) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    phase = prev;
+  }
+
   Future<Map<String, Object?>> _thermal() async {
     try {
       return await readThermal?.call() ?? const {};
@@ -417,14 +459,21 @@ class StressRunner extends ChangeNotifier {
   void _take(StressResult result, StressStep step, Map<String, dynamic> json, StressScenarioInfo? info,
       {Map<String, Object?> thermalStart = const {},
       Map<String, Object?> thermalEnd = const {},
-      bool backgrounded = false}) {
+      bool backgrounded = false,
+      double? startedAtS}) {
     final r = step.request;
     final stop = '${json['stop_reason'] ?? ''}';
     if (stop == 'cancelled') return; // a cut-short step reports nothing
     switch (r.kind) {
       case StressKind.plain:
         result.scenarios.add(ScenarioResult.fromEngine(json,
-            name: info?.name ?? r.scenario, tier: info?.tier ?? 'normal', buffer: step.buffer, backgrounded: backgrounded));
+            name: info?.name ?? r.scenario,
+            tier: info?.tier ?? 'normal',
+            buffer: step.buffer,
+            backgrounded: backgrounded,
+            thermalStart: thermalStart,
+            thermalEnd: thermalEnd,
+            startedAtS: startedAtS));
       case StressKind.rampTracks || StressKind.rampVoices || StressKind.rampEffects:
         final kind = switch (r.kind) { StressKind.rampTracks => 'tracks', StressKind.rampVoices => 'voices', _ => 'effects' };
         final failed = (json['first_failed'] as num?)?.toInt() ?? -1;

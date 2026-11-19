@@ -60,6 +60,10 @@ class ScenarioResult {
     this.mixActiveWorkers = 0,
     this.warmupXruns,
     this.deviceSizes = false,
+    this.spikes = 0,
+    this.thermalStart = const {},
+    this.thermalEnd = const {},
+    this.startedAtS,
     String feature = '',
     this.parts = const [],
   }) : feature = stressFeatures.containsKey(feature) ? feature : scenarioFeature(id);
@@ -115,10 +119,39 @@ class ScenarioResult {
   /// Android 11 and older, where a size never reaches the stream, so it ran at the burst, not 1024 frames).
   final bool deviceSizes;
 
+  /// Callbacks over twice the p99: one-off stalls (a preemption, an interrupt), apart from the steady load the p99
+  /// describes. Local JSON only.
+  final int spikes;
+
+  /// The platform's thermal status and headroom just before and after this step ({'status', 'headroom'}; empty:
+  /// unknown), and when the step started, in seconds from the run's start: how warm the phone was for it. Local only.
+  final Map<String, Object?> thermalStart, thermalEnd;
+  final double? startedAtS;
+
+  /// The timed span's core clock against that core's top (the mean of its start and end readings; null unknown).
+  double? get clockShare {
+    if (coreKhzStart <= 0 || coreKhzEnd <= 0 || coreMaxKhz <= 0) return null;
+    return ((coreKhzStart + coreKhzEnd) / 2 / coreMaxKhz).clamp(0.0, 1.0);
+  }
+
+  /// [Assumption] what the load would be with the core at its top clock: the raw share times [clockShare] (time
+  /// scales with the clock; memory stalls don't, so this is a lower bound). Lets runs at different clocks (a cool
+  /// and a hot phone, a governor that kept the clock low) be compared; the raw share is what the device did.
+  double? scaledToTopClock(double pct) {
+    final c = clockShare;
+    return c == null ? null : pct * c;
+  }
+
   bool get ran => skipped == null && error == null && callbacks > 0;
 
   factory ScenarioResult.fromEngine(Map<String, dynamic> j,
-      {required String name, required String tier, String? buffer, bool backgrounded = false}) {
+      {required String name,
+      required String tier,
+      String? buffer,
+      bool backgrounded = false,
+      Map<String, Object?> thermalStart = const {},
+      Map<String, Object?> thermalEnd = const {},
+      double? startedAtS}) {
     double d(String k) => (j[k] as num?)?.toDouble() ?? 0;
     int i(String k) => (j[k] as num?)?.toInt() ?? 0;
     final err = '${j['error'] ?? ''}';
@@ -160,6 +193,10 @@ class ScenarioResult {
       mixActiveWorkers: i('mix_active_workers'),
       warmupXruns: wx >= 0 ? wx : null,
       deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
+      spikes: i('spikes'),
+      thermalStart: thermalStart,
+      thermalEnd: thermalEnd,
+      startedAtS: startedAtS,
       feature: j['feature'] is String ? j['feature'] as String : '',
       parts: EnginePart.parseList(j['parts']),
     );
@@ -206,6 +243,17 @@ class ScenarioResult {
           'core_khz_start': coreKhzStart,
           'core_khz_end': coreKhzEnd,
           'core_max_khz': coreMaxKhz,
+          // The core's clock against its top, and the load scaled to the top clock beside the raw one (an
+          // assumption: scaledToTopClock).
+          if (clockShare != null) ...{
+            'clock_share': _r2(clockShare!),
+            'mean_pct_at_top_clock': _r1(scaledToTopClock(meanPct)!),
+            'p99_pct_at_top_clock': _r1(scaledToTopClock(p99Pct)!),
+          },
+          'spikes': spikes,
+          if (thermalStart.isNotEmpty) 'thermal_start': thermalStart,
+          if (thermalEnd.isNotEmpty) 'thermal_end': thermalEnd,
+          if (startedAtS != null) 'started_at_s': _r1(startedAtS!),
           if (parts.isNotEmpty) 'parts': [for (final p in parts) p.toJson()],
           if (partsBasis != null) 'parts_basis': partsBasis,
           if (audioThreads.isNotEmpty) 'audio_threads': audioThreads,

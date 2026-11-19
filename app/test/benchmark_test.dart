@@ -8,6 +8,7 @@ import 'package:caw/model/stress_result.dart';
 import 'package:caw/model/stress_runner.dart';
 import 'package:caw_services/telemetry/report_schema.dart';
 import 'package:caw/ui/benchmark/benchmark_screen.dart';
+import 'package:caw/ui/benchmark/benchmark_summary.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -142,6 +143,8 @@ class FakeHost implements StressHost {
 }
 
 void main() {
+  setUpAll(() => StressRunner.cooldownScale = 0); // the pauses after hot steps: none in tests
+
   test('a Quick run plays every scenario, the three ramps, a profile and a live check, then sends H2 stress', () async {
     final fake = FakeStress();
     final host = FakeHost();
@@ -201,25 +204,65 @@ void main() {
 
   test('the sustained run is live at the playing buffer: its trend, core clock and thermal state', () async {
     final fake = FakeStress(extra: {'slope_pct_per_min': 3.0, 'core_khz_start': 2995200, 'core_khz_end': 2400000});
-    final thermal = [
-      {'status': 0, 'headroom': 0.42},
-      {'status': 2, 'headroom': 0.91},
-    ];
     var reads = 0;
-    final res = await StressRunner(backend: fake, readThermal: () async => thermal[reads++]).run(StressPlanKind.full);
+    // Every measured step reads the thermal state before and after it; the sustained run is the last step.
+    final res = await StressRunner(backend: fake, readThermal: () async => {'status': reads++, 'headroom': 0.5})
+        .run(StressPlanKind.full);
     final r = fake.started.singleWhere((r) => r.kind == StressKind.sustained);
     expect(r.mode, StressMode.live);
     expect(r.frames, StressBuffer.playingFrames);
     final s = res.sustained!;
-    expect(reads, 2);
-    expect(s.thermalStart['headroom'], 0.42);
-    expect(s.thermalEnd['status'], 2);
+    expect(s.thermalStart['status'], reads - 2);
+    expect(s.thermalEnd['status'], reads - 1);
     expect(s.coreKhzEnd, 2400000);
     // 3% of the budget a minute for two minutes, against a start at 37.5%: 16% slower.
     expect(s.driftPct, closeTo(100 * 3.0 * 2 / (100 * 2000 / 5333.3), 0.01));
     final j = s.toJson();
-    expect(j['thermal_end'], {'status': 2, 'headroom': 0.91});
+    expect(j['thermal_end'], {'status': reads - 1, 'headroom': 0.5});
     expect(j['slope_pct_per_min'], 3.0);
+    // Each row has its own thermal state around it.
+    for (final row in res.scenarios) {
+      expect(row.thermalStart, isNotEmpty);
+      expect((row.thermalEnd['status'] as int) - (row.thermalStart['status'] as int), 1);
+    }
+  });
+
+  test('the plan runs coolest first: light and heavy, then live, then Extreme and the ramps with a pause after', () {
+    final plan = stressPlan(StressPlanKind.full, _scenarios);
+    int at(bool Function(StressStep s) f) => plan.indexWhere(f);
+    final firstLive = at((s) => s.request.mode == StressMode.live);
+    final extreme = at((s) => s.request.scenario == 'song32_heavy' && s.request.kind == StressKind.plain);
+    final heavy = at((s) => s.request.scenario == 'song16' && s.request.kind == StressKind.plain && s.request.mode == StressMode.dsp);
+    final ramp = at((s) => s.request.kind == StressKind.rampTracks);
+    expect(plan.first.warmUp, isTrue);
+    expect(heavy, lessThan(firstLive));
+    expect(at((s) => s.request.scenario == 'tail_floor'), lessThan(firstLive)); // idle with the light ones
+    expect(firstLive, lessThan(extreme));
+    expect(extreme, lessThan(ramp));
+    expect(plan[extreme].cooldown, const Duration(seconds: stressCooldownSeconds));
+    expect(plan[ramp].cooldown, const Duration(seconds: stressCooldownSeconds));
+    expect(plan[heavy].cooldown, Duration.zero);
+    expect(plan.last.request.kind, StressKind.sustained);
+  });
+
+  test('a row keeps its spikes, its clock against the top and its load at the top clock', () async {
+    final fake = FakeStress(extra: {'spikes': 3, 'core_khz_start': 1000000, 'core_khz_end': 1500000, 'core_max_khz': 2500000});
+    final res = await StressRunner(backend: fake).run(StressPlanKind.quick);
+    final row = res.scenarios.firstWhere((s) => s.id == 'song8' && !s.live);
+    expect(row.spikes, 3);
+    expect(row.clockShare, closeTo(0.5, 1e-9));
+    expect(row.scaledToTopClock(40), closeTo(20, 1e-9));
+    final j = row.toJson();
+    expect(j['spikes'], 3);
+    expect(j['clock_share'], 0.5);
+    expect(j['p99_pct_at_top_clock'], 20.0); // song8's p99 is 40% in the fake
+    expect(j['started_at_s'], isA<double>());
+    expect(scenarioNumbers(row), contains('3 one-off spikes'));
+    expect(scenarioNumbers(row), contains('50% of its top clock'));
+    // An unknown clock leaves the scaled numbers out rather than guessing.
+    final unknown = ScenarioResult(id: 'x', name: 'x', tier: 'normal', callbacks: 1, meanPct: 10, p99Pct: 20);
+    expect(unknown.clockShare, isNull);
+    expect(unknown.toJson().containsKey('p99_pct_at_top_clock'), isFalse);
   });
 
   test('a playing-buffer run that took the device\'s own sizes says so (Android 11 and older)', () async {

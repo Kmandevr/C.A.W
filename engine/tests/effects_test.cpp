@@ -1,5 +1,6 @@
 // The built-in effects suite (#173): kernels, each effect's response, stability, block sizes, sleep, display, reference renders.
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -20,6 +21,7 @@
 #include "caw/library/spectrum.hpp"
 #include "analysis.h"
 #include "capi_internal.h"
+#include "stereo_pair.h"
 
 // M_PI is not standard C++ (MSVC lacks it without _USE_MATH_DEFINES).
 static constexpr double kTestPi = 3.14159265358979323846;
@@ -214,6 +216,26 @@ TEST(fast_log_and_decibels_match_the_library_maths) {
     CHECK_NEAR(lib::dbToGain(-6.0), std::pow(10.0, -0.3), 1e-12);
     CHECK_NEAR(lib::gainToDb(0.5), 20 * std::log10(0.5), 1e-12);
     CHECK_EQ(lib::gainToDb(0.0), -120.0);
+}
+
+TEST(fast_log_pair_gives_fast_log_s_bits_lane_by_lane) {
+    // The compressor's two-at-a-time curve (stereo_pair.h): fastLog's bits for every positive normal double.
+    size_t differ = 0, tried = 0;
+    for (double x = 2.2250738585072014e-308; x < 1.7976931348623157e308 / 1.37; x *= 1.37, ++tried) {
+        const double y = x * 1.0000001;
+        const Pair v = fastLogNormalPair(pairOf(x, y));
+        differ += lane(v, 0) != lib::fastLog(x) || lane(v, 1) != lib::fastLog(y);
+    }
+    for (double x : {1.0, 0.5, 2.0, 1.4142135623730951, 1.4142135623730954, 0.7071067811865475, 1e-5, 0.999999})
+        differ += lane(fastLogNormalPair(pairOf(x, x)), 0) != lib::fastLog(x);
+    CHECK(tried > 2000);
+    CHECK_EQ(differ, 0u);
+    // And both are the plain operations in their order whatever the flags and the platform: fastLog's bits over
+    // 1e-300 .. 1e300 hash to what a strict build (no contraction, no reassociation) gives on x86-64 and on Arm64
+    // (before fastLogSeries pinned them, the engine's -ffp-contract=fast fused them on Arm64: 47a7f7fe49833d96).
+    uint64_t h = 1469598103934665603ull;  // FNV-1a over each result's bits
+    for (double x = 1e-300; x < 1e300; x *= 1.0137) h = (h ^ std::bit_cast<uint64_t>(lib::fastLog(x))) * 1099511628211ull;
+    CHECK_EQ(h, 0x37a69ee6c1dca50cull);
 }
 
 TEST(a_parametric_band_has_its_type_s_response_measured_and_computed) {
@@ -539,6 +561,29 @@ TEST(the_eq_is_transparent_by_default_and_shapes_as_its_bands_say) {
     const Stereo mono = sine(1000, 0.25, 24000);
     const Stereo mOut = run(*r, mono, {{"b4_gain", 12}, {"b4_channel", 2}});
     CHECK_NEAR(db(rms(mOut.l, 12000, 24000) / rms(mono.l, 12000, 24000)), 0.0, 0.01);
+}
+
+// A band given a new type or channel fades out, switches and fades back in while every knob then stays as it is
+// (a steady EQ skips controls whose knobs are unchanged; a pending switch is work, not a steady state), also from
+// a band that had no gain (an identity band is not run, so it has nothing to fade).
+TEST(an_eq_band_comes_back_after_a_type_or_channel_change_with_the_knobs_held) {
+    Engine e(48000);
+    const Stereo tone = sine(4000, 0.5, 12000);  // 0.25 s, far above each 5 ms fade
+    auto lastHalf = [&](const std::vector<float>& x) { return db(rms(x, 6000, 12000) / rms(tone.l, 6000, 12000)); };
+    std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.eq");
+    const Values lowCut = {{"b1_on", 1}, {"b1_type", 5}, {"b1_freq", 1000}};
+    CHECK(lastHalf(run(*p, tone, lowCut).l) > -0.5);  // a low cut at 1 kHz passes 4 kHz
+    Values highCut = lowCut;
+    highCut[1] = {"b1_type", 8};
+    CHECK(lastHalf(run(*p, tone, highCut).l) < -60.0);  // a high cut at 1 kHz takes it away
+    Values left = highCut;
+    left.push_back({"b1_channel", 3});
+    const Stereo l = run(*p, tone, left);
+    CHECK(lastHalf(l.l) < -60.0);
+    CHECK(lastHalf(l.r) > -0.5);
+    std::unique_ptr<ModuleProcessor> q = make(e, "org.caw.eq");
+    CHECK(lastHalf(run(*q, tone).l) > -0.01);  // band 3: a bell at 250 Hz with no gain
+    CHECK(lastHalf(run(*q, tone, {{"b3_type", 8}}).l) < -60.0);  // now a high cut at 250 Hz
 }
 
 TEST(the_eq_display_shows_its_spectrum_and_curve_while_watched) {

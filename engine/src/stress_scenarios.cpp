@@ -494,6 +494,7 @@ SuiteStats stats(const std::vector<double>& us, size_t from, size_t to) {
     s.p99Us = x[std::min(x.size() - 1, x.size() * 99 / 100)];
     s.maxUs = x.back();
     s.callbacks = x.size();
+    s.spikes = static_cast<size_t>(x.end() - std::upper_bound(x.begin(), x.end(), 2.0 * s.p99Us));
     return s;
 }
 

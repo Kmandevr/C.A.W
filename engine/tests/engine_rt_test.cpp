@@ -648,6 +648,38 @@ TEST(device_midi_never_allocates_on_the_audio_thread) {
     CHECK_EQ(e.midiDropped(), 0u);
 }
 
+TEST(device_midi_flood_never_allocates_on_the_audio_thread) {
+    // A flood past the queue: note ons drop, controller moves merge (producer side), note offs take the reserve,
+    // and the audio thread orders and plays what came without allocating.
+    ProjectSpec p;
+    p.layers = {layer("s", "org.caw.synth.flagship")};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    std::vector<uint8_t> flood;
+    for (int i = 0; i < 3000; ++i) {
+        flood.insert(flood.end(), {0x90, static_cast<uint8_t>(40 + i % 24), 90});
+        flood.insert(flood.end(), {0xB0, 1, static_cast<uint8_t>(i & 0x7F)});
+        flood.insert(flood.end(), {0xE0, 0, static_cast<uint8_t>(i & 0x7F)});
+    }
+    for (int n = 0; n < 24; ++n) flood.insert(flood.end(), {0x80, static_cast<uint8_t>(40 + n), 0});
+    std::size_t operations = 0;
+    for (int pass = 0; pass < 3; ++pass) {
+        e.setMidiOptions(false, 2, 48, pass == 2 ? 5 : 0);
+        e.midiBytes("s", flood.data(), static_cast<int>(flood.size()), 0);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+        operations += scope.count();
+        e.meters();  // the control thread moves merged values in
+        cawtest::AllocationScope after;
+        for (int k = 0; k < 4; ++k) e.process(l.data(), r.data(), 192);
+        operations += after.count();
+    }
+    CHECK(e.midiDropped() > 0u);
+    CHECK_EQ(operations, 0u);
+}
+
 TEST(the_flagship_s_user_wavetable_and_twice_rate_warps_never_allocate_on_the_audio_thread) {
     // A flagship playing its user wavetable (the state, a sine and a square frame) through Osc FM, FM and fold,
     // its warps and table switched as it plays and its state replaced between rounds: no allocation or free.
