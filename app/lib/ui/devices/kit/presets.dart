@@ -1,5 +1,8 @@
 // Device presets (Init, the engine's list when it offers one, starter lists in Dart, the user's own) and the header's A/B compare snapshots.
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import '../../../engine/component_info.dart';
+import '../../../model/merged_devices.dart';
 import '../../../model/device_target.dart';
 import '../../../model/user_presets.dart';
 
@@ -70,7 +73,13 @@ class DevicePresets {
   static List<DevicePreset> user(DeviceTarget target) {
     final id = target.componentId;
     if (id == null) return const [];
-    return [for (final p in target.state.userPresets.forComponent(id)) DevicePreset.user(p)];
+    // A merged device (FX consolidation): the user's presets of the variant it plays (another variant's would set
+    // knobs it doesn't have; the variant picker changes the variant).
+    final variant = target.info?.variantIndex ?? 0;
+    return [
+      for (final p in target.state.userPresets.forComponent(id))
+        if (!MergedDevices.isMerged(id) || ((p.device?.params[variantParam] ?? 0).round() == variant)) DevicePreset.user(p),
+    ];
   }
 
   /// What was loaded last, per device: the preset's [DevicePreset.key] and name.
@@ -94,8 +103,33 @@ class DevicePresets {
     target.state.endUndoStep();
   }
 
+  /// The preset [by] places after (or before) the current one in [of]'s order, wrapping round; from no current
+  /// preset, the first (or the last). Null when the device has none.
+  static DevicePreset? stepFrom(DeviceTarget target, int by) {
+    final all = of(target);
+    if (all.isEmpty) return null;
+    // Nothing loaded yet and every value at its default: it stands on Init (the label says so).
+    final now = current(target) ?? (matches(target, const DevicePreset('Init', {})) ? all.first : null);
+    final at = now == null ? -1 : all.indexWhere((p) => p.key == now.key);
+    if (at < 0) return by > 0 ? all.first : all.last;
+    return all[(at + by) % all.length];
+  }
+
+  /// The header's ‹ and ›: loads the preset before or after the current one (one undo step).
+  static DevicePreset? step(DeviceTarget target, int by) {
+    final p = stepFrom(target, by);
+    if (p != null) apply(target, p);
+    return p;
+  }
+
   /// Makes [preset] the device's current one without loading it (just saved from its values).
   static void remember(DeviceTarget target, DevicePreset preset) => _current[_key(target)] = (preset.key, preset.name);
+
+  /// What [current] goes by for the device, to put back with [restoreRemembered] (a cancelled preview).
+  static (String, String)? remembered(DeviceTarget target) => _current[_key(target)];
+
+  static void restoreRemembered(DeviceTarget target, (String, String)? was) =>
+      was == null ? _current.remove(_key(target)) : _current[_key(target)] = was;
 
   /// The user preset loaded last into the device, while it is still in the library; null otherwise.
   static UserPreset? currentUser(DeviceTarget target) {
@@ -158,6 +192,9 @@ class DeviceAB {
   DeviceAB._();
   static final Map<String, (bool, Map<String, double>?)> _state = {};
 
+  /// Fires when a device switches side or copies A to B, so every view of it shows the side it is on.
+  static final ValueNotifier<int> changes = ValueNotifier(0);
+
   static String _key(DeviceTarget t) => '${t.layerId}\u0000${t.slot}\u0000${t.componentId}';
 
   /// True while side B is loaded.
@@ -170,5 +207,20 @@ class DeviceAB {
     final other = _state[_key(t)]?.$2;
     _state[_key(t)] = (b, now);
     if (other != null) t.setAll(other);
+    changes.value++;
+  }
+
+  /// A hold on the switch: B becomes a copy of A. On A, B's snapshot is A's values now; on B, A's values load into B
+  /// (one undo step).
+  static void copyAToB(DeviceTarget t) {
+    final info = t.info;
+    if (info == null) return;
+    final now = {for (final p in info.parameters) p.id: t.value(p.id)};
+    if (!isB(t)) {
+      _state[_key(t)] = (false, now);
+    } else if (_state[_key(t)]?.$2 case final a?) {
+      t.setAll(a);
+    }
+    changes.value++;
   }
 }

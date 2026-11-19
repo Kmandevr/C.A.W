@@ -241,7 +241,7 @@ TEST(fx_rack_modulates_an_inner_parameter_from_a_macro_and_an_lfo) {
 
 TEST(a_whole_rack_saves_and_loads_as_one_set_of_values_and_state) {
     ComponentSpec s = spec("org.caw.rack.fx", {{"s1_fx", hashOf("org.caw.filter")}, {"s1.cutoff", 700.0},
-                                               {"s2_fx", hashOf("org.caw.delay.pro")}, {"s2.mix", 0.4},
+                                               {"s2_fx", hashOf("org.caw.delay")}, {"s2.mix", 0.4},
                                                {"lfo1_rate", 3.0}, {"mod1_src", 1}, {"mod1_amt", 0.3}});
     auto a = chainOf(s);
     if (!a) return;
@@ -279,7 +279,7 @@ TEST(a_whole_rack_saves_and_loads_as_one_set_of_values_and_state) {
     knob.params.emplace_back("s1.cutoff", 2000.0);
     CHECK(a->sameComponents({knob}, kSr));
     ComponentSpec other = s;
-    other.params.emplace_back("s2_fx", hashOf("org.caw.reverb.pro"));
+    other.params.emplace_back("s2_fx", hashOf("org.caw.reverb"));
     CHECK(!a->sameComponents({other}, kSr));
 }
 
@@ -304,8 +304,8 @@ TEST(rack_factory_presets_build_and_sound) {
 
 TEST(racks_give_the_same_bits_at_any_block_size) {
     const std::vector<ComponentSpec> specs = {
-        spec("org.caw.rack.fx", {{"s1_fx", hashOf("org.caw.filter")}, {"s2_fx", hashOf("org.caw.saturator")},
-                                 {"s3_fx", hashOf("org.caw.delay.pro")}, {"mod1_src", 1}, {"mod1_dst", 0},
+        spec("org.caw.rack.fx", {{"s1_fx", hashOf("org.caw.filter")}, {"s2_fx", hashOf("org.caw.drive")},
+                                 {"s2.variant", 1}, {"s3_fx", hashOf("org.caw.delay")}, {"mod1_src", 1}, {"mod1_dst", 0},
                                  {"lfo1_rate", 5.0}, {"mod2_src", 5}, {"mod3_src", 9}}),
         spec("org.caw.rack.multiband", {{"bands", 4}, {"b1s1_fx", hashOf("org.caw.compressor")},
                                         {"b2s1_fx", hashOf("org.caw.limiter")}, {"b3s2_fx", hashOf("org.caw.chorus")},

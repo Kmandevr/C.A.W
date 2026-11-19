@@ -17,6 +17,8 @@
 #include "builtin_components.h"
 #include "caw/detmath.hpp"
 #include "caw/instrument.hpp"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "json.h"
 #include "params.h"
 #include "utf8_path.h"
@@ -1050,7 +1052,7 @@ bool renderComponent(const ModuleRegistry& registry, const TestComponent& c, dou
         error = "component '" + c.id + "' is not loaded";
         return false;
     }
-    std::unique_ptr<ModuleProcessor> p = registry.create(c.id);
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry, c.id, c.params);  // a merged device: its variant
     if (!p) {
         error = "component '" + c.id + "' could not create an instance";
         return false;
@@ -1260,10 +1262,13 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
                            std::to_string(static_cast<int>(req.sampleRate)) + " Hz (leave 'sample_rate' out to use the file's)");
     }
     std::string error;
+    // A retired built-in id runs as its merged device's variant (fx_migrate.h), as a project naming it plays.
+    for (TestComponent* c : {&req.component, &req.compare})
+        if (c->library.empty()) fx::migrateLegacyId(c->id, c->params);
     ModuleRegistry registry;
     registerBuiltinComponents(registry);
     if (!prepareRegistry(registry, req.component, error)) return failure(error);
-    const ModuleDescriptor* d = registry.find(req.component.id);
+    const ModuleDescriptor* d = findComponentDescriptor(registry, req.component.id, req.component.params);
 
     const PortLayout ports = portLayout(*d);
     const bool fedNotes = ports.audioIn.empty();  // an instrument: the notes are its signal
@@ -1318,7 +1323,7 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
     if (fedNotes)  // an instrument's tail and quiet level are measured against its own peak while the notes play
         for (std::size_t i = 0; i < S; ++i)
             inputPeak = std::max({inputPeak, std::fabs(static_cast<double>(main.left[i])), std::fabs(static_cast<double>(main.right[i]))});
-    const ModuleDescriptor& desc = *registry.find(req.component.id);
+    const ModuleDescriptor& desc = *findComponentDescriptor(registry, req.component.id, req.component.params);
     if (!req.writeInputWav.empty() && !writeStereoWav(req.writeInputWav, inL, inR, req.sampleRate, error))
         return failure(error);
     if (!req.writeWav.empty() && !writeStereoWav(req.writeWav, main.left, main.right, req.sampleRate, error))

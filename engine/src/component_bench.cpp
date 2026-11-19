@@ -18,6 +18,8 @@
 #include "component_chain.h"
 #include "component_profile.h"
 #include "fp_mode.h"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "json.h"
 #include "params.h"
 
@@ -100,8 +102,9 @@ public:
         if (active_) p_->deactivate();
     }
 
-    bool open(const ModuleRegistry& registry, const std::string& id, double rate, uint32_t maxFrames, std::string& error) {
-        p_ = registry.create(id);
+    bool open(const ModuleRegistry& registry, const std::string& id, const std::vector<std::pair<std::string, double>>& params,
+              double rate, uint32_t maxFrames, std::string& error) {
+        p_ = createComponent(registry, id, params);  // a merged device: the variant `params` choose
         if (!p_) {
             error = "component '" + id + "' could not create an instance";
             return false;
@@ -447,19 +450,23 @@ std::string runLocked(const Request& r, int32_t* progress, const int32_t* cancel
     if (!(r.seconds >= 0.1 && r.seconds <= 10)) return failure("seconds must be 0.1..10");
     ModuleRegistry registry;
     registerBuiltinComponents(registry);
+    std::string id = r.id;
+    std::vector<std::pair<std::string, double>> params;
     if (!r.library.empty()) {
         // Only the user's own choice of Trusted opens a library here; the loader also refuses Blocked and Isolated.
         if (r.trust != NativeModuleTrust::Trusted)
             return failure("the plug-in benchmark runs only components you built or chose to trust (trust: Trusted)");
         const ModuleLoadResult loaded = registry.loadSharedLibrary(r.library, r.id, r.trust);
         if (!loaded.success) return failure("can't load '" + r.id + "': " + loaded.message);
+    } else if (std::string own = r.id; !registry.find(r.id) && fx::migrateLegacyId(own, params)) {
+        id = own;  // a retired built-in id: its merged device's variant (fx_migrate.h)
     } else if (!registry.find(r.id)) {
         return failure("component '" + r.id + "' is not built in; give its library and trust");
     }
     std::string error;
     auto rig = [&](double rate, uint32_t maxFrames) -> std::unique_ptr<Rig> {
         auto x = std::make_unique<Rig>();
-        if (!x->open(registry, r.id, rate, maxFrames, error)) return nullptr;
+        if (!x->open(registry, id, params, rate, maxFrames, error)) return nullptr;
         return x;
     };
     const double S = r.seconds;

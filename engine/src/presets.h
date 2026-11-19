@@ -18,6 +18,10 @@ struct BuiltinPreset {
 // The presets of a built-in component, in display order (empty for one without presets).
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId);
 
+// The presets a built-in's own table holds, before a merged device (fx_merged.h) gathers its old effects': the
+// merged device's list starts with these where it reuses an old id (fx::mergedPresets).
+const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId);
+
 // The preset of that name, or null.
 const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string_view name);
 

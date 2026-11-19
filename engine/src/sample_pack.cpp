@@ -23,6 +23,8 @@
 #include "caw/instrument.hpp"
 #include "component_chain.h"
 #include "fp_mode.h"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "json.h"
 #include "params.h"
 
@@ -904,6 +906,11 @@ bool parseSamplePackRequest(std::string_view json, SamplePackRequest& out, std::
             v.id = to;
         }
     }
+    // A retired effect id (FX consolidation, fx_migrate.h) renders as its merged device's variant; every parameter
+    // keeps its id, so the steps on it need no change.
+    for (PackComponent& e : r.effects)
+        if (e.library.empty()) fx::migrateLegacyId(e.id, e.params);
+    if (r.instrument.library.empty()) fx::migrateLegacyId(r.instrument.id, r.instrument.params);
     out = std::move(r);
     return true;
 }
@@ -983,7 +990,7 @@ public:
         out.latency = 0;
         for (std::size_t s = 0; s < comps.size(); ++s) {
             Stage st;
-            st.processor = reg_.create(comps[s]->id);
+            st.processor = createComponent(reg_, comps[s]->id, comps[s]->params);  // a merged device: its variant
             if (!st.processor) {
                 error = "component '" + comps[s]->id + "' could not create an instance";
                 return false;
@@ -1289,7 +1296,7 @@ std::string renderSamplePack(const SamplePackRequest& req, NativeModuleTrust tru
         return failure("'" + req.instrument.id + "' is not an instrument (one event input, one stereo audio output)");
     std::vector<const ModuleDescriptor*> descs{inst};
     for (const PackComponent& e : req.effects) {
-        const ModuleDescriptor* d = registry.find(e.id);
+        const ModuleDescriptor* d = findComponentDescriptor(registry, e.id, e.params);
         if (!isStereoEffect(*d))
             return failure("effect '" + e.id + "' must have one stereo audio input and one stereo audio output");
         descs.push_back(d);

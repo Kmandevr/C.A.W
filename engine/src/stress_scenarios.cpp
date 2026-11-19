@@ -883,20 +883,70 @@ ProjectSpec everyInstrument(const std::string& dir, std::string* error) {
 }
 
 ProjectSpec everyEffect() {
-    // Every built-in effect (as registered on 2026-11-13, keyed ones keyed by the first track), a dozen or so on
-    // each of five Flagship chord tracks, in registration order.
-    const char* const ids[] = {
-        "org.caw.stereo.balance", "org.caw.stereo.width", "org.caw.distortion", "org.caw.delay.pingpong", "org.caw.chorus",
-        "org.caw.autopan", "org.caw.bitcrush", "org.caw.channelmixer", "org.caw.clipper", "org.caw.comb",
-        "org.caw.convolver", "org.caw.deesser", "org.caw.delay.pro", "org.caw.disperser", "org.caw.doubler",
-        "org.caw.dynamics", "org.caw.ensemble", "org.caw.eq", "org.caw.eq.dj", "org.caw.filter", "org.caw.flanger",
-        "org.caw.formant", "org.caw.freqshift", "org.caw.geq", "org.caw.haas", "org.caw.imager", "org.caw.ladder",
-        "org.caw.limiter", "org.caw.multiband", "org.caw.nlfilter", "org.caw.phasedist", "org.caw.phaser",
-        "org.caw.pitchshift", "org.caw.rack.multiband", "org.caw.resonator", "org.caw.reverb.pro", "org.caw.reverser",
-        "org.caw.rotary", "org.caw.saturator", "org.caw.shimmer", "org.caw.stutter", "org.caw.tapestop", "org.caw.tilt",
-        "org.caw.trancegate", "org.caw.transient", "org.caw.tremolo", "org.caw.utility", "org.caw.vibrato",
-        "org.caw.compressor", "org.caw.ducker", "org.caw.gate", "org.caw.rack.fx", "org.caw.ringmod"};
-    const char* const keyedIds[] = {"org.caw.compressor", "org.caw.ducker", "org.caw.gate", "org.caw.ringmod"};
+    // Every built-in effect as registered on 2026-11-13 (keyed ones keyed by the first track), a dozen or so on each
+    // of five Flagship chord tracks, in that order. Since the FX consolidation (1.0.8) an old effect is its merged
+    // device's variant (fx_merged.h; its old id in the comment): one entry per old effect, the same coverage and
+    // sound. `variant` -1: a device with none.
+    struct Entry {
+        const char* id;
+        int variant;
+        bool keyed;
+    };
+    const Entry entries[] = {
+        {"org.caw.utility", 2, false},  // stereo.balance
+        {"org.caw.utility", 1, false},  // stereo.width
+        {"org.caw.drive", 0, false},  // distortion
+        {"org.caw.delay", 1, false},  // delay.pingpong
+        {"org.caw.chorus", 0, false},
+        {"org.caw.tremolo", 1, false},  // autopan
+        {"org.caw.bits", 0, false},  // bitcrush
+        {"org.caw.utility", 5, false},  // channelmixer
+        {"org.caw.drive", 2, false},  // clipper
+        {"org.caw.comb", -1, false},
+        {"org.caw.convolver", -1, false},
+        {"org.caw.deesser", -1, false},
+        {"org.caw.delay", 0, false},  // delay.pro
+        {"org.caw.disperser", -1, false},
+        {"org.caw.chorus", 2, false},  // doubler
+        {"org.caw.compressor", 1, false},  // dynamics
+        {"org.caw.chorus", 1, false},  // ensemble
+        {"org.caw.eq", 0, false},
+        {"org.caw.eq", 2, false},  // eq.dj
+        {"org.caw.filter", 0, false},
+        {"org.caw.chorus", 3, false},  // flanger
+        {"org.caw.formant", -1, false},
+        {"org.caw.shift", 1, false},  // freqshift
+        {"org.caw.eq", 1, false},  // geq
+        {"org.caw.utility", 4, false},  // haas
+        {"org.caw.utility", 3, false},  // imager
+        {"org.caw.filter", 1, false},  // ladder
+        {"org.caw.limiter", 0, false},
+        {"org.caw.multiband", -1, false},
+        {"org.caw.filter", 2, false},  // nlfilter
+        {"org.caw.drive", 3, false},  // phasedist
+        {"org.caw.phaser", 0, false},
+        {"org.caw.shift", 0, false},  // pitchshift
+        {"org.caw.rack.multiband", -1, false},
+        {"org.caw.resonator", -1, false},
+        {"org.caw.reverb", 0, false},  // reverb.pro
+        {"org.caw.reverser", -1, false},
+        {"org.caw.chorus", 5, false},  // rotary
+        {"org.caw.drive", 1, false},  // saturator
+        {"org.caw.reverb", 1, false},  // shimmer
+        {"org.caw.stutter", -1, false},
+        {"org.caw.tapestop", -1, false},
+        {"org.caw.eq", 3, false},  // tilt
+        {"org.caw.trancegate", -1, false},
+        {"org.caw.transient", 0, false},
+        {"org.caw.tremolo", 0, false},
+        {"org.caw.utility", 0, false},
+        {"org.caw.chorus", 4, false},  // vibrato
+        {"org.caw.compressor", 0, true},
+        {"org.caw.compressor", 3, true},  // ducker
+        {"org.caw.compressor", 2, true},  // gate
+        {"org.caw.rack.fx", -1, false},
+        {"org.caw.ringmod", -1, true},
+    };
     constexpr int kTracks = 5;
     ProjectSpec p;
     p.name = "Every effect";
@@ -905,10 +955,12 @@ ProjectSpec everyEffect() {
     p.modules = {{"chords", patternSource("Chords", "16", chordBar())}};
     std::vector<std::vector<ComponentSpec>> chains(kTracks);
     int k = 0;
-    for (const char* id : ids) {
-        const bool key = std::find_if(std::begin(keyedIds), std::end(keyedIds), [&](const char* x) { return std::string(x) == id; }) != std::end(keyedIds);
+    for (const Entry& e : entries) {
         const int t = k++ % kTracks;
-        chains[static_cast<size_t>(t)].push_back(key && t != 0 ? keyed(id, {}, "FX1") : component(id));
+        Values params;
+        if (e.variant >= 0) params.emplace_back("variant", e.variant);
+        chains[static_cast<size_t>(t)].push_back(e.keyed && t != 0 ? keyed(e.id, std::move(params), "FX1")
+                                                                  : component(e.id, std::move(params)));
     }
     for (int t = 0; t < kTracks; ++t)
         addInstrumentLayer(p, "FX" + std::to_string(t + 1), "org.caw.synth.flagship", {{"osc1_unison", 2}}, "chords", 0.3,

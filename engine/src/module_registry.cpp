@@ -551,6 +551,36 @@ bool ModuleRegistry::addInternal(const ModuleDescriptor& descriptor, ModuleFacto
     return true;
 }
 
+bool ModuleRegistry::replaceBuiltin(const ModuleDescriptor& descriptor, ModuleFactory factory) {
+    if (!factory || validateModuleDescriptor(descriptor) != ModuleValidation::Ok) return false;
+    for (ModuleRegistration& registration : registrations_)
+        if (registration.descriptor && registration.descriptor->id == descriptor.id) {
+            if (registration.component || registration.internal) return false;
+            registration.descriptor = &descriptor;
+            registration.factory = factory;
+            registration.destroy = &destroyWithDelete;
+            return true;
+        }
+    return add(descriptor, factory);
+}
+
+bool ModuleRegistry::retireBuiltin(std::string_view id) {
+    for (auto it = registrations_.begin(); it != registrations_.end(); ++it)
+        if (it->descriptor && it->descriptor->id == id) {
+            if (it->component || it->internal) return false;
+            retired_.push_back(std::move(*it));
+            registrations_.erase(it);
+            return true;
+        }
+    return false;
+}
+
+void ModuleRegistry::restoreRetired() {
+    for (ModuleRegistration& r : retired_)
+        if (!find(r.descriptor->id)) registrations_.push_back(std::move(r));
+    retired_.clear();
+}
+
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace,
     std::string_view legacySha256) {

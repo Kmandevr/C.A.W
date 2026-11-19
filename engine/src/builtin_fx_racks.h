@@ -18,6 +18,13 @@ inline constexpr std::string_view kMultibandRackId = "org.caw.rack.multiband";
 // Whether `id` names a rack (racks never go inside racks).
 inline bool isRackId(std::string_view id) noexcept { return id.substr(0, 13) == "org.caw.rack."; }
 
+// A rack's layout version, its last parameter (after the routes, so no route's destination index moves): 2 since
+// the FX consolidation (a child that is a merged device reusing an old id, as org.caw.utility, lists `variant` after
+// its old parameters). A rack entry without it is older: fx_migrate re-points its routes and adds it. The engine
+// writes it when it migrates a project or an entry (caw_migrate_component) and in its rack presets; not automatable.
+inline constexpr std::string_view kRackLayoutParam = "rack_layout";
+inline constexpr double kRackLayoutCurrent = 2.0;
+
 // A child's identity in its slot's `<slot>_fx` parameter: the 32-bit FNV-1a hash of the component id held to 24 bits
 // (exact as a double), never 0 (0 is an empty slot). The app computes the same (app/lib/model/racks.dart).
 uint32_t rackChildHash(std::string_view id) noexcept;

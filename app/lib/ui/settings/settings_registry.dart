@@ -184,6 +184,8 @@ const List<SettingEntry> settingEntries = [
       ['limiter', 'loud', 'ears', 'protect', 'clip', 'volume', 'hearing', 'speaker']),
   _E.more('audio.bufferTuning', _C.quality, 'Find the smallest stable buffer', 'While playing, the buffer shrinks until it plays steadily and grows after a dropout',
       ['buffer', 'latency', 'tune', 'tuner', 'automatic', 'dropout', 'glitch', 'aaudio']),
+  _E.more('audio.autoGain', _C.quality, 'Auto gain on new devices', 'Each device you add starts with its auto gain on (the ear in its header)',
+      ['auto gain', 'loudness', 'gain staging', 'level', 'ear', 'match', 'volume']),
   _E.more('audio.monoCheck', _C.quality, 'Mono check', 'Hear the mix in mono, to check what cancels; for listening only, never in exports',
       ['mono', 'stereo', 'phase', 'mix', 'check', 'sum']),
   _E.more('audio.exclusive', _C.quality, 'Exclusive mode', 'Take the device for C.A.W alone: AAudio exclusive, WASAPI exclusive',

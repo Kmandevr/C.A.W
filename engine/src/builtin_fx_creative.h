@@ -27,6 +27,13 @@ void registerPitchShift(ModuleRegistry& registry);  // builtin_fx_creative_pitch
 void registerFreqShift(ModuleRegistry& registry);   // builtin_fx_creative_freqshift.cpp
 void registerRingMod(ModuleRegistry& registry);     // builtin_fx_creative_ringmod.cpp
 
+// The pitch and frequency shifters as variants of Pitch/Shift (builtin_fx_merged_space.cpp): their own (legacy)
+// descriptors, and an instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).
+const ModuleDescriptor& pitchShiftDescriptor();
+ModuleProcessor* makePitchShiftAs(const ModuleDescriptor& variant) noexcept;
+const ModuleDescriptor& freqShiftDescriptor();
+ModuleProcessor* makeFreqShiftAs(const ModuleDescriptor& variant) noexcept;
+
 namespace creative {
 
 template <class T>

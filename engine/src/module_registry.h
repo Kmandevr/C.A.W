@@ -74,6 +74,15 @@ public:
     // An engine-internal built-in (the test signal, org.caw.test.osc): found and created by id like any other,
     // but left out of builtinComponents(), so hosts never list it in a browser or the Library.
     bool addInternal(const ModuleDescriptor& descriptor, ModuleFactory factory);
+    // A merged device (fx_merged.h) that reuses an old built-in's id: replaces that static registration in place
+    // (its place in builtinComponents() kept), else adds it. Never replaces a loaded library's component.
+    bool replaceBuiltin(const ModuleDescriptor& descriptor, ModuleFactory factory);
+    // An old built-in a merged device retired (fx_merged.h): its static registration is set aside, so it is no
+    // longer found, created or listed (a project naming it is migrated first). Never a loaded library's component.
+    bool retireBuiltin(std::string_view id);
+    // Registers the retired built-ins again, after the others (tests only: they compare a merged device's variant
+    // with the old effect it replaces, as it ran before; no host calls it).
+    void restoreRetired();
 
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
     // The library must export caw_get_component_v3 (caw_component.h); its descriptor is copied into
@@ -116,6 +125,7 @@ private:
     ModuleLoadResult openScanned(const std::string& path, ComponentFile& file, std::string_view expectedId,
                                  bool replace);
     std::vector<ModuleRegistration> registrations_;
+    std::vector<ModuleRegistration> retired_;  // retireBuiltin: never found, created or listed
 };
 
 // One descriptor as JSON for hosts (the app): identity, role, timing, ports, parameters with their

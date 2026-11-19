@@ -12,6 +12,8 @@
 #include "builtin_fx_filters.h"
 // fx-filters end
 #include "builtin_fx_racks.h"  // fx-racks
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "json.h"
 
 namespace caw {
@@ -267,7 +269,7 @@ const std::vector<BuiltinPreset>* fxDynamicsPresets(std::string_view id);  // bu
 const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
 // fx-creative end
 
-const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
+const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
@@ -283,6 +285,13 @@ const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (isRackId(componentId)) return rackPresets(componentId);
     // fx-racks end
     return kNone;
+}
+
+const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
+    // A merged device (fx_merged.h): its own presets (an id it reuses) and its old effects', migrated.
+    if (fx::findMergedDevice(componentId))
+        if (const auto* p = fx::mergedPresets(componentId)) return *p;
+    return ownBuiltinPresets(componentId);
 }
 
 const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string_view name) {

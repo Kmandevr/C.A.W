@@ -10,6 +10,7 @@
 
 #include "audio_clips.h"
 #include "builtin_fx_racks.h"
+#include "fx_merged.h"
 #include "json.h"
 #include "mod_route.h"
 #include "route_math.h"
@@ -252,6 +253,11 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " is not loaded; load it with an explicit trust choice first";
             return nullptr;
         }
+        // A merged device's port shape is its chosen variant's (a ducker's key notes, a plain variant's lack of a
+        // sidechain, per-note use), as a rack slot's is its child's own: not the first variant's the registry lists.
+        if (const fx::MergedDevice* m = registry.isBuiltin(spec.id) ? fx::findMergedDevice(spec.id) : nullptr;
+            m && !m->variants.empty())
+            d = &m->variants[fx::variantIndex(*m, spec.params)].descriptor();
         if (instrument && !isInstrument(*d)) {
             error = "native component " + quoted(spec.id) +
                     " can't be an instrument: an instrument has one event input and one stereo audio output";
@@ -297,7 +303,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         if (kind == Kind::NoteEffects)
             for (uint32_t k = 0; k < d->portCount; ++k)
                 e->noteEvents = e->noteEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
-        e->processor = registry.create(spec.id);
+        e->processor = createComponent(registry, spec.id, spec.params);  // a merged device: its variant's class
         chain->foreign_ = chain->foreign_ || registry.isLoadedComponent(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
@@ -314,8 +320,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
                 error = "native component " + quoted(spec.id) + ": " + why;
                 return nullptr;
             }
-            e->structure = rackStructure(spec);
         }
+        e->structure = componentStructure(spec);  // a rack's children, a merged device's variant
         const ModuleDescriptor& own = e->processor->descriptor();  // lives as long as the processor
         const uint32_t count = own.parameterCount;
         e->resolvers.resize(count);
@@ -343,6 +349,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             if (k < 0 && spec.lenient) continue;  // a rebuild dropped the parameter
             // A rack's value for a child its slot no longer holds (`s2.cutoff` after s2 changed): left over, ignored.
             if (k < 0 && !e->structure.empty() && name.find('.') != std::string::npos) continue;
+            // A merged device's value for another variant (`semitones` after Pitch became Frequency): left over too.
+            if (k < 0 && isOtherVariantParameter(spec.id, name)) continue;
             if (k < 0) {
                 error = "native component " + quoted(spec.id) + " has no parameter " + quoted(name);
                 return nullptr;
@@ -358,6 +366,9 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         const bool bypass = spec.bypass;
         e->bypass.store(bypass, std::memory_order_relaxed);
         e->mix = bypass ? 0.0 : 1.0;
+        // Auto gain is a track's or the master's effect chain's: an instrument, per-note FX and modulators ignore it.
+        e->autoGain.store(spec.autoGain && kind == Kind::Effects, std::memory_order_relaxed);
+        e->matcher.prepare(sampleRate);
         // Prepared here, on the control thread: the audio thread only processes.
         if (!e->processor->activate(sampleRate, kMaxFrames)) {
             error = "native component " + quoted(spec.id) + " could not prepare for playback";
@@ -398,7 +409,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
 bool ComponentChain::sameComponents(const std::vector<ComponentSpec>& specs, double sampleRate) const noexcept {
     if (specs.size() != entries_.size() || sampleRate != sampleRate_) return false;
     for (std::size_t i = 0; i < specs.size(); ++i)
-        if (specs[i].id != entries_[i]->id || rackStructure(specs[i]) != entries_[i]->structure) return false;
+        if (specs[i].id != entries_[i]->id || componentStructure(specs[i]) != entries_[i]->structure) return false;
     return true;
 }
 
@@ -437,6 +448,7 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
         }
         e.generation.fetch_add(1, std::memory_order_release);  // after the values
         e.bypass.store(specs[i].bypass, std::memory_order_relaxed);
+        e.autoGain.store(specs[i].autoGain && effectChain(), std::memory_order_relaxed);
     }
 }
 
@@ -446,6 +458,9 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
     const int k = parameterIndex(e, parameterId);
     if (k < 0) return false;
     const double v = constrainParameter(e.processor->descriptor().parameters[k], value);
+    // A merged device's `variant` is structural: another one is a rebuild (a project update), never a value.
+    if (parameterId == fx::kVariantParam && !e.structure.empty() && fromBits(e.held[k].load(std::memory_order_relaxed)) != v)
+        return false;
     e.held[k].store(toBits(v), std::memory_order_relaxed);
     e.touches[k].fetch_add(1, std::memory_order_release);  // after the value: the audio thread reads it after this
     e.generation.fetch_add(1, std::memory_order_release);
@@ -455,6 +470,29 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
 bool ComponentChain::setBypass(std::size_t index, bool bypass) noexcept {
     if (index >= entries_.size()) return false;
     entries_[index]->bypass.store(bypass, std::memory_order_relaxed);
+    return true;
+}
+
+bool ComponentChain::setAutoGain(std::size_t index, bool on) noexcept {
+    if (index >= entries_.size() || !effectChain()) return false;
+    entries_[index]->autoGain.store(on, std::memory_order_relaxed);
+    return true;
+}
+
+bool ComponentChain::autoGainDb(std::size_t index, float& db) const noexcept {
+    if (index >= entries_.size()) return false;
+    db = entries_[index]->autoGain.load(std::memory_order_relaxed)
+             ? entries_[index]->autoGainDb.load(std::memory_order_relaxed)
+             : 0.0f;
+    return true;
+}
+
+bool ComponentChain::readSlotMeter(std::size_t index, float& peakL, float& peakR, bool& clipped) const noexcept {
+    if (index >= entries_.size()) return false;
+    const Entry& e = *entries_[index];
+    peakL = e.peakL.exchange(0.0f, std::memory_order_relaxed);
+    peakR = e.peakR.exchange(0.0f, std::memory_order_relaxed);
+    clipped = e.clipped.exchange(false, std::memory_order_relaxed);
     return true;
 }
 
@@ -482,6 +520,7 @@ std::vector<ComponentSpec> ComponentChain::currentSpecs() const {
         for (uint32_t k = 0; k < d.parameterCount; ++k)
             specs[i].params.emplace_back(std::string(d.parameters[k].id), fromBits(e.held[k].load(std::memory_order_relaxed)));
         specs[i].bypass = e.bypass.load(std::memory_order_relaxed);
+        specs[i].autoGain = e.autoGain.load(std::memory_order_relaxed);
         if (states[i].ok && !states[i].data.empty()) {
             specs[i].hasState = true;
             
@@ -743,6 +782,15 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
     return ok;
 }
 
+// Audio thread: raises a slot's output meter by this block (one writer; a reader's exchange may lose at most this
+// block's raise, never a later one).
+void ComponentChain::meterSlot(Entry& e, const float* left, const float* right, uint32_t m) noexcept {
+    const float l = peakAbs(left, m), r = peakAbs(right, m);
+    if (l > e.peakL.load(std::memory_order_relaxed)) e.peakL.store(l, std::memory_order_relaxed);
+    if (r > e.peakR.load(std::memory_order_relaxed)) e.peakR.store(r, std::memory_order_relaxed);
+    if (l > 1.0f || r > 1.0f) e.clipped.store(true, std::memory_order_relaxed);
+}
+
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
     clean_ = false;  // processors run below (see reset())
@@ -770,8 +818,24 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             const PartScope automation(parts, Part::Automation);
             resolveEntry(e, index, m, time, playing, newPlay);
         }
+        // Auto gain: turned on, or a new Play, starts its matcher's analysis from 0 dB (a render from Play repeats);
+        // turned off, its trim ramps to unity. Either way the gain heard fades over 10 ms (AutoGainMatcher), and the
+        // matcher runs while it does.
+        const bool autoGain = e.autoGain.load(std::memory_order_relaxed);
+        if (autoGain && (!e.autoGainWas || newPlay)) {
+            e.matcher.restart();
+            e.autoGainDb.store(0.0f, std::memory_order_relaxed);
+        } else if (!autoGain && e.autoGainWas) {
+            e.matcher.release();
+            e.autoGainDb.store(0.0f, std::memory_order_relaxed);
+        }
+        e.autoGainWas = autoGain;
+        const bool matching = !notes_ && e.matcher.active();
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
-        if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
+        if (e.mix == 0.0 && target == 0.0) {  // bypassed: not run, input passes on untouched
+            meterSlot(e, left, right, m);
+            continue;
+        }
         assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
         if (e.mix == 0.0) e.processor->reset();  // back from a bypass: no audio from before it
         // Asleep (fallen silent) and still nothing coming in: not run. Its output is silence, which is already
@@ -780,7 +844,18 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         // A keyed effect hears its key only in the chunk the sources wrote it (else silence and no notes).
         const KeyInput* key = e.key && time && time->chunk >= 0 && e.key->chunk == time->chunk ? e.key.get() : nullptr;
         const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0) || (e.noteEvents && noteEventCount_ > 0);
-        if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
+        // A key that sounds wakes it too (a ducker keeps following its key through a gap in its input).
+        const bool keyHeard = key && (peakAbs(key->l, m) != 0.0f || peakAbs(key->r, m) != 0.0f);
+        if (e.asleep && on && !events && !keyHeard &&
+            (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) {
+            // Its matcher hears these frames' silence as if the effect had run, so the trim doesn't depend on the
+            // host's block size.
+            if (matching) {
+                e.matcher.advanceSilence(m);
+                if (autoGain) e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
+            }
+            continue;
+        }
         e.asleep = false;
         scope.ran = true;
         std::copy_n(left, m, stageL_.data());
@@ -859,6 +934,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
         sanitize(left, m);
         sanitize(right, m);
+        if (matching) {  // after the effect, before its bypass crossfade
+            e.matcher.process(stageL_.data(), stageR_.data(), left, right, m);
+            if (autoGain) e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
+        }
         // Only a component that says so sleeps: one put to sleep by its declared tail alone would fall asleep on a
         // block boundary with its timed state (an LFO, a control grid) frozen there, and wake differently for
         // each device buffer size than in an export.
@@ -871,6 +950,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
                 right[i] = stageR_[i] + (right[i] - stageR_[i]) * w;
             }
         }
+        meterSlot(e, left, right, m);
     }
     if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
     noteEvents_ = nullptr;  // per-note FX: set again before each call

@@ -91,10 +91,13 @@ void main() {
 
 /// Each editor's ceilings: whether it has motion, render objects painted in the stopped and playing second, and
 /// widgets rebuilt by 20 steps of its first parameter and of its first knob (measured in docs/performance.md).
+// The device shell (2026-11-18) puts its header and footer (Mix, Output: a second knob of the same value) on every
+// page, so a step that rebuilds the page (EQ `b1_on`, ping-pong `mode`) rebuilds them too: about 140 widgets a step.
 const _ceilings = <String, ({bool motion, int stoppedPainted, int playingPainted, int firstBuilds, int knobBuilds})>{
-  'org.caw.eq': (motion: false, stoppedPainted: 10, playingPainted: 830, firstBuilds: 12400, knobBuilds: 3800),
+  'org.caw.eq': (motion: false, stoppedPainted: 10, playingPainted: 830, firstBuilds: 16800, knobBuilds: 3800),
   'org.caw.compressor': (motion: false, stoppedPainted: 10, playingPainted: 500, firstBuilds: 1200, knobBuilds: 1200),
-  'org.caw.delay.pingpong': (motion: true, stoppedPainted: 10, playingPainted: 1560, firstBuilds: 7950, knobBuilds: 1720),
+  'org.caw.delay.pingpong': (motion: true, stoppedPainted: 10, playingPainted: 1560, firstBuilds: 12300, knobBuilds: 1720),
   'org.caw.phaser': (motion: true, stoppedPainted: 10, playingPainted: 1520, firstBuilds: 2050, knobBuilds: 1220),
-  'org.caw.synth.flagship': (motion: true, stoppedPainted: 10, playingPainted: 270, firstBuilds: 16100, knobBuilds: 1240),
+  // The flagship opens on its Oscillators panel (a phone): no modulated knob or moving drawing there, so no motion.
+  'org.caw.synth.flagship': (motion: false, stoppedPainted: 10, playingPainted: 270, firstBuilds: 16100, knobBuilds: 1240),
 };

@@ -1,11 +1,14 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Log
 
+- 2026-11-19: 1.0.8-alpha.1 prepared (the effects release): the merged effects open old projects as their merged device (file version 7); one page per merged effect with mode cards and a centrepiece (Dynamics and Drive, EQ and Filter, Space, Modulation, Utility and Pitch); the Compressor's Duck; per-slot auto gain and output meters (C API 39); the one-screen Flagship; family colours as the approved plan; silent: the engine's patch model.
+- 2026-11-19: 1.0.8 engine review fixes: auto gain ramps its trim to unity over 10 ms when turned off and from its old gain at a new Play, advances through a sleeping effect (block-size independent) and is ignored by per-note FX and instruments; a keyed effect stays awake while its key sounds (Duck no longer pops in after a gap), Duck ramps Output and Mix; patches cap delay lines at 64 MiB and chain components at 256, and a kept module carries its values ([engine](engine.md)).
+- 2026-11-18: the device shell (1.0.8, owner-approved plan): FX chain rows that fold with Collapse all, one header (power, ‹ preset › ★, A/B with hold to copy, the auto gain ear, ⋯ copy/paste/randomize/undo history/reset), the knob's hold menu with React to…, the footer meter and live preset Preview ([app](app.md), Device editors); per-slot meters and auto gain wait for the engine (`DeviceSlotAudio`).
 - 2026-11-18: 1.0.7-alpha.1 prepared (the safety release: the pre-load scan, declared needs, the trust sheet; silent: general routing and the Hub link); the Hub goes into use with 1.1.0 ([decisions](decisions.md)).
 - 2026-11-18: the pre-load scan (engine, C API 37, `caw scan`): every native component is scanned before it loads and blocked on an undeclared capability; declarations embedded in the binary; the Hub's update channels and a single download of an update ([decisions](decisions.md), PR #254).
 - 2026-11-18: 1.0.7 started: the Hub's channels and download notifications, the pre-load scan and its findings in the trust sheet decided ([decisions](decisions.md)).

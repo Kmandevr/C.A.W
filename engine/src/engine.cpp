@@ -1,5 +1,7 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "audio_clips.h"
 
 #include "presets.h"
@@ -1212,6 +1214,12 @@ std::string Engine::nativeComponentsJson() {
         std::string one = moduleDescriptorJson(*d);
         std::string head = first ? "{\"builtin\":true," : ",{\"builtin\":true,";
         if (!builtinPresets(d->id).empty()) head += "\"presets\":" + builtinPresetsJson(d->id) + ",";
+        if (const fx::MergedDevice* m = fx::findMergedDevice(d->id)) {  // every variant's own descriptor
+            head += "\"variants\":[";
+            for (size_t v = 0; v < m->variants.size(); ++v)
+                head += (v ? "," : "") + moduleDescriptorJson(m->variants[v].descriptor());
+            head += "],";
+        }
         json += head + one.substr(1);
         first = false;
     }
@@ -1224,7 +1232,11 @@ std::string Engine::nativeComponentsJson() {
 
 std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
-    return nativeModules_.create(id);
+    // A retired id makes its merged device's variant (fx_migrate.h), as a project naming it plays.
+    std::string own = id;
+    std::vector<std::pair<std::string, double>> params;
+    if (nativeModules_.find(id) || !fx::migrateLegacyId(own, params)) return nativeModules_.create(id);
+    return createComponent(nativeModules_, own, params);
 }
 
 void Engine::setQuality(int quality) noexcept {
@@ -1277,6 +1289,13 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 ++it;
             }
         }
+        return setProjectImpl(migrated, offline);
+    }
+    // The effects merged into one device each (FX consolidation, 1.0.8, fx_migrate.h): an old id plays its merged
+    // device's variant with its values moved, in every component list and rack, and its lanes and links follow.
+    if (fx::hasLegacyEffects(p)) {
+        ProjectSpec migrated = p;
+        fx::migrateLegacyEffects(migrated);
         return setProjectImpl(migrated, offline);
     }
     std::lock_guard<std::mutex> lock(ctl_);
@@ -2404,6 +2423,29 @@ int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, flo
     ComponentChain* chain = ctlComponentChain(layerId, index);
     if (!chain) return -1;
     return chain->readDisplay(index, out, max);
+}
+
+bool Engine::setComponentAutoGain(const std::string& layerId, uint32_t index, bool on) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    if (index == kInstrumentIndex || (index & kNoteComponentFlag)) return false;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->setAutoGain(index, on);
+}
+
+int32_t Engine::componentAutoGain(const std::string& layerId, uint32_t index, float& db) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    if (index == kInstrumentIndex || (index & kNoteComponentFlag)) return -1;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->autoGainDb(index, db) ? 1 : -1;
+}
+
+int32_t Engine::componentMeter(const std::string& layerId, uint32_t index, float& peakL, float& peakR, bool& clipped) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag)) return -1;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->readSlotMeter(index, peakL, peakR, clipped) ? 1 : -1;
 }
 
 bool Engine::setModulatorParam(const std::string& modulatorId, const std::string& param, double value) {

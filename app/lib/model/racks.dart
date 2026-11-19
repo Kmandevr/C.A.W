@@ -69,7 +69,8 @@ final Map<String, NativeComponentInfo> _expanded = {};
 NativeComponentInfo rackInfo(NativeComponentInfo base, Map<String, double> params, Map<String, NativeComponentInfo> catalog) {
   final slots = rackSlots(base.id);
   final children = [for (final s in slots) rackChildId(params, s, catalog)];
-  final key = '${base.id}|${identityHashCode(base)}|${identityHashCode(catalog)}|${children.join(',')}';
+  final key = '${base.id}|${identityHashCode(base)}|${identityHashCode(catalog)}|'
+      '${[for (var i = 0; i < slots.length; i++) '${children[i]}:${params['${slots[i].name}.variant'] ?? 0}'].join(',')}';
   final hit = _expanded[key];
   if (hit != null) return hit;
   if (_expanded.length > 64) _expanded.clear();
@@ -77,7 +78,8 @@ NativeComponentInfo rackInfo(NativeComponentInfo base, Map<String, double> param
   final own = firstRoute < 0 ? base.parameters : base.parameters.sublist(0, firstRoute);
   final out = <ComponentParameterInfo>[...own];
   for (var i = 0; i < slots.length; i++) {
-    final child = children[i] == null ? null : catalog[children[i]];
+    // A merged child (FX consolidation): the parameters of the variant its `<slot>.variant` chooses.
+    final child = children[i] == null ? null : catalog[children[i]]?.forValues(params, prefix: '${slots[i].name}.');
     if (child == null) continue;
     for (final p in child.parameters) {
       out.add(ComponentParameterInfo(id: slots[i].param(p.id), name: '${slots[i].label} ${p.label}', unit: p.unit,
@@ -113,6 +115,26 @@ Map<String, double> rackValuesWithSlot(DeviceTarget rack, RackSlot slot, String?
   values[slot.fxId] = childId == null ? 0 : rackChildHash(childId).toDouble();
   values[slot.onId] = 1;
   return _repointRoutes(before, rackInfo(base, values, catalog), values);
+}
+
+/// The rack's values with [slot]'s child's own values replaced by [childValues] (unprefixed; a merged child's variant
+/// change, variant_edit.dart): its switch and identity stay, and every route keeps pointing at the same knob unless it
+/// pointed at one of the child's knobs not in [kept] (a knob whose units changed), which is cleared.
+Map<String, double> rackValuesWithChildValues(DeviceTarget rack, RackSlot slot, Map<String, double> childValues,
+    {Set<String> kept = const {}}) {
+  final use = rack.use, before = rack.info;
+  final catalog = rack.state.componentCatalog.value;
+  final base = rack.componentId == null ? null : rack.state.componentInfo(rack.componentId!);
+  if (use == null || before == null || base == null) return use?.params ?? const {};
+  final values = Map<String, double>.of(use.params)..removeWhere((k, _) => k.startsWith('${slot.name}.'));
+  for (final e in childValues.entries) {
+    values[slot.param(e.key)] = e.value;
+  }
+  final rename = <String, String>{
+    for (final p in before.parameters)
+      if (p.id.startsWith('${slot.name}.') && !kept.contains(p.id.substring(slot.name.length + 1))) p.id: '\u0000reset',
+  };
+  return _repointRoutes(before, rackInfo(base, values, catalog), values, rename: rename);
 }
 
 /// Moves the child in [from] to [to] (both on one rack), with its values; routes follow it.
@@ -172,6 +194,7 @@ void setRackValues(DeviceTarget rack, Map<String, double> values) {
   rack.state.endUndoStep();
   rack.state.editLayer(layer, (_) {
     use.params = Map<String, double>.of(values);
+    use.legacyRack = false;  // edited in this build: today's layout (saved with rack_layout)
     use.state = null;  // the children's states belonged to the old structure
     use.preset = null;
   });
@@ -192,7 +215,8 @@ class RackChildTarget extends DeviceTarget {
   String? get componentId => childId;
 
   @override
-  NativeComponentInfo? get info => state.componentInfo(childId);
+  NativeComponentInfo? get info =>
+      state.componentInfo(childId)?.forValues(rack.use?.params ?? const {}, prefix: '${rackSlot.name}.');
 
   @override
   String get label => state.componentLabel(childId);

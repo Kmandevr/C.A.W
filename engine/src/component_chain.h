@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "auto_gain.h"
 #include "engine_parts.h"
 #include "tempo_map.h"
 #include "module_registry.h"
@@ -219,6 +220,18 @@ public:
     // False for an index or parameter id the chain does not have, or a non-finite value.
     bool setValue(std::size_t index, const std::string& parameterId, double value) noexcept;
     bool setBypass(std::size_t index, bool bypass) noexcept;
+    // Per-slot auto gain (1.0.8, auto_gain.h): a trim after component `index` matching its output's short-term
+    // loudness to its input's, applied before its bypass crossfade (so a bypassed slot plays its input untrimmed).
+    // Off by default; the project's "auto_gain" sets it at build and on every update. Only an effect chain (build())
+    // has it: an instrument's, per-note FX's and modulators' chains ignore "auto_gain" and refuse setAutoGain.
+    // Turned off while playing, the trim ramps to unity over 10 ms first (no click). Control thread: false for an
+    // index the chain does not have. Any thread: the trim now in dB (0 while off), or false for no such index.
+    bool setAutoGain(std::size_t index, bool on) noexcept;
+    bool autoGainDb(std::size_t index, float& db) const noexcept;
+    // Per-slot output meter (1.0.8): each side's peak (linear) of what component `index` passes on (after its trim and
+    // bypass crossfade) since the last read, and whether any sample went over full scale (|x| > 1) since then. Any
+    // thread but the audio thread; lock-free; reading resets them. False for no such index.
+    bool readSlotMeter(std::size_t index, float& peakL, float& peakR, bool& clipped) const noexcept;
     // Control thread: each component's state as save_state writes it, in chain order. Components
     // must allow save_state while they process (the component interface's thread rule).
     struct SavedState {
@@ -294,13 +307,22 @@ private:
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).
         bool asleep = false;
-        std::string structure;          // a rack's children (rackStructure; empty for anything else)
+        std::string structure;          // a rack's children or a merged device's variant (componentStructure; empty for anything else)
         std::unordered_map<std::string_view, int> index;  // parameter id to index (ids live in the descriptor)
         std::unique_ptr<KeyInput> key;  // a keyed effect's sidechain (null: not keyed)
         bool keyEvents = false;         // ... and it takes the key's notes
         bool noteEvents = false;        // per-note FX: it has an event input (its note's events)
+        // Auto gain (setAutoGain): the flag, the trim now (audio thread writes), and the matcher (audio thread).
+        std::atomic<bool> autoGain{false};
+        std::atomic<float> autoGainDb{0.0f};
+        bool autoGainWas = false;  // audio thread: on at the last block (turning on restarts it, off releases it)
+        AutoGainMatcher matcher;
+        // The slot's output meter (readSlotMeter): peaks since the last read, raised by the audio thread.
+        mutable std::atomic<float> peakL{0.0f}, peakR{0.0f};
+        mutable std::atomic<bool> clipped{false};
     };
     ComponentChain() = default;
+    static void meterSlot(Entry& e, const float* left, const float* right, uint32_t m) noexcept;
     int parameterIndex(const Entry& e, const std::string& id) const noexcept { return parameterIndex(e, std::string_view(id)); }
     int parameterIndex(const Entry& e, std::string_view id) const noexcept;
     // Audio thread: entry `index`'s parameters for this block (lanes, ramps, touches), into e.values.
@@ -309,6 +331,7 @@ private:
     const ParameterValue* modulated(const Entry& e, std::size_t index, uint32_t m, const ChainTime* time) noexcept;
 
     enum class Kind : uint8_t { Effects, Instrument, Modulators, NoteEffects };
+    bool effectChain() const noexcept { return !notes_ && !modulators_ && !noteFx_; }
     static std::unique_ptr<ComponentChain> make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
                                                 double sampleRate, Kind kind, std::string& error);
 

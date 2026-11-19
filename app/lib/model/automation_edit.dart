@@ -230,13 +230,13 @@ extension AutomationEdits on AppState {
         final use = layer.instrument;
         if (use == null) return null;
         return use.params[t.name] ??
-            componentInfo(use.id)?.parameters.where((p) => p.id == t.name).firstOrNull?.defaultValue ?? 0;
+            useInfo(use)?.parameters.where((p) => p.id == t.name).firstOrNull?.defaultValue ?? 0;
       case 'component':
         final i = t.component ?? -1;
         if (i < 0 || i >= layer.components.length) return null;
         final use = layer.components[i];
         return use.params[t.name] ??
-            componentInfo(use.id)?.parameters.where((p) => p.id == t.name).firstOrNull?.defaultValue ?? 0;
+            useInfo(use)?.parameters.where((p) => p.id == t.name).firstOrNull?.defaultValue ?? 0;
     }
     return null;
   }

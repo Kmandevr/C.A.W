@@ -8,6 +8,7 @@
 
 #include "caw/library/eq.hpp"
 #include "caw/library/spectrum.hpp"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0). The 3-band EQ splits with Linkwitz-Riley 4th-order crossovers (two
 // Butterworth stages each; Linkwitz, "Active crossover networks for noncoincident drivers", JAES 1976) and an
@@ -77,7 +78,7 @@ const ModuleDescriptor& eq3Descriptor() {
     return d;
 }
 
-class Eq3 final : public EffectBase {
+class Eq3 : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return eq3Descriptor(); }
 
@@ -195,7 +196,7 @@ const ModuleDescriptor& tiltDescriptor() {
 // The tilt is the parametric EQ's Tilt band (eq.hpp: a high shelf at the pivot, the whole curve down by half the
 // tilt): `tilt` dB from the lows to the highs, 0 dB at the pivot, steeper with Q. A channel change fades the
 // filter out and back in (5 ms) with a clean state.
-class TiltEq final : public EffectBase {
+class TiltEq : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return tiltDescriptor(); }
 
@@ -313,7 +314,7 @@ const ModuleDescriptor& geqDescriptor() {
     return d;
 }
 
-class GraphicEq final : public EffectBase {
+class GraphicEq : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return geqDescriptor(); }
 
@@ -459,6 +460,15 @@ private:
 ModuleProcessor* makeGeq() noexcept { return new (std::nothrow) GraphicEq(); }
 
 }  // namespace
+
+// The old effect as a variant of a merged device (builtin_fx_merged_eqfilter.cpp, fx_merged.h AsVariant): its own
+// (legacy) descriptor, and an instance of the same class under a variant's descriptor.
+const ModuleDescriptor& legacyGeqDescriptor() { return geqDescriptor(); }
+ModuleProcessor* makeGeqAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<GraphicEq>(variant); }
+const ModuleDescriptor& legacyEq3Descriptor() { return eq3Descriptor(); }
+ModuleProcessor* makeEq3As(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Eq3>(variant); }
+const ModuleDescriptor& legacyTiltDescriptor() { return tiltDescriptor(); }
+ModuleProcessor* makeTiltAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<TiltEq>(variant); }
 
 void registerFilterEqs(ModuleRegistry& registry) {
     registry.add(eq3Descriptor(), &makeEq3);

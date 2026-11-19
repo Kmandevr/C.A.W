@@ -132,6 +132,15 @@ public:
     // at most `max` floats into out; the count, 0 when it has none (or the control thread is busy: it never
     // waits), -1 when there is no such component. Any thread but the audio thread.
     int32_t componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max);
+    // Per-slot auto gain (1.0.8, API 39; ComponentChain::setAutoGain): turns a playing effect's loudness-matching trim
+    // on or off (a later project update sets it again from "auto_gain"). False for no such effect (the instrument and
+    // per-note FX have none). autoGainDb: the trim now (0 while off); never waits (false while busy or none).
+    bool setComponentAutoGain(const std::string& layerId, uint32_t index, bool on);
+    // 1 with the trim, 0 busy (try again), -1 no such effect.
+    int32_t componentAutoGain(const std::string& layerId, uint32_t index, float& db);
+    // Per-slot output meter (1.0.8, API 39; ComponentChain::readSlotMeter): read and reset. 1, 0 busy, -1 none.
+    // The instrument (kInstrumentIndex) has one too.
+    int32_t componentMeter(const std::string& layerId, uint32_t index, float& peakL, float& peakR, bool& clipped);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // A send while it plays (send `index` of the layer's project "sends"): its level (linear, 0..+12 dB), pre- or
     // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets

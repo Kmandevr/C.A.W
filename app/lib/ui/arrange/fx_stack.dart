@@ -1,5 +1,6 @@
 // The FX tab: a track's FX chain like REAPER's (its instrument first, then its native C++ effects), built-ins as their
 // plugin UIs inline and the rest as knob cards, and a Routing view.
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -173,6 +174,42 @@ class _FxStackState extends State<FxStack> {
   /// The selected card: ('native' | 'instrument', index).
   (String, int)? _selected;
 
+  /// A row's key in the open/collapsed UI state (Settings.fxCollapsed): its track, slot and component.
+  String _rowKey((String, int) slot) {
+    final use = slot.$1 == 'instrument' ? layer.instrument : layer.components[slot.$2];
+    return '${layer.id}/${slot.$1 == 'instrument' ? -1 : slot.$2}/${use?.id ?? ''}';
+  }
+
+  bool _open((String, int) slot) => s.settings.fxRowOpen(s.project.id, _rowKey(slot));
+
+  void _setOpen((String, int) slot, bool open) {
+    final pruned = _prune();
+    if (!s.settings.setFxRowOpen(s.project.id, _rowKey(slot), open) && !pruned) return;
+    setState(() {});
+    unawaited(s.settings.save());
+  }
+
+  /// Drops the keys of this track's rows that are gone (a removed device, a shorter chain) and of tracks the project
+  /// no longer has, so the saved keys keep to rows that exist.
+  bool _prune() {
+    final rows = {for (final slot in _slots) _rowKey(slot)};
+    final others = {for (final l in s.project.layers) if (l.id != layer.id) '${l.id}/', '$masterLayerId/'};
+    return s.settings.pruneFxRows(s.project.id, (k) => k.startsWith('${layer.id}/')
+        ? rows.contains(k) : others.any(k.startsWith));
+  }
+
+  /// Collapse all (any row open) or open all (every row collapsed): the toolbar's button.
+  void _foldAll() {
+    final open = !_slots.any(_open);
+    var changed = _prune();
+    for (final slot in _slots) {
+      changed = s.settings.setFxRowOpen(s.project.id, _rowKey(slot), open) || changed;
+    }
+    if (!changed) return;
+    setState(() {});
+    unawaited(s.settings.save());
+  }
+
   AppState get s => widget.state;
   LayerDoc get layer => widget.layer;
 
@@ -217,6 +254,15 @@ class _FxStackState extends State<FxStack> {
     Text(_routing ? 'ROUTING' : 'FX STACK', style: const TextStyle(
       color: Neon.dim, fontSize: 10, letterSpacing: 1.3, fontWeight: FontWeight.w800)),
     const Spacer(),
+    if (!_routing && _slots.isNotEmpty) Builder(builder: (context) {
+      final any = _slots.any(_open);
+      return TextButton.icon(
+        key: const ValueKey('fx-collapse-all'),
+        style: TextButton.styleFrom(foregroundColor: Neon.dim, visualDensity: VisualDensity.compact),
+        onPressed: _foldAll,
+        icon: Icon(any ? Icons.unfold_less : Icons.unfold_more, size: 18),
+        label: Text(any ? 'Collapse all' : 'Open all', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)));
+    }),
     if (!isMasterLayer(layer)) IconButton(
       key: const ValueKey('fx-routing-toggle'),
       tooltip: _routing ? 'FX stack' : 'Routing',
@@ -252,6 +298,7 @@ class _FxStackState extends State<FxStack> {
         KeyedSubtree(key: _cardKey(('instrument', 0)), child: _NativeEffectCard(
           key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
           instrument: true, selected: _selected == ('instrument', 0), keyFocus: _keys.hasFocus, glow: glow,
+          open: _open(('instrument', 0)), onOpenChanged: (o) => _setOpen(('instrument', 0), o),
           onSelect: () => setState(() => _selected = ('instrument', 0)))),
       ] else ...[
         const _GroupLabel('INSTRUMENT', null, note: 'Nothing plays this track\'s notes yet'),
@@ -280,6 +327,7 @@ class _FxStackState extends State<FxStack> {
                 key: _cardKey(('native', i)),
                 child: _NativeEffectCard(state: s, layer: layer,
                   index: i, selected: _selected == ('native', i), keyFocus: _keys.hasFocus, glow: glow,
+                  open: _open(('native', i)), onOpenChanged: (o) => _setOpen(('native', i), o),
                   onSelect: () => setState(() => _selected = ('native', i))))),
           ],
         ),
@@ -315,8 +363,11 @@ class _GroupLabel extends StatelessWidget {
 class _FxCard extends StatelessWidget {
   const _FxCard({required this.index, required this.title, required this.color, required this.glow,
     required this.selected, required this.onSelect, required this.onMenu, required this.body,
-    this.subtitle, this.onTitle, this.actions = const [], this.dimmed = false, this.titleKey});
+    this.subtitle, this.onTitle, this.actions = const [], this.dimmed = false, this.titleKey, this.open = true});
   final int index;
+
+  /// Collapsed: the title row only.
+  final bool open;
   final String title;
   final String? subtitle;
   final Color color, glow;
@@ -370,7 +421,7 @@ class _FxCard extends StatelessWidget {
                 )),
                 ...actions,
               ])),
-              body,
+              DeviceGrow(child: open ? body : const SizedBox(width: double.infinity)),
             ]),
           )),
         ),
@@ -387,8 +438,13 @@ Widget _iconAction({required String tooltip, required IconData icon, required Vo
 /// A native component's card: one of the track's C++ effects, or (with [instrument]) its C++ instrument.
 class _NativeEffectCard extends StatelessWidget {
   const _NativeEffectCard({super.key, required this.state, required this.layer, required this.index,
-    required this.selected, required this.glow, required this.onSelect, this.instrument = false, this.keyFocus = false});
+    required this.selected, required this.glow, required this.onSelect, this.instrument = false, this.keyFocus = false,
+    this.open = true, this.onOpenChanged});
   final AppState state;
+
+  /// The row is open (the device and its footer) or collapsed (one row); [onOpenChanged] folds it.
+  final bool open;
+  final ValueChanged<bool>? onOpenChanged;
   final LayerDoc layer;
   final int index;
   final bool selected;
@@ -421,7 +477,7 @@ class _NativeEffectCard extends StatelessWidget {
 
   Widget _card(BuildContext context) {
     final use = _use;
-    final info = state.componentInfo(use.id);
+    final info = state.useInfo(use);
     final cpp = state.cppComponentFor(use.id);
     final builtin = isBuiltinComponent(use.id) || (info?.builtin ?? false);
     final status = state.nativeEffectState(use.id);
@@ -454,7 +510,7 @@ class _NativeEffectCard extends StatelessWidget {
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);
       if (v == 'reset' && info != null) {
-        for (final p in info.parameters) {
+        for (final p in info.knobs) {
           _param(p.id, p.defaultValue);
         }
         state.commitNativeParams(layer);
@@ -482,14 +538,19 @@ class _NativeEffectCard extends StatelessWidget {
         selected: selected,
         glow: glow,
         onSelect: onSelect,
+        open: this.open,
+        onOpenChanged: onOpenChanged,
+        powerKey: bypassKey,
+        // The power button is the header's own (device shell); ⤢ only gives the device more room.
         actions: [
           _iconAction(key: openKey, tooltip: 'Open $name full screen', icon: Icons.open_in_full,
             onPressed: () => openDeviceEditor(context, state, layer, target.slot)),
-          _iconAction(key: bypassKey, tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
-            icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
-            onPressed: () => _bypass(!use.bypass)),
           // Replace… is in the header's long-press menu, leaving room for the preset on a phone.
           _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
+        ],
+        rowActions: [
+          _iconAction(key: openKey, tooltip: 'Open $name full screen', icon: Icons.open_in_full,
+            onPressed: () => openDeviceEditor(context, state, layer, target.slot)),
         ],
       );
     }
@@ -517,7 +578,11 @@ class _NativeEffectCard extends StatelessWidget {
         if (instrument) _iconAction(key: const ValueKey('fx-instrument-replace'), tooltip: 'Replace $name',
           icon: Icons.swap_horiz, onPressed: () => pickInstrument(context, state, layer)),
         _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
+        if (onOpenChanged != null) _iconAction(key: ValueKey('fx-fold-${instrument ? 'instrument' : index}'),
+          tooltip: this.open ? 'Collapse $name' : 'Open $name',
+          icon: this.open ? Icons.expand_less : Icons.expand_more, onPressed: () => onOpenChanged!(!this.open)),
       ],
+      open: this.open,
       body: _body(context, status, use, info, cpp, open),
     );
   }
@@ -560,7 +625,7 @@ class _NativeEffectCard extends StatelessWidget {
         return ValueListenableBuilder<int>(
           valueListenable: state.layerValueTick(layer.id),
           builder: (context, _, _) => Wrap(spacing: 2, runSpacing: 4, children: [
-            for (final p in info.parameters)
+            for (final p in info.knobs)
               if (p.isChoice)
                 _ChoiceParam(label: p.label, value: use.params[p.id] ?? p.defaultValue, choices: p.choices, min: p.min,
                   onChanged: (v) { _param(p.id, v); state.commitNativeParams(layer); })

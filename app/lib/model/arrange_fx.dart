@@ -101,6 +101,9 @@ extension ArrangeFx on AppState {
 
   NativeComponentInfo? componentInfo(String id) => componentCatalog.value[id];
 
+  /// The descriptor [use]'s values choose: a merged device's variant's (FX consolidation), else its component's.
+  NativeComponentInfo? useInfo(ComponentUseDoc use) => componentInfo(use.id)?.forValues(use.params);
+
   /// The project's C++ component that defines [componentId], or null (a built-in, or code that isn't in the project).
   CppComponentDoc? cppComponentFor(String componentId) =>
       project.cppComponents.where((c) => c.componentId == componentId).firstOrNull;
@@ -134,8 +137,10 @@ extension ArrangeFx on AppState {
 
   /// Adds native effect [componentId] to [layer]'s inserts (at [at], or the end). A folder has inserts only while
   /// its bus is on (a reverb bus).
-  ComponentUseDoc? addNativeEffect(LayerDoc layer, String componentId, {int? at}) =>
-      componentId.isEmpty ? null : insertNativeEffect(layer, ComponentUseDoc(componentId), at: at);
+  /// A new device starts with auto gain as Settings › Sound "Auto gain on new devices" says.
+  ComponentUseDoc? addNativeEffect(LayerDoc layer, String componentId, {int? at}) => componentId.isEmpty
+      ? null
+      : insertNativeEffect(layer, ComponentUseDoc(componentId)..autoGain = settings.autoGainNewDevices, at: at);
 
   /// Puts [use] (a new effect, or a copy of one: the FX chain's Ctrl+D) into [layer]'s inserts at [at], or the end.
   ComponentUseDoc? insertNativeEffect(LayerDoc layer, ComponentUseDoc use, {int? at}) {
@@ -178,6 +183,18 @@ extension ArrangeFx on AppState {
     final engineIndex = engineComponentIndex(layer, index);
     if (engineIndex != null) engine?.setComponentBypass(engineLayerId(layer), engineIndex, bypass);
     editLayer(layer, (l) => l.components[index].bypass = bypass);
+  }
+
+  /// Switches native effect [index]'s auto gain (the device header's ear): live in the engine, and stored in the
+  /// project (a later project update sets it again from there) as one undo step.
+  void setNativeAutoGain(LayerDoc layer, int index, bool on) {
+    if (guardFrozen(layer)) return;
+    if (index < 0 || index >= layer.components.length || layer.components[index].autoGain == on) return;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (engineIndex != null) engine?.setComponentAutoGain(engineLayerId(layer), engineIndex, on);
+    endUndoStep();
+    editLayer(layer, (l) => l.components[index].autoGain = on);
+    endUndoStep();
   }
 
   /// A knob move on native effect [index]: live in the engine at once, and kept in the project. Call

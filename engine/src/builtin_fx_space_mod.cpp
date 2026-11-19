@@ -1,5 +1,6 @@
 // The fx-space modulation effects: ensemble, doubler, vibrato, tremolo, auto-pan and rotary speaker, plus the group's shared helpers.
 #include "builtin_fx_space.h"
+#include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
 #include <cmath>
@@ -127,7 +128,7 @@ const ModuleDescriptor& ensembleDescriptor() {
 // detune in cents and the rate (a sine of depth D samples at f Hz bends the pitch by at most 2 pi f D / rate), so
 // the pitch wobble stays as set whatever the rate. Vintage adds a fast, shallow second sine to the slow one, as the
 // bucket-brigade string ensembles did; Random glides between seeded random values.
-class Ensemble final : public EffectBase {
+class Ensemble : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return ensembleDescriptor(); }
 
@@ -273,7 +274,7 @@ const ModuleDescriptor& doublerDescriptor() {
 // smooth-random LFO, as a second take's timing does), pitched a few cents off (a two-tap shifter: a steady detune
 // with none of a chorus's wobble) and panned out by `width`, the low end cut so the doubles don't muddy the centre
 // or fight it in mono. The dry stays in the middle; `mix` blends to the doubles alone.
-class Doubler final : public EffectBase {
+class Doubler : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return doublerDescriptor(); }
 
@@ -389,7 +390,7 @@ const ModuleDescriptor& vibratoDescriptor() {
 // Pitch vibrato: the whole signal through a delay swept by an LFO (no dry, by default), the sweep's depth worked
 // out from cents and rate so the pitch swings by exactly the depth at any rate (held to 12 ms). The right side's
 // LFO runs `stereo` x half a cycle behind.
-class Vibrato final : public EffectBase {
+class Vibrato : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return vibratoDescriptor(); }
 
@@ -561,7 +562,7 @@ protected:
     bool primed_ = false;
 };
 
-class Tremolo final : public TremoloBase {
+class Tremolo : public TremoloBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return tremoloDescriptor(); }
 
@@ -600,7 +601,7 @@ private:
     double depth_ = 0.6;
 };
 
-class Autopan final : public TremoloBase {
+class Autopan : public TremoloBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return autopanDescriptor(); }
 
@@ -663,7 +664,7 @@ const ModuleDescriptor& rotaryDescriptor() {
 // hear each rotor through a delay that is shortest when the rotor faces the mic (the Doppler shift, up to 0.5 ms
 // for the horn and 0.2 ms for the drum, x `doppler`) and loudest then (the horn's beam swings the level far more
 // than the drum's).
-class Rotary final : public EffectBase {
+class Rotary : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return rotaryDescriptor(); }
 
@@ -768,6 +769,21 @@ private:
 };
 
 }  // namespace
+
+// FX consolidation (fx_merged.h): the descriptors and classes the merged devices wrap as variants
+// (builtin_fx_merged_stereomod.cpp), the classes unchanged.
+const ModuleDescriptor& legacyEnsembleDescriptor() { return ensembleDescriptor(); }
+ModuleProcessor* makeEnsembleAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Ensemble>(variant); }
+const ModuleDescriptor& legacyDoublerDescriptor() { return doublerDescriptor(); }
+ModuleProcessor* makeDoublerAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Doubler>(variant); }
+const ModuleDescriptor& legacyVibratoDescriptor() { return vibratoDescriptor(); }
+ModuleProcessor* makeVibratoAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Vibrato>(variant); }
+const ModuleDescriptor& legacyRotaryDescriptor() { return rotaryDescriptor(); }
+ModuleProcessor* makeRotaryAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Rotary>(variant); }
+const ModuleDescriptor& legacyTremoloDescriptor() { return tremoloDescriptor(); }
+ModuleProcessor* makeTremoloAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Tremolo>(variant); }
+const ModuleDescriptor& legacyAutopanDescriptor() { return autopanDescriptor(); }
+ModuleProcessor* makeAutopanAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Autopan>(variant); }
 
 void registerFxSpaceMod(ModuleRegistry& registry) {
     registry.add(ensembleDescriptor(), &make<Ensemble>);

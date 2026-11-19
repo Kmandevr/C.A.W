@@ -7,6 +7,7 @@
 
 #include "caw/library/filter.hpp"
 #include "caw/library/oversample.hpp"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0). Both are zero-delay-feedback (topology-preserving transform) filters, the
 // form Zavalishin's "The Art of VA Filter Design" describes; the ladder solves its saturating feedback loop with
@@ -110,7 +111,7 @@ struct LadderChannel {
     }
 };
 
-class LadderEffect final : public EffectBase {
+class LadderEffect : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return ladderDescriptor(); }
 
@@ -278,7 +279,7 @@ struct NlChannel {
     }
 };
 
-class NonlinearFilter final : public EffectBase {
+class NonlinearFilter : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return nlDescriptor(); }
 
@@ -376,6 +377,13 @@ private:
 ModuleProcessor* makeNl() noexcept { return new (std::nothrow) NonlinearFilter(); }
 
 }  // namespace
+
+// The old effect as a variant of a merged device (builtin_fx_merged_eqfilter.cpp, fx_merged.h AsVariant): its own
+// (legacy) descriptor, and an instance of the same class under a variant's descriptor.
+const ModuleDescriptor& legacyLadderDescriptor() { return ladderDescriptor(); }
+ModuleProcessor* makeLadderAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<LadderEffect>(variant); }
+const ModuleDescriptor& legacyNlFilterDescriptor() { return nlDescriptor(); }
+ModuleProcessor* makeNlFilterAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<NonlinearFilter>(variant); }
 
 void registerLadderAndNonlinear(ModuleRegistry& registry) {
     registry.add(ladderDescriptor(), &makeLadder);

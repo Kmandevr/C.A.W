@@ -126,6 +126,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.longPress(find.byKey(const ValueKey('dknob-cutoff')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('knob-menu-mod')));  // the hold menu's Modulation (2)…
+    await tester.pumpAndSettle();
     expect(find.textContaining('MODULATION · Track'), findsOneWidget);
     final link = s.project.linksTo(_cutoff).single;
     await tester.tap(find.byKey(ValueKey('modlink-polarity-${link.id}')).last);

@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/cpp_completion.dart';
@@ -155,9 +156,10 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
   });
 
   test('every built-in in the Library is registered in the engine with those knobs', () {
-    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite.
+    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite; and fx_merged.h, which
+    // names the merged devices' `variant`.
     final src = (Directory('../engine/src').listSync().whereType<File>().map((f) => f.path)
-            .where((p) => RegExp(r'builtin_[a-z_]+\.cpp$').hasMatch(p)).toList()..sort())
+            .where((p) => RegExp(r'(builtin_[a-z_]+\.cpp|fx_merged\.h)$').hasMatch(p)).toList()..sort())
         .map((p) => File(p).readAsStringSync())
         .join('\n');
     for (final b in cppBuiltins) {
@@ -168,7 +170,11 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
     }
     // Internal components (ModuleRegistry::addInternal) play by id but are never listed, so the Library leaves them out.
     const internal = {'org.caw.downmix', 'org.caw.test.osc'};
-    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet().difference(internal);
+    // The old effect ids the merged devices retired (FX consolidation) stay in the sources (their classes are the
+    // variants) but are no built-ins of their own: the Library lists their merged devices instead.
+    final retired = {for (final v in MergedDevices.variants) if (v.oldId != v.id) v.oldId};
+    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet().difference(internal)
+        .difference(retired);
     expect(ids, cppBuiltins.map((b) => b.id).toSet(), reason: 'a built-in is missing from the Library');
   });
 

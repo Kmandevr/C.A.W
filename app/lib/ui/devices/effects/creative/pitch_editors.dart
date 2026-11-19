@@ -175,21 +175,21 @@ class FreqShiftPage extends StatelessWidget {
         caption: 'PARTIALS ≈',
         grid: false,
         readout: Builder(builder: (context) => Text('${t.value('shift') >= 0 ? '+' : ''}${t.value('shift').toStringAsFixed(1)} Hz')),
-        child: const _ShiftHero(),
+        child: const ShiftHero(),
       )),
       KnobRow(const ['shift', 'spread', 'feedback', 'delay', 'mix'], size: 50),
     ]);
   }
 }
 
-class _ShiftHero extends StatefulWidget {
-  const _ShiftHero();
+class ShiftHero extends StatefulWidget {
+  const ShiftHero({super.key});
 
   @override
-  State<_ShiftHero> createState() => _ShiftHeroState();
+  State<ShiftHero> createState() => _ShiftHeroState();
 }
 
-class _ShiftHeroState extends State<_ShiftHero> {
+class _ShiftHeroState extends State<ShiftHero> {
   bool _active = false;
   double _shift = 0, _fb = 0;
 

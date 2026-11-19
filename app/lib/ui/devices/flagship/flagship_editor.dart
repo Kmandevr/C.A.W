@@ -1,41 +1,27 @@
-// The flagship synth's editor (`org.caw.synth.flagship`, #171): three tabs like Vital's (SYNTH, EFFECTS, MATRIX), the SYNTH page's sections expanding in place.
+// The flagship synth's editor (`org.caw.synth.flagship`): one screen, Vital-style. Wide: oscillators on top, filters and effects in the middle, mod sources as tabs at the bottom. Phone portrait: three swipeable panels (Oscillators, Filters, Modulation).
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../model/device_target.dart';
+import '../../../model/mod_matrix.dart';
 import '../../motion.dart';
 import '../../theme.dart';
-import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
-import '../kit/param_watch.dart';
-import '../kit/controls.dart';
-import '../visuals/filter_curve.dart';
-import '../visuals/unison_view.dart';
-import '../visuals/wavetable_view.dart';
-import '../../../model/device_target.dart';
-import '../../../model/flagship_shapes.dart' show filterTypeNames, warpNames;
 import 'flagship_mod_fx.dart';
-import '../../pointer_input.dart';
-import 'flagship_wavetable.dart';
+import 'flagship_panels.dart';
+import 'flagship_tools.dart';
 
 const flagshipComponentId = 'org.caw.synth.flagship';
 
-/// Width from which a page lays its cards side by side.
+/// Width from which the editor is one screen; narrower, the three panels.
 const double flagshipWide = 700;
 
-/// Three tabs, as Vital has Voice, Effects and Matrix: everything that makes the sound on one page of sections
-/// that open in place (owner, 2026-11-10: "Everything doesn't need to be a separate screen"), the effects rack,
-/// and the list of every modulation.
+/// One page (owner, 2026-11-18: one cohesive screen, no accordions); the mod sources live on it.
 List<DeviceSection> flagshipSections(DeviceTarget target) => [
-  DeviceSection('synth', 'SYNTH', Icons.graphic_eq, (_) => const FlagshipSynthPage(), showsSources: true),
-  DeviceSection('fx', 'EFFECTS', Icons.auto_awesome_outlined, (_) => const FlagshipFxPage()),
-  DeviceSection('matrix', 'MATRIX', Icons.hub_outlined, (_) => const FlagshipMatrixPage()),
+  DeviceSection('synth', 'SYNTH', Icons.graphic_eq, (_) => const FlagshipPage(), showsSources: true, stripAtBottom: true),
 ];
-
-/// Knobs in rows that wrap.
-Widget knobRow(List<Widget> knobs) => Padding(
-  padding: const EdgeInsets.only(top: 4),
-  child: Wrap(spacing: 0, runSpacing: 2, children: knobs),
-);
 
 /// Plain names for the flagship's knobs (owner, 2026-11-10: no cryptic abbreviations), by parameter id suffix.
 const Map<String, String> flagshipLabels = {
@@ -45,50 +31,6 @@ const Map<String, String> flagshipLabels = {
   'resonance': 'Resonance', 'drive': 'Drive', 'keytrack': 'Key tracking', 'mix': 'Mix', 'attack': 'Attack',
   'decay': 'Decay', 'sustain': 'Sustain', 'release': 'Release',
 };
-
-/// [prefix] + each of [names] as big knobs with their plain labels.
-Widget plainKnobs(String prefix, List<String> names, {double size = 46, Map<String, String> labels = const {},
-    Color? color}) =>
-    KnobRow([for (final n in names) '$prefix$n'], size: size, color: color,
-      labels: {for (final n in names) '$prefix$n': labels[n] ?? flagshipLabels[n] ?? n});
-
-/// The SYNTH page: oscillators, filters, envelopes, LFOs and the voice, each a section that opens in place (one
-/// oscillator open to start). Wide, the oscillators, filters and modulators sit side by side.
-class FlagshipSynthPage extends StatelessWidget {
-  const FlagshipSynthPage({super.key});
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
-    final wide = box.maxWidth >= flagshipWide;
-    // Built whole (not lazily), so a source opened from the strip finds its section and scrolls to it.
-    return SingleChildScrollView(key: const ValueKey('flagship-synth'), padding: const EdgeInsets.fromLTRB(8, 8, 8, 32),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const _Group('OSCILLATORS', 'Each draws a wavetable; turn one on with its power button.'),
-      DeviceColumns(minWidth: 300, children: [for (var o = 1; o <= 3; o++) OscCard(o, initiallyOpen: wide || o == 1)]),
-      const _Group('FILTERS', 'Shape the oscillators\' tone. Drag a curve: sideways for cutoff, up for resonance.'),
-      DeviceColumns(minWidth: 340, children: [for (var f = 1; f <= 2; f++) FilterCard(f, initiallyOpen: wide || f == 1)]),
-      const FilterRoutingCard(),
-      _Group('MODULATORS', '${PointerInput.tapCap} a source chip above, then ${PointerInput.tap} knobs. Or drag the chip onto a knob.'),
-      DeviceColumns(minWidth: 320, children: const [EnvelopesCard(), LfosCard()]),
-      const VoiceCard(),
-    ]));
-  });
-}
-
-/// A small heading between a page's groups of sections, with a one-line hint.
-class _Group extends StatelessWidget {
-  const _Group(this.title, this.hint);
-  final String title, hint;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontSize: 10, letterSpacing: 1.8, fontWeight: FontWeight.w900, color: Neon.text)),
-      Text(hint, style: const TextStyle(fontSize: 10, color: Neon.dim)),
-    ]),
-  );
-}
 
 /// A row of segments with an on-dot each: picks the oscillator, filter or source shown.
 class DevicePicker extends StatelessWidget {
@@ -155,205 +97,183 @@ class LabeledRow extends StatelessWidget {
   );
 }
 
-/// One oscillator as a section: closed, its power, name and what it is set to ("Analog · 7 voices · to Filter 1");
-/// open, its wavetable (drag sideways for the position, up for the warp), the warp, level and pan, its pitch, its
-/// unison fan (drag for width and detune) and where it goes.
-class OscCard extends StatelessWidget {
-  const OscCard(this.n, {super.key, this.initiallyOpen = false});
-  final int n;
-  final bool initiallyOpen;
+/// The phone's three panels, by name.
+const flagshipPanels = ['Oscillators', 'Filters', 'Modulation'];
 
-  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
+/// The flagship's editor page: a toolbar (the phone's panel dots, Init, Random patch, What's modulating? and the
+/// keys), the screen (wide) or the three panels (narrow), and the keys strip when shown.
+class FlagshipPage extends StatefulWidget {
+  const FlagshipPage({super.key});
+
   @override
-  Widget build(BuildContext context) => watchDevice(context, _body);
-
-  Widget _body(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final p = 'osc${n}_';
-    final on = t.value('${p}on') >= 0.5;
-    String choice(String id) => formatParamValue(t.param(id), t.value(id));
-    final voices = t.value('${p}unison').round();
-    final summary = on ? '${choice('${p}table')} · $voices voice${voices == 1 ? '' : 's'} · to ${choice('${p}dest')}' : 'Off';
-    return DeviceExpandCard(
-      key: ValueKey('osc-$n'),
-      storageId: 'flagship-osc-$n',
-      title: 'OSCILLATOR $n',
-      summary: summary,
-      color: scope.accent,
-      dimmed: !on,
-      initiallyOpen: initiallyOpen,
-      leading: DevicePower('${p}on'),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        // Six long names as segments from about 440 dp; narrower, a menu.
-        LabeledRow('WAVETABLE', LayoutBuilder(builder: (context, box) =>
-            DeviceChoice('${p}table', maxSegments: box.maxWidth >= 440 ? 6 : 0))),
-        const SizedBox(height: 4),
-        // The visuals have their own watches: a knob step redraws them and the knob, not the card.
-        watchDevice(context, (_) => WavetableView(prefix: p)),
-        ImportWavetableButton(prefix: p),
-        LabeledRow('WARP', _roomy((roomy) => DeviceChoice('${p}warp', maxSegments: roomy ? 5 : 0, labels: warpNames))),
-        // With the fold warp, how it folds (#197): each unison copy, or the stack's sum once (lighter on the CPU).
-        foldSize(context, t.value('${p}warp').round() == _foldWarp && t.param('${p}fold_mode') != null
-            ? LabeledRow('FOLD', DeviceChoice('${p}fold_mode', maxSegments: 2))
-            : const SizedBox(width: double.infinity)),
-        plainKnobs(p, const ['frame', 'warp_amt', 'level', 'pan']),
-        const DeviceHeading('PITCH'),
-        plainKnobs(p, const ['octave', 'semi', 'fine'], size: 42),
-        DeviceHeading('UNISON', trailing: DeviceChoice('${p}stack', maxSegments: 0)),
-        watchDevice(context, (_) => UnisonView(prefix: p)),
-        plainKnobs(p, const ['unison', 'detune', 'spread', 'blend', 'detune_power'], size: 42),
-        LabeledRow('SENDS TO', DeviceChoice('${p}dest', labels: const ['Filter 1', 'Filter 2', 'Both', 'No filter'])),
-        DeviceFold(title: 'PHASE', child: plainKnobs(p, const ['phase', 'phase_rand'], size: 42)),
-      ]),
-    );
-  }
+  State<FlagshipPage> createState() => _FlagshipPageState();
 }
 
-/// The fold warp's index in [warpNames].
-final int _foldWarp = warpNames.indexOf('Fold');
-
-/// Five long names fit as segments from about 360 dp; narrower, a menu keeps them whole (no "Harmo…").
-Widget _roomy(Widget Function(bool roomy) b) => LayoutBuilder(builder: (context, box) => b(box.maxWidth >= 360));
-
-/// How the two filters connect (series or parallel), drawn.
-class FilterRoutingCard extends StatelessWidget {
-  const FilterRoutingCard({super.key});
-
-  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
-  @override
-  Widget build(BuildContext context) => watchDevice(context, _body);
-
-  Widget _body(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final parallel = scope.target.value('flt_routing') >= 0.5;
-    return DeviceExpandCard(
-      storageId: 'flagship-filter-routing',
-      title: 'FILTER ROUTING',
-      summary: parallel ? 'Parallel: side by side' : 'Series: filter 1, then filter 2',
-      color: scope.accent,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        Align(alignment: Alignment.centerLeft, child: DeviceChoice('flt_routing')),
-        const SizedBox(height: 6),
-        SizedBox(height: 40, child: CustomPaint(painter: _RoutingPainter(parallel, scope.accent))),
-        const SizedBox(height: 4),
-        const Text('Each oscillator picks its filter in its own section (Sends to).',
-          style: TextStyle(fontSize: 10, color: Neon.dim)),
-      ]),
-    );
-  }
-}
-
-class _RoutingPainter extends CustomPainter {
-  _RoutingPainter(this.parallel, this.color);
-  final bool parallel;
-  final Color color;
+class _FlagshipPageState extends State<FlagshipPage> {
+  final _ui = FlagshipUi();
+  final _pages = PageController();
+  int _panel = 0;
+  bool _narrow = false;
+  ValueNotifier<ModSource>? _focus;
+  Timer? _flip;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final line = Paint()
-      ..color = color.withValues(alpha: 0.7)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    void box(Rect r, String text) {
-      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(5)), Paint()..color = color.withValues(alpha: 0.15));
-      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(5)), line);
-      final tp = TextPainter(text: TextSpan(text: text, style: Neon.code(size: 9, color: Neon.text)),
-        textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, r.center - Offset(tp.width / 2, tp.height / 2));
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final f = DeviceScope.of(context).focusSource;
+    if (f != _focus) {
+      _focus?.removeListener(_focused);
+      _focus = f..addListener(_focused);
     }
+  }
 
-    final mid = size.height / 2, w = size.width;
-    if (!parallel) {
-      canvas.drawLine(Offset(0, mid), Offset(w, mid), line);
-      box(Rect.fromCenter(center: Offset(w * 0.33, mid), width: 64, height: 22), 'Filter 1');
-      box(Rect.fromCenter(center: Offset(w * 0.66, mid), width: 64, height: 22), 'Filter 2');
+  @override
+  void dispose() {
+    _flip?.cancel();
+    _focus?.removeListener(_focused);
+    _pages.dispose();
+    _ui.dispose();
+    super.dispose();
+  }
+
+  // A source opened from elsewhere (assign mode's Edit, a tab): on a phone, the Modulation panel.
+  void _focused() {
+    if (_narrow && _panel != 2) goTo(2);
+  }
+
+  /// Shows panel [i] (a phone's); nothing when everything shows at once.
+  void goTo(int i) {
+    if (!_narrow || !_pages.hasClients) return;
+    i = i.clamp(0, flagshipPanels.length - 1);
+    final d = Motion.fade(Motion.standard * 2, Motion.of(context));
+    if (d == Duration.zero) {
+      _pages.jumpToPage(i);
     } else {
-      final path = Path()
-        ..moveTo(0, mid)
-        ..lineTo(w * 0.2, mid)
-        ..moveTo(w * 0.2, 7)
-        ..lineTo(w * 0.2, size.height - 7)
-        ..moveTo(w * 0.2, 7)
-        ..lineTo(w * 0.8, 7)
-        ..moveTo(w * 0.2, size.height - 7)
-        ..lineTo(w * 0.8, size.height - 7)
-        ..moveTo(w * 0.8, 7)
-        ..lineTo(w * 0.8, size.height - 7)
-        ..moveTo(w * 0.8, mid)
-        ..lineTo(w, mid);
-      canvas.drawPath(path, line);
-      box(Rect.fromCenter(center: Offset(w * 0.5, 7), width: 64, height: 14), 'Filter 1');
-      box(Rect.fromCenter(center: Offset(w * 0.5, size.height - 7), width: 64, height: 14), 'Filter 2');
+      _pages.animateToPage(i, duration: d, curve: Curves.easeOutCubic);
     }
   }
 
+  // A source dragged to a side: the next panel that way, again every 700 ms while it stays there.
+  void _edgeEnter(int dir) {
+    _flip?.cancel();
+    _flip = Timer(const Duration(milliseconds: 350), () {
+      goTo(_panel + dir);
+      _flip = Timer.periodic(const Duration(milliseconds: 700), (_) => goTo(_panel + dir));
+    });
+  }
+
+  void _edgeLeave() {
+    _flip?.cancel();
+    _flip = null;
+  }
+
   @override
-  bool shouldRepaint(covariant _RoutingPainter o) => o.parallel != parallel || o.color != color;
-}
+  Widget build(BuildContext context) => FlagshipUiScope(ui: _ui, child: ListenableBuilder(listenable: _ui,
+    builder: (context, _) => LayoutBuilder(builder: (context, box) {
+      _narrow = box.maxWidth < flagshipWide;
+      final accent = DeviceScope.of(context).accent;
+      return Column(key: const ValueKey('flagship-synth'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SizedBox(height: 36, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Row(children: [
+          if (_narrow) ...[
+            PanelDots(count: flagshipPanels.length, index: _panel, color: accent, onPick: goTo),
+            const SizedBox(width: 6),
+            Flexible(child: Text(flagshipPanels[_panel].toUpperCase(), key: const ValueKey('flagship-panel-name'),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: Neon.text))),
+          ] else
+            const Flexible(child: Text('Drag a source\'s chip onto any knob; drag a ring to set how much.', maxLines: 1,
+              overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Neon.dim))),
+          const Spacer(),
+          FlagshipActions(ui: _ui),
+        ]))),
+        Expanded(child: _narrow ? _panels(context) : _wide(context, box.maxWidth)),
+        foldSize(context, _ui.keys ? const FlagshipKeys() : const SizedBox(width: double.infinity)),
+      ]);
+    })));
 
-/// One filter as a section: power, type, its response curve (drag: cutoff sideways, resonance up) and knobs.
-class FilterCard extends StatelessWidget {
-  const FilterCard(this.n, {super.key, this.initiallyOpen = false});
-  final int n;
-  final bool initiallyOpen;
+  /// The one screen: oscillators, then filters with their switch and the effects, then the mod sources, the matrix
+  /// and the voice. It scrolls where the window is short.
+  Widget _wide(BuildContext context, double width) {
+    final roomy = width >= 1200;
+    final k = roomy ? 40.0 : 32.0;
+    const gap = SizedBox(width: 8, height: 8);
+    return SingleChildScrollView(key: const ValueKey('flagship-wide'), padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (var o = 1; o <= 3; o++) ...[
+            if (o > 1) gap,
+            Expanded(child: OscPanel(o, knobSize: k, waveHeight: roomy ? 92 : 60)),
+          ],
+        ]),
+        gap,
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 5, child: FilterPanel(1, knobSize: k, curveHeight: roomy ? 76 : 48)),
+          const Padding(padding: EdgeInsets.only(top: 40), child: FilterRouteSwitch()),
+          Expanded(flex: 5, child: FilterPanel(2, knobSize: k, curveHeight: roomy ? 76 : 48)),
+          gap,
+          const Expanded(flex: 4, child: FlagshipFxRack()),
+        ]),
+        gap,
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Expanded(flex: 5, child: FPanel(title: 'MODULATION', child: ModSourceTabs(wide: true))),
+          gap,
+          Expanded(flex: 4, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const FPanel(title: 'MATRIX', child: FlagshipMatrixList()),
+            gap,
+            VoicePanel(knobSize: k - 2),
+          ])),
+        ]),
+      ]));
+  }
 
-  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
-  @override
-  Widget build(BuildContext context) => watchDevice(context, _body);
-
-  Widget _body(BuildContext context) {
+  /// The phone's three panels, swiped sideways; a source dragged to either side goes to the next panel.
+  Widget _panels(BuildContext context) {
     final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final p = 'flt${n}_';
-    final type = t.value('${p}type').round();
-    final on = t.value('${p}on') >= 0.5;
-    final summary = on
-        ? '${filterTypeNames.elementAtOrNull(type) ?? ''} · ${formatParamValue(t.param('${p}cutoff'), t.value('${p}cutoff'))} Hz'
-        : 'Off';
-    return DeviceExpandCard(
-      key: ValueKey('filter-$n'),
-      storageId: 'flagship-filter-$n',
-      title: 'FILTER $n',
-      summary: summary,
-      color: scope.accent,
-      dimmed: !on,
-      initiallyOpen: initiallyOpen,
-      leading: DevicePower('${p}on'),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        LabeledRow('TYPE', DeviceChoice('${p}type', maxSegments: 0)),
-        const SizedBox(height: 4),
-        watchDevice(context, (_) => FilterCurve(prefix: p)),
-        plainKnobs(p, const ['cutoff', 'resonance', 'drive', 'mix']),
-        plainKnobs(p, const ['keytrack', 'morph'], size: 42,
-          labels: {'morph': type == 8 ? 'Vowel' : (type == 7 ? 'Damping' : 'Morph')}),
-      ]),
-    );
+    Widget panel(String key, List<Widget> children) => ListView(key: ValueKey(key),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+      children: [for (final c in children) Padding(padding: const EdgeInsets.only(bottom: 8), child: c)]);
+    Widget edge(int dir) => Positioned(top: 0, bottom: 0, left: dir < 0 ? 0 : null, right: dir > 0 ? 0 : null, width: 28,
+      child: DragTarget<ModSource>(
+        key: ValueKey('flagship-edge-${dir < 0 ? 'left' : 'right'}'),
+        onWillAcceptWithDetails: (_) {
+          _edgeEnter(dir);
+          return false;
+        },
+        onLeave: (_) => _edgeLeave(),
+        builder: (context, _, _) => ValueListenableBuilder<ModSource?>(valueListenable: scope.dragging,
+          builder: (context, src, _) {
+            final can = src != null && (dir < 0 ? _panel > 0 : _panel < flagshipPanels.length - 1);
+            final c = src == null ? Neon.dim : modSourceColor(src);
+            return IgnorePointer(child: AnimatedOpacity(duration: Motion.fade(Motion.small, Motion.of(context)),
+              opacity: can ? 1 : 0, child: DecoratedBox(
+                decoration: BoxDecoration(gradient: LinearGradient(
+                  begin: dir < 0 ? Alignment.centerLeft : Alignment.centerRight,
+                  end: dir < 0 ? Alignment.centerRight : Alignment.centerLeft,
+                  colors: [c.withValues(alpha: 0.35), c.withValues(alpha: 0)])),
+                child: Icon(dir < 0 ? Icons.chevron_left : Icons.chevron_right, color: c))));
+          }),
+      ));
+    return Stack(children: [
+      PageView(
+        key: const ValueKey('flagship-pages'),
+        controller: _pages,
+        onPageChanged: (i) {
+          Motion.tick();
+          setState(() => _panel = i);
+        },
+        children: [
+          panel('flagship-panel-osc', [for (var o = 1; o <= 3; o++) OscPanel(o), const VoicePanel()]),
+          panel('flagship-panel-filters', [const FilterPanel(1), const FilterRouteSwitch(vertical: false),
+            const FilterPanel(2), const FlagshipFxRack()]),
+          panel('flagship-panel-mod', [
+            const FPanel(title: 'MODULATION', child: ModSourceTabs()),
+            FPanel(title: 'MATRIX', child: FlagshipMatrixList(onLocate: (id) => goTo(flagshipPanelOf(id)))),
+          ]),
+        ],
+      ),
+      edge(-1),
+      edge(1),
+    ]);
   }
 }
 
-/// The voice: poly or mono, volume, velocity, bend range and glide.
-class VoiceCard extends StatelessWidget {
-  const VoiceCard({super.key});
-
-  // Its own watch (param_watch.dart): a knob step in another card doesn't rebuild it.
-  @override
-  Widget build(BuildContext context) => watchDevice(context, _body);
-
-  Widget _body(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    return DeviceExpandCard(
-      storageId: 'flagship-voice',
-      title: 'VOICE',
-      summary: '${formatParamValue(t.param('voice_mode'), t.value('voice_mode'))} · volume ${formatParamValue(t.param('volume'), t.value('volume'))}',
-      color: scope.accent,
-      // Poly, Mono or Legato with its glide (one synth, 2026-11-10: the Mono bass and Acid 303 presets play legato).
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        LabeledRow('PLAYS', DeviceChoice('voice_mode', maxSegments: 3)),
-        KnobRow(const ['volume', 'velocity', 'bend_range', 'glide'], size: 46,
-          labels: const {'volume': 'Volume', 'velocity': 'Velocity', 'bend_range': 'Bend range', 'glide': 'Glide'}),
-      ]),
-    );
-  }
-}

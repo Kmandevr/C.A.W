@@ -2,9 +2,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
+import '../../../model/merged_devices.dart';
 import '../device_registry.dart';
 import '../kit/device_style.dart';
 import 'drive_editors.dart';
+import 'dyn_drive/catalog.dart' show dynDriveEditors; // fam-dyn
 import 'dynamics/catalog.dart' show fxDynamicsEditors; // fx-dynamics
 import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
@@ -13,11 +15,11 @@ import 'eq_editor.dart';
 // fx-filters begin
 import 'filters/filters_editors.dart';
 // fx-filters end
-import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'space/space_fx.dart'; // fx-space
+import 'space/space_devices.dart' show fxSpaceMergedEditors; // fx-space
 import 'utility_editors.dart';
 // fx-creative begin
 import 'creative/creative_catalog.dart';
@@ -33,7 +35,8 @@ bool _has(NativeComponentInfo i, String id) => i.parameters.any((p) => p.id == i
 /// saturation (`drive` with `type` or `shape`); null for anything else (the fallback page).
 DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
   if (info.isInstrument) return null;
-  if (_byId[info.id] case final e?) return e;
+  if (dynDriveEditors[info.id] case final e?) return e;  // fam-dyn: the Dynamics and Drive devices' own pages, every variant
+  if (_byId[MergedDevices.pageId(info.id, info.variantIndex)] case final e?) return e;  // a merged device: its variant's
   if (info.parameters.any((p) => _band.hasMatch(p.id)) &&
       ((_has(info, 'band1_freq') && _has(info, 'band1_gain')) || (_has(info, 'b1_freq') && _has(info, 'b1_gain')))) {
     return singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage());
@@ -55,8 +58,10 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
 
 /// Every built-in effect's plugin UI, by id.
 final Map<String, DeviceEditorEntry> _byId = {
-  'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
+  // org.caw.eq and org.caw.filter (and their variants' old ids): filtersEditors, one page per merged device.
   'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
+  // The Compressor's Duck variant: the compressor's page, its curve drawn from `amount`.
+  MergedDevices.duckPageId: singlePage('duck', 'DUCK', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
   'org.caw.reverb.pro': singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage()),
   'org.caw.delay.pro': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
   'org.caw.delay.pingpong': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
@@ -66,7 +71,6 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.ducker': singlePage('ducker', 'DUCK', Icons.call_received, DeviceFamily.dynamics, () => const DuckerPage()),
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
-  'org.caw.filter': singlePage('filter', 'FILTER', Icons.filter_alt_outlined, DeviceFamily.filter, () => const FilterPage()),
   'org.caw.phaser': singlePage('phaser', 'PHASER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: false)),
   'org.caw.flanger': singlePage('flanger', 'FLANGER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: true)),
   'org.caw.chorus': singlePage('chorus', 'CHORUS', Icons.waves, DeviceFamily.modulation, () => const ChorusPage()),
@@ -77,6 +81,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   ...creativeEditors,  // fx-creative
   // fx-space begin
   ...fxSpaceEditors,
+  ...fxSpaceMergedEditors,  // the merged Space, Modulation, Utility and Pitch pages (every variant's id)
   // fx-space end
   // fx-filters begin
   ...filtersEditors,

@@ -505,6 +505,10 @@ class Settings extends ChangeNotifier {
   /// The live output's safety limiter (API 35, #244): on by default; never in exports.
   bool safetyLimiter = true;
 
+  /// Settings › Sound (device shell, 1.0.8): whether a newly added device starts with its auto gain on. Each device
+  /// keeps its own switch after that (the header's ear icon). Off by default.
+  bool autoGainNewDevices = false;
+
   /// Mono check (#244): the live output in mono, for listening. Never saved: off at every start, never in exports.
   bool monoCheck = false;
 
@@ -523,6 +527,39 @@ class Settings extends ChangeNotifier {
   bool rememberZoom = true;
   final Map<String, ArrangeView> projectViews = {};
   static const maxProjectViews = 64;
+
+  /// The FX chain rows the user collapsed (device shell), per project id: `layer/slot/component` keys (the project
+  /// keeps no id per device, so a row's state stays with its place). UI state, never in the project file and no undo
+  /// step; the most recent [maxProjectViews] projects are kept, and per project the newest [maxFxCollapsed] keys.
+  final Map<String, Set<String>> fxCollapsed = {};
+  static const maxFxCollapsed = 512;
+
+  /// Whether the FX chain row [slot] of project [projectId] is open (rows are open until collapsed).
+  bool fxRowOpen(String projectId, String slot) => !(fxCollapsed[projectId]?.contains(slot) ?? false);
+
+  /// Opens or collapses an FX chain row; false when nothing changed. Past [maxFxCollapsed] the oldest key goes.
+  bool setFxRowOpen(String projectId, String slot, bool open) {
+    final set = fxCollapsed.remove(projectId) ?? <String>{};
+    final changed = open ? set.remove(slot) : set.add(slot);
+    while (set.length > maxFxCollapsed) {
+      set.remove(set.first);  // insertion order: the oldest first
+    }
+    if (set.isNotEmpty) fxCollapsed[projectId] = set;  // newest last
+    while (fxCollapsed.length > maxProjectViews) {
+      fxCollapsed.remove(fxCollapsed.keys.first);
+    }
+    return changed;
+  }
+
+  /// Drops project [projectId]'s collapsed-row keys that [keep] refuses (rows whose device is gone); true when any went.
+  bool pruneFxRows(String projectId, bool Function(String key) keep) {
+    final set = fxCollapsed[projectId];
+    if (set == null) return false;
+    final n = set.length;
+    set.removeWhere((k) => !keep(k));
+    if (set.isEmpty) fxCollapsed.remove(projectId);
+    return set.length != n;
+  }
 
   /// Keeps [view] as project [id]'s, newest last, dropping the oldest past [maxProjectViews].
   void rememberProjectView(String id, ArrangeView view) {
@@ -766,6 +803,7 @@ class Settings extends ChangeNotifier {
         'export_naming': exportNaming.name,
         'pause_on_unplug': pauseOnUnplug,
         'safety_limiter': safetyLimiter,
+        'auto_gain_new_devices': autoGainNewDevices,
         'keep_awake': keepAwake.name,
         'new_track_monitor': newTrackMonitor,
         'new_track_instrument': newTrackInstrument,
@@ -774,6 +812,7 @@ class Settings extends ChangeNotifier {
         'remember_zoom': rememberZoom,
         if (projectViews.isNotEmpty)
           'project_views': {for (final e in projectViews.entries) e.key: [e.value.zoom, e.value.left, e.value.top]},
+        if (fxCollapsed.isNotEmpty) 'fx_collapsed': {for (final e in fxCollapsed.entries) e.key: e.value.toList()},
         'left_handed': leftHanded,
       };
 
@@ -959,6 +998,15 @@ class Settings extends ChangeNotifier {
     exportNaming = pick(ExportNaming.values, j['export_naming'], exportNaming);
     pauseOnUnplug = flag('pause_on_unplug') ?? pauseOnUnplug;
     safetyLimiter = flag('safety_limiter') ?? safetyLimiter;
+    autoGainNewDevices = flag('auto_gain_new_devices') ?? autoGainNewDevices;
+    if (j['fx_collapsed'] case final Map rows) {
+      fxCollapsed.clear();
+      for (final e in rows.entries.take(maxProjectViews)) {
+        if (e.key is! String || (e.key as String).length > 128 || e.value is! List) continue;
+        final keys = {for (final k in (e.value as List).take(maxFxCollapsed)) if (k is String && k.length <= 300) k};
+        if (keys.isNotEmpty) fxCollapsed[e.key as String] = keys;
+      }
+    }
     keepAwake = pick(KeepAwake.values, j['keep_awake'], keepAwake);
     if (const ['off', 'auto', 'on'].contains(j['new_track_monitor'])) newTrackMonitor = j['new_track_monitor'] as String;
     final instrument = j['new_track_instrument'];

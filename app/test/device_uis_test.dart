@@ -2,6 +2,8 @@
 // parameters, live display data draws, presets and A/B work, and goldens at phone (and some desktop) size.
 import 'dart:io';
 
+import 'package:caw/engine/component_info.dart';
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
@@ -162,7 +164,7 @@ void main() {
   });
 
   group('gestures', () {
-    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap resets, power and + in the strip, a tile sets the type', (tester) async {
+    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap resets, power, a tap adds a band, the type button sets the type', (tester) async {
       final s = await open(tester, 'org.caw.eq');
       final t = targetOf(s, 'org.caw.eq');
       final view = tester.getRect(find.byKey(const ValueKey('eq-view')));
@@ -201,21 +203,22 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('eq-band-power')));
       await tester.pumpAndSettle();
       expect(t.value('b6_on'), 0);
-      // "+" then a tap on the curve turns the first off band on there, selected, its values readable.
-      await tester.ensureVisible(find.byKey(const ValueKey('eq-add')));
-      await tester.tap(find.byKey(const ValueKey('eq-add')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('eq-add-hint')), findsOneWidget);
+      // A tap on the curve's open space turns the first off band on there, selected.
       final firstOff = [for (var n = 1; n <= 8; n++) if (t.param('b${n}_on') != null && t.value('b${n}_on') < 0.5) n].first;
+      // The footer (device shell) takes room at the bottom: bring the curve back into view first.
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-view')));
+      await tester.pumpAndSettle();
       final v2 = tester.getRect(find.byKey(const ValueKey('eq-view')));
-      await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 30));
+      await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 50));
       await tester.pumpAndSettle();
       expect(t.value('b${firstOff}_on'), 1);
       expect(t.value('b${firstOff}_freq'), closeTo(300, 30));
-      expect(find.byKey(const ValueKey('eq-add-hint')), findsNothing);
-      expect(find.descendant(of: find.byKey(const ValueKey('eq-readout')), matching: find.text('BAND $firstOff')), findsOneWidget);
-      // The band chips select; the selected band's type tiles set its type (Notch is tile 9).
+      expect(find.text('BAND $firstOff'), findsOneWidget);
+      // The band chips select; the selected band's type button lists the types (Notch is 9).
       await tester.tap(find.byKey(const ValueKey('eq-band-5')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-type')));
+      await tester.tap(find.byKey(const ValueKey('eq-type')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('eq-type-9')));
       await tester.pumpAndSettle();
@@ -237,6 +240,34 @@ void main() {
       await close(tester);
     });
 
+    testWidgets('the Compressor\'s Duck opens the compressor page: its curve from amount, up in the knee graph lowers it',
+        (tester) async {
+      const id = MergedDevices.duckPageId;
+      expect(DeviceEditors.custom('org.caw.compressor', builtinInfo(id)), isNotNull);
+      final s = await open(tester, id);
+      final t = targetOf(s, id);
+      expect(t.info!.variantIndex, 4);
+      expect(find.byKey(const ValueKey('device-fallback')), findsNothing);
+      expect(find.text('DUCK'), findsWidgets);
+      expect(find.byKey(const ValueKey('dknob-amount')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dknob-hold')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dknob-ratio')), findsNothing);
+      final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
+      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('threshold'), greaterThan(-20));
+      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('amount'), lessThan(0.5));
+      expect(tester.takeException(), isNull);
+      await close(tester);
+      for (final size in const [Size(844, 390), Size(360, 740)]) {
+        await open(tester, id, size: size, live: false);
+        expect(tester.takeException(), isNull, reason: '$size');
+        await close(tester);
+      }
+    });
+
     testWidgets('limiter: the ceiling line drags; elsewhere drags the gain', (tester) async {
       final s = await open(tester, 'org.caw.limiter');
       final t = targetOf(s, 'org.caw.limiter');
@@ -252,15 +283,7 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('gate: dragging away from the centre raises the threshold', (tester) async {
-      final s = await open(tester, 'org.caw.gate');
-      final t = targetOf(s, 'org.caw.gate');
-      final hero = tester.getRect(find.byKey(const ValueKey('gate-hero')));
-      await tester.dragFrom(Offset(hero.center.dx, hero.top + 50), const Offset(0, -30));
-      await tester.pumpAndSettle();
-      expect(t.value('threshold'), greaterThan(-40));
-      await close(tester);
-    });
+    // The Compressor's Gate variant and its drags: dyn_drive_ui_test.dart.
 
     testWidgets('transient shaper: the left of the envelope is attack, the right sustain', (tester) async {
       final s = await open(tester, 'org.caw.transient');
@@ -296,7 +319,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value('sync'), greaterThan(7), reason: 'a longer division');
       expect(t.value('feedback'), greaterThan(0.4));
-      await tester.tap(find.byKey(const ValueKey('mode-mode-1')));
+      await tester.ensureVisible(find.byKey(const ValueKey('dchoice-mode-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('dchoice-mode-1')));
       await tester.pumpAndSettle();
       expect(t.value('mode'), 1);
       await close(tester);
@@ -328,14 +353,19 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('filter: the handle drags the cutoff and resonance; type and LFO shape are tiles', (tester) async {
+    testWidgets('filter: the puck drags the cutoff and resonance; the model strip sets the type, LFO shape tiles under MORE', (tester) async {
       final s = await open(tester, 'org.caw.filter');
       final t = targetOf(s, 'org.caw.filter');
       await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('filter-hero'))), const Offset(60, -40));
       await tester.pumpAndSettle();
       expect(t.value('cutoff'), greaterThan(1300));
       expect(t.value('resonance'), greaterThan(0.2));
-      await tester.tap(find.byKey(const ValueKey('mode-type-4')));
+      await tester.tap(find.byKey(const ValueKey('filter-model-0-4')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('device-fold')));
+      await tester.tap(find.byKey(const ValueKey('device-fold')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('mode-lfo_shape-2')));
       await tester.tap(find.byKey(const ValueKey('mode-lfo_shape-2')));
       await tester.pumpAndSettle();
       expect((t.value('type'), t.value('lfo_shape')), (4, 2));
@@ -347,7 +377,9 @@ void main() {
         final s = await open(tester, id);
         final t = targetOf(s, id);
         final before = t.value(place);
-        await tester.dragFrom(tester.getCenter(find.byKey(ValueKey('${id.substring(8)}-hero'))), const Offset(50, -30));
+        // The phaser's comb, the flanger's voices pad (delay across, feedback up).
+        final hero = id == 'org.caw.flanger' ? 'xy-delay-feedback' : 'phaser-hero';
+        await tester.dragFrom(tester.getCenter(find.byKey(ValueKey(hero))), const Offset(50, -30));
         await tester.pumpAndSettle();
         expect(t.value(place), greaterThan(before));
         expect(t.value('feedback'), greaterThan(0.4));
@@ -368,7 +400,7 @@ void main() {
     testWidgets('utility: sideways pans, up widens, a pinch widens; the switches flip', (tester) async {
       final s = await open(tester, 'org.caw.utility');
       final t = targetOf(s, 'org.caw.utility');
-      final hero = tester.getCenter(find.byKey(const ValueKey('stereo-hero')));
+      final hero = tester.getCenter(find.byKey(const ValueKey('utility-hero')));
       await tester.dragFrom(hero, const Offset(40, -30));
       await tester.pumpAndSettle();
       expect(t.value('pan'), greaterThan(0.1));
@@ -384,20 +416,22 @@ void main() {
       await b.up();
       await tester.pumpAndSettle();
       expect(t.value('width'), greaterThan(w0));
+      await tester.ensureVisible(find.byKey(const ValueKey('toggle-invert_l')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('toggle-invert_l')));
       await tester.pumpAndSettle();
       expect(t.value('invert_l'), 1);
       await close(tester);
     });
 
-    testWidgets('width and balance: the same field on their one knob', (tester) async {
+    testWidgets('width and balance: the same goniometer on their one knob', (tester) async {
       var s = await open(tester, 'org.caw.stereo.width');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(0, 40));
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.width').value('width'), lessThan(1));
       await close(tester);
       s = await open(tester, 'org.caw.stereo.balance');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(-50, 0));
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(-50, 0));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.balance').value('pan'), lessThan(-0.1));
       await close(tester);
@@ -412,12 +446,26 @@ void main() {
     for (final id in retiredDrums) {
       expect(engine.containsKey(id), isFalse, reason: '$id is retired');
     }
+    // The old effect ids are retired (FX consolidation): the engine lists only their merged devices, each with every
+    // variant's descriptor, which the fixture holds as the engine dumped them.
+    for (final v in MergedDevices.variants.where((v) => v.oldId != v.id)) {
+      expect(engine.containsKey(v.oldId), isFalse, reason: '${v.oldId} is retired');
+    }
+    List<(String, double, double, double, String)> knobs(NativeComponentInfo i) =>
+        [for (final p in i.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))];
     for (final id in [...builtinEffects, ...engineInstruments]) {
-      final want = engine[id], have = builtinInfo(id);
+      final merged = MergedDevices.of(id);
+      final want = merged == null ? engine[id] : engine[merged.id]?.variants[merged.variant], have = builtinInfo(id);
       expect(want, isNotNull, reason: id);
-      expect([for (final p in have.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
-          [for (final p in want!.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
-          reason: '$id changed: refresh test/fixtures/builtin_components.json');
+      expect(knobs(have), knobs(want!), reason: '$id changed: refresh test/fixtures/builtin_components.json');
+    }
+    for (final id in MergedDevices.ids) {
+      final want = engine[id], have = builtinInfos().firstWhere((c) => c.id == id);
+      expect(want, isNotNull, reason: id);
+      expect(have.variants.length, want!.variants.length, reason: id);
+      for (var v = 0; v < want.variants.length; v++) {
+        expect(knobs(have.variants[v]), knobs(want.variants[v]), reason: '$id variant $v changed: refresh the fixture');
+      }
     }
   }, skip: (Platform.environment['CAW_LIB'] ?? '').isEmpty ? 'set CAW_LIB to the built engine library' : null);
 

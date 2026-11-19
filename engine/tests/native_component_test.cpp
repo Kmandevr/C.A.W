@@ -195,8 +195,11 @@ TEST(c_api_lists_loaded_component_descriptors_as_json) {
     CHECK(builtins != nullptr);
     if (builtins) {
         const std::string json(builtins);
-        CHECK(json.find("{\"builtin\":true,\"id\":\"org.caw.stereo.balance\"") != std::string::npos);
-        CHECK(json.find("{\"builtin\":true,\"id\":\"org.caw.stereo.width\"") != std::string::npos);
+        // The stereo tools are Utility/Stereo's variants now (FX consolidation): the old ids are retired.
+        CHECK(json.find("\"id\":\"org.caw.utility\"") != std::string::npos);
+        CHECK(json.find("\"id\":\"org.caw.chorus\"") != std::string::npos);
+        CHECK(json.find("\"id\":\"org.caw.stereo.balance\"") == std::string::npos);
+        CHECK(json.find("\"id\":\"org.caw.stereo.width\"") == std::string::npos);
         CHECK(json.find(kComponentId) == std::string::npos);
     }
     caw_free(builtins);

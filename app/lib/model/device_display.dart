@@ -8,6 +8,7 @@ import 'mixer_fx.dart';
 import 'device_target.dart';
 import 'fx_space_display.dart'; // fx-space
 import 'drums.dart';
+import 'merged_devices.dart';
 import 'project.dart';
 // fx-filters begin
 import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
@@ -111,7 +112,9 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
     }
     // A rack's child (fx-racks): the rack's index + (child + 1) * 65536.
     final n = engine.componentDisplay(engineLayerId(layer), target.displayChild == 0 ? index : index + target.displayChild * 65536, _buffer);
-    if (n > 0) value = decodeDisplay(id, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
+    // A merged device's display is its variant's old effect's layout (FX consolidation).
+    final shown = MergedDevices.isMerged(id) ? MergedDevices.pageId(id, target.info?.variantIndex ?? 0) : id;
+    if (n > 0) value = decodeDisplay(shown, _buffer, n);  // 0: nothing new to show (or the engine is busy): keep the last
     if (n < 0) value = null;
   }
 }
@@ -146,20 +149,13 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
         for (var s = 1; s <= sources; ++s) 'src$s': at(2 + s),
         for (var r = 0; r < 16; ++r) 'route${r + 1}': at(3 + sources + r)});
     // fx-racks end
-    case 'org.caw.eq':
-      final bins = at(0).toInt();
-      final watched = at(3) > 0.5;
-      final post = 4 + bins;
-      return DeviceDisplayFrame(
-        spectrum: watched && post + bins <= n
-            ? [for (var j = 0; j < bins; ++j) ((f[post + j] + 90) / 90).clamp(0.0, 1.0).toDouble()]
-            : null,
-        inputDb: at(4 + 3 * bins + 48 + 1),
-        outputDb: at(4 + 3 * bins + 48 + 2),
-        values: {'output_db': at(4 + 3 * bins + 48)});
+    // org.caw.eq and org.caw.filter: decodeFiltersDisplay (fx-filters).
     case 'org.caw.compressor':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
           values: named(['gr_max', 'gr', 'detector_db', 'threshold', 'ratio', 'knee', 'makeup_db', 'lookahead_ms'], 2));
+    case MergedDevices.duckPageId:  // the Compressor's Duck variant (docs/engine.md, "The Compressor's Duck variant")
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(4),
+          values: named(['detector_db', 'key_db', 'gr', 'gr_max', 'threshold', 'amount', 'detection', 'sidechain'], 2));
     case 'org.caw.limiter':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
           values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak'], 2));
@@ -184,9 +180,6 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
       });
     case 'org.caw.transient':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['gain_db', 'boost_db', 'cut_db'], 2));
-    case 'org.caw.filter':
-      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
-          values: named(['type', 'cutoff_l', 'cutoff_r', 'resonance', 'lfo', 'envelope'], 2));
     case 'org.caw.phaser':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['lfo_l', 'lfo_r', 'freq_l', 'freq_r', 'stages'], 2));
     case 'org.caw.flanger':

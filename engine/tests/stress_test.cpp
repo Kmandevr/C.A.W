@@ -169,7 +169,7 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         {"sample_stream", "cb17fda8f1472dea"},
         {"resample", "ae1e8b3fbd5f3ad7"},
         {"every_instrument", "3ab70624484ac6bd"},
-        {"every_effect", "7d5715c05ce87eca"},
+        {"every_effect", "872fde1013543d13"},  // 1.0.8: the merged ids with each variant (was 7d5715c05ce87eca; same sound)
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},
     };
@@ -576,8 +576,8 @@ TEST(stress_profiles_are_per_engine) {
     };
     const auto ma = ids(a), mb = ids(b);
     CHECK(ma.count("host") && mb.count("host"));
-    CHECK(ma.count("org.caw.reverb.pro") == 1);   // the song's
-    CHECK(mb.count("org.caw.reverb.pro") == 0);   // the kit has none: nothing of the song's leaked into its rows
+    CHECK(ma.count("org.caw.reverb") == 1);       // the song's (its reverb.pro, migrated to Reverb)
+    CHECK(mb.count("org.caw.reverb") == 0);       // the kit has none: nothing of the song's leaked into its rows
     CHECK(mb.count("org.caw.drums") == 1);
     CHECK(ma.count("org.caw.mod.lfo") == 1);      // the song's LFOs: modulators get the profile too
 }

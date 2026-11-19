@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../model/device_display.dart';
+import '../../../model/device_target.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
 import '../kit/controls.dart';
@@ -27,31 +28,42 @@ String _db(double v, {int digits = 1}) => '${v > 0 ? '+' : ''}${v.toStringAsFixe
 /// the threshold line, and the knee graph beside it with a dot riding the curve at the detector's level. Drag up
 /// and down on the history for the threshold; in the knee graph sideways for the threshold, up and down for the
 /// ratio. Then the main knobs, and the rest behind MORE.
+///
+/// The Compressor's Duck variant (it has `amount` rather than `ratio`) opens the same page: the curve is its
+/// `amount` as a ratio (1: ∞:1) after its `output`, the dot rides the level its detector hears (the key's with
+/// Sidechain External, else its own input), and the knee graph's up and down sets the amount.
 class CompressorPage extends StatelessWidget {
   const CompressorPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
+    final duck = _isDuck(scope.target);
     return effectPage('compressor', [
       HeroCanvas(
         color: scope.accent,
         height: 214,
-        caption: 'COMPRESSOR',
+        caption: duck ? 'DUCK' : 'COMPRESSOR',
         grid: false,
         readout: DeviceDisplay(builder: (context, f) => Text(f?.gainReductionDb == null ? '' : 'GR ${_db(f!.gainReductionDb!)}',
           style: Neon.code(size: 10, color: Neon.pink))),
         child: const _CompressorHero(),
       ),
-      const KnobRow(['threshold', 'ratio', 'attack', 'release', 'makeup', 'mix'], size: 50),
+      const KnobRow(['threshold', 'ratio', 'amount', 'attack', 'hold', 'release', 'makeup', 'mix'], size: 50),
       Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: const [
         DeviceToggle('auto_makeup', label: 'Auto makeup', icon: Icons.auto_fix_high),
         DeviceToggle('auto_release', label: 'Auto release', icon: Icons.auto_mode),
       ])),
-      const DeviceFold(child: ParamGrid(only: ['knee', 'lookahead', 'detect', 'link', 'sc_hpf', 'sc_listen'])),
+      const DeviceFold(child: ParamGrid(only: ['knee', 'lookahead', 'detect', 'detection', 'link', 'sc_hpf', 'sc_listen'])),
     ]);
   }
 }
+
+/// Whether [t] is the Compressor's Duck variant (an `amount`, no `ratio`).
+bool _isDuck(DeviceTarget t) => t.param('ratio') == null && t.param('amount') != null;
+
+/// Duck's `amount` (0..1 of the excess removed) as the ratio the knee graph draws: 1 is ∞:1 (drawn as 20:1).
+double duckRatio(double amount) => amount >= 0.95 ? 20 : 1 / (1 - amount.clamp(0.0, 1.0));
 
 class _CompressorHero extends StatefulWidget {
   const _CompressorHero();
@@ -69,7 +81,9 @@ class _CompressorHeroState extends State<_CompressorHero> {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     double v(String id, double d) => t.param(id) == null ? d : t.value(id);
-    final thr = v('threshold', -18), ratio = v('ratio', 4), knee = v('knee', 0), makeup = v('makeup', 0);
+    final duck = _isDuck(t);
+    final thr = v('threshold', -18), knee = v('knee', 0);
+    final ratio = duck ? duckRatio(v('amount', 0.5)) : v('ratio', 4), makeup = duck ? v('output', 0) : v('makeup', 0);
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth, h = box.maxHeight;
       final side = math.min(h - 26, w * 0.48);
@@ -89,7 +103,11 @@ class _CompressorHeroState extends State<_CompressorHero> {
             // The curve follows the finger: up lifts the slope above the threshold, a lower ratio.
             _ratio = (_ratio * math.pow(2, u.delta.dy / 50 * fine)).toDouble();
             t.setLive('threshold', _thr);
-            t.setLive('ratio', _ratio.clamp(1, 20));
+            if (duck) {
+              t.setLive('amount', (1 - 1 / _ratio.clamp(1, 20)).clamp(0.0, 1.0));
+            } else {
+              t.setLive('ratio', _ratio.clamp(1, 20));
+            }
           } else {
             _thr -= u.delta.dy / (h - 20) * 60 * fine;
             t.setLive('threshold', _thr);
@@ -102,6 +120,7 @@ class _CompressorHeroState extends State<_CompressorHero> {
         onDoubleTap: (_) => t.setAll({
           if (t.param('threshold') case final p?) p.id: p.defaultValue,
           if (t.param('ratio') case final p?) p.id: p.defaultValue,
+          if (duck) if (t.param('amount') case final p?) p.id: p.defaultValue,
         }),
         child: CustomPaint(size: Size(w, h), painter: _CompPainter(
           hist: hist, thr: thr, ratio: ratio, knee: knee, makeup: makeup, inset: inset,

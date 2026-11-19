@@ -44,7 +44,7 @@ extension ClipLoopEdit on AppState {
         ? layer.instrument
         : component != null && component >= 0 && component < layer.components.length ? layer.components[component] : null;
     if (use == null) return 0;
-    return componentInfo(use.id)?.parameters.where((p) => p.id == target).firstOrNull?.defaultValue ?? 0;
+    return useInfo(use)?.parameters.where((p) => p.id == target).firstOrNull?.defaultValue ?? 0;
   }
 
   /// Adds a clip lane on [target] to [clip], flat at the value the target has where the clip starts, across its loop.

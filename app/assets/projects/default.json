@@ -70,8 +70,9 @@
    "automation": [],
    "components": [
     {
-     "id": "org.caw.ducker",
+     "id": "org.caw.compressor",
      "params": {
+      "variant": 3.0,
       "release": 357.26895549467986,
       "tension": 0.21796875000000096,
       "hold": 66.86090225563906,
@@ -81,8 +82,9 @@
      }
     },
     {
-     "id": "org.caw.distortion",
+     "id": "org.caw.drive",
      "params": {
+      "variant": 0.0,
       "mix": 1.0,
       "drive": 9.57833244496703,
       "shape": 0.0
@@ -140,8 +142,9 @@
    "automation": [],
    "components": [
     {
-     "id": "org.caw.distortion",
+     "id": "org.caw.drive",
      "params": {
+      "variant": 0.0,
       "drive": 2.8103066142718998,
       "shape": 0.0,
       "bits": 4.457187499999998,
@@ -150,8 +153,9 @@
      }
     },
     {
-     "id": "org.caw.saturator",
+     "id": "org.caw.drive",
      "params": {
+      "variant": 1.0,
       "drive": 3.6198343373494057,
       "mode": 7.0,
       "tone": -0.6859375000000003,
@@ -162,8 +166,9 @@
      }
     },
     {
-     "id": "org.caw.ducker",
+     "id": "org.caw.compressor",
      "params": {
+      "variant": 3.0,
       "depth": 1.0,
       "release": 173.4499194414612,
       "tension": -0.15562500000000043,
@@ -263,8 +268,9 @@
    "automation": [],
    "components": [
     {
-     "id": "org.caw.distortion",
+     "id": "org.caw.drive",
      "params": {
+      "variant": 0.0,
       "drive": 3.6817767169017217,
       "shape": 2.0
      }
@@ -489,7 +495,12 @@
    ],
    "automation": [],
    "components": [
-    "org.caw.delay.pingpong"
+    {
+     "id": "org.caw.delay",
+     "params": {
+      "variant": 1.0
+     }
+    }
    ],
    "instrument": {
     "id": "org.caw.synth.flagship",

@@ -9,6 +9,7 @@
 #include "caw/library/convolver.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/reverb.hpp"
+#include "fx_merged.h"
 
 // Original code (C.A.W. is Apache-2.0). The impulse responses are generated here from seeded noise, chirps,
 // combs and grains, so there is nothing to license; a loaded WAV is the user's own.
@@ -715,7 +716,7 @@ const ModuleDescriptor& shimmerDescriptor() {
 // highest rounds fade out above `tone`: the "angelic" pad trails of Eno and Lanois's records, after the Eventide
 // H3000 patches. `amount` sets the loop gain (at most 0.6, scaled down for tails past 4 s, inside a tanh, so it
 // can never run away).
-class Shimmer final : public EffectBase {
+class Shimmer : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return shimmerDescriptor(); }
 
@@ -811,6 +812,13 @@ private:
 };
 
 }  // namespace
+
+// The shimmer reverb as a variant of Reverb (builtin_fx_merged_space.cpp): its own (legacy) descriptor, and an
+// instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).
+const ModuleDescriptor& shimmerReverbDescriptor() { return shimmerDescriptor(); }
+ModuleProcessor* makeShimmerAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Shimmer>(variant);
+}
 
 void registerFxSpaceReverb(ModuleRegistry& registry) {
     registry.add(convDescriptor(), &make<Convolver>);

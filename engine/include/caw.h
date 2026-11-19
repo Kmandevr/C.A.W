@@ -147,8 +147,26 @@ extern "C" {
    The file is held open from the scan to the load. A component may need only system libraries.
    caw_engine_load_component_ex (flags: CAW_LOAD_LEGACY_GRACE with the trusted file's SHA-256) and
    caw_engine_scan_component (the scan as JSON for the trust sheet). The load and reload JSON gain "sha256",
-   "scan_verdict" and "grace_applied". */
-#define CAW_API_VERSION 37
+   "scan_verdict" and "grace_applied".
+   38 (2026-11-18, 1.0.8): merged effect devices (FX consolidation). One id per family whose reserved parameter
+   "variant" (a choice, set by hand: not automatable, modulatable or MIDI-mappable) picks the class that runs, each
+   variant with its own parameters, latency and tail; a changed "variant" rebuilds the chain, crossfaded, and
+   caw_engine_set_component_param refuses one (send it in the project). caw_engine_components lists a merged
+   device with its first variant's descriptor plus "variants" (every variant's descriptor, in order) and its old
+   effects' presets, migrated (under their old names). Pitch/Shift (org.caw.shift: "Pitch" was
+   org.caw.pitchshift, "Frequency" org.caw.freqshift) and the other families (docs/engine.md, "Merged devices").
+   The old ids are retired: no longer listed, and not made as a device of their own; a project, preset, rack or
+   call naming one (the component testing suite, the plug-in benchmark, the sample-pack maker) plays the merged
+   device's variant (its lanes and links follow), and caw_migrate_component turns an entry into its merged form
+   for the app's document.
+   39 (2026-11-18, 1.0.8): per-slot auto gain and output meters. A component entry's optional "auto_gain": true (absent:
+   off, so older projects play and read as before) puts a loudness-matching trim after that effect (K-weighted
+   energies of its input and output over a 3 s equivalent window, the trim clamped to +-24 dB, held below -70 LUFS,
+   from 0 dB at each Play); caw_engine_set_component_auto_gain turns it on or off while playing and
+   caw_engine_component_auto_gain reads the trim. caw_engine_component_meter reads and resets an effect's output
+   peaks and its clip flag (CawSlotMeter). The Compressor (org.caw.compressor) gains a fifth variant, "Duck" (4).
+   Nothing else changes. */
+#define CAW_API_VERSION 39
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -315,6 +333,27 @@ CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_
    docs/engine.md ("Display data"). */
 CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_t index, float* out,
                                              int32_t max);
+/* Per-slot auto gain (API version 39): on != 0 puts a trim after effect `index` (addressed as in
+   caw_engine_set_component_param; not the instrument or per-note FX) that matches its output's short-term loudness
+   to its input's, so it can be compared with its bypass by ear: K-weighted, a 3 s equivalent window, the trim moving
+   slowly, clamped to +-24 dB and held while either side is below -70 LUFS; it starts from 0 dB at each Play, so a
+   render repeats, and a render plays it exactly when the project's entry says "auto_gain": true. A bypassed effect
+   plays its input untrimmed. A later project update sets it again from the entry. 1 on success, 0 if there is no
+   such effect. */
+CAW_API int32_t caw_engine_set_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, int32_t on);
+/* The trim auto gain applies after effect `index` now, in dB (0 while off), into *trim_db (may be NULL). Returns 1,
+   0 when the engine is busy with a project update (call again; never blocks) or -1 when there is no such effect. */
+CAW_API int32_t caw_engine_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, float* trim_db);
+/* An effect slot's output meter (API version 39), for a device's footer. */
+typedef struct CawSlotMeter {
+    float peak_l;     /* each side's peak (linear) of what the slot passes on since the last read */
+    float peak_r;
+    int32_t clipped;  /* 1: a sample went over full scale (|x| > 1) since the last read */
+} CawSlotMeter;
+/* Reads and resets slot `index`'s meter (addressed as in caw_engine_set_component_param; CAW_INSTRUMENT_INDEX the
+   instrument; not per-note FX): what it passes on, after its auto gain and bypass. Lock-free on the audio side; 1,
+   0 when the engine is busy with a project update (out is zeroed; call again) or -1 when there is no such slot. */
+CAW_API int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t index, CawSlotMeter* out);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
    {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
    index CAW_INSTRUMENT_INDEX). Store "state" and
@@ -532,7 +571,7 @@ CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
 
 /* Component testing suite (#163): renders one C++ effect offline (never on the audio thread, no
    device) with a test signal and returns its measurements as JSON. The request is JSON, e.g.
-   {"component":{"id":"org.caw.distortion","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
+   {"component":{"id":"org.caw.drive","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
    a built library needs "library"; its trust is [trust_level] (CAW_NATIVE_TRUST_*: the user's own choice for that
    library), and a request naming a "trust" is refused. "write_wav"/"write_input_wav" are plain file names written
    inside [output_dir] (NULL: no files) and a WAV test signal's "path" a plain name inside [input_dir] (NULL: none).
@@ -560,6 +599,16 @@ CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_lev
    and, when it names a "preset", that preset's values under its own params (an unknown preset: "ok": false).
    Needs no engine; free with caw_free. The engine migrates a project it is given too. */
 CAW_API char* caw_migrate_instrument(const char* entry_json);
+
+/* Merged effect devices (API version 38): for an effect entry {"id": ..., "params": {...}, "preset": ...} returns
+   {"ok": true, "migrated": bool, "id", "params": {...}, "renamed": {old: new}, "dropped": [old...],
+   "keeps_state": bool}. An old id becomes its merged device (its "variant" set, parameters moved); an FX rack's or
+   multiband rack's children that are old ids become theirs ("<slot>_fx", "<slot>.variant", "<slot>.<param>" and
+   the routes' destinations). Move an automation lane or modulation link on a "renamed" parameter to its new name
+   and drop one on a "dropped" parameter; any other keeps its target. "keeps_state" false: drop the entry's saved
+   state. A "preset" (the entry's own id's) is applied first, the entry's own params winning. Another entry comes
+   back with "migrated": false. Needs no engine; free with caw_free. The engine migrates a project it is given too. */
+CAW_API char* caw_migrate_component(const char* entry_json);
 
 /* Drums (API version 11; docs/engine.md "Drums"). Pure functions: no engine needed; free each result with caw_free.
    caw_drums_info: the instrument's layout as JSON: {"ok", "banks", "pads_per_bank", "pads", "parameters", "globals",

@@ -1,5 +1,6 @@
 // The built-in effects suite (#173): the shared EffectBase (control grid, sleep, display) and registration.
 #include "builtin_effects.h"
+#include "fx_merged.h"
 // fx-creative begin
 #include "builtin_fx_creative.h"
 // fx-creative end
@@ -83,6 +84,24 @@ bool EffectBase::processPorts(const ProcessBlock& b) noexcept {
     return done;
 }
 
+bool EffectBase::connectOptionalPort(uint32_t index, float* left, float* right) noexcept {
+    const std::span<const OptionalPort> ports = optionalPorts();
+    if (index >= ports.size() || index >= kMaxOptionalPorts || (left == nullptr) != (right == nullptr)) return false;
+    optL_[index] = left;
+    optR_[index] = right;
+    optOutputs_ = false;
+    for (uint32_t k = 0; k < ports.size() && k < kMaxOptionalPorts; ++k)
+        optOutputs_ = optOutputs_ || (!ports[k].input && optL_[k]);
+    return true;
+}
+
+void EffectBase::zeroOptionalOutputs(uint32_t from, uint32_t to) noexcept {
+    const std::span<const OptionalPort> ports = optionalPorts();
+    for (uint32_t k = 0; k < ports.size() && k < kMaxOptionalPorts; ++k)
+        if (!ports[k].input && optL_[k])
+            for (uint32_t i = from; i < to; ++i) optL_[k][i] = optR_[k][i] = 0.0f;
+}
+
 bool EffectBase::activate(double sampleRate, uint32_t maxFrames) noexcept {
     rate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
     keyed_ = false;
@@ -116,7 +135,12 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
     bool fellAsleep = false;
     for (uint32_t i = 0; i < b.frames;) {
         if (idle_) {
-            while (i < b.frames && inL[i] == 0.0f && inR[i] == 0.0f) outL[i] = outR[i] = 0.0f, ++i;
+            const uint32_t from = i;
+            // A keyed effect's key counts as input: one asleep wakes when its key sounds (a ducker follows its key
+            // through a gap in its input, and the input coming back finds it ducked).
+            while (i < b.frames && inL[i] == 0.0f && inR[i] == 0.0f && (!keyL_ || (keyL_[i] == 0.0f && keyR_[i] == 0.0f)))
+                outL[i] = outR[i] = 0.0f, ++i;
+            if (optOutputs_) zeroOptionalOutputs(from, i);
             if (i == b.frames) break;
             idle_ = false;  // woken: the grid starts here
             left_ = 0;
@@ -147,6 +171,13 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
             const int32_t a = l > r ? l : r;
             inMax = a > inMax ? a : inMax;
         }
+        if (keyL_)  // a sounding key is not silence: the effect stays awake while it sounds
+            for (uint32_t k = 0; k < n; ++k) {
+                int32_t l, r;
+                std::memcpy(&l, keyL_ + i + k, 4);
+                std::memcpy(&r, keyR_ + i + k, 4);
+                zero[k] = ((l | r) & kAbs) == 0 ? zero[k] : 0;
+            }
         inPeak_ = std::max(inPeak_, static_cast<double>(std::bit_cast<float>(inMax)));
         runAt_ = i;
         run(inL + i, inR + i, outL + i, outR + i, n);
@@ -201,6 +232,7 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     // fx-racks begin
     fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
     // fx-racks end
+    fx::registerMergedDevices(registry);  // fx_merged.h: the FX consolidation's merged devices (Pitch/Shift...)
 }
 
 }  // namespace caw

@@ -108,7 +108,7 @@ void main() {
     s.insertTrackTemplate(s.trackTemplates.firstWhere((t) => t.name == 'Reverb bus'));
     expect(s.project.layers.length, before + 1);
     expect(s.project.layers.last.isFolder, isTrue);
-    expect(s.project.layers.last.components.single.id, 'org.caw.reverb.pro');
+    expect(s.project.layers.last.components.single.id, 'org.caw.reverb');
   });
 
   test('templates are kept on disk and read back', () async {

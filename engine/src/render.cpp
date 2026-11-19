@@ -10,6 +10,8 @@
 #include "builtin_components.h"
 #include "component_test.h"
 #include "engine.h"
+#include "fx_merged.h"
+#include "fx_migrate.h"
 #include "pattern.h"
 #include "sample_time.h"
 #include "wav.h"
@@ -166,7 +168,8 @@ bool renderComponentWavetable(TestComponent c, const ExportOptions& o, RenderRes
                               int32_t* cancel) {
     ModuleRegistry registry;
     registerBuiltinComponents(registry);
-    const ModuleDescriptor* d = registry.find(c.id);
+    if (c.library.empty()) fx::migrateLegacyId(c.id, c.params);  // a retired effect id: its merged device (fx_migrate.h)
+    const ModuleDescriptor* d = findComponentDescriptor(registry, c.id, c.params);
     if (!d) {
         out.error = "no instrument layer or built-in component '" + o.target + "' to make a wavetable from";
         return false;

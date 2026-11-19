@@ -5,6 +5,8 @@
 #include "builtin_effects.h"
 #include "builtin_instruments.h"
 #include "builtin_test_signal.h"
+#include "fx_merged.h"
+#include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
 #include <cmath>
@@ -70,7 +72,7 @@ double valueAt(const AudioProcessBlock& b, uint32_t i, double fallback) noexcept
 
 bool stereo(const AudioProcessBlock& b) noexcept { return b.input.channelCount == 2 && b.output.channelCount == 2; }
 
-class Balance final : public ModuleProcessor {
+class Balance : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kBalance; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -87,7 +89,7 @@ public:
     }
 };
 
-class Width final : public ModuleProcessor {
+class Width : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kWidth; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -146,7 +148,7 @@ bool steadyKnobs(const AudioProcessBlock& b, uint32_t count) noexcept {
 
 // The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
 // what depends only on the knobs is worked out once per value, not per sample.
-class Distortion final : public ModuleProcessor {
+class Distortion : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
     // No state: silence in gives silence out, so the host may skip it while its input is silent.
@@ -246,7 +248,7 @@ ModuleDescriptor delayDescriptor() {
 }
 const ModuleDescriptor kDelay = delayDescriptor();
 
-class PingPong final : public ModuleProcessor {
+class PingPong : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDelay; }
     bool activate(double sampleRate, uint32_t) noexcept override {
@@ -300,6 +302,19 @@ private:
     double glide_ = 0.0;
 };
 
+}  // namespace
+
+// The ping-pong delay as a variant of Delay (builtin_fx_merged_space.cpp): its own (legacy) descriptor, and an
+// instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).
+namespace fx {
+const ModuleDescriptor& pingPongDelayDescriptor() { return kDelay; }
+ModuleProcessor* makePingPongDelayAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<PingPong>(variant);
+}
+}  // namespace fx
+
+namespace {
+
 // Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
 const ParameterDescriptor kChorusParams[] = {
     tapered("rate", "Rate", 0.6, 0.05, 5.0, "Hz"),
@@ -316,7 +331,7 @@ ModuleDescriptor chorusDescriptor() {
 }
 const ModuleDescriptor kChorus = chorusDescriptor();
 
-class ChorusEffect final : public ModuleProcessor {
+class ChorusEffect : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kChorus; }
     bool activate(double sampleRate, uint32_t) noexcept override {
@@ -379,6 +394,19 @@ ModuleProcessor* make() noexcept {
 
 }  // namespace
 
+namespace fx {
+
+// FX consolidation (fx_merged.h): the descriptors and classes the merged devices wrap as variants
+// (builtin_fx_merged_stereomod.cpp), the classes unchanged.
+const ModuleDescriptor& legacyWidthDescriptor() { return kWidth; }
+ModuleProcessor* makeWidthAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Width>(variant); }
+const ModuleDescriptor& legacyBalanceDescriptor() { return kBalance; }
+ModuleProcessor* makeBalanceAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<Balance>(variant); }
+const ModuleDescriptor& legacyChorusDescriptor() { return kChorus; }
+ModuleProcessor* makeChorusAs(const ModuleDescriptor& variant) noexcept { return new (std::nothrow) AsVariant<ChorusEffect>(variant); }
+
+}  // namespace fx
+
 void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kBalance, &make<Balance>);
     registry.add(kWidth, &make<Width>);
@@ -390,5 +418,13 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registerBuiltinModulators(registry);  // LFO, envelope, follower, steps, random, macros, MIDI to CV (#161)
     registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
+
+// As Drive's Distortion variant (builtin_fx_merged_drive.cpp): its own descriptor, and the same class under the variant's.
+namespace fx {
+const ModuleDescriptor& distortionDescriptor() { return kDistortion; }
+ModuleProcessor* makeDistortionAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Distortion>(variant);
+}
+}  // namespace fx
 
 }  // namespace caw

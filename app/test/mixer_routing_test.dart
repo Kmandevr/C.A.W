@@ -82,10 +82,10 @@ void main() {
       }
     });
 
-    test('the bundled default project saves at v5 and again byte for byte', () {
+    test('the bundled default project saves at v7 (its effects are merged devices) and again byte for byte', () {
       final p = ProjectDoc.fromJson(jsonDecode(File('assets/projects/default.json').readAsStringSync()) as Map<String, dynamic>);
       final first = jsonEncode(p.toJson());
-      expect(jsonDecode(first)['caw_app_project'], 5);
+      expect(jsonDecode(first)['caw_app_project'], 7);
       expect(jsonEncode(_reload(p).toJson()), first);
     });
 
@@ -112,7 +112,7 @@ void main() {
       expect(p.toJson()['caw_app_project'], 5);
     });
 
-    test('this build reads v5 and v6 and refuses v7', () {
+    test('this build reads v5, v6 and v7 and refuses v8', () {
       final p = _project();
       _l(p, 'kick').output = 'verb';
       final v6 = p.toJson();
@@ -120,8 +120,10 @@ void main() {
       final v5 = _project().toJson();
       expect(v5['caw_app_project'], 5);
       expect(ProjectDoc.fromJson(v5).layers, hasLength(7));
-      expect(() => ProjectDoc.fromJson({...v6, 'caw_app_project': 7}), throwsA(isA<NewerProjectFormat>()));
-      expect(ProjectDoc.fileVersion, 6);
+      expect(ProjectDoc.fromJson({...v6, 'caw_app_project': 7}).layers, hasLength(7));
+      expect(() => ProjectDoc.fromJson({...v6, 'caw_app_project': 8}), throwsA(isA<NewerProjectFormat>()));
+      expect(ProjectDoc.fileVersion, 7);
+      expect(ProjectDoc.routingFileVersion, 6);
       expect(ProjectDoc.baseFileVersion, 5);
     });
   });

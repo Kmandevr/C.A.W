@@ -17,13 +17,14 @@ TEST(the_racks_never_allocate_on_the_audio_thread) {
     auto h = [](const char* id) { return static_cast<double>(rackChildHash(id)); };
     std::vector<ComponentSpec> specs(2);
     specs[0].id = "org.caw.rack.fx";
-    specs[0].params = {{"s1_fx", h("org.caw.filter")}, {"s2_fx", h("org.caw.compressor")}, {"s3_fx", h("org.caw.reverb.pro")},
-                       {"s4_fx", h("org.caw.ducker")}, {"mod1_src", 1}, {"mod1_dst", 100}, {"mod1_amt", 0.5},
+    specs[0].params = {{"s1_fx", h("org.caw.filter")}, {"s2_fx", h("org.caw.compressor")}, {"s3_fx", h("org.caw.reverb")},
+                       {"s4_fx", h("org.caw.compressor")}, {"s4.variant", 3}, {"mod1_src", 1}, {"mod1_dst", 100}, {"mod1_amt", 0.5},
                        {"mod2_src", 5}, {"mod2_dst", 120}, {"mod2_amt", 0.3}, {"mod3_src", 9}, {"mod3_dst", 130},
                        {"mod3_amt", -0.4}, {"lfo1_shape", 7}};
     specs[1].id = "org.caw.rack.multiband";
     specs[1].params = {{"bands", 5}, {"b1s1_fx", h("org.caw.compressor")}, {"b2s1_fx", h("org.caw.limiter")},
-                       {"b3s1_fx", h("org.caw.saturator")}, {"b4s2_fx", h("org.caw.eq")}, {"b5s4_fx", h("org.caw.delay.pro")}};
+                       {"b3s1_fx", h("org.caw.drive")}, {"b3s1.variant", 1}, {"b4s2_fx", h("org.caw.eq")},
+                       {"b5s4_fx", h("org.caw.delay")}};
     std::string error;
     auto chain = ComponentChain::build(reg, specs, 48000.0, error);
     CHECK(chain != nullptr);

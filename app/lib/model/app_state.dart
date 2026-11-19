@@ -1,6 +1,7 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'output_watch.dart';
 import 'track_defaults.dart';
+import 'merged_devices.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -26,6 +27,8 @@ import 'sample_use.dart' show SampleUse;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
 import 'default_project.dart';
+import 'device_slot_audio.dart';
+import 'engine_slot_audio.dart';
 import 'freeze.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
@@ -555,6 +558,8 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       try {
         engine = await createEngine(settings.sampleRate);
+        DeviceSlotAudio.current = EngineSlotAudio.instance;  // per-slot meters and auto gain (device shell)
+        MergedDevices.resolver = Engine.resolveComponent;  // old presets' effects as merged devices (user_presets.dart)
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
         hardwareProfile = EngineExecutionPolicy.hardwareProfile;
         auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
@@ -698,6 +703,7 @@ class AppState extends ChangeNotifier implements StressHost {
     revealStartRequests.dispose();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
+    if (engine != null && identical(DeviceSlotAudio.current, EngineSlotAudio.instance)) DeviceSlotAudio.current = null;
     engine?.dispose();
     super.dispose();
   }
@@ -814,10 +820,10 @@ class AppState extends ChangeNotifier implements StressHost {
     layer('Lead', flagship, lead, 0.45, preset: 'Morph pad', params: {
       'osc1_frame': 0.66, 'mod1_amt': 0.15, 'osc1_unison': 3, 'osc1_detune': 10, 'flt1_cutoff': 2600,
       'env1_attack': 0.005, 'env1_decay': 0.25, 'env1_sustain': 0.5, 'env1_release': 0.3,
-    }, effects: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.3})]);
+    }, effects: [ComponentUseDoc('org.caw.delay', {'variant': 1, 'sync': 3, 'mix': 0.3})]);
     // Muted to start with: the acid line plays in the bass's register and the pad under the lead. Unmute one.
     layer('Acid', flagship, acid, 0.6, preset: 'Acid 303',
-        params: {'flt1_resonance': 0.8}, effects: [ComponentUseDoc('org.caw.distortion', {'drive': 3, 'mix': 0.5})], mute: true);
+        params: {'flt1_resonance': 0.8}, effects: [ComponentUseDoc('org.caw.drive', {'drive': 3, 'mix': 0.5})], mute: true);
     layer('Pad', flagship, chords, 0.5, preset: 'Morph pad', effects: [ComponentUseDoc('org.caw.chorus')], mute: true);
     return p;
   }
@@ -1124,15 +1130,20 @@ class AppState extends ChangeNotifier implements StressHost {
   bool get canUndo => history.canUndo;
   bool get canRedo => history.canRedo;
 
-  bool _historyHeld = false;
+  /// How many holds keep the history open now (an automation take, a preset preview): they can overlap, and the
+  /// burst settles only when the last one ends.
+  int _historyHolds = 0;
+  bool get _historyHeld => _historyHolds > 0;
 
-  /// Keeps the burst of edits open while [hold] is true, so a whole take of automation writing is one undo step;
-  /// edits made before it settle first, as their own step.
+  /// Keeps the burst of edits open while held, so a whole take of automation writing (or a preset preview) is one
+  /// undo step; edits made before the first hold settle first, as their own step. Each `holdHistory(true)` is
+  /// ended by one `holdHistory(false)`; while holds overlap, their edits end as one step when the last one ends.
   void holdHistory(bool hold) {
-    if (hold == _historyHeld) return;
+    if (!hold && _historyHolds == 0) return;
+    _historyHolds += hold ? 1 : -1;
+    if (_historyHolds > (hold ? 1 : 0)) return;  // another hold keeps it open
     _historyTimer?.cancel();
     if (!starting) history.settle(_snapshot());
-    _historyHeld = hold;
     notifyListeners();
   }
 
@@ -2431,6 +2442,9 @@ class AppState extends ChangeNotifier implements StressHost {
     // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
     // plays, so a project opened without the engine library still sounds right).
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
+    // The retired effect ids as their merged devices (FX consolidation, 1.0.8), with their lanes, links and MIDI
+    // mappings: one load step, not an undo step, like the instruments above.
+    if (engine != null) p.resolveComponents(Engine.resolveComponent);
     // A path the project names that isn't a plain local one (a network share, a device or URL) becomes a missing
     // file before the engine or the missing-files check could look at it (project_dependencies.dart).
     try {

@@ -570,7 +570,9 @@ TEST(width_keeps_a_mono_signal_as_it_is_at_every_setting) {
 TEST(the_built_in_distortion_shapes_each_channel_with_mix_and_output) {
     Engine e(48000);
     e.setMasterBypass(true);
-    CHECK(e.nativeComponentsJson().find("\"id\":\"org.caw.distortion\"") != std::string::npos);  // it registered
+    // Retired (FX consolidation): Drive's Distortion variant lists in its place; a project naming the old id plays it.
+    CHECK(e.nativeComponentsJson().find("\"id\":\"org.caw.distortion\"") == std::string::npos);
+    CHECK(e.nativeComponentsJson().find("\"id\":\"org.caw.drive\"") != std::string::npos);
     ProjectSpec p = constantTrack({{"org.caw.distortion", {{"shape", 0}, {"drive", 4}}}});
     CHECK(ok(e.setProject(p)));
     e.play();

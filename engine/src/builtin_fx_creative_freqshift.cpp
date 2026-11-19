@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "builtin_fx_creative.h"
+#include "fx_merged.h"
 #include "caw/library/oversample.hpp"
 
 // Original code (C.A.W. is Apache-2.0). Single-sideband modulation (Bode's frequency shifter; DAFX, 2nd ed.,
@@ -85,7 +86,7 @@ private:
     double held_ = 0.0;
 };
 
-class FreqShift final : public EffectBase {
+class FreqShift : public EffectBase {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return shiftDescriptor(); }
 
@@ -161,6 +162,11 @@ private:
 };
 
 }  // namespace
+
+const ModuleDescriptor& freqShiftDescriptor() { return shiftDescriptor(); }
+ModuleProcessor* makeFreqShiftAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<FreqShift>(variant);
+}
 
 void registerFreqShift(ModuleRegistry& registry) { registry.add(shiftDescriptor(), &creative::make<FreqShift>); }
 

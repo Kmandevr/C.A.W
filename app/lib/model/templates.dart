@@ -363,12 +363,12 @@ extension Templates on AppState {
           [track('tpl-drums', 'Drums', 'org.caw.drums', preset: 'Kit: 808', volume: 0.9)]),
       ('builtin:track-bass', 'Bass', 'Flagship, Mono bass', [track('tpl-bass', 'Bass', flagship, preset: 'Mono bass', volume: 0.75)]),
       ('builtin:track-keys', 'Keys', 'Flagship, Morph pad with a ping-pong delay', [track('tpl-keys', 'Keys', flagship,
-          preset: 'Morph pad', volume: 0.6, fx: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.25})])]),
+          preset: 'Morph pad', volume: 0.6, fx: [ComponentUseDoc('org.caw.delay', {'variant': 1, 'sync': 3, 'mix': 0.25})])]),
       ('builtin:track-pad', 'Pad', 'Flagship, Morph pad with chorus',
           [track('tpl-pad', 'Pad', flagship, preset: 'Morph pad', volume: 0.5, fx: [ComponentUseDoc('org.caw.chorus')])]),
       ('builtin:track-reverb-bus', 'Reverb bus', 'A bus running a reverb fully wet; send tracks to it', [
         LayerDoc(id: 'tpl-reverb', name: 'Reverb bus', color: 0, isFolder: true, volume: 1,
-            components: [ComponentUseDoc('org.caw.reverb.pro', {'mix': 1.0})]),
+            components: [ComponentUseDoc('org.caw.reverb', {'mix': 1.0})]),
       ]),
     ];
   }

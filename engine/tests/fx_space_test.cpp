@@ -270,8 +270,9 @@ TEST(fx_space_effects_are_listed_with_good_descriptors_and_presets) {
                 if (q.curve != ParameterCurve::Exponential)
                     cawtest::fail(__FILE__, __LINE__, std::string(id) + "." + std::string(q.id) + " should taper");
         }
-        // 3 to 8 factory presets, each naming only the effect's own parameters, within their ranges.
-        const std::vector<BuiltinPreset>& presets = builtinPresets(id);
+        // 3 to 8 factory presets, each naming only the effect's own parameters, within their ranges (its own table's:
+        // a merged device reusing the id, as Tremolo/Pan does org.caw.tremolo, lists its other variants' too).
+        const std::vector<BuiltinPreset>& presets = ownBuiltinPresets(id);
         if (presets.size() < 3 || presets.size() > 8) cawtest::fail(__FILE__, __LINE__, std::string(id) + " has " + std::to_string(presets.size()) + " presets");
         for (const BuiltinPreset& pr : presets)
             for (const auto& [k, v] : pr.values) {

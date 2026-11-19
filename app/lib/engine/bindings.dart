@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 37;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 39;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -75,6 +75,16 @@ final class CawPositionStruct extends Struct {
   external int num;
   @Int32()
   external int den;
+}
+
+/// CawSlotMeter (API 39): an effect slot's output peaks and clip flag, as caw_engine_component_meter fills them.
+final class CawSlotMeterStruct extends Struct {
+  @Float()
+  external double peakL;
+  @Float()
+  external double peakR;
+  @Int32()
+  external int clipped;
 }
 
 /// CawLayerMeterStereo (API 25): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
@@ -286,6 +296,12 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int)>('caw_engine_set_component_state'),
         componentDisplay = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Float>, Int32),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int)>('caw_engine_component_display'),
+        setComponentAutoGain = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Int32),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, int)>('caw_engine_set_component_auto_gain'),
+        componentAutoGain = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Float>),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>)>('caw_engine_component_auto_gain'),
+        componentMeter = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<CawSlotMeterStruct>),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>)>('caw_engine_component_meter'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         setMaster = lib.lookupFunction<Void Function(Pointer<Void>, Double),
@@ -308,6 +324,8 @@ class Bindings {
             'caw_engine_release_touches'),
         migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_migrate_instrument'),
+        migrateComponent = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_migrate_component'),
         drumsInfo = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_drums_info'),
         drumsRandomize = lib.lookupFunction<Pointer<Utf8> Function(Int32, Uint32, Double, Int32, Pointer<Utf8>),
             Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>)>('caw_drums_randomize'),
@@ -526,6 +544,12 @@ class Bindings {
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) componentStates;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Uint8>, int, int) setComponentState;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>, int) componentDisplay;
+  /// caw_engine_set_component_auto_gain (API 39): a slot's loudness-matching trim on or off.
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, int) setComponentAutoGain;
+  /// caw_engine_component_auto_gain (API 39): the trim now in dB; 1, 0 busy, -1 no such effect.
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>) componentAutoGain;
+  /// caw_engine_component_meter (API 39): a slot's output peaks and clip flag, read and reset; 1, 0 busy, -1 none.
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>) componentMeter;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final void Function(Pointer<Void>, double) setMaster;
   final void Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn;
@@ -537,6 +561,8 @@ class Bindings {
   final void Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
+  /// caw_migrate_component (API 38): an effect entry in its merged form (FX consolidation).
+  final Pointer<Utf8> Function(Pointer<Utf8>) migrateComponent;
   final Pointer<Utf8> Function() drumsInfo;
   final Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>) drumsRandomize;
   final Pointer<Utf8> Function(Pointer<Utf8>) drumsExplode;

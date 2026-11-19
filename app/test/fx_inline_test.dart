@@ -110,7 +110,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('fx-bypass-0')));
     await tester.pump();
     expect(layer().components.first.bypass, isTrue);
-    await tester.tap(find.byTooltip('Remove Chorus'));
+    await tester.tap(find.byTooltip('Remove ${s.componentLabel('org.caw.chorus')}'));  // the merged device's name
     await tester.pump();
     expect(layer().components.map((c) => c.id), ['com.example.fuzz']);
     expect(tester.takeException(), isNull);
@@ -123,7 +123,7 @@ void main() {
         s.setNativeInstrument(layer(), inst);
         layer().components.clear();
         for (final id in builtinEffects) {
-          s.addNativeEffect(layer(), id);
+          addBuiltinEffect(s, layer(), id);  // an old id: its merged device's variant
         }
         await pumpStack(tester, size: Size(width, 9000));
         expect(find.byType(DeviceInline), findsNWidgets(builtinEffects.length + 1), reason: inst);
@@ -182,6 +182,8 @@ void main() {
     // The knob's Modulation sheet, a bottom sheet over the stack (no new page): its slider moves the amount.
     await tester.longPress(inInst('dknob-osc1_level'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('knob-menu-mod')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget);
     expect(find.byKey(const ValueKey('device-editor')), findsNothing);
     final before = layer().instrument!.params['mod${r.slot}_amt']!;
@@ -197,12 +199,12 @@ void main() {
     await tester.tap(inInst('flagship-inline-src-env3'));
     await tester.pumpAndSettle();
     expect(inInst('modroute-${r.slot}'), findsOneWidget);
-    // The full editor's MATRIX shows the same route.
+    // The full editor's matrix list (its Modulation panel) shows the same route.
     await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('device-tab-matrix')));
+    await tester.tap(find.byKey(const ValueKey('flagship-dot-2')));
     await tester.pumpAndSettle();
-    expect(find.byKey(ValueKey('modroute-${r.slot}')), findsOneWidget);
+    expect(find.byKey(ValueKey('fmatrix-${r.slot}')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await done(tester);
   });
@@ -227,7 +229,7 @@ void main() {
     final display = CountingDisplay();
     DeviceDisplaySource.current = display;
     Motion.setting = MotionLevel.full;
-    for (final id in ['org.caw.eq', 'org.caw.compressor', 'org.caw.reverb.pro', 'org.caw.delay.pro']) {
+    for (final id in ['org.caw.eq', 'org.caw.compressor', 'org.caw.reverb', 'org.caw.delay']) {
       s.addNativeEffect(layer(), id);
     }
     await pumpStack(tester);
@@ -240,7 +242,7 @@ void main() {
     expect(onScreen('fx-device-instrument'), isTrue);
     expect(onScreen('fx-device-4'), isFalse);
     expect(ticker('fx-inline-4')!.enabled, isFalse, reason: 'its motion stands still');
-    expect(display.listeners('org.caw.delay.pro'), 0, reason: 'nothing polls it');
+    expect(display.listeners('org.caw.delay'), 0, reason: 'nothing polls it');
     expect(display.listeners('org.caw.chorus'), greaterThanOrEqualTo(0));
     // Scrolled to the end: the delay runs and polls; the flagship stops.
     final outer = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
@@ -250,7 +252,7 @@ void main() {
     }
     expect(onScreen('fx-device-4'), isTrue);
     expect(ticker('fx-inline-4')!.enabled, isTrue);
-    expect(display.listeners('org.caw.delay.pro'), greaterThan(0));
+    expect(display.listeners('org.caw.delay'), greaterThan(0));
     // The flagship, far above: the list let it go, or it stands still.
     final flagship = find.byKey(const ValueKey('fx-device-instrument'));
     if (flagship.evaluate().isNotEmpty) expect(onScreen('fx-device-instrument'), isFalse);
@@ -263,7 +265,7 @@ void main() {
     expect(onScreen('fx-device-instrument'), isTrue);
     expect(ticker('fx-inline-instrument')!.enabled, isTrue);
     expect(onScreen('fx-device-4'), isFalse);
-    expect(display.listeners('org.caw.delay.pro'), 0);
+    expect(display.listeners('org.caw.delay'), 0);
     Motion.setting = MotionLevel.off;
     await done(tester);
   });

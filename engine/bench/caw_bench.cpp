@@ -16,10 +16,12 @@
 #include <vector>
 
 #include "audio_clips.h"
+#include "builtin_components.h"
 #include "builtin_flagship.h"
 #include "caw/instrument.hpp"
 #include "component_chain.h"
 #include "engine.h"
+#include "fx_merged.h"
 #include "graph.h"
 #include "mix_pool.h"
 #include "project.h"
@@ -122,8 +124,12 @@ double heldNotes(const std::vector<std::pair<std::string, double>>& values, int 
 // and tones, never silent, so nothing sleeps) in the engine's 64-frame chain blocks, at its defaults and with its
 // heavier options, the best of 3 runs; microseconds of CPU per second of audio (10000 = 1% of a core).
 double effectCost(const char* id, const std::vector<std::pair<std::string, double>>& values, double seconds) {
-    Engine e(kRate);
-    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+    static const ModuleRegistry registry = [] {
+        ModuleRegistry r;
+        registerBuiltinComponents(r);
+        return r;
+    }();
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry, id, values);  // a merged device: `variant`'s class
     if (!p || !p->activate(kRate, 64)) return 0.0;
     const ModuleDescriptor& d = p->descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
@@ -178,16 +184,36 @@ void effectsCost(double seconds) {
           {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}},
         {"compressor (default: peak, linked)", "org.caw.compressor", {}},
         {"compressor, RMS, unlinked, sidechain HPF", "org.caw.compressor", {{"detect", 1}, {"link", 0}, {"sc_hpf", 120}}},
+        // 1.0.8: the Compressor's Duck variant (its own input, no key: a leveller) in each detection mode.
+        {"Compressor: Duck (default: RMS)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}}},
+        {"Compressor: Duck, Peak", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
+        {"Compressor: Duck, ISP (4x true peak)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
         {"limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}},
         {"limiter, sample peak", "org.caw.limiter", {{"gain", 12}, {"true_peak", 0}}},
         {"reverb (default: modulated)", "org.caw.reverb.pro", {}},
         {"reverb, no modulation", "org.caw.reverb.pro", {{"mod", 0}}},
         {"reverb, ducking", "org.caw.reverb.pro", {{"duck", 0.5}}},
+        // FX consolidation part E: Delay and Reverb's variants against the old ids they replace.
+        {"Reverb: Hall (default)", "org.caw.reverb", {}},
+        {"shimmer (old id)", "org.caw.shimmer", {}},
+        {"Reverb: Shimmer", "org.caw.reverb", {{"variant", 1}}},
+        {"Delay: Digital (default)", "org.caw.delay", {}},
+        {"Delay: Ping-pong (old id: ping-pong delay)", "org.caw.delay", {{"variant", 1}}},
         {"delay (default)", "org.caw.delay.pro", {}},
         {"delay, ping-pong, ducking", "org.caw.delay.pro", {{"mode", 1}, {"duck", 0.5}}},
         {"saturator (default: tape, 2x)", "org.caw.saturator", {}},
         {"saturator, tape, no oversampling", "org.caw.saturator", {{"oversample", 0}}},
         {"saturator, tube, 2x, tone", "org.caw.saturator", {{"mode", 1}, {"tone", 0.5}}},
+        // FX consolidation part B: each Drive and Bit distortion variant against the old id it replaces.
+        {"distortion (old id)", "org.caw.distortion", {}},
+        {"Drive: Distortion", "org.caw.drive", {{"variant", 0}}},
+        {"Drive: Saturate (default: tape, 2x)", "org.caw.drive", {{"variant", 1}}},
+        {"clipper (old id), 4x", "org.caw.clipper", {{"drive", 6}, {"oversample", 3}}},
+        {"Drive: Clip, 4x", "org.caw.drive", {{"variant", 2}, {"drive", 6}, {"oversample", 3}}},
+        {"phase distortion (old id)", "org.caw.phasedist", {}},
+        {"Drive: Phase", "org.caw.drive", {{"variant", 3}}},
+        {"bitcrush (old id)", "org.caw.bitcrush", {}},
+        {"Bit distortion: Crush", "org.caw.bits", {{"variant", 0}}},
         {"gate", "org.caw.gate", {}},
         {"transient shaper", "org.caw.transient", {{"attack", 0.5}, {"sustain", 0.3}}},
         {"filter (default: 24 dB SVF)", "org.caw.filter", {}},
@@ -198,6 +224,11 @@ void effectsCost(double seconds) {
         {"utility, bass mono, DC block", "org.caw.utility", {{"bass_mono", 1}, {"dc_block", 1}, {"width", 1.3}}},
         {"chorus (existing, for scale)", "org.caw.chorus", {}},
         {"ping-pong delay (existing)", "org.caw.delay.pingpong", {}},
+        // FX consolidation: each merged variant against the old id it replaces (the cost must not rise).
+        {"pitch shifter (old id), a fifth up", "org.caw.pitchshift", {{"semitones", 7}}},
+        {"Pitch/Shift: Pitch, a fifth up", "org.caw.shift", {{"variant", 0}, {"semitones", 7}}},
+        {"frequency shifter (old id), 100 Hz", "org.caw.freqshift", {{"shift", 100}}},
+        {"Pitch/Shift: Frequency, 100 Hz", "org.caw.shift", {{"variant", 1}, {"shift", 100}}},
     };
     std::printf("effects: microseconds of CPU per second of stereo audio, 64-frame blocks (10000 = 1%% of a core)\n");
     for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));

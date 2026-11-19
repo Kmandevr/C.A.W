@@ -1,6 +1,7 @@
 // Benchmarks a knob step in every built-in's editor (beta plan B4.5): widgets rebuilt per live step of each of its
 // first six knobs, with motion off. The knob and the visuals that draw its value rebuild; the page around them
 // doesn't (param_watch.dart). Prints a BENCH line per device; the counts are asserted so they can't grow back.
+import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/ui/devices/device_controls.dart';
 import 'package:caw/ui/devices/kit/hero.dart';
@@ -12,8 +13,11 @@ import 'device_ui_fixture.dart';
 import 'perf_util.dart';
 
 void main() {
-  for (final info in builtinInfos()) {
-    final id = info.id;
+  // Every device, and every old effect's page as its merged device's variant (FX consolidation: the old ids name
+  // them here, stateWith puts the merged device on that variant).
+  final ids = [for (final info in builtinInfos()) info.id,
+    for (final v in MergedDevices.variants) if (v.oldId != v.id) v.oldId];
+  for (final id in ids) {
     testWidgets('$id: a knob step rebuilds the knob and its visuals', (tester) async {
       DeviceDisplaySource.current = FakeDisplay();
       MotionClock.hold = true;
@@ -45,8 +49,9 @@ void main() {
       print('BENCH $id knob step builds: ${out.join(' ')}');
       // A rack's knobs rebuild its page (its parameters choose its children); every other device's rebuild the
       // knob and its visuals (EQ's: the curve, the band strip, the readout and the band's controls). Ceilings about
-      // 10 % over the counts in docs/performance.md (exact in the test VM).
-      final ceiling = _ceilings[id] ?? 80;
+      // 10 % over the counts in docs/performance.md (exact in the test VM). Mix and Output show twice since the device
+      // shell (2026-11-18): the page's knob and the footer's, until each family's page drops its own (90, was 80).
+      final ceiling = _ceilings[MergedDevices.isMerged(id) ? MergedDevices.pageId(id, 0) : id] ?? 90;
       for (final o in out) {
         expect(int.parse(o.split('=').last), lessThanOrEqualTo(ceiling), reason: '$id $o');
       }
@@ -61,5 +66,5 @@ void main() {
 /// The devices whose knob step rebuilds more than the 80 widgets most do (docs/performance.md, a knob step).
 const _ceilings = {
   'org.caw.eq': 190, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
-  'org.caw.rack.fx': 1120, 'org.caw.rack.multiband': 670,
+  'org.caw.rack.fx': 1240, 'org.caw.rack.multiband': 890,
 };

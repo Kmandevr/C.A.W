@@ -8,7 +8,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 
-import '../engine/component_info.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'automation_curve.dart';
@@ -339,18 +338,15 @@ class AutomationWriter extends ChangeNotifier {
         final i = t.component ?? -1;
         if (l == null || i < 0 || i >= l.components.length) return 0;
         final use = l.components[i];
-        return use.params[t.name] ?? _componentParam(use.id, t.name)?.defaultValue ?? 0;
+        return use.params[t.name] ?? state.useInfo(use)?.param(t.name)?.defaultValue ?? 0;
       case 'instrument':
         final use = l?.instrument;
         if (use == null) return 0;
-        return use.params[t.name] ?? _componentParam(use.id, t.name)?.defaultValue ?? 0;
+        return use.params[t.name] ?? state.useInfo(use)?.param(t.name)?.defaultValue ?? 0;
       default:
         return 0;
     }
   }
-
-  ComponentParameterInfo? _componentParam(String id, String param) =>
-      state.componentInfo(id)?.parameters.where((p) => p.id == param).firstOrNull;
 
   /// The span of the control's values, for the thinning tolerance (volume: in dB, -60..+12).
   double _range(AutomationTarget t, _Segment seg) {
@@ -360,9 +356,9 @@ class AutomationWriter extends ChangeNotifier {
       case 'track':
         return t.name == 'volume' ? 72 : 2;
       case 'component' || 'instrument':
-        final id = t.kind == 'instrument' ? l?.instrument?.id : (l != null && (t.component ?? -1) >= 0 &&
-            t.component! < l.components.length ? l.components[t.component!].id : null);
-        final p = id == null ? null : _componentParam(id, t.name);
+        final use = t.kind == 'instrument' ? l?.instrument : (l != null && (t.component ?? -1) >= 0 &&
+            t.component! < l.components.length ? l.components[t.component!] : null);
+        final p = use == null ? null : state.useInfo(use)?.param(t.name);  // a merged device: its variant's knob
         if (p != null) (lo, hi) = (p.min, p.max);
       default:
         break;
