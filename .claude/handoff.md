@@ -14,10 +14,10 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: approve the logo designs; Rook groove look-ahead (docs/decisions.md). Lark editor look chosen: note blobs.
 
 ## In progress (pushed as backup branches)
-- **1.1.0 on the session branch** (merged Flock): every effect, the pack, Lark (API 42), Raven, Magpie (API 43), Timber, Rook (bench 323), Flock (bench 322); pages for all but Lark and Flock. The stabilizer now follows the asked buffer mode and the screen stays on during a Benchmark (6d70a63). ctest 22/22, app 2703.
-- **Running** (push them to `caw-backup-*` at check-ins): ui-lark (Lark's page and note-blob clip editor, owner's look), ui-flock (Flock's page), ui-library (names, search and purpose tags, templates, field guides, Happy accident).
-- **Next:** extras (sidechain filter everywhere, LUFS target, CPU/latency per effect, smart freeze, armed low-latency, heat warn), theme, personality, Easter eggs, logo previews (owner approves), Field Guide demo song; Dawn chorus kit needs verified CC0/CC-BY recordings; final audio review, then the 1.1.0 PR.
-- **Follow-ups:** Magpie's keyboard zoom on phones;  back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
+- **1.1.0 on the session branch** (7c95afd): every planned device and page, names and tags, templates, guides, Happy accident, theme, personality and eggs, engine extras (API 44), presets ≥8, the audio review's fixes; version 1.1.0-alpha.1+14 with its CHANGELOG. ctest 22/22.
+- **Running:** ui-extras (app wiring: per-slot CPU/latency, armed badge, sidechain knobs, Limiter target, Flock direction, smart freeze, heat warn). Backup: caw-backup-ui-extras.
+- **Next:** merge ui-extras, full app suite, release-check, the 1.1.0 PR, CI, merge, dispatch app.yml (installables, release). Not in 1.1.0: logo designs (owner approves), Field Guide demo song, Dawn chorus kit (needs CC0/CC-BY recordings), spectrogram egg.
+- **Follow-ups:** arming clicks (Lark clears its dry ring; Ducker/Talon look-ahead jumps); Magpie keyboard zoom on phones; back up a project before its first conversion; Pedal gate's pre-FX key; stress_profile test load-proof.
 
 ## Rules for continuing
 - **No lost work:** push after every commit. Agents can't push (their permissions refuse it), so the main session pushes their branches to `caw-backup-*` at each check-in and merge.
