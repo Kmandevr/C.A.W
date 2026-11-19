@@ -14,7 +14,12 @@ updated: 2026-11-19
 - **No unbranded build:** C.A.W won't provide one, so a rebranded clone isn't made easy (owner).
 - **Hosted content:** what AutoStacc hosts (packs, presets, kits) is AutoStacc's commercial content, outside this repository and outside Apache.
 
-**[Fact]** Apache-2.0 §6 grants no trademark rights, and released code and content keep their Apache licence. **[Assumption]** The policy states AutoStacc's claim; registering the marks (a conflict search first, e.g. C.A.W and Raven) is what makes them enforceable. That is the owner's step, with legal advice.
+**[Fact]** Apache-2.0 §6 grants no trademark rights, and released code and content keep their Apache licence. **Owner's own check (2026-11-19):**
+- the owner found no business in the field trading as "CAW";
+- C.A.W is the acronym of the full name "Code Auditioning Workspace", for which the owner found no trademark;
+- the owner considers Raven unclaimed in this field.
+
+**[Assumption]** The policy states AutoStacc's claim; registering the marks is what makes them enforceable. That is the owner's call.
 
 ## 2026-11-19: The audio callback keeps its core busy where Android gives no performance hint (Claude, owner-approved performance work)
 
