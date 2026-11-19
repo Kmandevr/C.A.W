@@ -123,9 +123,34 @@ void EffectBase::reset() noexcept {
     inPeak_ = outPeak_ = 0.0;
 }
 
+bool EffectBase::knobsUnchanged(double* last, uint32_t count, uint32_t at) noexcept {
+    const bool given = block_ && block_->parameters && count <= block_->parameterCount;
+    if (given && knobsBlock_ == blocks_ && knobsConstant_) return true;  // compared at this block's first call
+    bool same = true, constant = given;
+    if (given) {
+        const ParameterValue* p = block_->parameters;
+        for (uint32_t k = 0; k < count; ++k) {
+            const double v = p[k].samples ? p[k].samples[at] : p[k].value;
+            constant &= p[k].samples == nullptr;
+            same &= v == last[k];
+            last[k] = v;
+        }
+    } else {
+        for (uint32_t k = 0; k < count; ++k) {
+            const double v = param(k, at);
+            same &= v == last[k];
+            last[k] = v;
+        }
+    }
+    knobsBlock_ = blocks_;
+    knobsConstant_ = constant;
+    return same;
+}
+
 bool EffectBase::process(const AudioProcessBlock& b) noexcept {
     if (b.input.channelCount != 2 || b.output.channelCount != 2 || !audioProcessBlockValid(b)) return false;
     block_ = &b;
+    ++blocks_;
     if (b.transport) tempo_ = b.transport->tempo > 1.0 ? b.transport->tempo : 1.0;
     const float* inL = b.input.channels[0];
     const float* inR = b.input.channels[1];
@@ -181,6 +206,9 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
         inPeak_ = std::max(inPeak_, static_cast<double>(std::bit_cast<float>(inMax)));
         runAt_ = i;
         run(inL + i, inR + i, outL + i, outR + i, n);
+        // Both as plain maxima (a NaN's 0, a silent frame's 0) written with masks, not selects (GCC if-converts
+        // these), so this loop vectorizes too: the same values as "the largest finite magnitude" and "1 + the last
+        // frame that was not silent" frame by frame.
         int32_t outMax = 0;
         int32_t loud = 0;  // 1 + the last frame that was not silent (0: all were)
         for (uint32_t k = 0; k < n; ++k) {
@@ -189,8 +217,11 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
             std::memcpy(&r, outR + i + k, 4);
             l &= kAbs, r &= kAbs;
             const int32_t a = l > r ? l : r;  // a NaN's bits are above every number's: never silent
-            outMax = a > outMax && a <= kInf ? a : outMax;
-            loud = zero[k] && a < silentBits ? loud : static_cast<int32_t>(k) + 1;
+            const int32_t finite = a & -static_cast<int32_t>(a <= kInf);
+            outMax = finite > outMax ? finite : outMax;
+            const int32_t sounds = (zero[k] ^ 1) | static_cast<int32_t>(a >= silentBits);
+            const int32_t at = (static_cast<int32_t>(k) + 1) & -sounds;
+            loud = at > loud ? at : loud;
         }
         outPeak_ = std::max(outPeak_, static_cast<double>(std::bit_cast<float>(outMax)));
         silent_ = loud == 0 ? silent_ + n : n - static_cast<uint32_t>(loud);

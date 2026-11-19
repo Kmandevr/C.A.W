@@ -206,6 +206,10 @@ protected:
         const ParameterValue& v = block_->parameters[k];
         return v.samples ? v.samples[at] : v.value;
     }
+    // Whether parameters 0..count-1 at frame `at` are each what they were at the last call (`last`, which this
+    // updates; a NaN is never the same). For a control() with nothing to do while the knobs hold still: a block
+    // whose values are all constants is compared once, at its first call, and its later calls cost a compare.
+    bool knobsUnchanged(double* last, uint32_t count, uint32_t at) noexcept;
     int choice(uint32_t k, uint32_t at) const noexcept { return static_cast<int>(param(k, at) + 0.5); }
     bool on(uint32_t k, uint32_t at) const noexcept { return param(k, at) >= 0.5; }
     // The song's tempo (the last one the host gave; 120 before any).
@@ -244,6 +248,9 @@ private:
     bool skipPublish_ = false;                   // Eco publishes every other display tick (30 a second)
     double rate_ = 48000.0, tempo_ = 120.0;
     uint32_t left_ = 0;         // frames until the next control
+    uint64_t blocks_ = 0;       // process() calls so far (knobsUnchanged: which block it last compared)
+    uint64_t knobsBlock_ = ~0ull;
+    bool knobsConstant_ = false;  // that block's knobs were all constants
     uint64_t silent_ = 0;       // frames of silence in and out so far
     bool idle_ = true;          // asleep: silence out until an input sample that is not 0
     double inPeak_ = 0.0, outPeak_ = 0.0;
