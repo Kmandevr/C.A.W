@@ -319,6 +319,15 @@ struct Engine::Cmd {
 
 
 namespace {
+// An instrument chain's entries: the instrument, then the track's MIDI effects (1.1.0).
+std::vector<ComponentSpec> instrumentSpecs(const ComponentSpec& instrument, const std::vector<ComponentSpec>* midi) {
+    std::vector<ComponentSpec> specs{instrument};
+    if (midi) specs.insert(specs.end(), midi->begin(), midi->end());
+    return specs;
+}
+}  // namespace
+
+namespace {
 
 constexpr double kSwapSeconds = 0.02;
 constexpr double kStopSeconds = 0.01;
@@ -1163,8 +1172,9 @@ ModuleLoadResult Engine::reloadNativeComponent(
     auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
         if (!old || !old->uses(expectedId)) return true;
         const std::vector<ComponentSpec> specs = old->currentSpecs();
-        auto chain = old->instrument() ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error)
-                                       : ComponentChain::build(nativeModules_, specs, sr_, error);
+        auto chain = old->instrument()
+                         ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error, {specs.begin() + 1, specs.end()})
+                         : ComponentChain::build(nativeModules_, specs, sr_, error);
         if (!chain) return false;
         delete chain->swapAutomation(chain->automationFor(ctlAutomation_, layerId).release());
         rebuilt.push_back({slot, layer, std::move(chain)});
@@ -1330,9 +1340,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 total += l.components.size();
             }
             if (!l.folder && l.hasInstrument) {
-                charge({l.instrument});
+                charge(instrumentSpecs(l.instrument, &l.midiComponents));
                 masterChainBytes += sizeof(NoteEvents) + NoteEvents::kBytes;  // its note list and held notes
-                ++total;
+                if (!l.midiComponents.empty()) masterChainBytes += NoteEvents::kCapacity * sizeof(Event);  // their scratch
+                total += 1 + l.midiComponents.size();
             }
             if (!l.folder && !l.noteComponents.empty())  // per-note FX (#127): each slot chain and the overflow chain
                 for (int k = 0; k <= noteFxSlots(l.noteVoices); ++k) {
@@ -1379,9 +1390,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (const LayerSpec& l : p.layers) {
             if (l.folder || !l.hasInstrument) continue;
             auto it = layers_.find(l.id);
-            if (it != layers_.end() && it->second.instrument && it->second.instrument->sameComponents({l.instrument}, sr_))
+            if (it != layers_.end() && it->second.instrument &&
+                it->second.instrument->sameComponents(instrumentSpecs(l.instrument, &l.midiComponents), sr_))
                 continue;
-            auto instrument = ComponentChain::buildInstrument(nativeModules_, l.instrument, sr_, error);
+            auto instrument = ComponentChain::buildInstrument(nativeModules_, l.instrument, sr_, error, l.midiComponents);
             if (!instrument)
                 return "{\"ok\":false,\"error\":\"layer '" + jsonEscape(l.id) + "' instrument: " + jsonEscape(error) +
                        "\",\"modules\":{}}";
@@ -1501,6 +1513,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         const std::vector<ComponentSpec>* components = nullptr;  // the layer's native inserts
         const ComponentSpec* instrument = nullptr;  // the layer's native instrument, if any
         std::string outputId;  // "output": the bus its audio goes to instead of its folder's ("": that)
+        const std::vector<ComponentSpec>* midi = nullptr;  // the layer's MIDI effects (its instrument's entries 1..)
     };
     std::vector<Want> wants;
     int order = 0;
@@ -1512,7 +1525,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
         wants.push_back({l.id, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components,
-                         l.hasInstrument && !l.folder ? &l.instrument : nullptr, l.outputId});
+                         l.hasInstrument && !l.folder ? &l.instrument : nullptr, l.outputId, &l.midiComponents});
     }
 
     // Pass 1: whether each layer plays (a track needs an instrument), its notes, and its slot.
@@ -1790,7 +1803,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native instrument update");
                 }
             } else if (pl.track && ls.instrument) {
-                ls.instrument->setValues({*w.instrument});
+                ls.instrument->setValues(instrumentSpecs(*w.instrument, w.midi));
                 updateAutomation(ls.slot, *ls.instrument, w.id, ls.instrumentAutomationKey);
             }
         }
@@ -2121,8 +2134,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
 }
 
 ComponentChain* Engine::ctlComponentChain(const std::string& layerId, uint32_t& index) noexcept {
-    const bool instrument = index == kInstrumentIndex;
-    if (instrument) index = 0;
+    const bool midi = index != kInstrumentIndex && (index & kMidiComponentFlag) && !(index & kNoteComponentFlag);
+    const bool instrument = index == kInstrumentIndex || midi;
+    if (midi) index = 1 + (index & ~kMidiComponentFlag);  // its MIDI effects follow the instrument in its chain
+    else if (instrument) index = 0;
     if (layerId.empty()) return instrument ? nullptr : ctlMasterChain_;
     auto it = layers_.find(layerId);
     if (it == layers_.end()) return nullptr;
@@ -2367,7 +2382,10 @@ std::string Engine::componentStatesJson(const std::string& layerId) {
         for (size_t i = 0; i < states.size(); ++i) add(states[i], i);
     }
     if (instrument)
-        for (const ComponentChain::SavedState& state : instrument->saveStates()) add(state, kInstrumentIndex);
+        for (const ComponentChain::SavedState& state : instrument->saveStates()) {
+            add(state, instrumentIndex == 0 ? kInstrumentIndex : kMidiComponentFlag | (instrumentIndex - 1));
+            ++instrumentIndex;  // the instrument, then its MIDI effects
+        }
     return j + "]}";
 }
 
@@ -2376,7 +2394,7 @@ bool Engine::setComponentState(const std::string& layerId, uint32_t index, const
     if (size > 0 && !data) return false;
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
-    const bool instrument = index == kInstrumentIndex;
+    const bool instrument = index == kInstrumentIndex || (!(index & kNoteComponentFlag) && (index & kMidiComponentFlag));
     uint32_t at = index;
     ComponentChain* old = ctlComponentChain(layerId, at);
     if (!old) return false;
@@ -2396,8 +2414,9 @@ bool Engine::setComponentState(const std::string& layerId, uint32_t index, const
     std::string error;
     const BuildingQuality building(&quality_);
     const BuildingLiveAudio buildingInput(audioIn_.get());
-    auto chain = instrument ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error)
-                            : ComponentChain::build(nativeModules_, specs, sr_, error);
+    auto chain = instrument
+                     ? ComponentChain::buildInstrument(nativeModules_, specs.front(), sr_, error, {specs.begin() + 1, specs.end()})
+                     : ComponentChain::build(nativeModules_, specs, sr_, error);
     if (!chain) return false;
     delete chain->swapAutomation(chain->automationFor(ctlAutomation_, layerId).release());
     Cmd c;
@@ -4223,6 +4242,8 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
             if (!previewChunk_) instrumentNotes(s, notes, m);
             if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
             instrumentMotion(notes, m);
+            // MIDI effects (1.1.0): the notes as they shape them, before the taps, the per-note FX and the instrument.
+            if (s.instrument->midiEffects()) s.instrument->runMidiEffects(static_cast<uint32_t>(m), sr_, &time);
             if (modulation_->listens(s.index)) modulation_->tapNotes(s.index, notes.events(), notes.count());  // #161
             // Per-note FX (#127, note_fx_host.cpp): the host places this block's notes in slots and hands the
             // instrument its voice bus; each lane runs through its slot inside the instrument's block.

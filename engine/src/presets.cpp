@@ -1,5 +1,6 @@
 // Built-in presets (named parameter sets of built-in components) and the migration of the retired synths to Flagship presets.
 #include "presets.h"
+#include "midi_fx.h"
 
 #include <cmath>
 #include <cstdio>
@@ -271,6 +272,7 @@ const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
 
 const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
+    if (const auto* p = midifx::presets(componentId)) return *p;  // MIDI effects (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();

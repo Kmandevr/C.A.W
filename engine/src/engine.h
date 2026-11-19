@@ -99,6 +99,9 @@ public:
     // A component index with this bit names component (index & ~kNoteComponentFlag) of the layer's per-note FX
     // (#127): knob moves and bypass fan out to every slot, the display reads the newest note's slot.
     static constexpr uint32_t kNoteComponentFlag = 0x40000000u;
+    // A component index with this bit names MIDI effect (index & ~kMidiComponentFlag) of the layer's "midiComponents"
+    // (1.1.0, midi_fx.h): entry 1 + that of its instrument's chain.
+    static constexpr uint32_t kMidiComponentFlag = 0x20000000u;
     // Per-note FX (#127): the layer's voice budget, active slots and overflow (any thread; false: none there).
     bool noteFxStats(const std::string& layerId, NoteFxStats& out);
     // Play after Stop: an instrument still ringing fades out over its next 5 ms, rendered at Play (inside one

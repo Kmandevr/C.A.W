@@ -1,5 +1,6 @@
 // Built-in components (the C.A.W. Library, #121): stereo effects and an instrument, registered in every Engine.
 #include "builtin_components.h"
+#include "midi_fx.h"
 #include "builtin_modulators.h"
 
 #include "builtin_effects.h"
@@ -415,6 +416,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kChorus, &make<ChorusEffect>);
     registerBuiltinEffects(registry);  // the effects suite (#173, builtin_effects*.cpp)
     registerBuiltinInstruments(registry);  // the drums and Flagship (builtin_instruments.cpp, builtin_flagship.cpp)
+    midifx::registerMidiEffects(registry);  // arpeggiator, chords, scale, note echo, humanize (midi_fx.h, 1.1.0)
     registerBuiltinModulators(registry);  // LFO, envelope, follower, steps, random, macros, MIDI to CV (#161)
     registerTestSignal(registry);  // org.caw.test.osc, internal: for tests, never listed (builtin_test_signal.cpp)
 }
