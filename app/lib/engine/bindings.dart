@@ -523,7 +523,7 @@ class Bindings {
           Pointer<Utf8>, int)>('caw_pattern_export_song');
 
   // API 42: the clip pitch editor's engine (Lark; caw.h). Call these off the UI isolate (Isolate.run): they
-  // allocate and work through a whole clip. No UI uses them yet.
+  // allocate and work through a whole clip. The clip pitch editor uses them (lib/engine/pitch_clip_engine.dart).
   /// caw_pitch_clip_analyse(left, right or null, frames, sample_rate, options JSON or null, out clip): the notes as
   /// JSON (free with [free]); `*out` is the clip handle, or null on failure.
   late final Pointer<Utf8> Function(Pointer<Float>, Pointer<Float>, int, int, Pointer<Utf8>, Pointer<Pointer<Void>>)

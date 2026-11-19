@@ -128,11 +128,12 @@ class EffectCatalog {
     ('org.caw.delay', 'Space', 'Digital (synced, dual, drive in the loop) or Ping-pong echoes', Icons.blur_linear),
     ('org.caw.reverb', 'Space', 'Hall (rooms to halls, ducking and freeze) or Shimmer', Icons.blur_on),
     ('org.caw.shift', 'Pitch & Time', 'Pitch, Frequency, Harmonizer (voices in key) or Octaver (an octave under and over)', Icons.height),
-    // 1.1.0's new devices (Glint, Mimic, Preen, Hush).
+    // 1.1.0's new devices (Glint, Mimic, Preen, Hush, Lark).
     ('org.caw.exciter', 'Drive', 'Exciter (air and presence) or Bass (low harmonics that carry on small speakers)', Icons.auto_awesome),
     ('org.caw.vocoder', 'Creative', 'A vocoder: the voice speaks through a synth playing the key track\'s notes, or its audio', Icons.record_voice_over_outlined),
     ('org.caw.clean', 'Utility', 'Clean-up: Denoise (learn the noise), De-hum or De-reverb', Icons.cleaning_services_outlined),
     ('org.caw.vocalclean', 'Utility', 'Vocal clean-up: De-click, De-plosive or Breath', Icons.mic_none),
+    ('org.caw.pitchfix', 'Pitch & Time', 'Lark: pitch correction to a key and scale, with Keep vibrato; edits a clip\'s notes', Icons.multiline_chart),
   ];
 
   static const List<EffectEntry> _entries = [
@@ -173,6 +174,9 @@ class EffectCatalog {
         Icons.swap_horiz, keywords: ['stereo', 'imager', 'mono']),
     EffectEntry('org.caw.stereo.balance', EffectCategory.utility, 'Left/right balance',
         Icons.swap_horiz, keywords: ['pan', 'stereo']),
+    // Lark (1.1.0): found by what pitch correction is also called.
+    EffectEntry('org.caw.pitchfix', EffectCategory.pitchTime, 'Pitch correction to a key and scale', Icons.multiline_chart,
+        keywords: ['lark', 'autotune', 'auto-tune', 'tuning', 'pitch correction', 'vocal tune', 'pitch editor']),
     // fx-racks begin
     EffectEntry('org.caw.rack.fx', EffectCategory.racks, 'Up to 8 effects in one device, with LFOs, envelopes and macros',
         Icons.view_agenda_outlined, keywords: ['snap heap', 'chain', 'container', 'macro', 'modulation']),

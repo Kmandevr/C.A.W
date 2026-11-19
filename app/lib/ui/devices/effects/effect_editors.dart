@@ -94,7 +94,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   ...filtersEditors,
   // fx-filters end
   ...toolsEditors,  // Meters, Lo-fi, Phase align (1.1.0)
-  ...voiceEditors,  // Glint, Mimic, Preen, Hush (1.1.0)
+  ...voiceEditors,  // Glint, Mimic, Preen, Hush, Lark (1.1.0)
   ...packEditors,  // the AutoStacc pack: Murmur, Peck, Bend, Iris (1.1.0)
   // fx-racks begin
   ...rackEditors,

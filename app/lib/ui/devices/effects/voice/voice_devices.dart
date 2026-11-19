@@ -1,4 +1,4 @@
-// 1.1.0's voice devices' pages: the Exciter (Glint: harmonics bars) and the Vocoder (Mimic: band bars, the carrier choice and the formant shift), and the drag hero they and the clean-up pages share.
+// 1.1.0's voice devices' pages: the Exciter (Glint: harmonics bars), the Vocoder (Mimic: band bars, the carrier choice and the formant shift) and Lark's registration (lark_device.dart), and the drag hero they and the clean-up pages share.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -16,8 +16,9 @@ import '../../kit/repaint.dart';
 import '../dyn_drive/common.dart' show ChoiceChips, chipWrap;
 import '../eqfilter/variant_cards.dart' show VariantCards, variantOf;
 import '../modes_kit.dart' show travelBy, hzLabel, logUnit;
-import '../space/space_devices.dart' show mergedPage;
+import '../space/space_devices.dart' show mergedPage, pitchAccent;
 import 'clean_devices.dart';
+import 'lark_device.dart';
 
 /// The voice and clean-up devices' pages by id (effect_editors.dart merges them in). A page with variants keys its
 /// section by the variant, so a new variant builds afresh, and shows them as cards ([DeviceEditorEntry.ownsVariant]).
@@ -27,6 +28,9 @@ final Map<String, DeviceEditorEntry> voiceEditors = {
       (_) => const MimicPage())], family: DeviceFamily.creative),
   'org.caw.clean': _cards('clean', 'CLEAN', Icons.cleaning_services_outlined, DeviceFamily.utility, () => const PreenPage()),
   'org.caw.vocalclean': _cards('vocalclean', 'VOCAL', Icons.mic_none, DeviceFamily.utility, () => const HushPage()),
+  // Lark (pitch correction): the Pitch family's pink.
+  'org.caw.pitchfix': DeviceEditorEntry((_) => [DeviceSection('pitchfix', 'PITCH', Icons.multiline_chart,
+      (_) => const LarkPage())], family: DeviceFamily.creative, accent: pitchAccent),
 };
 
 DeviceEditorEntry _cards(String id, String label, IconData icon, DeviceFamily family, Widget Function() page) =>
