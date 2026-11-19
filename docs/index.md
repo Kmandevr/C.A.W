@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # C.A.W vault
@@ -14,8 +14,6 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 
 ## Notes
 
-- [Native engine recovery](engine-recovery.md): short resume protocol, current checkpoint and critical architecture facts for interrupted sessions.
-- [Native engine progress](engine-progress.md): milestone ledger with actual implementation status, evidence, commits, CI, blockers and exact next actions.
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): concise current UI implementation pointer and verified workflow gaps; no stale branch/CI snapshot.
 - [Roadmap](roadmap.md): the work C.A.W has promised and hasn't built yet (VST3 and CLAP hosting, iOS and macOS, Google Play, the AutoStacc store and cloud library); the vision and other plans are private.
 - [Architecture](architecture.md): verified technical architecture and engine/app boundaries
