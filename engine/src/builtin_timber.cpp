@@ -10,13 +10,14 @@
 #include "builtin_effects.h"
 #include "presets.h"
 #include "timber_core.h"
+#include "timber_keys.h"
 #include "timber_piano.h"
 
 namespace caw::timber {
 namespace {
 
 constexpr std::string_view kName = "Timber";
-constexpr std::string_view kModels[] = {"Piano"};
+constexpr std::string_view kModels[] = {"Piano", "Electric piano", "Organ"};
 constexpr uint32_t kModelCount = sizeof(kModels) / sizeof(kModels[0]);
 
 constexpr PortDescriptor kPorts[] = {
@@ -30,7 +31,7 @@ void sharedParams(fx::ParamTable& t, double voices, double maxVoices, double rel
     t.num("body", "Body", body, 0.0, 1.0).group = "shared";
     t.num("space", "Space", space, 0.0, 1.0).group = "shared";
     t.num("velocity", "Velocity", 0.8, 0.0, 1.0).group = "shared";
-    t.expo("release", "Release", release, 0.02, 10.0, "s").group = "shared";
+    t.expo("release", "Release", release, 0.005, 10.0, "s").group = "shared";
     ParameterDescriptor& v = t.num("voices", "Voices", voices, 1.0, maxVoices);
     v.step = 1.0, v.smoothingFrames = 0, v.group = "shared";
     t.num("level", "Level", 0.0, -48.0, 12.0, "dB").group = "shared";
@@ -87,6 +88,50 @@ const ModuleDescriptor& pianoDescriptor() {
 }
 static_assert(Piano::kModelParams == 8);
 
+// ---------- Electric piano ----------
+constexpr std::string_view kKinds[] = {"Tine", "Reed"};
+void epianoParams(fx::ParamTable& t) {
+    t.pick("kind", "Kind", 0.0, kKinds).group = "epiano";
+    t.num("pickup", "Pickup", 0.5, 0.0, 1.0).group = "epiano";
+    t.num("symmetry", "Symmetry", 0.2, -1.0, 1.0).group = "epiano";
+    t.num("bell", "Bell", 0.5, 0.0, 1.0).group = "epiano";
+    t.num("bark", "Bark", 0.2, 0.0, 1.0).group = "epiano";
+    t.num("tremolo", "Tremolo", 0.0, 0.0, 1.0).group = "epiano";
+    t.expo("rate", "Tremolo rate", 4.0, 0.5, 12.0, "Hz").group = "epiano";
+    t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "epiano";
+}
+const ModuleDescriptor& epianoDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<EPiano>(1, 0.12, 0.5, 0.1, CpuClass::Medium, &epianoParams);
+    return d;
+}
+static_assert(EPiano::kModelParams == 8);
+
+// ---------- Organ ----------
+constexpr std::string_view kPercs[] = {"Off", "2nd", "3rd"};
+constexpr std::string_view kPercDecay[] = {"Slow", "Fast"};
+constexpr std::string_view kVibratos[] = {"Off", "V1", "V2", "V3", "C1", "C2", "C3"};
+constexpr std::string_view kRotaries[] = {"Off", "Slow", "Fast", "Brake"};
+void organParams(fx::ParamTable& t) {
+    static const char* kBars[9][2] = {{"db16", "16'"}, {"db513", "5 1/3'"}, {"db8", "8'"}, {"db4", "4'"}, {"db223", "2 2/3'"},
+                                      {"db2", "2'"}, {"db135", "1 3/5'"}, {"db113", "1 1/3'"}, {"db1", "1'"}};
+    static constexpr double kDefault[9] = {8, 8, 8, 0, 0, 0, 0, 0, 0};  // the classic 888000000
+    for (int k = 0; k < 9; ++k) {
+        ParameterDescriptor& p = t.num(kBars[k][0], kBars[k][1], kDefault[k], 0.0, 8.0);
+        p.step = 1.0, p.group = "organ/drawbars";
+    }
+    t.pick("perc", "Percussion", 0.0, kPercs).group = "organ";
+    t.pick("perc_decay", "Percussion decay", 1.0, kPercDecay).group = "organ";
+    t.pick("vibrato", "Vibrato", 0.0, kVibratos).group = "organ";
+    t.num("click", "Key click", 0.3, 0.0, 1.0).group = "organ";
+    t.num("drive", "Drive", 0.1, 0.0, 1.0).group = "organ";
+    t.pick("rotary", "Rotary", 1.0, kRotaries).group = "organ";
+}
+const ModuleDescriptor& organDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<Organ>(2, 0.01, 0.5, 0.1, CpuClass::Medium, &organParams);
+    return d;
+}
+static_assert(Organ::kModelParams == 15);
+
 template <class M, const ModuleDescriptor& (*D)(), int Index>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) Instrument<M>(D(), Index);
@@ -94,6 +139,8 @@ ModuleProcessor* make() noexcept {
 
 const fx::Variant kVariants[] = {
     {kModels[0], &pianoDescriptor, &make<Piano, &pianoDescriptor, 0>},
+    {kModels[1], &epianoDescriptor, &make<EPiano, &epianoDescriptor, 1>},
+    {kModels[2], &organDescriptor, &make<Organ, &organDescriptor, 2>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kModelCount);
 const fx::MergedDevice kDevices[] = {{kTimberId, kName, kVariants}};
@@ -113,6 +160,8 @@ size_t timberBytes(uint32_t variant, double sampleRate) noexcept {
     if (!p || !p->activate(sampleRate, 64)) return 0;
     switch (variant) {
         case 0: return static_cast<Instrument<Piano>&>(*p).bytes();
+        case 1: return static_cast<Instrument<EPiano>&>(*p).bytes();
+        case 2: return static_cast<Instrument<Organ>&>(*p).bytes();
         default: return 0;
     }
 }

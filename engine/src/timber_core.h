@@ -29,6 +29,7 @@ struct Shared {
     int quality = kQualityNormal;
     double modWheel = 0;  // CC 1, 0..1
     double pedal = 0;     // CC 64, 0..1 (the piano also has a sustain knob)
+    uint64_t clock = 0;   // frames played since the instrument last woke (start(): the note's own frame)
 };
 
 // The fields every model's voice has (VoicePool's and the frame's).
@@ -86,6 +87,7 @@ public:
         levelFresh_ = true;
         settled_ = true;
         left_ = 0;
+        clock_ = 0;
         silentFrames_ = 0;
         peak_ = periodPeak_ = 0;
         shared_.modWheel = shared_.pedal = 0;
@@ -159,6 +161,7 @@ protected:
                 const double pan = clampd((m.pitch - 64.0) / 44.0, -1.0, 1.0) * M::kSpread;  // low keys left
                 v.panL = static_cast<float>(std::cos((pan + 1.0) * 0.25 * kPi));
                 v.panR = static_cast<float>(std::sin((pan + 1.0) * 0.25 * kPi));
+                shared_.clock = clock_;
                 model_.start(v, shared_);
                 break;
             }
@@ -194,6 +197,7 @@ protected:
             }
             const uint32_t n = std::min(left_, frames - done);
             chunk(left + done, right + done, n);
+            clock_ += n;
             left_ -= n;
             if (left_ == 0) endPeriod();  // decisions only on the grid, so any block size gives the same bits
             done += n;
@@ -217,7 +221,7 @@ private:
         shared_.body = clampd(param(kBody, at), 0.0, 1.0);
         shared_.space = clampd(param(kSpace, at), 0.0, 1.0);
         shared_.velocity = clampd(param(kVelocity, at), 0.0, 1.0);
-        shared_.release = clampd(param(kRelease, at), 0.01, 10.0);
+        shared_.release = clampd(param(kRelease, at), 0.005, 10.0);
         shared_.levelDb = clampd(param(kLevel, at), -48.0, 12.0);
         shared_.quality = qualityNow(quality_);
         const uint32_t tier = shared_.quality == kQualityEco ? M::kEcoCap
@@ -304,6 +308,7 @@ private:
                 toneL_ = toneR_ = 0;
                 silentFrames_ = 0;
                 settled_ = true;
+                clock_ = 0;
             }
         } else {
             silentFrames_ = 0;
@@ -341,6 +346,7 @@ private:
     bool levelFresh_ = true;
     bool settled_ = true;
     uint32_t left_ = 0;
+    uint64_t clock_ = 0;
     uint64_t silentFrames_ = 0;
     float peak_ = 0, periodPeak_ = 0;
     int lastKey_ = -1;

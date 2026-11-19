@@ -38,6 +38,7 @@ TEST(timber_is_one_merged_instrument_whose_model_picks_the_class) {
     if (!m) return;
     for (uint32_t k = 0; k < m->variants.size(); ++k) {
         const ModuleDescriptor& vd = m->variants[k].descriptor();
+        CHECK(validateModuleDescriptor(vd) == ModuleValidation::Ok);
         std::unique_ptr<ModuleProcessor> p = make({{"variant", static_cast<double>(k)}});
         CHECK(p && &p->descriptor() == &vd);
         // The shared knobs first, in order, then 4..15 of the model's own, then the model.
@@ -264,4 +265,89 @@ TEST(timber_piano_keyboard_is_even_in_loudness) {
         lo = std::min(lo, l), hi = std::max(hi, l);
     }
     CHECK(hi - lo < 12);
+}
+
+// ---------- Electric piano ----------
+
+TEST(timber_epiano_pickup_bends_harder_close_and_loud_and_dampers_stop_it) {
+    // The 2nd and 3rd harmonics against the fundamental: a close pickup struck hard has far more than a far one soft.
+    auto harmonics = [](const Values& v, double vel) {
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, 57, vel}}, 0.6).mono();
+        const double f = hzOf(57);
+        const double h1 = bandDb(m, f, 9600, 9600, 48000);
+        return std::max(bandDb(m, 2 * f, 9600, 9600, 48000), bandDb(m, 3 * f, 9600, 9600, 48000)) - h1;
+    };
+    const double soft = harmonics(withModel(1, {{"pickup", 0.0}, {"bell", 0}, {"bark", 0}, {"space", 0}}), 0.3);
+    const double hard = harmonics(withModel(1, {{"pickup", 1.0}, {"bell", 0}, {"bark", 0}, {"space", 0}}), 1.0);
+    const double reed = harmonics(withModel(1, {{"kind", 1}, {"pickup", 1.0}, {"bell", 0}, {"bark", 0}, {"space", 0}}), 1.0);
+    if (verbose()) std::printf("epiano harmonics: soft %.1f, hard %.1f, reed %.1f dB\n", soft, hard, reed);
+    CHECK(hard > soft + 15);
+    CHECK(std::fabs(reed - hard) > 1);  // the reed's curve is its own
+    // In tune, and the damper stops a released key.
+    const Values v = withModel(1, {{"space", 0}, {"release", 0.1}, {"pickup", 0.2}});
+    auto p = make(v);
+    const std::vector<float> m = play(*p, v, {{0.0, 0.3, 69, 0.6}}, 1.0).mono();
+    CHECK(std::fabs(cents(peakHz(m, 440, 20, 2400, 9600, 48000), 440)) < 3);
+    CHECK(rmsDb(m, 33600, 4800) < rmsDb(m, 4800, 4800) - 30);
+}
+
+// ---------- Organ ----------
+
+TEST(timber_organ_drawbars_are_pure_footages_and_wheels_are_shared_in_phase) {
+    const double f = hzOf(60);
+    // 8' alone: a sine at the key's pitch (no other drawbar sounds).
+    {
+        const Values v = withModel(2, {{"db16", 0}, {"db513", 0}, {"db8", 8}, {"rotary", 0}, {"drive", 0}, {"click", 0}, {"space", 0}});
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, 60, 0.8}}, 0.5).mono();
+        const double h1 = bandDb(m, f, 4800, 9600, 48000);
+        CHECK(bandDb(m, f / 2, 4800, 9600, 48000) < h1 - 50);
+        CHECK(bandDb(m, 2 * f, 4800, 9600, 48000) < h1 - 50);
+        CHECK(std::fabs(cents(peakHz(m, f, 10, 4800, 19200, 48000), f)) < 0.5);
+    }
+    // 16' sounds an octave down, 5 1/3' a fifth above the 8'.
+    {
+        const Values v = withModel(2, {{"db16", 8}, {"db513", 8}, {"db8", 0}, {"rotary", 0}, {"drive", 0}, {"click", 0}, {"space", 0}});
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, 60, 0.8}}, 0.5).mono();
+        CHECK(std::fabs(bandDb(m, f / 2, 4800, 9600, 48000) - bandDb(m, 1.5 * f, 4800, 9600, 48000)) < 1.5);
+        CHECK(bandDb(m, f, 4800, 9600, 48000) < bandDb(m, f / 2, 4800, 9600, 48000) - 40);
+    }
+    // C4's 4' and C5's 8' read the same wheel: in phase, the two together are 6 dB over one (not 3, as unrelated phases).
+    {
+        const Values one = withModel(2, {{"db16", 0}, {"db513", 0}, {"db8", 8}, {"rotary", 0}, {"drive", 0}, {"click", 0}, {"space", 0}});
+        const Values both = withModel(2, {{"db16", 0}, {"db513", 0}, {"db8", 8}, {"db4", 8}, {"rotary", 0}, {"drive", 0}, {"click", 0}, {"space", 0}});
+        auto a = make(one), b = make(both);
+        const std::vector<float> x = play(*a, one, {{0.0, -1, 72, 0.8}}, 0.5).mono();
+        const std::vector<float> y = play(*b, both, {{0.0, -1, 72, 0.8}, {0.1234, -1, 60, 0.8}}, 0.5).mono();
+        const double gain = bandDb(y, 2 * f, 9600, 9600, 48000) - bandDb(x, 2 * f, 9600, 9600, 48000);
+        if (verbose()) std::printf("shared wheel: +%.2f dB\n", gain);
+        CHECK(std::fabs(gain - 6.02) < 0.3);
+    }
+}
+
+TEST(timber_organ_percussion_is_single_triggered_and_the_rotary_moves) {
+    const double f = hzOf(60);
+    const Values v = withModel(2, {{"db16", 0}, {"db513", 0}, {"perc", 2}, {"perc_decay", 1}, {"rotary", 0}, {"click", 0}, {"space", 0}});
+    auto p = make(v);
+    // A note alone, then a second while the first is held: only the first gets the 3rd-harmonic percussion.
+    const std::vector<float> m = play(*p, v, {{0.0, 0.25, 60, 0.8}, {0.5, -1, 60.0 + 12, 0.8}, {0.6, -1, 60, 0.8}}, 0.9).mono();
+    const double first = bandDb(m, 3 * f, 0, 2400, 48000), later = bandDb(m, 3 * f, static_cast<size_t>(0.6 * 48000), 2400, 48000);
+    if (verbose()) std::printf("percussion: first %.1f, legato %.1f dB\n", first, later);
+    CHECK(first > later + 15);
+    // The rotary at Fast swings the level of a held note; Off holds it steady.
+    for (int rotary : {0, 2}) {
+        const Values r = withModel(2, {{"rotary", rotary}, {"click", 0}, {"space", 0}, {"drive", 0}});
+        auto q = make(r);
+        const std::vector<float> s = play(*q, r, {{0.0, -1, 79, 0.8}}, 2.5).l;
+        double lo = 1e9, hi = -1e9;
+        for (size_t at = 48000; at + 1200 < s.size(); at += 1200) {
+            const double l = rmsDb(s, at, 1200);
+            lo = std::min(lo, l), hi = std::max(hi, l);
+        }
+        if (verbose()) std::printf("rotary %d: level swing %.1f dB\n", rotary, hi - lo);
+        if (rotary == 0) CHECK(hi - lo < 0.5);
+        else CHECK(hi - lo > 2);
+    }
 }

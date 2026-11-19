@@ -37,6 +37,13 @@ inline F4 operator*(F4 a, F4 b) noexcept { return {{a.v[0] * b.v[0], a.v[1] * b.
 inline F4 f4(float x) noexcept { return {{x, x, x, x}}; }
 #endif
 
+// A cheap soft clip: the [3/2] Pade form of tanh, x (27 + x^2) / (27 + 9 x^2), held to +-1 past |x| = 3.
+inline float softClip(float x) noexcept {
+    x = x < -3.0f ? -3.0f : (x > 3.0f ? 3.0f : x);
+    const float s = x * x;
+    return x * (27.0f + s) / (27.0f + 9.0f * s);
+}
+
 // The phase delay, in samples at `w` radians a sample, of the first-order allpass (a + z^-1) / (1 + a z^-1).
 inline double allpassDelay(double a, double w) noexcept {
     return 1.0 - 2.0 / w * std::atan(a * std::sin(w) / (1.0 + a * std::cos(w)));
@@ -176,8 +183,9 @@ struct Tables {
     static constexpr int kCharacters = 3, kZones = 8, kExcLength = 14400;
     static constexpr double kExcRate = 48000.0;
     int16_t excitation[kCharacters][kZones][kExcLength];
-    // A sine of kSine + 1 points (the last repeats the first): the organ's tonewheels.
-    static constexpr int kSine = 2048;
+    // A sine of kSine + 1 points (the last repeats the first): the organ's tonewheels, read without interpolation
+    // (its error, about -80 dB, sits under a tonewheel's own leakage).
+    static constexpr int kSine = 8192;
     float sine[kSine + 1];
     // A seeded noise burst for the plucked strings' excitation.
     static constexpr int kPluck = 8192;

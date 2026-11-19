@@ -25,7 +25,8 @@ TEST(timber_never_allocates_on_the_audio_thread) {
         l.instrument.params = {{"variant", static_cast<double>(model)}, {"space", 0.3}};
         p.layers.push_back(l);
         Engine e(48000);
-        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        const std::string set = e.setProject(p);
+        if (set.find("\"ok\":true") == std::string::npos) cawtest::fail(__FILE__, __LINE__, set);
         std::vector<float> left(192), right(192);
         // Warm up: the first notes of each key range, off the measured stretch.
         for (int id = 0; id < 12; ++id) e.noteOn("t", id, 30 + 6 * id, 0.8);

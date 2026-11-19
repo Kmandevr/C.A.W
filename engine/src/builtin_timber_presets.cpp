@@ -26,6 +26,20 @@ const std::vector<BuiltinPreset>& list() {
         {"Pedalled ambience", "Piano: sustain down, strong resonance and a wide room, for ambient washes", with(0, {{"sustain", 1.0}, {"resonance", 0.8}, {"space", 0.4}, {"hammer", 0.35}})},
         {"Jazz trio piano", "Piano: a warm grand with a soft touch, close", with(0, {{"hammer", 0.4}, {"tone", -0.1}, {"space", 0.1}, {"velocity", 0.9}})},
         {"Una corda", "Piano: the soft pedal down, a hushed and veiled grand", with(0, {{"soft", 1.0}, {"hammer", 0.3}, {"space", 0.2}})},
+        // Electric piano (1)
+        {"Tine ballad", "Electric piano: a mellow tine piano with a slow stereo pan, for soul and ballads", with(1, {{"pickup", 0.35}, {"bell", 0.4}, {"tremolo", 0.5}, {"rate", 3.0}})},
+        {"Tine bark", "Electric piano: a close pickup played hard, growling, for funk and rock", with(1, {{"pickup", 0.9}, {"symmetry", 0.5}, {"bark", 0.7}, {"bell", 0.6}})},
+        {"Bell keys", "Electric piano: a glassy, bell-heavy tine for pop pads", with(1, {{"bell", 1.0}, {"pickup", 0.3}, {"space", 0.25}, {"tone", 0.2}})},
+        {"Reed classic", "Electric piano: a reed piano with its tremolo, for soul and pop", with(1, {{"kind", 1}, {"tremolo", 0.4}, {"rate", 5.5}, {"bark", 0.3}})},
+        {"Reed grit", "Electric piano: an overdriven reed for rock rhythm parts", with(1, {{"kind", 1}, {"bark", 0.8}, {"pickup", 0.8}, {"symmetry", 0.6}})},
+        {"Soft tine pad", "Electric piano: a dark, long tine for backing chords", with(1, {{"pickup", 0.15}, {"bell", 0.15}, {"decay", 2.0}, {"tone", -0.3}, {"release", 0.4}})},
+        // Organ (2)
+        {"Gospel full", "Organ: all the low drawbars out, fast rotary, for gospel and soul", with(2, {{"db16", 8}, {"db513", 8}, {"db8", 8}, {"db4", 8}, {"db223", 6}, {"db2", 6}, {"rotary", 2}, {"drive", 0.3}})},
+        {"Jazz percussion", "Organ: 888 with 3rd-harmonic fast percussion, for jazz comping", with(2, {{"perc", 2}, {"perc_decay", 1}, {"vibrato", 6}, {"click", 0.5}})},
+        {"Rock drive", "Organ: a driven full registration on a fast rotary, for rock", with(2, {{"db4", 8}, {"db2", 6}, {"db1", 8}, {"drive", 0.8}, {"rotary", 2}, {"click", 0.6}})},
+        {"Ballad soft", "Organ: flutes 8' and 4' on a slow rotary, for quiet backing", with(2, {{"db16", 0}, {"db513", 0}, {"db8", 6}, {"db4", 4}, {"vibrato", 5}, {"drive", 0.0}, {"click", 0.1}})},
+        {"Church flutes", "Organ: soft stops without the rotary, for hymns and pads", with(2, {{"db16", 6}, {"db513", 0}, {"db8", 8}, {"db4", 6}, {"db2", 4}, {"rotary", 0}, {"click", 0.0}, {"space", 0.35}, {"release", 0.3}})},
+        {"Reggae bubble", "Organ: a short, percussive mid registration for skank chords", with(2, {{"db16", 0}, {"db513", 0}, {"db8", 8}, {"db4", 8}, {"db223", 8}, {"perc", 1}, {"perc_decay", 1}, {"rotary", 1}})},
     };
     return p;
 }
