@@ -390,9 +390,13 @@ const cppBuiltins = <CppBuiltin>[
       'Variants (`variant`): Bands, Graphic, DJ, Tilt; these knobs are the first\'s. 8 bands (bell, shelves, cuts at 12/24/48 dB, notch, band-pass, tilt), each stereo, mid, side, left or right; '
       'knobs b1_..b8_ on, type, freq, gain, q, channel; a live spectrum.',
       ['variant', 'output']),
-  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Compressor, Dynamics, Gate, Shape; these knobs are the first\'s. Soft knee, auto release and makeup, RMS or peak, link, sidechain filter.',
+  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Down, Dynamics, Up, Bus; these knobs are Down\'s. Soft knee, auto release and makeup, peak, RMS or ISP, link, sidechain filters, character, output. Always send talon_layout 1 (an entry without it is read as 1.0.9\'s).',
       ['variant', 'threshold', 'ratio', 'knee', 'attack', 'release', 'auto_release', 'makeup', 'auto_makeup', 'mix', 'lookahead', 'detect',
-       'link', 'sc_hpf', 'sc_listen', 'sidechain']),
+       'link', 'sc_hpf', 'sc_listen', 'sidechain', 'sc_lpf', 'character', 'output']),
+  CppBuiltin('org.caw.gate', 'Gate', false, 'Variants (`variant`): Gate, Expand, Pedal gate; these knobs are the first\'s. Threshold, range, ratio, hold, sidechain filter and key.',
+      ['variant', 'threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf', 'sidechain']),
+  CppBuiltin('org.caw.duck', 'Ducker', false, 'Variants (`variant`): Duck, Level, Carve; these knobs are the first\'s. Ducks under a key (or levels its own input) by an amount above a threshold.',
+      ['variant', 'threshold', 'amount', 'attack', 'hold', 'release', 'detection', 'output', 'mix', 'sidechain']),
   CppBuiltin('org.caw.limiter', 'Limiter', false, 'A look-ahead limiter with a true-peak estimate.',
       ['gain', 'ceiling', 'release', 'lookahead', 'true_peak']),
   CppBuiltin('org.caw.transient', 'Transient shaper', false, 'More or less attack and sustain.', ['attack', 'sustain', 'output', 'mix']),
@@ -447,7 +451,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.convolver', 'Convolver', false,
       'Convolution reverb: generated rooms, halls, plates, springs, chambers and odd spaces, or a loaded WAV; 512 frames of latency.',
       ['source', 'decay', 'size', 'damping', 'length', 'reverse', 'predelay', 'low_cut', 'high_cut', 'width', 'mix']),
-  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan; these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
+  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan, Shape (the drawn duck); these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
       ['variant', 'rate', 'sync', 'depth', 'shape', 'smooth', 'stereo', 'mode']),
   // fx-space end
   // fx-filters begin

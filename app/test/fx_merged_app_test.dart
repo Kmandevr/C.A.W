@@ -167,11 +167,15 @@ void main() {
         final d = PresetDevice.fromJson({'component': 'org.caw.saturator', 'params': {'drive': 5, 'mode': 3}})!;
         expect(d.componentId, 'org.caw.drive', reason: '$resolver');
         expect(d.params, {'drive': 5, 'mode': 3, 'variant': 1});
-        // A Compressor preset from before 1.1.0 gets talon_layout (its variant 0 stays); one of its moved variants
-        // goes to its new device.
+        // A Compressor preset from before 1.1.0 stays (its variant 0; the marker lives only on file); one of its
+        // moved variants goes to its new device; a 1.1.0 one (marked) keeps Talon's numbering.
         final reused = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'ratio': 3}})!;
         expect(reused.componentId, 'org.caw.compressor');
-        expect(reused.params, {'ratio': 3, talonLayoutParam: talonLayoutCurrent});
+        expect(reused.params, {'ratio': 3});
+        expect(reused.toJson()['params'], {'ratio': 3, talonLayoutParam: talonLayoutCurrent});
+        final up = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'variant': 2, talonLayoutParam: 1}})!;
+        expect(up.componentId, 'org.caw.compressor');
+        expect(up.params, {'variant': 2});
         final duck = PresetDevice.fromJson({'component': 'org.caw.compressor', 'params': {'variant': 4, 'amount': 0.6}})!;
         expect(duck.componentId, 'org.caw.duck', reason: '$resolver');
         expect(duck.params, {'variant': 0, 'amount': 0.6});

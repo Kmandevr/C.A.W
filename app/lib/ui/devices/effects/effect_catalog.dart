@@ -108,7 +108,9 @@ class EffectCatalog {
   /// The merged devices (FX consolidation, 1.0.8): one entry each, listed by the engine in place of the old effects
   /// they replaced (engine/src/fx_merged.h; the old ids are retired and no longer listed).
   static const List<(String, String, String, IconData)> _merged = [
-    ('org.caw.compressor', 'Dynamics', 'Compressor, Dynamics, Gate or Shape (the drawn duck), with a sidechain', Icons.compress),
+    ('org.caw.compressor', 'Dynamics', 'Down, Dynamics, Up (upward) or Bus (glue), with a sidechain', Icons.compress),
+    ('org.caw.gate', 'Dynamics', 'Gate, Expand or Pedal gate: closes or lowers the quiet parts', Icons.door_sliding_outlined),
+    ('org.caw.duck', 'Dynamics', 'Duck under a key, Level (a slow rider) or Carve (the key\'s frequencies dip)', Icons.call_received),
     ('org.caw.limiter', 'Dynamics', 'A brickwall ceiling with look-ahead and true peak', Icons.vertical_align_top),
     ('org.caw.transient', 'Dynamics', 'More or less attack and sustain, whatever the level', Icons.show_chart),
     ('org.caw.drive', 'Drive', 'Distortion, Saturate, Clip or Phase: from warmth to grit', Icons.whatshot_outlined),
@@ -118,7 +120,7 @@ class EffectCatalog {
     ('org.caw.utility', 'Utility', 'Utility, Width, Balance, Imager, Haas or Mixer: gain and the stereo field', Icons.tune),
     ('org.caw.chorus', 'Modulation', 'Chorus, Ensemble, Doubler, Flanger, Vibrato or Rotary', Icons.waves),
     ('org.caw.phaser', 'Modulation', 'Swept all-pass notches with feedback', Icons.waves),
-    ('org.caw.tremolo', 'Modulation', 'Tremolo or Pan: level or place moving in time', Icons.swap_horiz),
+    ('org.caw.tremolo', 'Modulation', 'Tremolo, Pan or Shape (the drawn duck): level or place moving in time', Icons.swap_horiz),
     ('org.caw.delay', 'Space', 'Digital (synced, dual, drive in the loop) or Ping-pong echoes', Icons.blur_linear),
     ('org.caw.reverb', 'Space', 'Hall (rooms to halls, ducking and freeze) or Shimmer', Icons.blur_on),
     ('org.caw.shift', 'Pitch & Time', 'Pitch (semitones and cents) or Frequency (every partial by the same hertz)', Icons.height),
