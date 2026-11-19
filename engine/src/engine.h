@@ -172,11 +172,13 @@ public:
     // Tests only: the MIDI clock the audio thread reads (-1: the real one).
     void setMidiClockForTest(int64_t ns) noexcept { midiClockTest_.store(ns, std::memory_order_relaxed); }
     void setMaster(double volume);
-    void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
+    // play, playCountIn and stop return whether the command reached the audio thread's queue (false: it stayed
+    // full, as when audio stalled; nothing changed).
+    bool play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
     // Count-in: clicks [beats] beats at the tempo (previews still play), then plays from [fromStep] on the
     // sample after the last beat. 0 beats is play(). Its beats are the ticks (1/den notes) of the signature where
     // playback starts; with [bars], [beats] is bars (0..16) of that signature's ticks, so it starts on an accent.
-    void playCountIn(double fromStep, int beats, bool bars = false);
+    bool playCountIn(double fromStep, int beats, bool bars = false);
     // How many Play commands (play, a count-in) have been sent (control thread): caw_audio_tune_buffer tells a new
     // playback from a long quiet one by it.
     uint64_t playsSent() const noexcept { return playCount_; }
@@ -210,7 +212,7 @@ public:
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
     // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
     void releaseTouches();
-    void stop();
+    bool stop();
     void clearOverload();
     // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
     // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.

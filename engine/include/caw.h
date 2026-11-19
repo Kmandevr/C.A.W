@@ -165,8 +165,13 @@ extern "C" {
    from 0 dB at each Play); caw_engine_set_component_auto_gain turns it on or off while playing and
    caw_engine_component_auto_gain reads the trim. caw_engine_component_meter reads and resets an effect's output
    peaks and its clip flag (CawSlotMeter). The Compressor (org.caw.compressor) gains a fifth variant, "Duck" (4).
+   Nothing else changes.
+   40 (2026-11-19, 1.0.9): Play and Stop report their status. caw_engine_play, caw_engine_play_at,
+   caw_engine_play_count_in, caw_engine_play_count_in_bars and caw_engine_stop return int32_t: 1 when the command
+   reached the audio thread, 0 when its queue stayed full (it was dropped; nothing changed). Callers may ignore it.
+   Device MIDI keeps its last queue slots for note offs and merges controller moves under pressure (no API change).
    Nothing else changes. */
-#define CAW_API_VERSION 39
+#define CAW_API_VERSION 40
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -416,19 +421,21 @@ CAW_API void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, 
 CAW_API void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
 CAW_API void caw_engine_note_off(CawEngine* e, int32_t id);
 CAW_API void caw_engine_notes_off(CawEngine* e);
-CAW_API void caw_engine_play(CawEngine* e);
+/* API 40: caw_engine_play, _play_at, _play_count_in, _play_count_in_bars and caw_engine_stop return 1 when the command
+   reached the audio thread's queue, 0 when it stayed full (audio stalled; nothing changed) or for a null engine. */
+CAW_API int32_t caw_engine_play(CawEngine* e);
 /* Plays from `step` sixteenth steps into the project loop (fractions allowed), so a pause resumes where it stopped,
    on the same beat even if the tempo changed meanwhile; outside the loop (or not finite) it starts at 0. It fades in
    over 10 ms. Notes that began before it are not heard, and a module's trig fires at its next pass, not here. */
-CAW_API void caw_engine_play_at(CawEngine* e, double step);
+CAW_API int32_t caw_engine_play_at(CawEngine* e, double step);
 /* Clicks `beats` (0..64) beats at the tempo, accented on each bar, then plays from `step` as caw_engine_play_at does
    (API 31: its beats are the ticks, 1/den notes, of the time signature and tempo where `step` is),
    on the sample after the last beat; previews play during it. While playing, or with 0 beats, it is play_at. A stop
    during the count-in cancels it. */
-CAW_API void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
+CAW_API int32_t caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
 /* API 31: the count-in in bars (0..16): `bars` whole bars of the signature where `step` is, each its `num` ticks (1/den
    notes) at the tempo there, so it starts on an accent (a 6/8 bar is six eighth-note clicks); then as play_at. */
-CAW_API void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars);
+CAW_API int32_t caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars);
 /* API 35 (#244). The live output's last stage, in the device callback after the mix (renders, exports, freezes and
    stems never run it): CAW_OUTPUT_MONO plays both sides as their mean (a listening check), CAW_OUTPUT_LIMITER a
    gentle zero-latency peak limiter (no effect below -4 dBFS, the output kept under -1 dBFS; non-finite samples
@@ -445,7 +452,7 @@ CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
 /* Ends every knob touch (a parameter set while playing overrides its lane until the next play), so the lanes rule
    again at once: the host's automation Touch mode calls it when a written control is let go. */
 CAW_API void caw_engine_release_touches(CawEngine* e);
-CAW_API void caw_engine_stop(CawEngine* e);
+CAW_API int32_t caw_engine_stop(CawEngine* e);
 /* The tempo map and time signatures (API version 31). Positions are in beats (quarter notes) from the song start;
    tempo is BPM in quarter notes per minute. A point with ramp != 0 makes the tempo go linearly in BPM over beats from
    the previous point to it; otherwise the tempo steps there. A signature from `beat` (on a bar line of the one before

@@ -908,17 +908,19 @@ class Engine implements TempoEngine {
     }
   }
 
-  void play() => _b.play(_handle);
+  /// play, playAt, playCountIn, playCountInBars and stop return whether the command reached the audio thread (API
+  /// 40; false: its queue stayed full and nothing changed). Callers may ignore it.
+  bool play() => _b.play(_handle) == 1;
 
   /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
-  void playAt(double step) => _b.playAt(_handle, step);
+  bool playAt(double step) => _b.playAt(_handle, step) == 1;
 
   /// Clicks [beats] beats at the tempo, then plays from [step] (the recording count-in); a stop cancels it.
-  void playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats);
+  bool playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats) == 1;
 
   /// Clicks [bars] (0..16) whole bars of the time signature where [step] is (its ticks, 1/den notes, at the tempo
   /// there; API 31), so the count-in starts on an accent, then plays from [step].
-  void playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars);
+  bool playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars) == 1;
 
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
@@ -1030,7 +1032,7 @@ class Engine implements TempoEngine {
       calloc.free(r);
     }
   }
-  void stop() => _b.stop(_handle);
+  bool stop() => _b.stop(_handle) == 1;
   void clearOverload() => _b.clearOverload(_handle);
 
   EngineMeters meters() {

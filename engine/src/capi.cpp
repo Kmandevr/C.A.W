@@ -265,20 +265,20 @@ void caw_engine_set_master(CawEngine* e, double volume) {
     if (e) e->engine->setMaster(volume);
 }
 
-void caw_engine_play(CawEngine* e) {
-    if (e) e->engine->play();
+int32_t caw_engine_play(CawEngine* e) {
+    return e && e->engine->play() ? 1 : 0;
 }
 
-void caw_engine_play_at(CawEngine* e, double step) {
-    if (e) e->engine->play(step);
+int32_t caw_engine_play_at(CawEngine* e, double step) {
+    return e && e->engine->play(step) ? 1 : 0;
 }
 
-void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats) {
-    if (e) e->engine->playCountIn(step, beats);
+int32_t caw_engine_play_count_in(CawEngine* e, double step, int32_t beats) {
+    return e && e->engine->playCountIn(step, beats) ? 1 : 0;
 }
 
-void caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars) {
-    if (e) e->engine->playCountIn(step, bars, true);
+int32_t caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars) {
+    return e && e->engine->playCountIn(step, bars, true) ? 1 : 0;
 }
 
 void caw_engine_set_metronome(CawEngine* e, int32_t on) {
@@ -307,8 +307,8 @@ void caw_engine_release_touches(CawEngine* e) {
     if (e) e->engine->releaseTouches();
 }
 
-void caw_engine_stop(CawEngine* e) {
-    if (e) e->engine->stop();
+int32_t caw_engine_stop(CawEngine* e) {
+    return e && e->engine->stop() ? 1 : 0;
 }
 
 void caw_engine_clear_overload(CawEngine* e) {

@@ -2680,7 +2680,7 @@ void Engine::setMaster(double volume) {
     send(c);
 }
 
-void Engine::play(double fromStep) {
+bool Engine::play(double fromStep) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
@@ -2688,12 +2688,13 @@ void Engine::play(double fromStep) {
     c.fromStep = fromStep;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
+    if (!send(c)) return false;  // nothing changed on the audio side, so keep the control side as it was
     playCount_ = c.playCount;
     loudness_->requestReset();  // the integrated loudness measures this play
+    return true;
 }
 
-void Engine::playCountIn(double fromStep, int beats, bool bars) {
+bool Engine::playCountIn(double fromStep, int beats, bool bars) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
@@ -2703,9 +2704,10 @@ void Engine::playCountIn(double fromStep, int beats, bool bars) {
     c.countInBars = bars;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;
+    if (!send(c)) return false;
     playCount_ = c.playCount;
     loudness_->requestReset();
+    return true;
 }
 
 void Engine::setMetronome(bool on) {
@@ -2834,11 +2836,11 @@ void Engine::releaseTouches() {
     playCount_ = c.playCount;
 }
 
-void Engine::stop() {
+bool Engine::stop() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Stop;
-    send(c);
+    return send(c);
 }
 
 void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept {

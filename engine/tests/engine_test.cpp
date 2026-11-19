@@ -2446,3 +2446,26 @@ TEST(track_volume_lanes_reach_plus_12_db_as_the_faders) {
     CHECK_NEAR(parsed.layers[0].automation[0].points[0].value, 3.0, 1e-9);
     CHECK_NEAR(parsed.layers[0].automation[0].points[1].value, kMaxMixGain, 1e-9);  // held at +12 dB
 }
+
+TEST(play_and_stop_report_whether_they_reached_the_audio_thread) {
+    // API 40: 1 when the command is queued for the audio thread, 0 when its queue stayed full (audio stalled).
+    CHECK_EQ(caw_engine_play(nullptr), 0);
+    CHECK_EQ(caw_engine_stop(nullptr), 0);
+    CawEngine* ce = caw_engine_create(48000);
+    CHECK(ce != nullptr);
+    CHECK_EQ(caw_engine_play(ce), 1);
+    CHECK_EQ(caw_engine_play_at(ce, 4), 1);
+    CHECK_EQ(caw_engine_play_count_in(ce, 0, 4), 1);
+    CHECK_EQ(caw_engine_play_count_in_bars(ce, 0, 1), 1);
+    CHECK_EQ(caw_engine_stop(ce), 1);
+    caw_engine_destroy(ce);
+    // No callback runs: the command queue fills, and a stop past it reports the failure instead of vanishing.
+    Engine e(48000);
+    int queued = 0;
+    while (queued < 2048 && e.play()) ++queued;
+    CHECK(queued >= 1000 && queued < 2048);
+    CHECK(!e.stop());
+    std::vector<float> l(128), r(128);
+    e.process(l.data(), r.data(), 128);  // the audio thread empties the queue
+    CHECK(e.stop());
+}

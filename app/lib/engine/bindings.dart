@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 39;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 40;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -313,10 +313,10 @@ class Bindings {
         noteOff = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
             'caw_engine_note_off'),
         notesOff = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_notes_off'),
-        play = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_play'),
-        playAt = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
+        play = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_play'),
+        playAt = lib.lookupFunction<Int32 Function(Pointer<Void>, Double), int Function(Pointer<Void>, double)>(
             'caw_engine_play_at'),
-        playCountIn = lib.lookupFunction<Void Function(Pointer<Void>, Double, Int32), void Function(Pointer<Void>, double, int)>(
+        playCountIn = lib.lookupFunction<Int32 Function(Pointer<Void>, Double, Int32), int Function(Pointer<Void>, double, int)>(
             'caw_engine_play_count_in'),
         setMetronome = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
             'caw_engine_set_metronome'),
@@ -341,7 +341,7 @@ class Bindings {
             'caw_audio_set_background'),
         audioTuneBuffer = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_audio_tune_buffer'),
-        stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
+        stop = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
         meters = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<CawMetersStruct>),
@@ -508,8 +508,8 @@ class Bindings {
   late final int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int) setTimeSignatures = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<CawTimeSigStruct>, Int32),
       int Function(Pointer<Void>, Pointer<CawTimeSigStruct>, int)>('caw_engine_set_time_signatures');
-  late final void Function(Pointer<Void>, double, int) playCountInBars = _lib.lookupFunction<
-      Void Function(Pointer<Void>, Double, Int32), void Function(Pointer<Void>, double, int)>('caw_engine_play_count_in_bars');
+  late final int Function(Pointer<Void>, double, int) playCountInBars = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Double, Int32), int Function(Pointer<Void>, double, int)>('caw_engine_play_count_in_bars');
   late final int Function(Pointer<Void>, double) setBpm = _lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
       int Function(Pointer<Void>, double)>('caw_engine_set_bpm');
   late final int Function(Pointer<Void>, Pointer<CawPositionStruct>) position = _lib.lookupFunction<
@@ -556,9 +556,9 @@ class Bindings {
   final void Function(Pointer<Void>, int, double) notePitch;
   final void Function(Pointer<Void>, int) noteOff;
   final void Function(Pointer<Void>) notesOff;
-  final void Function(Pointer<Void>) play;
-  final void Function(Pointer<Void>, double) playAt;
-  final void Function(Pointer<Void>, double, int) playCountIn;
+  final int Function(Pointer<Void>) play; // API 40: 1 reached the audio thread, 0 its queue was full
+  final int Function(Pointer<Void>, double) playAt;
+  final int Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
   /// caw_migrate_component (API 38): an effect entry in its merged form (FX consolidation).
@@ -572,7 +572,7 @@ class Bindings {
   final int Function(Pointer<Void>, int) audioSetBackground;
   final int Function(Pointer<Void>, int) audioTuneBuffer;
   final void Function(Pointer<Void>) releaseTouches;
-  final void Function(Pointer<Void>) stop;
+  final int Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>) layerMeter;
