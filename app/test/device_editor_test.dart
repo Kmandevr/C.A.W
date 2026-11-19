@@ -349,7 +349,10 @@ void main() {
       await openSynth(tester);
       final slot = ModMatrix(synth()).add(ModSource.lfo1, 'osc1_level')!;
       await tester.pump();
+      // The hold menu (device shell), then its Modulation entry.
       await tester.longPress(find.byKey(const ValueKey('dknob-osc1_level')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('knob-menu-mod')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget);
       final slider = find.byKey(ValueKey('modamount-$slot'));
@@ -627,8 +630,8 @@ void main() {
     final knob = find.byKey(const ValueKey('dknob-osc1_level'));
     await tester.tap(knob, buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget, reason: 'the long-press sheet');
-    Navigator.of(tester.element(find.byKey(const ValueKey('mod-sheet')))).pop();
+    expect(find.byKey(const ValueKey('knob-menu')), findsOneWidget, reason: 'the hold menu');
+    Navigator.of(tester.element(find.byKey(const ValueKey('knob-menu')))).pop();
     await tester.pumpAndSettle();
     final before = synth().value('osc1_level');
     final mouse = TestPointer(1, PointerDeviceKind.mouse);

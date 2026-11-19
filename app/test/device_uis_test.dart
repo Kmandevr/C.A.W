@@ -209,6 +209,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('eq-add-hint')), findsOneWidget);
       final firstOff = [for (var n = 1; n <= 8; n++) if (t.param('b${n}_on') != null && t.value('b${n}_on') < 0.5) n].first;
+      // The footer (device shell) takes room at the bottom: bring the curve back into view first.
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-view')));
+      await tester.pumpAndSettle();
       final v2 = tester.getRect(find.byKey(const ValueKey('eq-view')));
       await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 30));
       await tester.pumpAndSettle();

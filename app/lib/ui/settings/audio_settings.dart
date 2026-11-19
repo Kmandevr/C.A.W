@@ -289,6 +289,11 @@ class _SoundSettingsState extends State<SoundSettings> {
                   ? 'On: while playing, the buffer steps down while it plays steadily and back up after a dropout; '
                       'the size found is kept per kind of output'
                   : 'Off: the buffer stays at the size Buffer mode gives'),
+        settingSwitch('audio.autoGain', s2.autoGainNewDevices, (v) => s2.update((x) => x.autoGainNewDevices = v),
+            icon: Icons.hearing,
+            subtitle: s2.autoGainNewDevices
+                ? 'On: a device you add keeps its output as loud as its input; switch it per device with the ear'
+                : 'Off: devices start without auto gain; switch it per device with the ear in its header'),
         settingSwitch('audio.monoCheck', s2.monoCheck, (v) => s2.update((x) => x.monoCheck = v),
             icon: Icons.call_merge,
             subtitle: s2.monoCheck

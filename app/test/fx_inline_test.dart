@@ -182,6 +182,8 @@ void main() {
     // The knob's Modulation sheet, a bottom sheet over the stack (no new page): its slider moves the amount.
     await tester.longPress(inInst('dknob-osc1_level'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('knob-menu-mod')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mod-sheet')), findsOneWidget);
     expect(find.byKey(const ValueKey('device-editor')), findsNothing);
     final before = layer().instrument!.params['mod${r.slot}_amt']!;

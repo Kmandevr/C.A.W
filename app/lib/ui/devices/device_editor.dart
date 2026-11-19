@@ -22,10 +22,11 @@ import 'sidechain_bar.dart';
 import 'variant_bar.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
-import 'kit/preset_browser.dart';
 import '../page_closer.dart';
 import '../panel_motion.dart';
 import 'kit/presets.dart';
+import 'kit/device_footer.dart';
+import 'kit/device_header.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
 
@@ -196,7 +197,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
         setState(() => _tab = modTab);
       },
       child: Builder(builder: (context) => _frame(context, title: t.label, color: color, style: style, bypass: true,
-        tabs: sections.length > 1 ? sections : null, tab: tab,
+        tabs: sections.length > 1 ? sections : null, tab: tab, stripAtBottom: sections[tab].stripAtBottom,
         strip: hasMatrix ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const ModSourceStrip(),
           const ModAssignBanner(),
@@ -210,50 +211,26 @@ class _DeviceEditorState extends State<DeviceEditor> {
   }
 
   Widget _frame(BuildContext context, {required String title, required Color color, required Widget body,
-      DeviceStyle? style, bool bypass = false, List<DeviceSection>? tabs, int tab = 0, Widget? strip}) {
+      DeviceStyle? style, bool bypass = false, List<DeviceSection>? tabs, int tab = 0, Widget? strip,
+      bool stripAtBottom = false}) {
     final layer = t.layer;
     final second = style?.secondary ?? color;
-    final header = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanUpdate: widget.onHeaderDrag == null ? null : (d) => widget.onHeaderDrag!(d.delta),
-      child: SizedBox(height: 48, child: Row(children: [
-        IconButton(key: const ValueKey('device-close'), tooltip: 'Close', iconSize: 20,
-          onPressed: widget.onClose,
-          icon: Icon(widget.onHeaderDrag == null ? Icons.arrow_back : Icons.close)),
-        Container(
-          key: const ValueKey('device-badge'),
-          width: 30, height: 30,
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(9),
-            gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: Neon.ramp([color.withValues(alpha: 0.9), second.withValues(alpha: 0.75)])),
-            boxShadow: Neon.glow(color, strength: 0.35)),
-          child: Icon(style?.icon ?? Icons.extension_outlined, size: 17, color: Neon.bg)),
-        const SizedBox(width: 8),
-        Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-            if (layer != null) Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 9, color: color)),
-          ])),
-        if (bypass) ...[
-          DevicePresetChip(target: t, color: color, shortcuts: true),
-          const SizedBox(width: 4),
-          _ABSwitch(target: t, color: color),
-          IconButton(
-            key: const ValueKey('device-bypass'),
-            tooltip: t.bypass ? 'Turn on' : 'Bypass',
-            iconSize: 18,
-            color: t.bypass ? Neon.dim : Neon.green,
-            onPressed: () {
-              DeviceFeel.tap();
-              t.setBypass(!t.bypass);
-            },
-            icon: Icon(Icons.power_settings_new, shadows: t.bypass ? null : [Shadow(color: Neon.green, blurRadius: 6)])),
-        ],
-        const SizedBox(width: 4),
-      ])),
-    );
+    final close = IconButton(key: const ValueKey('device-close'), tooltip: 'Close', iconSize: 20,
+        onPressed: widget.onClose,
+        icon: Icon(widget.onHeaderDrag == null ? Icons.arrow_back : Icons.close));
+    // The device shell's header (power, name, preset bar, A/B, ear, ⋯); a device not loaded yet gets its name only.
+    final header = bypass
+        ? DeviceHeader(target: t, color: color, style: style, leading: close, subtitle: layer?.name, shortcuts: true,
+            onDrag: widget.onHeaderDrag, wideAt: 600)
+        : GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanUpdate: widget.onHeaderDrag == null ? null : (d) => widget.onHeaderDrag!(d.delta),
+            child: SizedBox(height: 48, child: Row(children: [
+              close,
+              const SizedBox(width: 4),
+              Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color))),
+            ])));
     return DeviceFingers.counter(child: DeviceKeyArea(label: '$title device', child: Column(key: const ValueKey('device-editor'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       header,
       Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: Neon.ramp([
@@ -265,45 +242,17 @@ class _DeviceEditorState extends State<DeviceEditor> {
           Expanded(child: _Tab(section: tabs[i], selected: i == tab, color: color, onTap: () => setState(() => _tab = i))),
       ])),
       Container(height: 1, color: Neon.ink.withValues(alpha: 0.06)),
-      ?strip,
+      if (!stripAtBottom) ?strip,
       Expanded(child: AnimatedOpacity(
         duration: Motion.fade(Motion.small, Motion.of(context)),
         opacity: t.bypass ? 0.55 : 1,
         child: body)),
+      if (stripAtBottom && strip != null) DecoratedBox(
+        key: const ValueKey('device-strip-bottom'),
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.ink.withValues(alpha: 0.06)))),
+        child: strip),
+      if (bypass) const DeviceFooter(),
     ])));
-  }
-}
-
-/// The A/B compare switch.
-class _ABSwitch extends StatelessWidget {
-  const _ABSwitch({required this.target, required this.color});
-  final DeviceTarget target;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final b = DeviceAB.isB(target);
-    Widget side(String label, bool isB) => GestureDetector(
-      key: ValueKey('device-ab-${label.toLowerCase()}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        DeviceFeel.tap();
-        DeviceAB.select(target, isB);
-        (context as Element).markNeedsBuild();
-      },
-      child: Container(
-        width: 24, height: 26,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(6),
-          color: b == isB ? color.withValues(alpha: 0.25) : Colors.transparent),
-        child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: b == isB ? Neon.text : Neon.dim)),
-      ),
-    );
-    return Tooltip(message: 'Compare two settings', waitDuration: const Duration(milliseconds: 600), child: Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Neon.line)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [side('A', false), side('B', true)]),
-    ));
   }
 }
 

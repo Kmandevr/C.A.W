@@ -20,7 +20,7 @@ const double flagshipWide = 700;
 
 /// One page (owner, 2026-11-18: one cohesive screen, no accordions); the mod sources live on it.
 List<DeviceSection> flagshipSections(DeviceTarget target) => [
-  DeviceSection('synth', 'SYNTH', Icons.graphic_eq, (_) => const FlagshipPage(), showsSources: true),
+  DeviceSection('synth', 'SYNTH', Icons.graphic_eq, (_) => const FlagshipPage(), showsSources: true, stripAtBottom: true),
 ];
 
 /// Plain names for the flagship's knobs (owner, 2026-11-10: no cryptic abbreviations), by parameter id suffix.

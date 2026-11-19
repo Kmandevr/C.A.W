@@ -49,8 +49,9 @@ void main() {
       print('BENCH $id knob step builds: ${out.join(' ')}');
       // A rack's knobs rebuild its page (its parameters choose its children); every other device's rebuild the
       // knob and its visuals (EQ's: the curve, the band strip, the readout and the band's controls). Ceilings about
-      // 10 % over the counts in docs/performance.md (exact in the test VM).
-      final ceiling = _ceilings[MergedDevices.isMerged(id) ? MergedDevices.pageId(id, 0) : id] ?? 80;
+      // 10 % over the counts in docs/performance.md (exact in the test VM). Mix and Output show twice since the device
+      // shell (2026-11-18): the page's knob and the footer's, until each family's page drops its own (90, was 80).
+      final ceiling = _ceilings[MergedDevices.isMerged(id) ? MergedDevices.pageId(id, 0) : id] ?? 90;
       for (final o in out) {
         expect(int.parse(o.split('=').last), lessThanOrEqualTo(ceiling), reason: '$id $o');
       }
@@ -65,5 +66,5 @@ void main() {
 /// The devices whose knob step rebuilds more than the 80 widgets most do (docs/performance.md, a knob step).
 const _ceilings = {
   'org.caw.eq': 190, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
-  'org.caw.rack.fx': 1120, 'org.caw.rack.multiband': 670,
+  'org.caw.rack.fx': 1240, 'org.caw.rack.multiband': 890,
 };

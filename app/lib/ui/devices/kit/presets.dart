@@ -101,8 +101,33 @@ class DevicePresets {
     target.state.endUndoStep();
   }
 
+  /// The preset [by] places after (or before) the current one in [of]'s order, wrapping round; from no current
+  /// preset, the first (or the last). Null when the device has none.
+  static DevicePreset? stepFrom(DeviceTarget target, int by) {
+    final all = of(target);
+    if (all.isEmpty) return null;
+    // Nothing loaded yet and every value at its default: it stands on Init (the label says so).
+    final now = current(target) ?? (matches(target, const DevicePreset('Init', {})) ? all.first : null);
+    final at = now == null ? -1 : all.indexWhere((p) => p.key == now.key);
+    if (at < 0) return by > 0 ? all.first : all.last;
+    return all[(at + by) % all.length];
+  }
+
+  /// The header's ‹ and ›: loads the preset before or after the current one (one undo step).
+  static DevicePreset? step(DeviceTarget target, int by) {
+    final p = stepFrom(target, by);
+    if (p != null) apply(target, p);
+    return p;
+  }
+
   /// Makes [preset] the device's current one without loading it (just saved from its values).
   static void remember(DeviceTarget target, DevicePreset preset) => _current[_key(target)] = (preset.key, preset.name);
+
+  /// What [current] goes by for the device, to put back with [restoreRemembered] (a cancelled preview).
+  static (String, String)? remembered(DeviceTarget target) => _current[_key(target)];
+
+  static void restoreRemembered(DeviceTarget target, (String, String)? was) =>
+      was == null ? _current.remove(_key(target)) : _current[_key(target)] = was;
 
   /// The user preset loaded last into the device, while it is still in the library; null otherwise.
   static UserPreset? currentUser(DeviceTarget target) {
@@ -177,5 +202,19 @@ class DeviceAB {
     final other = _state[_key(t)]?.$2;
     _state[_key(t)] = (b, now);
     if (other != null) t.setAll(other);
+  }
+
+  /// A hold on the switch: B becomes a copy of A. On A, B's snapshot is A's values now; on B, A's values load into B
+  /// (one undo step).
+  static void copyAToB(DeviceTarget t) {
+    final info = t.info;
+    if (info == null) return;
+    final now = {for (final p in info.parameters) p.id: t.value(p.id)};
+    if (!isB(t)) {
+      _state[_key(t)] = (false, now);
+      return;
+    }
+    final a = _state[_key(t)]?.$2;
+    if (a != null) t.setAll(a);
   }
 }

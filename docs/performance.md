@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
 covers: [engine/bench/, engine/src/meters.cpp, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Performance
@@ -360,6 +360,7 @@ Beta readiness plan B3–B5 (owner, 2026-11-12, [beta readiness plan](beta-readi
 | Device editors' raster, playing | 9.4–15 ms | 10–13 ms (the same picture) |
 
 - **What changed** (details in [app](app.md), Frame rate):
+  - The device shell (2026-11-18) adds its header and footer to every editor: a Mix or Output step now also rebuilds the footer's knob of the same value (knob-step ceiling 90, was 80), a step that rebuilds the page (EQ `b1_on`, ping-pong `mode`) rebuilds the header and footer too (about 140 widgets more a step; EQ 15,290 and ping-pong 11,208 builds for 20), and the racks' page rebuilds take about 100 more. The preset bar's arrows and star rebuild only when a preset loads, not on a knob step. Each family's page dropping its own Mix (a later round) takes the doubled knob away.
   - Device motion is a Ticker (`MotionClock`) inside its own repaint boundary and build scope (`DevicePhase`, the knob's face as a `LiveIsland`): a motion frame repaints 2 render objects instead of the card or page around it. It asks for every frame (120 at 120 Hz, was 30) only while something moves: the engine sounds (`AppState.sounding`) or a finger is down on the editor (`MotionTouch`); stopped, silent and untouched the engine runs no modulator (`Engine::process`), so the clock holds its time and asks for none, and Auto's idle drop comes (the battery rule, 2026-11-12). Reduced or no motion, Minimal, the background and covered routes stop it.
   - Device display reads ride the shared meter tick instead of their own 33 ms timers, so they stop when the poller does.
   - Waveforms: cached 512 px tiles of one `drawRawPoints` batch each per clip, zoom and size (was a `drawLine` per pixel across the whole clip on every repaint), repainted only for their own file's peaks; track cards' playhead is a live island over its own layer.

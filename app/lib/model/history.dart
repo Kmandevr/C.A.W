@@ -25,6 +25,9 @@ class ProjectHistory {
   /// A burst of edits is open: edited since the last [settle].
   bool get open => _open;
 
+  /// The undo steps' snapshots, oldest first (read only: a device's own steps, device_history.dart).
+  List<String> get undoSnapshots => List.unmodifiable(_undo);
+
   /// A new project (or one just opened): no history, and [current] is where it stands.
   void reset(String current) {
     _undo.clear();
