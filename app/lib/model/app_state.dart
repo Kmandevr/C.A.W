@@ -30,6 +30,7 @@ import 'default_project.dart';
 import 'device_slot_audio.dart';
 import 'engine_slot_audio.dart';
 import 'freeze.dart';
+import 'freeze_hint.dart';
 import 'history.dart';
 import 'mixer_fx.dart' show masterLayerId;
 import 'pattern_doc.dart';
@@ -490,6 +491,13 @@ class AppState extends ChangeNotifier implements StressHost {
 
   /// Set when an overload switched light mode on, so the app can say so once.
   bool lightTurnedOnBySelf = false;
+
+  /// Smart freeze (1.1.0): the one-time suggestion to freeze the heaviest track when the CPU stays near the limit.
+  final FreezeHint freezeHint = FreezeHint();
+
+  /// The platform's thermal and power state as it last reported it (the heat banner reads it; nothing changes a
+  /// setting on it).
+  final ValueNotifier<EnginePressure> pressure = ValueNotifier(EnginePressure.unknown);
   List<LayerMeterValue> layerMeters = const [];
 
   Timer? _saveTimer;
@@ -550,10 +558,15 @@ class AppState extends ChangeNotifier implements StressHost {
       try {
         await latency.load();
         _resourcePressureSubscription = ResourceSignals.changes.listen(
-          (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+          (p) {
+            EngineExecutionPolicy.updateRuntimeSignals(pressure: p);
+            pressure.value = p;
+          },
           onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
         );
-        EngineExecutionPolicy.updateRuntimeSignals(pressure: await readPressure());
+        final now = await readPressure();
+        EngineExecutionPolicy.updateRuntimeSignals(pressure: now);
+        pressure.value = now;
       } catch (_) {
         // The signals are optional: the policy stays conservative without them.
         EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
@@ -698,6 +711,8 @@ class AppState extends ChangeNotifier implements StressHost {
     _syncTimer?.cancel();
     _historyTimer?.cancel();
     masterValueTick.dispose();
+    freezeHint.dispose();
+    pressure.dispose();
     values.dispose();
     tick.dispose();
     startup.dispose();
@@ -732,6 +747,9 @@ class AppState extends ChangeNotifier implements StressHost {
       checkAudioDevice();
     }
     tick.value++;
+    freezeHint.poll(now, cpu: meters.cpu, playing: meters.playing, overloaded: meters.overloaded > 0,
+        tracks: () => freezeCandidates(this), share: (l) => measuredTrackShare(this, l),
+        hint: (l) => hintedTrackCost(this, l));
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
       // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
       lightTurnedOnBySelf = true;

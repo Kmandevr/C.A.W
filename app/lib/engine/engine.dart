@@ -78,6 +78,17 @@ class SlotMeter {
   final bool clipped;
 }
 
+/// An effect slot's cost (caw_engine_component_cost, API 44): its share of one core (0.01 = 1 %; null until the
+/// engine has measured a block after the first read), the latency it reports now (0 bypassed) and whether it plays
+/// its armed, near-zero-delay version now (the header's badge).
+class SlotCost {
+  const SlotCost({required this.cpuShare, required this.latencyFrames, required this.latencyMs, required this.armed});
+  final double? cpuShare;
+  final int latencyFrames;
+  final double latencyMs;
+  final bool armed;
+}
+
 /// Where the transport is (caw_engine_position): its sample, beats, seconds, the tempo there, and the 0-based bar,
 /// the beat within it (quarter notes) and the signature.
 class EnginePosition {
@@ -786,6 +797,25 @@ class Engine implements TempoEngine {
       if (_b.componentMeter(_handle, l, index, out) != 1) return null;
       final r = out.ref;
       return SlotMeter(peakL: r.peakL, peakR: r.peakR, clipped: r.clipped != 0);
+    } finally {
+      calloc.free(l);
+      calloc.free(out);
+    }
+  }
+
+  /// Effect slot [index]'s cost (API 44; [index] CAW_INSTRUMENT_INDEX: the instrument). A read keeps the engine timing
+  /// that chain's slots for 2 s, so poll it a few times a second only while a header shows it. Null when the engine
+  /// is busy (try again) or there is no such slot. Never blocks.
+  SlotCost? componentCost(String? layerId, int index) {
+    if (_nativeDestroyed) return null;
+    final l = (layerId ?? '').toNativeUtf8();
+    final out = calloc<CawSlotCostStruct>();
+    try {
+      out.ref.structSize = sizeOf<CawSlotCostStruct>();
+      if (_b.componentCost(_handle, l, index, out) != 1) return null;
+      final r = out.ref;
+      return SlotCost(cpuShare: r.cpuShare < 0 || !r.cpuShare.isFinite ? null : r.cpuShare,
+        latencyFrames: r.latencyFrames, latencyMs: r.latencyMs.isFinite ? r.latencyMs : 0, armed: r.armed == 1);
     } finally {
       calloc.free(l);
       calloc.free(out);

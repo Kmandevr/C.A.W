@@ -87,6 +87,21 @@ final class CawSlotMeterStruct extends Struct {
   external int clipped;
 }
 
+/// CawSlotCost (API 44): an effect slot's CPU share, latency now and armed flag, as caw_engine_component_cost fills
+/// them. Versioned: the caller sets [structSize] (fields are only ever appended).
+final class CawSlotCostStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  @Float()
+  external double cpuShare;
+  @Uint32()
+  external int latencyFrames;
+  @Float()
+  external double latencyMs;
+  @Int32()
+  external int armed;
+}
+
 /// CawLayerMeterStereo (API 25): one layer's meter with each side's peak, as caw_engine_layer_meters fills them.
 final class CawLayerMeterStereoStruct extends Struct {
   @Float()
@@ -302,6 +317,8 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>)>('caw_engine_component_auto_gain'),
         componentMeter = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<CawSlotMeterStruct>),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>)>('caw_engine_component_meter'),
+        componentCost = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<CawSlotCostStruct>),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotCostStruct>)>('caw_engine_component_cost'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         setMaster = lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
@@ -577,6 +594,8 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Float>) componentAutoGain;
   /// caw_engine_component_meter (API 39): a slot's output peaks and clip flag, read and reset; 1, 0 busy, -1 none.
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>) componentMeter;
+  /// caw_engine_component_cost (API 44): a slot's CPU share, latency and armed flag; 1, 0 busy, -1 none.
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotCostStruct>) componentCost;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final int Function(Pointer<Void>, double) setMaster; // API 40: 1 queued, 0 the queue was full
   final int Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn; // also -1: nothing to send

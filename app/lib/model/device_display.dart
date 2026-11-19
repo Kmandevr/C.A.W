@@ -166,7 +166,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
           values: named(['detector_db', 'key_db', 'gr', 'gr_max', 'threshold', 'amount', 'detection', 'sidechain'], 2));
     case 'org.caw.limiter':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
-          values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak'], 2));
+          // 1.1.0 appends the loudness target (7-12; LUFS and LU, -200 while off or unmeasured).
+          values: named(['gr_max', 'gr', 'ceiling_db', 'gain_db', 'true_peak', 'target_on', 'target_lufs', 'short_lufs',
+            'integrated_lufs', 'short_from_target', 'integrated_from_target'], 2));
     case 'org.caw.gate':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2),
           values: named(['gr', 'gr_max', 'detector_db', 'threshold', 'open'], 2));

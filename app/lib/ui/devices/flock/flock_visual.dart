@@ -7,7 +7,8 @@ import '../../../model/device_display.dart';
 import '../../theme.dart';
 import '../kit/hero.dart';
 
-/// What Flock's display frame says (docs/engine.md, Display data, `org.caw.flock`): 44 floats, then 5 per grain.
+/// What Flock's display frame says (docs/engine.md, Display data, `org.caw.flock`): 44 floats, then 5 per grain, then
+/// (1.1.0) one direction flag per grain.
 class FlockFrame {
   const FlockFrame(this.f);
   final DeviceDisplayFrame? f;
@@ -46,6 +47,15 @@ class FlockFrame {
     final b = head + overviewBins + perGrain * k;
     return (pos: _at(b).clamp(0.0, 1.0), phase: _at(b + 1).clamp(0.0, 1.0), pan: _at(b + 2).clamp(-1.0, 1.0),
         semitones: _at(b + 3), voice: _at(b + 4).round());
+  }
+
+  /// Whether grain [k] plays backwards, from the direction block after the grains (index 44 + 5 × [shown] + k: 1
+  /// backwards, 0 forwards); null on an engine before 1.1.0, whose frame has no such block.
+  bool? backwards(int k) {
+    final n = shown, raw = f?.raw?.length ?? 0;
+    final i = head + overviewBins + perGrain * n + k;
+    if (k < 0 || k >= n || raw < head + overviewBins + (perGrain + 1) * n) return null;
+    return _at(i) >= 0.5;
   }
 }
 
@@ -180,8 +190,9 @@ class FlockPainter extends CustomPainter {
     for (var k = 0; k < fr.shown; k++) {
       final g = fr.grain(k);
       final level = flockWindowLevel(window, g.phase);
-      // The display marks a backwards grain by a negative pitch; with Reverse off, negative is only a lower pitch.
-      final back = reversing && g.semitones < 0;
+      // 1.1.0's direction flags say which grains play backwards (their semitones are then sent negated); an older
+      // frame marks one only by a negative pitch, which with Reverse off is only a lower pitch.
+      final back = fr.backwards(k) ?? (reversing && g.semitones < 0);
       final st = back ? -g.semitones : g.semitones;
       final y = (mid - st / span * s.height * 0.42 + g.pan * s.height * 0.06).clamp(10.0, s.height - 12);
       final c = Color.lerp(p.accent, p.secondary, (g.voice % 4) / 5)!;

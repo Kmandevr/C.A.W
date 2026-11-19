@@ -18,6 +18,7 @@ import '../dynamics_editors.dart' show duckRatio;
 import '../ducker_editor.dart' show duckAt;
 import '../effect_page.dart';
 import '../eqfilter/variant_cards.dart' show VariantCards;
+import '../../sidechain_bar.dart' show KeyFilterControls;
 import 'common.dart';
 import 'dynamics_modes.dart';
 
@@ -141,11 +142,11 @@ class CompressorDevice extends StatelessWidget {
     if (inline) return effectPage('compressor', [cards, hero, KnobRow(main, size: 44, labels: labels)]);
     final more = switch (v) {
       1 => const ['knee', 'range', 'in_gain'],
-      2 => const ['ratio', 'knee', 'sc_hpf'],
+      2 => const ['ratio', 'knee'],
       4 => const <String>[],
-      5 => const ['floor', 'knee', 'lookahead', 'link', 'sc_hpf', 'sc_lpf', 'sc_listen'],
-      6 => const ['link', 'sc_hpf', 'sc_lpf', 'sc_listen'],
-      _ => const ['knee', 'lookahead', 'link', 'sc_hpf', 'sc_lpf', 'sc_listen'],
+      5 => const ['floor', 'knee', 'lookahead', 'link'],
+      6 => const ['link'],
+      _ => const ['knee', 'lookahead', 'link'],
     };
     return effectPage('compressor', [
       cards,
@@ -162,6 +163,7 @@ class CompressorDevice extends StatelessWidget {
         if (v == 0) const DeviceToggle('auto_release', label: 'Auto release', icon: Icons.auto_mode),
       ]),
       if (more.isNotEmpty) DeviceFold(child: ParamGrid(only: more)),
+      const KeyFilterControls(),
     ]);
   }
 

@@ -243,6 +243,86 @@ void main() {
     expect(evenShare(cycleHarmonics(clipped)), closeTo(0, 1e-6), reason: 'a symmetric clip: odd only');
   });
 
+  group('the key filter (1.1.0): every keyed page has the same three controls', () {
+    Finder inFilter(String key) => find.descendant(of: find.byKey(const ValueKey('key-filter')), matching: find.byKey(ValueKey(key)));
+    const keyed = [
+      ('org.caw.duck', 0, <String, double>{}, 'Duck'), ('org.caw.duck', 2, <String, double>{}, 'Carve'),
+      ('org.caw.gate', 0, <String, double>{}, 'Gate'), ('org.caw.gate', 2, <String, double>{}, 'Pedal gate'),
+      ('org.caw.ringmod', 0, {'source': 5.0}, 'Ring mod on Key'), ('org.caw.vocoder', 0, {'carrier': 1.0}, 'Mimic on Sidechain'),
+      ('org.caw.compressor', 0, <String, double>{}, 'Talon Down'),
+    ];
+    for (final (id, variant, values, name) in keyed) {
+      testWidgets(name, (tester) async {
+        final (_, t) = await open(tester, id, variant: variant, values: values);
+        expect(find.byKey(const ValueKey('key-filter')), findsOneWidget);
+        final fold = inFilter('device-fold');
+        await tester.ensureVisible(fold);
+        await tester.tap(fold);
+        await tester.pumpAndSettle();
+        expect(inFilter('dknob-sc_hpf'), findsOneWidget);
+        expect(inFilter('dknob-sc_lpf'), findsOneWidget);
+        expect(inFilter('toggle-sc_listen'), findsOneWidget);
+        expect(find.byKey(const ValueKey('dknob-sc_hpf')), findsOneWidget, reason: 'not again in MORE');
+        // Mid-screen, clear of the footer.
+        await Scrollable.ensureVisible(tester.element(inFilter('toggle-sc_listen')), alignment: 0.5);
+        await tester.pumpAndSettle();
+        await tester.tap(inFilter('toggle-sc_listen'));
+        await tester.pumpAndSettle();
+        expect(t.value('sc_listen'), 1);
+        expect(tester.takeException(), isNull);
+        await close(tester);
+      });
+    }
+    testWidgets('not where nothing is keyed: Level, Ring mod on its own carrier, Mimic\'s built-in synth', (tester) async {
+      for (final (id, variant) in [('org.caw.duck', 1), ('org.caw.ringmod', 0), ('org.caw.vocoder', 0)]) {
+        await open(tester, id, variant: variant);
+        expect(find.byKey(const ValueKey('key-filter')), findsNothing, reason: '$id $variant');
+        await close(tester);
+      }
+    });
+  });
+
+  group('the Limiter\'s loudness target', () {
+    DeviceDisplayFrame frame(List<double> tail) =>
+        decodeDisplay('org.caw.limiter', [-3, -1, 2, 1, -1, 6, 0, ...tail], 7 + tail.length);
+    testWidgets('a switch and its LUFS; the readout shows short-term, integrated and the distances', (tester) async {
+      final (_, t) = await open(tester, 'org.caw.limiter');
+      expect(find.byKey(const ValueKey('limiter-loudness')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dknob-target')), findsOneWidget);
+      String line(String key) => tester.widgetList<Text>(find.descendant(of: find.byKey(ValueKey(key)),
+          matching: find.byType(Text))).map((w) => w.data).join(' ').trim();
+      display.frame.value = frame([0, -14, -200, -200, -200, -200]);
+      await tester.pumpAndSettle();
+      expect(line('limiter-lufs-short'), 'Short-term — LUFS', reason: 'off: none');
+      await Scrollable.ensureVisible(tester.element(find.byKey(const ValueKey('toggle-target_on'))), alignment: 0.5);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('toggle-target_on')));
+      await tester.pumpAndSettle();
+      expect(t.value('target_on'), 1);
+      display.frame.value = frame([1, -14, -13.24, -15.5, 0.76, -1.5]);
+      await tester.pumpAndSettle();
+      expect(line('limiter-lufs-short'), 'Short-term −13.2 LUFS +0.8 LU');
+      expect(line('limiter-lufs-integrated'), 'Integrated −15.5 LUFS −1.5 LU');
+      // Integrated not measured yet (just turned on or after Play): a dash, no distance.
+      display.frame.value = frame([1, -14, -13.2, -200, 0.8, -200]);
+      await tester.pumpAndSettle();
+      expect(line('limiter-lufs-integrated'), 'Integrated — LUFS');
+      expect(tester.takeException(), isNull);
+      await close(tester);
+    });
+
+    test('the decoder names floats 7-12', () {
+      final f = frame([1, -14, -13, -15, 1, -1]);
+      expect(f.values['target_on'], 1);
+      expect(f.values['target_lufs'], -14);
+      expect(f.values['short_lufs'], -13);
+      expect(f.values['integrated_lufs'], -15);
+      expect(f.values['short_from_target'], 1);
+      expect(f.values['integrated_from_target'], -1);
+      expect(decodeDisplay('org.caw.limiter', [1, -1, 3, 2, -1, 6, 1], 7).values.containsKey('target_on'), isFalse);
+    });
+  });
+
   group('no overflow', () {
     const pages = [
       ('org.caw.compressor', 5), ('org.caw.limiter', 1), ('org.caw.transient', 1), ('org.caw.drive', 4), ('org.caw.bits', 1),

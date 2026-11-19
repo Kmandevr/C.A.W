@@ -288,6 +288,19 @@ void main() {
     await close(tester);
   });
 
+  test('1.1.0\'s direction block says which grains fly backwards; an older frame has none', () {
+    final grains = cloud(n: 3);
+    final old = flockFrame(grains: grains);
+    expect(FlockFrame(old).backwards(0), isNull, reason: 'no block: the page falls back to the pitch sign');
+    // 44 + 5 × 3 floats, then a flag per grain: the middle one backwards.
+    final f = DeviceDisplayFrame(raw: [...old.raw!, 0, 1, 0]);
+    final fr = FlockFrame(f);
+    expect(fr.shown, 3);
+    expect([for (var k = 0; k < 3; k++) fr.backwards(k)], [false, true, false]);
+    expect(fr.backwards(3), isNull);
+    expect(fr.grain(2).semitones, grains[2][3], reason: 'the grains\' indices keep their meaning');
+  });
+
   test('the window levels the birds are sized by stay in 0..1 and peak where the window does', () {
     for (var w = 0; w < 5; w++) {
       for (var i = 0; i <= 20; i++) {
