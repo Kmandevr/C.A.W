@@ -113,7 +113,9 @@ void main() {
     try {
       for (var i = 0; i < frames; ++i) {
         var v = 0.0;
-        for (var k = 1; k <= 8; ++k) v += math.cos(2 * math.pi * k * 220.0 * i / 48000) / k;
+        for (var k = 1; k <= 8; ++k) {
+          v += math.cos(2 * math.pi * k * 220.0 * i / 48000) / k;
+        }
         left[i] = 0.2 * v;
       }
       final r = b.pitchClipAnalyse(left, nullptr, frames, 48000, nullptr, clip);

@@ -521,7 +521,7 @@ void main() {
     await tester.scrollUntilVisible(find.text('MIDI'), 200, scrollable: scrollable);
     expect(find.text('MIDI'), findsOneWidget);
     expect(find.text('Beat pattern'), findsOneWidget);
-    expect(find.text('Chorus'), findsOneWidget);
+    expect(find.text('Flutter · Chorus/Flanger'), findsOneWidget);
     expect(find.text('COMPILED MODULES'), findsNothing);
   });
 

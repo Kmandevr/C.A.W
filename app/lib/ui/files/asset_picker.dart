@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
+import '../../model/chain_templates.dart';
+import '../../model/device_names.dart';
 import '../../model/effect_recents.dart';
 import '../../model/files_catalog.dart';
 import '../../model/racks.dart';
@@ -31,9 +33,11 @@ Future<AssetDrag?> showAssetPicker(BuildContext context, AppState state, {requir
   );
 }
 
-/// The sheet's body: a title, search, category tabs (All, then [EffectCategory]'s nine), and the list. On All with
-/// no search: Favourites and Recently used first, then Instruments, the built-ins by category and My effects (each
-/// only when it has something). Each built-in shows its icon, name and one-line description ([EffectCatalog]) and a
+/// The sheet's body: a title, search, purpose chips ([DevicePurpose]), category tabs (All, then [EffectCategory]'s),
+/// and the list. On All with no search: Favourites and Recently used first, then Instruments, the built-ins by
+/// category and My effects (each only when it has something). A purpose chip lists that purpose's chain templates
+/// ([ChainTemplates]) first, then only its devices. A search ranks an exact name or tag first ("EQ": Plume on top;
+/// [DeviceNames.rank]), groups and rows alike. Each built-in shows its icon, name and one-line description ([EffectCatalog]) and a
 /// star. A project C++ effect that isn't built or trusted yet is still listed, with a badge saying so.
 class AssetPickerSheet extends StatefulWidget {
   const AssetPickerSheet({super.key, required this.state, required this.kinds, required this.title,
@@ -50,6 +54,7 @@ class AssetPickerSheet extends StatefulWidget {
 class _AssetPickerSheetState extends State<AssetPickerSheet> {
   String _query = '';
   EffectCategory? _tab;  // null: All
+  DevicePurpose? _purpose;  // null: every purpose
 
   AppState get state => widget.state;
 
@@ -69,12 +74,34 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
 
   String get _q => _query.trim().toLowerCase();
 
-  bool _match(FileAsset a) {
+  /// How well the search finds [a] (lower first; null: not at all), within the chosen purpose.
+  int? _rank(FileAsset a) {
+    final p = _purpose;
+    if (p != null && !(a.native != null && DeviceNames.purposesOf(a.native!.id).contains(p))) return null;
     final q = _q;
-    if (q.isEmpty) return true;
-    if (a.builtin && a.native != null) return EffectCatalog.describe(a.native!).matches(q, a.name);
+    if (q.isEmpty) return 0;
+    if (a.builtin && a.native != null) return EffectCatalog.describe(a.native!).rank(q, a.name);
     return a.name.toLowerCase().contains(q) || a.type.label.toLowerCase().contains(q) ||
-        (a.native?.id.toLowerCase().contains(q) ?? false);
+        (a.native?.id.toLowerCase().contains(q) ?? false) ? 3 : null;
+  }
+
+  /// [list]'s matches, best first (a stable sort: equal ranks keep their order).
+  List<FileAsset> _ranked(List<FileAsset> list) {
+    final ranked = [for (final (i, a) in list.indexed) if (_rank(a) case final r?) (r, i, a)];
+    if (_q.isNotEmpty) ranked.sort((x, y) => x.$1 != y.$1 ? x.$1.compareTo(y.$1) : x.$2.compareTo(y.$2));
+    return [for (final (_, _, a) in ranked) a];
+  }
+
+  /// The chain templates to list: the chosen purpose's, or with a search those it finds; none in a rack's picker,
+  /// the instrument picker or the plain list.
+  List<ChainTemplate> get _templates {
+    if (!widget.effects || widget.rackChild || _tab != null || !widget.kinds.contains(AssetKind.nativeEffect)) return const [];
+    final q = _q, p = _purpose;
+    if (p == null && q.isEmpty) return const [];
+    return [
+      for (final t in p == null ? ChainTemplates.all : ChainTemplates.forPurpose(p))
+        if (q.isEmpty || t.name.toLowerCase().contains(q) || t.summary.toLowerCase().contains(q)) t,
+    ];
   }
 
   EffectCategory _category(FileAsset a) => EffectCatalog.describe(a.native!).category;
@@ -93,7 +120,7 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
     final builtins = _builtinEffects;
     final tab = _tab;
     if (tab != null) {
-      return [(tab.label, [for (final a in builtins) if (_category(a) == tab && _match(a)) a])];
+      return [(tab.label, _ranked([for (final a in builtins) if (_category(a) == tab) a]))];
     }
     final byId = {for (final a in builtins) a.native!.id: a};
     final browsing = _q.isEmpty;
@@ -113,8 +140,19 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
         ('Patterns', modules),
       // Packs: the app has no packs yet, so there is no group.
     ];
-    return [for (final (name, list) in groups) if (list.where(_match).isNotEmpty) (name, list.where(_match).toList())];
+    final shown = [for (final (name, list) in groups) if (_ranked(list) case final l when l.isNotEmpty) (name, l)];
+    // A search puts the group holding the best match first (the rest keep their order).
+    if (_q.isNotEmpty) {
+      int best((String, List<FileAsset>) g) => _rank(g.$2.first) ?? 99;
+      final order = [for (final (i, g) in shown.indexed) (best(g), i, g)]
+        ..sort((x, y) => x.$1 != y.$1 ? x.$1.compareTo(y.$1) : x.$2.compareTo(y.$2));
+      return [for (final (_, _, g) in order) g];
+    }
+    return shown;
   }
+
+  void _pickTemplate(ChainTemplate t) =>
+      Navigator.of(context).pop(AssetDrag(AssetKind.chainTemplate, t.id, t.name));
 
   void _pick(FileAsset a) {
     if (a.builtin && a.native != null && !a.isInstrument) state.effectRecents.use(a.native!.id);
@@ -126,8 +164,9 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
         listenable: state,
         builder: (context, _) {
           final groups = _groups();
+          final templates = _templates;
           final actions = FilesActions(context: context, state: state, onOpenBuilder: () {}, onSelect: (_) {});
-          final empty = groups.isEmpty || groups.every((g) => g.$2.isEmpty);
+          final empty = templates.isEmpty && (groups.isEmpty || groups.every((g) => g.$2.isEmpty));
           return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.s, Space.xs),
@@ -161,19 +200,28 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
                 ),
               ),
             ),
+            if (_builtinEffects.isNotEmpty || widget.instruments) _purposes(),
             if (_builtinEffects.isNotEmpty) _tabs(),
             const SizedBox(height: Space.xs),
             Flexible(
               child: empty
                   ? Padding(
                       padding: const EdgeInsets.all(Space.xl),
-                      child: Text(_q.isEmpty ? (_tab == null ? 'Nothing to add yet.' : 'No ${_tab!.label} effects yet.') : 'Nothing matches.',
+                      child: Text(_q.isNotEmpty ? 'Nothing matches.' : _purpose != null ? 'Nothing for ${_purpose!.label} here yet.'
+                          : (_tab == null ? 'Nothing to add yet.' : 'No ${_tab!.label} effects yet.'),
                           textAlign: TextAlign.center, style: const TextStyle(color: Neon.dim)),
                     )
                   : ListView(
                       shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.l),
                       children: [
+                        if (templates.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(Space.s, Space.s, Space.s, 2),
+                            child: Text('CHAIN TEMPLATES', style: TypeScale.heading()),
+                          ),
+                          for (final t in templates) _templateRow(t),
+                        ],
                         for (final (name, list) in groups) ...[
                           if (_tab == null)
                             Padding(
@@ -201,6 +249,58 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
             _tabChip(null, 'All', Icons.apps, Neon.text),
             for (final c in EffectCategory.values) _tabChip(c, c.label, c.icon, c.color),
           ],
+        ),
+      );
+
+  /// The purpose chips (Guitar, Vocals, ...): a tap picks one, a second tap shows every purpose again.
+  Widget _purposes() => SizedBox(
+        height: 40,
+        child: ListView(
+          key: const ValueKey('fx-browser-purposes'),
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(Space.m, Space.xs, Space.m, 0),
+          children: [
+            for (final p in DevicePurpose.values)
+              Padding(
+                padding: const EdgeInsets.only(right: Space.xs),
+                child: FilterChip(
+                  key: ValueKey('fx-purpose-${p.name}'),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  label: Text(p.label, style: TextStyle(fontSize: 11, color: _purpose == p ? Neon.bg : Neon.text)),
+                  selected: _purpose == p,
+                  selectedColor: Neon.yellow,
+                  showCheckmark: false,
+                  onSelected: (_) => setState(() => _purpose = _purpose == p ? null : p),
+                ),
+              ),
+          ],
+        ),
+      );
+
+  /// A chain template: its name, what it does and the devices it adds, in order.
+  Widget _templateRow(ChainTemplate t) => InkWell(
+        key: ValueKey('fx-template-${t.id}'),
+        borderRadius: BorderRadius.circular(Radii.s),
+        onTap: () => _pickTemplate(t),
+        child: SizedBox(
+          height: 48,
+          child: Row(children: [
+            const SizedBox(width: Space.s),
+            Container(
+              width: 30, height: 30,
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Neon.yellow)),
+              child: const Icon(Icons.linear_scale, size: 17, color: Neon.yellow)),
+            const SizedBox(width: Space.s),
+            Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: TypeScale.label, fontWeight: FontWeight.w600)),
+                Text([for (final s in t.steps) DeviceNames.name(s.componentId, s.componentId)].join(' → '),
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Neon.dim)),
+              ])),
+            const SizedBox(width: Space.s),
+          ]),
         ),
       );
 

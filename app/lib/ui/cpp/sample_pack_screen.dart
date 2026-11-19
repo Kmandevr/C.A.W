@@ -109,7 +109,7 @@ class SamplePackScreenState extends State<SamplePackScreen> {
     super.dispose();
   }
 
-  String get _defaultName => _instrument == null ? 'Pack' : packFolderName(s.componentLabel(_instrument!));
+  String get _defaultName => _instrument == null ? 'Pack' : packFolderName(s.componentInfo(_instrument!)?.shortLabel ?? s.componentLabel(_instrument!));
 
   List<int> get notes => [for (var n = _from; n <= _to; n += _step) n];
   List<int> get velocities => velocityLayers[_layers]!;
