@@ -3,6 +3,43 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.0-alpha.1 (2026-11-20)
+
+The effects and instruments suite: new effects, four new and reworked instruments, and a little bird in everything. Every device now has a crow-family name with a plain subtitle (Talon · Compressor, Plume · EQ), and a plain search still finds it ("EQ", "compressor", "autotune").
+
+### New
+- **Instruments:**
+  - **Timber · Acoustic:** physically modelled piano, electric piano, organ, plucked and bowed strings, mallets and winds, all synthesised (no samples).
+  - **Flock · Granular:** a grain cloud over your sample or a built-in tone, drawn as a flock.
+  - **Raven · Flagship** gains FM, ring, AM and sync between oscillators, spectral and additive warps, new filters, a fourth LFO and 8 macros.
+  - **Magpie · Sampler:** drop a sample and play it across the keys, slice it, stretch it, or record a multisample.
+  - **Rook · Drums:** every setting now does something or says what turns it on, with FM, physical and texture layers, per-pad effects, groove (swing, humanize, accent, flam) and 16 new kits.
+  - Every instrument uses Raven's one-screen layout.
+- **Effects:**
+  - the Compressor splits into **Talon** (Down, Up, Dynamics, Bus), **Hatch** (Gate, Expand, Pedal gate) and **Duck** (Duck, Level, Carve);
+  - new modes: dynamic, mid/side, Match and linear-phase EQ; Wah; Tape, Reverse and Multi-tap delays; Room, Plate, Spring, Gated and Reverse reverbs; Amp, Pedal and Bands drive; Bitwise; Cab; Harmonizer and Octaver;
+  - new effects: **Lark** (pitch correction, plus a pitch editor for a recorded voice: drag each sung note), **Glint** (exciter), **Mimic** (vocoder), **Meters**, **Preen** (denoise, de-hum, de-reverb), **Hush** (de-click, de-plosive, breath), Lo-fi and Phase align;
+  - MIDI effects: Hop, Clutch, Perch, Ricochet and Ruffle;
+  - the AutoStacc pack: Murmur, Peck, Bend and Iris.
+- **Around the effects:**
+  - a sidechain filter (high-pass, low-pass and Listen) on every keyed effect;
+  - a loudness target on the Limiter;
+  - CPU and latency in each device's header;
+  - while a track is armed, heavy effects play a near-zero-delay version, and the full one plays back and exports;
+  - at least 8 presets per effect, tagged by purpose, with purpose chips, chain templates (guitar, vocal, podcast, drum bus, master) and project templates (guitar recording, podcast, beat, sound design);
+  - a "?" field guide in every device, and **Happy accident**, which nudges a sound a small random step (one undo).
+- **The look:** bird icons for each family, a crow in empty places and on the loader, a quill for the modulation handle, and themes named Raven, Jackdaw, Magpie and Jay. New projects get generated names (Settings can turn that off), and each project card shows time spent, bars, tracks and the last export. There may also be a few surprises.
+
+### Changed
+- **Steadier live playback on phones:** the load stabilizer from 1.0.9 now follows your Buffer mode, not the mode Android grants, so it runs on phones that refuse a low-latency stream (the Galaxy S22+ at its 960–1024-frame buffers). Battery still turns it off.
+- **The screen stays on while a Benchmark runs.**
+- Themes: Neon becomes Raven and Flat becomes Jackdaw; Dusk and Dawn move to Jackdaw and Jay, Amber to Magpie. Saved settings move over by themselves.
+
+### For contributors
+- Engine C API 44 (from 43): MIDI effects (41), the pitch clip editor (42), the sampler's tools (43) and per-slot cost and armed versions (44).
+
+That's the flock for this one.
+
 ## 1.0.9-alpha.1 (2026-11-19)
 
 The performance release: steadier live playback on phones, a fairer Benchmark, and cheaper effects.
