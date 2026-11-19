@@ -71,6 +71,12 @@ const ModuleDescriptor& legacyVariantDescriptor(const ModuleDescriptor& legacy, 
                                                 std::string_view name, std::span<const std::string_view> labels,
                                                 uint32_t index);
 
+// legacyVariantDescriptor with `after` appended after `variant` (1.1.0: Talon's Down extras and its talon_layout
+// marker), so the base's indices and `variant`'s place hold for older racks' routes.
+const ModuleDescriptor& extendedVariantDescriptor(const ModuleDescriptor& base, std::string_view id,
+                                                  std::string_view name, std::span<const std::string_view> labels,
+                                                  uint32_t index, std::span<const ParameterDescriptor> after);
+
 // The `variant` parameter itself, for a variant that builds its own table: a choice of `labels`, default `index`,
 // structural (no automation, modulation or MIDI mapping, no smoothing).
 ParameterDescriptor variantParameter(std::span<const std::string_view> labels, uint32_t index) noexcept;

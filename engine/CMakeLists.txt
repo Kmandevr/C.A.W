@@ -182,6 +182,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 # FX consolidation (1.0.8): merged devices and the migration of the ids they replace; one file pair per family part.
 target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_dynamics.cpp src/fx_migrate_dynamics.cpp src/builtin_fx_duck.cpp
+  src/builtin_fx_talon.cpp src/builtin_fx_hatch.cpp src/builtin_fx_duck_level_carve.cpp src/builtin_fx_dynsplit_presets.cpp  # 1.1.0: the Talon/Hatch/Duck split
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
   src/builtin_fx_merged_stereomod.cpp src/fx_migrate_stereomod.cpp
@@ -452,7 +453,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp bench/dynsplit_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -461,6 +462,10 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_patch_bench PRIVATE src)
   target_link_libraries(caw_patch_bench PRIVATE caw_core)
+  # 1.1.0's dynamics split against its cost ceilings: a Release build only (a Debug or sanitized one is slower by design).
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_test(NAME caw_dynsplit_cost COMMAND caw_bench 0.5 302)
+  endif()
 endif()
 
 # The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no

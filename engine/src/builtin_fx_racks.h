@@ -20,10 +20,12 @@ inline bool isRackId(std::string_view id) noexcept { return id.substr(0, 13) == 
 
 // A rack's layout version, its last parameter (after the routes, so no route's destination index moves): 2 since
 // the FX consolidation (a child that is a merged device reusing an old id, as org.caw.utility, lists `variant` after
-// its old parameters). A rack entry without it is older: fx_migrate re-points its routes and adds it. The engine
-// writes it when it migrates a project or an entry (caw_migrate_component) and in its rack presets; not automatable.
+// its old parameters), 3 since 1.1.0's Talon/Hatch/Duck split (a Compressor child's variant numbers are Talon's, and
+// its list goes on after `variant`). A rack entry with an older one is older: fx_migrate re-points its routes, moves
+// its children and sets it. The engine writes it when it migrates a project or an entry (caw_migrate_component) and
+// in its rack presets; not automatable.
 inline constexpr std::string_view kRackLayoutParam = "rack_layout";
-inline constexpr double kRackLayoutCurrent = 2.0;
+inline constexpr double kRackLayoutCurrent = 3.0;
 
 // A child's identity in its slot's `<slot>_fx` parameter: the 32-bit FNV-1a hash of the component id held to 24 bits
 // (exact as a double), never 0 (0 is an empty slot). The app computes the same (app/lib/model/racks.dart).
