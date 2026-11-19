@@ -62,9 +62,12 @@ class DeviceHeader extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Column(
             mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: nameSize, fontWeight: FontWeight.w800, color: color,
-                shadows: [Shadow(color: color.withValues(alpha: 0.45), blurRadius: 8)])),
+            Row(children: [
+              Flexible(child: Text(t.label, key: const ValueKey('device-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: nameSize, fontWeight: FontWeight.w800, color: color,
+                  shadows: [Shadow(color: color.withValues(alpha: 0.45), blurRadius: 8)]))),
+              if (t.info?.isAutoStacc ?? false) ...[const SizedBox(width: 6), const AutoStaccBadge(small: true)],
+            ]),
             if (subtitle != null) Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Neon.dim)),
           ])),

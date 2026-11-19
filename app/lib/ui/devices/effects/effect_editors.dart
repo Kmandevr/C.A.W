@@ -16,6 +16,7 @@ import 'eq_editor.dart';
 import 'filters/filters_editors.dart';
 // fx-filters end
 import 'mod_editors.dart';
+import 'pack/pack_devices.dart' show packEditors;  // the AutoStacc pack
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'space/cab_device.dart';
@@ -94,6 +95,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   // fx-filters end
   ...toolsEditors,  // Meters, Lo-fi, Phase align (1.1.0)
   ...voiceEditors,  // Glint, Mimic, Preen, Hush (1.1.0)
+  ...packEditors,  // the AutoStacc pack: Murmur, Peck, Bend, Iris (1.1.0)
   // fx-racks begin
   ...rackEditors,
   // fx-racks end

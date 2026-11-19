@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:caw/model/app_state.dart';
@@ -11,6 +12,9 @@ import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/variant_edit.dart';
 import 'package:caw/ui/devices/device_registry.dart';
 import 'package:caw/ui/devices/effects/dyn_drive/bitwise_device.dart';
+import 'package:caw/ui/devices/effects/effect_catalog.dart';
+import 'package:caw/ui/devices/effects/pack/pack_bend_iris.dart';
+import 'package:caw/ui/devices/effects/pack/pack_devices.dart';
 import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/ui/devices/kit/presets.dart' show DevicePresets;
 import 'package:caw/ui/motion.dart';
@@ -64,6 +68,11 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.vocalclean', 0, {}, 'hush_declick'),
   ('org.caw.vocalclean', 1, {}, 'hush_deplosive'),
   ('org.caw.vocalclean', 2, {}, 'hush_breath'),
+  // The AutoStacc pack (1.1.0).
+  (murmurId, 0, {}, 'pack_murmur'),
+  (peckId, 0, {}, 'pack_peck'),
+  (bendId, 0, {}, 'pack_bend'),
+  (irisId, 0, {'freeze': 1}, 'pack_iris'),
 ];
 
 /// A playing frame for [pageId] (the variant's page id, as the display decodes it) at [tick]: every float of its
@@ -176,6 +185,35 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0, int variant = 0}) {
       raw.setAll(2, [1.3, 1.3, 12, 43, 2048, -4, 32]);
     case 'org.caw.vocalclean':
       raw.setAll(2, [variant == 0 ? 17 : -9, variant == 0 ? 1 : 4, 0.4, 6, 0.2, 5]);
+    case murmurId:
+      raw.setAll(2, [14, 32, 0, 0, 2, 0.3, 80, 40, 14]);
+      for (var i = 0; i < 32; i++) {
+        raw[11 + i] = (0.2 + 0.7 * math.exp(-((i + tick) % 8) / 2.5)).clamp(0, 1);
+      }
+      for (var g = 0; g < 14; g++) {
+        raw.setAll(43 + 4 * g, [0.25 + 0.03 * g + 0.004 * tick % 0.2, ((g * 0.13 + tick * 0.05) % 1), math.sin(g * 1.7), (g % 5 - 2) * 3.0]);
+      }
+    case peckId:
+      const plan = [0, 1, 0, 2, 0, 0, 3, 0, 4, 0, 1, 5, 0, 2, 0, 0];
+      raw.setAll(2, [(tick % 16).toDouble(), plan[tick % 16].toDouble(), (tick % 5) / 5, 125, 0, 2]);
+      for (var i = 0; i < 16; i++) {
+        raw[8 + i] = plan[i].toDouble();
+        raw[24 + i] = 2;
+      }
+    case bendId:
+      raw.setAll(2, [0, 8, (tick % 40) / 40, 120, 1, 2000]);
+      for (var k = 0; k < 16; k++) {
+        raw[8 + k] = k < 8 ? math.sin(2 * math.pi * k / 8) : 0;
+      }
+      for (var s = 0; s < 64; s++) {
+        raw[24 + s] = math.sin(2 * math.pi * s / 64);
+      }
+    case irisId:
+      raw.setAll(2, [1, 1, 2048, 42.7, 0, -100, 64]);
+      for (var k = 0; k < 64; k++) {
+        raw[9 + k] = -30 - k * 0.6 + 14 * math.exp(-math.pow((k - 20) / 3, 2)) * hit;
+        raw[73 + k] = -24 - k * 0.5 + 18 * math.exp(-math.pow((k - 28) / 2.5, 2)) + 6 * math.sin(k * 0.7);
+      }
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -544,6 +582,84 @@ void main() {
     await tester.pumpAndSettle();
     expect(t.value('invert'), 1);
     await close(tester);
+  });
+
+  testWidgets('AutoStacc pack: each page has the badge; drags and the brush change the right knob or state', (tester) async {
+    var (s, t) = await open(tester, murmurId, 0);
+    expect(find.byKey(const ValueKey('autostacc-badge')), findsWidgets);
+    final size = t.value('size'), position = t.value('position');
+    await drag(tester, const ValueKey('murmur-hero'), const Offset(-60, -50));
+    expect(t.value('size'), greaterThan(size));
+    expect(t.value('position'), greaterThan(position), reason: 'left is older');
+    await close(tester);
+    (s, t) = await open(tester, peckId, 0);
+    expect(find.byKey(const ValueKey('autostacc-badge')), findsWidgets);
+    final chaos = t.value('chaos');
+    await drag(tester, const ValueKey('peck-hero'), const Offset(0, -50));
+    expect(t.value('chaos'), greaterThan(chaos));
+    await close(tester);
+    (s, t) = await open(tester, bendId, 0);
+    expect(find.byKey(const ValueKey('autostacc-badge')), findsWidgets);
+    final box = tester.getRect(find.byKey(const ValueKey('bend-hero')));
+    final plot = bendPlot(box.size);
+    final p2 = t.value('p2'), p3 = t.value('p3');
+    final at = box.topLeft + Offset(plot.left + plot.width * 2 / 8, plot.center.dy);
+    final g = await tester.startGesture(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    for (var i = 1; i <= 8; i++) {
+      await g.moveTo(at + Offset(0, -60.0 * i / 8));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(t.value('p2'), isNot(p2));
+    expect(t.value('p2'), closeTo(1 - 2 * (plot.height / 2 - 60) / plot.height, 0.02));
+    expect(t.value('p3'), p3, reason: 'only the point under the finger');
+    await close(tester);
+    (s, t) = await open(tester, irisId, 0, values: {'freeze': 1});
+    expect(find.byKey(const ValueKey('autostacc-badge')), findsWidgets);
+    expect(t.use!.state, isNull);
+    final ibox = tester.getRect(find.byKey(const ValueKey('iris-hero')));
+    final ip = irisPlot(ibox.size);
+    // Paint the low half up near +12 dB.
+    final from = ibox.topLeft + Offset(ip.left + 2, ip.top + 3), to = ibox.topLeft + Offset(ip.center.dx, ip.top + 3);
+    final h = await tester.startGesture(from);
+    await tester.pump(const Duration(milliseconds: 50));
+    for (var i = 1; i <= 12; i++) {
+      await h.moveTo(Offset.lerp(from, to, i / 12)!);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await h.up();
+    await tester.pumpAndSettle();
+    final paint = irisPaintOf(base64Decode(t.use!.state!));
+    expect(paint, isNotNull);
+    expect(t.use!.stateVersion, 1);
+    expect(paint!.take(30).every((db) => db > 10), isTrue, reason: '$paint');
+    expect(paint.skip(34).every((db) => db == 0), isTrue);
+    // Double-tap: flat again.
+    await tester.tap(find.byKey(const ValueKey('iris-hero')));
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tap(find.byKey(const ValueKey('iris-hero')));
+    await tester.pumpAndSettle();
+    expect(irisPaintOf(base64Decode(t.use!.state!))!.every((db) => db == 0), isTrue);
+    await close(tester);
+    expect(s.project.layers, isNotEmpty);
+  });
+
+  test('AutoStacc pack: the browser lists the four under its own tab; the state keeps a captured spectrum', () {
+    for (final id in [murmurId, peckId, bendId, irisId]) {
+      expect(EffectCatalog.of(id)!.category, EffectCategory.autostacc, reason: id);
+      expect(builtinInfo(id).isAutoStacc, isTrue, reason: id);
+    }
+    expect(builtinInfo('org.caw.eq').isAutoStacc, isFalse);
+    final flat = irisStateWith(null, List.filled(64, 0));
+    expect(flat.length, 20 + 256);
+    // A base with a spectrum (2 bins) keeps it, only the paint changes.
+    final base = Uint8List.fromList([...irisStateWith(null, List.filled(64, -3)), ...List.filled(32, 7)]);
+    final painted = irisStateWith(base, List.filled(64, 5));
+    expect(painted.length, base.length);
+    expect(painted.sublist(276), base.sublist(276));
+    expect(irisPaintOf(painted)!.toSet(), {5});
   });
 
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {

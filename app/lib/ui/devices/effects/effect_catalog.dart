@@ -7,6 +7,7 @@ import '../../theme.dart';
 import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
 import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
 import 'filters/filters_shared.dart' as fx_filters show filtersBrowserEntries;  // fx-filters
+import 'pack/pack_devices.dart' as fx_pack show packCatalog;  // the AutoStacc pack
 import '../../../model/fx_space_display.dart' as fx_space_model show fxSpaceBrowser;  // fx-space
 import 'space/space_fx.dart' as fx_space show fxSpaceIcons;  // fx-space
 
@@ -20,7 +21,8 @@ enum EffectCategory {
   pitchTime('Pitch & Time', Icons.timelapse),
   creative('Creative', Icons.auto_awesome),
   utility('Utility', Icons.tune),
-  racks('Racks', Icons.view_agenda_outlined);
+  racks('Racks', Icons.view_agenda_outlined),
+  autostacc('AutoStacc pack', Icons.toys_outlined);
 
   const EffectCategory(this.label, this.icon);
   final String label;
@@ -45,6 +47,7 @@ enum EffectCategory {
         EffectCategory.creative => Color.lerp(Neon.pink, Neon.yellow, 0.5)!,
         EffectCategory.utility => Neon.dim,
         EffectCategory.racks => Color.lerp(Neon.green, Neon.blue, 0.5)!,
+        EffectCategory.autostacc => Neon.pink,
       };
 }
 
@@ -101,6 +104,7 @@ class EffectCatalog {
     [for (final e in fx_dynamics.fxDynamicsCatalog) (e.id, e.category, e.description, e.icon)],  // fx-dynamics
     [for (final e in fx_creative.creativeCatalog) (e.id, e.category, e.description, e.icon)],  // fx-creative
     [for (final e in fx_filters.filtersBrowserEntries) (e.id, e.category, e.description, e.icon)],  // fx-filters
+    [for (final e in fx_pack.packCatalog) (e.id, e.category, e.description, e.icon)],  // the AutoStacc pack
     [for (final e in fx_space_model.fxSpaceBrowser.entries) (e.key, e.value.category, e.value.description, fx_space.fxSpaceIcons[e.key]!)],  // fx-space
     _merged,  // the merged devices (FX consolidation, 1.0.8), last: their entries win over a reused id's older one
   ];

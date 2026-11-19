@@ -232,6 +232,37 @@ extension ArrangeFx on AppState {
     return true;
   }
 
+  /// The saved state native effect [index] of [layer] has now: the engine's (as the playing effect saves it), else
+  /// the project's copy; null when it has none.
+  Uint8List? savedEffectState(LayerDoc layer, int index) {
+    if (index < 0 || index >= layer.components.length) return null;
+    final e = engine;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (e != null && engineIndex != null) {
+      if (e.componentStates(engineLayerId(layer))[engineIndex] case final s?) return base64Decode(s.state);
+    }
+    final kept = layer.components[index].state;
+    return kept == null || kept.isEmpty ? null : base64Decode(kept);
+  }
+
+  /// Writes a state the device's own page made (Iris's painted curve) to native effect [index]: to the engine at
+  /// once (when there is one; it rebuilds the chain off the UI thread), and with [keep] into the project as one
+  /// undo step, so a reload starts from it. Unlike [loadNativeEffectState] the project keeps it without an engine:
+  /// the page built it, so it is valid.
+  void writeNativeEffectState(LayerDoc layer, int index, Uint8List bytes, {int version = 1, bool keep = true}) {
+    if (guardFrozen(layer)) return;
+    if (index < 0 || index >= layer.components.length) return;
+    final engineIndex = engineComponentIndex(layer, index);
+    if (engineIndex != null) engine?.setComponentState(engineLayerId(layer), engineIndex, bytes, version);
+    if (!keep) return;
+    endUndoStep();
+    editLayer(layer, (l) {
+      l.components[index].state = base64Encode(bytes);
+      l.components[index].stateVersion = version;
+    });
+    endUndoStep();
+  }
+
   /// The C++ instruments a track can play: the engine's built-ins and the project's loaded (trusted) ones.
   List<NativeComponentInfo> get nativeInstruments =>
       [for (final c in componentCatalog.value.values) if (c.isInstrument && componentPlayable(c.id)) c];

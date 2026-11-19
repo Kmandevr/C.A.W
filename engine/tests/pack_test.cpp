@@ -448,12 +448,13 @@ TEST(iris_with_every_stage_off_is_the_input_one_window_late) {
 }
 
 TEST(iris_freezes_a_spectrum_and_holds_it_over_new_input_and_silence) {
-    const Values live = {{"fade", 20}};
+    const Values live = {{"fade", 20}, {"drift", 0}};  // no phase dither: the frozen tone's level is steady
     Values frozen = live;
     frozen.emplace_back("freeze", 1);
     auto p = make(kIris, live);
     if (!p) return;
     run(*p, sine(440, 0.3, 48000), live);
+    run(*p, sine(440, 0.3, 12000), frozen);  // the capture averages its first frames, all of 440 Hz
     const Stereo out = run(*p, sine(1000, 0.3, 48000), frozen);
     const double at440 = goertzelDb(out.l, 440, 9600, 48000), at1k = goertzelDb(out.l, 1000, 9600, 48000);
     if (!(at440 > -22.0 && at440 - at1k > 40.0)) cawtest::fail(__FILE__, __LINE__, "440 " + std::to_string(at440) + ", 1k " + std::to_string(at1k));
@@ -468,6 +469,30 @@ TEST(iris_freezes_a_spectrum_and_holds_it_over_new_input_and_silence) {
     // Freeze off: it fades out and the input comes back.
     const Stereo back = run(*p, sine(1000, 0.3, 48000), live);
     CHECK(goertzelDb(back.l, 1000, 24000, 48000) - goertzelDb(back.l, 440, 24000, 48000) > 30.0);
+}
+
+TEST(iris_freeze_averages_several_frames) {
+    // Freeze on with 440 Hz playing, then 1 kHz a little after: one frame would hold only 440 Hz; the capture's
+    // average over its frames holds both, and it completes only after those frames.
+    const Values live = {{"fade", 20}, {"drift", 0}};
+    Values frozen = live;
+    frozen.emplace_back("freeze", 1);
+    auto p = make(kIris, live);
+    if (!p) return;
+    run(*p, sine(440, 0.3, 48000), live);
+    run(*p, sine(440, 0.3, 1024), frozen);
+    CHECK(display(*p)[3] == 0.0f);  // still gathering
+    run(*p, sine(1000, 0.3, 24000), frozen);
+    const std::vector<float> d = display(*p);
+    CHECK(d.size() == 9 + 3 * 64 && d[3] == 1.0f);
+    const auto bandOf = [](double hz) { return static_cast<size_t>(64 * std::log(hz / 20.0) / std::log(1000.0)); };
+    const float top = *std::max_element(d.begin() + 73, d.begin() + 137);
+    const auto near = [&](double hz) {
+        const size_t b = bandOf(hz);
+        return std::max({d[73 + b - 1], d[73 + b], d[73 + b + 1]});
+    };
+    if (!(near(440) > top - 15.0f && near(1000) > top - 15.0f))
+        cawtest::fail(__FILE__, __LINE__, "440 " + std::to_string(near(440)) + ", 1k " + std::to_string(near(1000)) + ", top " + std::to_string(top));
 }
 
 TEST(iris_paints_its_frozen_spectrum_through_its_state) {

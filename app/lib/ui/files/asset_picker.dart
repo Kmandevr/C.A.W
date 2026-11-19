@@ -6,6 +6,7 @@ import '../../model/effect_recents.dart';
 import '../../model/files_catalog.dart';
 import '../../model/racks.dart';
 import '../devices/effects/effect_catalog.dart';
+import '../devices/kit/device_style.dart' show AutoStaccBadge;
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
@@ -245,8 +246,11 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
           const SizedBox(width: Space.s),
           Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: TypeScale.label, fontWeight: FontWeight.w600)),
+              Row(children: [
+                Flexible(child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: TypeScale.label, fontWeight: FontWeight.w600))),
+                if (a.native!.isAutoStacc) ...[const SizedBox(width: 6), const AutoStaccBadge(small: true)],
+              ]),
               Text(e.description, maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 10, color: Neon.dim)),
             ])),
