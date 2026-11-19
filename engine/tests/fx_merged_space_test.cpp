@@ -219,7 +219,8 @@ TEST(merged_delay_and_reverb_list_their_variants_as_the_old_descriptors_plus_var
     CHECK(isOtherVariantParameter(kDelay.id, "cross") && isOtherVariantParameter(kDelay.id, "offset"));
     CHECK(isOtherVariantParameter(kReverb.id, "amount") && isOtherVariantParameter(kReverb.id, "freeze"));
     CHECK(!isOtherVariantParameter(kReverb.id, "cross") && !isOtherVariantParameter(kDelay.id, "amount"));
-    CHECK(fx::findMergedDevice("org.caw.convolver") == nullptr && fx::findLegacyEffect("org.caw.convolver") == nullptr);
+    // 1.1.0: the Convolver is merged under its own id (Cab beside it, fx_cab_test.cpp); it replaces no old id.
+    CHECK(fx::findMergedDevice("org.caw.convolver") != nullptr && fx::findLegacyEffect("org.caw.convolver") == nullptr);
 }
 
 TEST(merged_delay_and_reverb_render_the_old_ids_bits_over_their_presets_and_random_values) {

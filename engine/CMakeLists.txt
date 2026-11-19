@@ -188,7 +188,7 @@ target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_space.cpp src/fx_migrate_space.cpp)
 # 1.1.0: new modes of merged devices (Delay, Reverb, Drive, Bit distortion, Convolver).
 target_sources(caw_core PRIVATE src/builtin_fx_delay_modes.cpp src/builtin_fx_reverb_modes.cpp
-  src/builtin_fx_drive_modes.cpp src/builtin_fx_bits_bitwise.cpp)
+  src/builtin_fx_drive_modes.cpp src/builtin_fx_bits_bitwise.cpp src/builtin_fx_cab.cpp)
 # modulators begin (#161: project modulation, its built-in modulators)
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
@@ -302,6 +302,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_reverb_modes_test.cpp)  # 1.1.0: the Reverb's Room, Plate, Spring, Gated and Reverse
   target_sources(caw_tests PRIVATE tests/fx_drive_modes_test.cpp)  # 1.1.0: the Drive's Amp, Pedal and Bands
   target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
+  target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters

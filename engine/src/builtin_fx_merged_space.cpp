@@ -10,7 +10,7 @@
 //   and 4 "Multi-tap" (builtin_fx_delay_modes.cpp).
 // Reverb ("org.caw.reverb", built): org.caw.reverb.pro (variant 0 "Hall", builtin_effects_space.cpp) and
 //   org.caw.shimmer (variant 1 "Shimmer", builtin_fx_space_reverb.cpp). 1.1.0 appends new DSP: 2 "Room", 3 "Plate",
-//   4 "Spring", 5 "Gated", 6 "Reverse" (builtin_fx_reverb_modes.cpp; a saved index never moves). org.caw.convolver stays its own device.
+//   4 "Spring", 5 "Gated", 6 "Reverse" (builtin_fx_reverb_modes.cpp; a saved index never moves). org.caw.convolver is merged in 1.1.0 (its id reused, variant 0 the convolver, 1 "Cab").
 //
 // How to build a family, as Pitch/Shift here: per variant a descriptor function (legacyVariantDescriptor of the old
 // class's descriptor, or a table of its own with variantParameter) and a factory (AsVariant<OldClass>, the class made
@@ -47,6 +47,12 @@ ModuleProcessor* makePlateReverbAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeSpringReverbAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeGatedReverbAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeReverseReverbAs(const ModuleDescriptor& variant) noexcept;
+// The Convolver (1.1.0: merged, its id reused): the convolver as it was (builtin_fx_space_reverb.cpp) and Cab
+// (builtin_fx_cab.cpp).
+const ModuleDescriptor& convolverDescriptor();
+ModuleProcessor* makeConvolverAs(const ModuleDescriptor& variant) noexcept;
+const ModuleDescriptor& cabDescriptor(std::span<const std::string_view> labels, uint32_t index);
+ModuleProcessor* makeCabAs(const ModuleDescriptor& variant) noexcept;
 
 namespace {
 
@@ -133,7 +139,26 @@ const Variant kReverb[] = {{kReverbVariants[0], &hallVariant, &makeHall},
                            {kReverbVariants[5], &gatedVariant, &makeGated},
                            {kReverbVariants[6], &reverseReverbVariant, &makeReverseReverb}};
 
-const MergedDevice kDevices[] = {{kDelayId, kDelayName, kDelay}, {kReverbId, kReverbName, kReverb}, {kShiftId, kShiftName, kShift}};
+// Convolver: its id reused, the convolver as it was variant 0 (an entry without `variant` plays it, no migration),
+// Cab variant 1.
+constexpr std::string_view kConvolverId = "org.caw.convolver";
+constexpr std::string_view kConvolverName = "Convolver";
+constexpr std::string_view kConvolverVariants[] = {"Convolver", "Cab"};
+const ModuleDescriptor& convolverVariant() {
+    static const ModuleDescriptor& d =
+        legacyVariantDescriptor(convolverDescriptor(), kConvolverId, kConvolverName, kConvolverVariants, 0);
+    return d;
+}
+const ModuleDescriptor& cabVariant() { return cabDescriptor(kConvolverVariants, 1); }
+ModuleProcessor* makeConvolver() noexcept { return makeConvolverAs(convolverVariant()); }
+ModuleProcessor* makeCab() noexcept { return makeCabAs(cabVariant()); }
+
+const Variant kConvolver[] = {{kConvolverVariants[0], &convolverVariant, &makeConvolver}, {kConvolverVariants[1], &cabVariant, &makeCab}};
+
+const MergedDevice kDevices[] = {{kDelayId, kDelayName, kDelay},
+                                 {kReverbId, kReverbName, kReverb},
+                                 {kShiftId, kShiftName, kShift},
+                                 {kConvolverId, kConvolverName, kConvolver}};
 
 }  // namespace
 

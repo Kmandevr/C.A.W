@@ -267,6 +267,8 @@ bool modesCostOver(double seconds) {
         {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
         {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
         {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
+        {"Convolver: Cab (default: 4x12)", "org.caw.convolver", {{"variant", 1}}, kMedium},
+        {"Convolver: Cab, far mic", "org.caw.convolver", {{"variant", 1}, {"distance", 1}}, kMedium},
         // modes-bench end
     };
     std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");
