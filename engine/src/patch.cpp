@@ -76,6 +76,8 @@ struct Building {
     const ModuleDescriptor* descriptor = nullptr;  // Module: its component's
     fx::EffectBase* effect = nullptr;              // Module: a built-in effect offering optional ports
     std::vector<std::pair<uint32_t, double>> values;  // Module: parameter index, constrained value
+    std::vector<double> all;                          // Module: every parameter's value (the spec's or default)
+    const std::vector<double>* oldValues = nullptr;   // Module, kept: the playing patch's values of it
     std::vector<uint32_t> wiredOptional;              // Module: optional ports some wire names, ascending
     uint32_t graph = UINT32_MAX;
     uint64_t latency = 0, time = 0;
@@ -101,6 +103,14 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
         return fail(std::to_string(spec.wires.size()) + " wires, more than the " + std::to_string(patch::kMaxWires) +
                     " a patch may have");
     const uint32_t nodeCount = static_cast<uint32_t>(spec.nodes.size());
+    {  // every Chain node within its own kMaxChainComponents, and all of them together within the patch's cap
+        std::size_t total = 0;
+        for (const PatchNodeSpec& ns : spec.nodes)
+            if (ns.kind == PatchNodeKind::Chain) total += ns.components.size();
+        if (total > patch::kMaxPatchChainComponents)
+            return fail(std::to_string(total) + " components in its chain nodes, more than the " +
+                        std::to_string(patch::kMaxPatchChainComponents) + " a patch may have");
+    }
 
     // ---- Nodes: ids, kinds, components (kept from `previous` where unchanged).
     std::vector<Building> nodes(nodeCount);
@@ -213,6 +223,8 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
                     all[k] = constrainParameter(d.parameters[k], value);
                     b.values.emplace_back(k, all[k]);
                 }
+                if (b.kept) b.oldValues = &old->values;
+                b.all = all;
                 if (const auto* v = dynamic_cast<const VariableLatency*>(&p))
                     b.latency = v->latencyFor(all.data(), d.parameterCount);
                 else
@@ -374,6 +386,7 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
                 t = std::max(t, nodes[w.from.node].time + nodes[w.from.node].latency);
         nodes[n].time = t;
     }
+    std::size_t delayBytes = 0;  // every compensation delay's line together (patch::kMaxDelayLineBytes)
     for (std::size_t w = 0; w < wires.size(); ++w) {
         Wire& wire = wires[w];
         if (!wire.compensated) continue;
@@ -381,6 +394,11 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
         if (wire.delay > patch::kMaxCompensationFrames)
             return fail("wire " + std::to_string(w) + " would need " + std::to_string(wire.delay) +
                         " frames of latency compensation, more than " + std::to_string(patch::kMaxCompensationFrames));
+        delayBytes += static_cast<std::size_t>(wire.delay) * channelsOf(wire.from.shape) * sizeof(float);
+        if (delayBytes > patch::kMaxDelayLineBytes)
+            return fail("its latency compensation would need more than the " +
+                        std::to_string(patch::kMaxDelayLineBytes >> 20) + " MiB of delay lines a patch may use (" +
+                        std::to_string(delayBytes) + " bytes by wire " + std::to_string(w) + ")");
     }
 
     // ---- The graph: the spec's nodes first, in spec order, then what the wires add.
@@ -418,7 +436,7 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
                 break;
         }
         if (b.instance) p.instances_.push_back(b.instance);
-        p.nodes_.push_back({b.spec->id, b.spec->kind, b.instance, b.graph});
+        p.nodes_.push_back({b.spec->id, b.spec->kind, b.instance, b.graph, b.all});
         if (b.kept) ++p.kept_;
     }
     // A graph port of an endpoint: a wired optional port follows its node's descriptor ports, in wiredOptional order.
@@ -497,10 +515,25 @@ std::unique_ptr<CompiledPatch> compilePatch(const ModuleRegistry& registry, cons
                                                     patch::kWideSubBlock, sampleRate, budget);
     if (prepared != GraphError::Ok)
         return fail(std::string("the compiled graph was refused: ") + graphErrorText(prepared));
-    for (uint32_t n = 0; n < nodeCount; ++n)
-        for (const auto& [k, value] : nodes[n].values)
-            if (!p.executor_.setInitialParameter(nodes[n].graph, k, value))
+    for (uint32_t n = 0; n < nodeCount; ++n) {
+        const Building& b = nodes[n];
+        if (b.oldValues && b.oldValues->size() == b.all.size()) {
+            // A kept module starts where the playing patch has it (its values, knob moves included), so nothing jumps
+            // at the swap, and ramps from there to the spec's values (unnamed: defaults, as a fresh build has them).
+            for (uint32_t k = 0; k < b.all.size(); ++k) {
+                const double from = (*b.oldValues)[k];
+                if (!p.executor_.setInitialParameter(b.graph, k, from))
+                    return fail("node " + quoted(spec.nodes[n].id) + " refused a value");
+                // The queue full (more moves than kParameterQueueCapacity): that value jumps instead.
+                if (from != b.all[k] && !p.executor_.queueParameter(b.graph, k, b.all[k]))
+                    p.executor_.setInitialParameter(b.graph, k, b.all[k]);
+            }
+            continue;
+        }
+        for (const auto& [k, value] : b.values)
+            if (!p.executor_.setInitialParameter(b.graph, k, value))
                 return fail("node " + quoted(spec.nodes[n].id) + " refused a value");
+    }
     p.pieceEvents_.resize(patch::kMaxEvents);
     p.graph_ = std::move(processors);
     p.latency_ = nodes[outputNode].time;
@@ -569,7 +602,7 @@ void CompiledPatch::reset() noexcept {
 bool CompiledPatch::setParameter(std::string_view node, uint32_t component, std::string_view parameter,
                                  double value) noexcept {
     if (!std::isfinite(value)) return false;
-    for (const Node& n : nodes_) {
+    for (Node& n : nodes_) {
         if (n.id != node || !n.instance) continue;
         if (n.instance->chain) {
             try {
@@ -581,7 +614,11 @@ bool CompiledPatch::setParameter(std::string_view node, uint32_t component, std:
         if (component != 0 || !n.instance->processor) return false;
         const ModuleDescriptor& d = n.instance->processor->descriptor();
         for (uint32_t k = 0; k < d.parameterCount; ++k)
-            if (d.parameters[k].id == parameter) return executor_.queueParameter(n.graphNode, k, value);
+            if (d.parameters[k].id == parameter) {
+                if (!executor_.queueParameter(n.graphNode, k, value)) return false;
+                if (k < n.values.size()) n.values[k] = constrainParameter(d.parameters[k], value);
+                return true;
+            }
         return false;
     }
     return false;
