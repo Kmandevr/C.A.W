@@ -136,7 +136,10 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
     for (uint32_t i = 0; i < b.frames;) {
         if (idle_) {
             const uint32_t from = i;
-            while (i < b.frames && inL[i] == 0.0f && inR[i] == 0.0f) outL[i] = outR[i] = 0.0f, ++i;
+            // A keyed effect's key counts as input: one asleep wakes when its key sounds (a ducker follows its key
+            // through a gap in its input, and the input coming back finds it ducked).
+            while (i < b.frames && inL[i] == 0.0f && inR[i] == 0.0f && (!keyL_ || (keyL_[i] == 0.0f && keyR_[i] == 0.0f)))
+                outL[i] = outR[i] = 0.0f, ++i;
             if (optOutputs_) zeroOptionalOutputs(from, i);
             if (i == b.frames) break;
             idle_ = false;  // woken: the grid starts here
@@ -168,6 +171,13 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
             const int32_t a = l > r ? l : r;
             inMax = a > inMax ? a : inMax;
         }
+        if (keyL_)  // a sounding key is not silence: the effect stays awake while it sounds
+            for (uint32_t k = 0; k < n; ++k) {
+                int32_t l, r;
+                std::memcpy(&l, keyL_ + i + k, 4);
+                std::memcpy(&r, keyR_ + i + k, 4);
+                zero[k] = ((l | r) & kAbs) == 0 ? zero[k] : 0;
+            }
         inPeak_ = std::max(inPeak_, static_cast<double>(std::bit_cast<float>(inMax)));
         runAt_ = i;
         run(inL + i, inR + i, outL + i, outR + i, n);

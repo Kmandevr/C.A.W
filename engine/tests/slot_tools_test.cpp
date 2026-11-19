@@ -150,8 +150,9 @@ TEST(auto_gain_off_is_bit_identical_and_turning_it_off_restores_the_bits) {
         if (start == split) CHECK(toggled->setAutoGain(0, false));
         toggled->process(got.l.data() + start, got.r.data() + start, 64, 48000.0, nullptr);
     }
-    CHECK(!same(want, got));       // it did trim while on
-    CHECK(same(want, got, split));  // and not after
+    CHECK(!same(want, got));  // it did trim while on
+    // and not once its trim has ramped back to unity (AutoGainMatcher::release: 10 ms, so turning it off can't click)
+    CHECK(same(want, got, split + AutoGainMatcher::fadeFrames(48000.0)));
     float trim = 5;
     CHECK(toggled->autoGainDb(0, trim));
     CHECK_EQ(trim, 0.0f);  // off reads 0
@@ -181,11 +182,140 @@ TEST(auto_gain_is_the_same_at_any_block_size_and_repeats_from_play) {
     fresh.playEpoch = 1;
     auto d = build({utility(6.0, true)});
     if (!d) return;
-    CHECK(same(render(*c, in, 64, &t), render(*d, in, 64, &fresh)));
+    // (c's trim was not 0 dB at the new Play: its first 10 ms ramp from that gain, so the tails don't click.)
+    CHECK(same(render(*c, in, 64, &t), render(*d, in, 64, &fresh), AutoGainMatcher::fadeFrames(48000.0)));
     // Bypassed, the slot plays its input untrimmed (after its 5 ms crossfade).
     CHECK(a->setBypass(0, true));
     const Stereo z = render(*a, in, 64);
     CHECK(std::memcmp(in.l.data() + 4800, z.l.data() + 4800, (in.l.size() - 4800) * 4) == 0);
+}
+
+namespace {
+// A 1 kHz cosine: a peak every 48 frames, so a gain step on one of those frames shows as a jump between samples.
+Stereo cosine(size_t frames, double level = 0.1) {
+    Stereo s{std::vector<float>(frames), std::vector<float>(frames)};
+    for (size_t i = 0; i < frames; ++i)
+        s.l[i] = s.r[i] = static_cast<float>(level * std::cos(6.283185307179586 * 1000.0 * static_cast<double>(i) / 48000.0));
+    return s;
+}
+double largestStep(const std::vector<float>& v, size_t from, size_t to) {
+    double most = 0;
+    for (size_t i = from + 1; i < to; ++i) most = std::max(most, std::fabs(static_cast<double>(v[i]) - v[i - 1]));
+    return most;
+}
+}  // namespace
+
+TEST(auto_gain_turned_off_while_playing_ramps_its_trim_to_unity_without_a_click) {
+    // Settled at about -6 dB after a +6 dB utility, then turned off on a peak of the cosine: a jump to 0 dB in one
+    // sample would step by 0.1 there, while the 0.2 cosine itself moves at most 0.2 * 2 pi / 48 = 0.026 a sample.
+    const size_t frames = 48000 * 11, split = 48000 * 10;
+    const Stereo in = cosine(frames);
+    auto chain = build({utility(6.0, true)});
+    if (!chain) return;
+    Stereo got = in;
+    for (size_t start = 0; start < frames; start += 64) {
+        if (start == split) {
+            float trim = 0;
+            CHECK(chain->autoGainDb(0, trim));
+            CHECK_NEAR(trim, -6.0, 0.2);
+            CHECK(chain->setAutoGain(0, false));
+        }
+        chain->process(got.l.data() + start, got.r.data() + start, 64, 48000.0, nullptr);
+    }
+    CHECK(largestStep(got.l, split - 960, split + 960) < 0.03);
+    const uint32_t fade = AutoGainMatcher::fadeFrames(48000.0);
+    CHECK_EQ(fade % AutoGainMatcher::kGrid, 0u);  // on its grid
+    CHECK(fade >= 480u && fade < 480u + AutoGainMatcher::kGrid);
+    CHECK_NEAR(got.l[split + fade / 2] / in.l[split + fade / 2], 2.0 * (0.5 + 0.5 * 0.5), 0.05);  // halfway there
+    auto plain = build({utility(6.0, false)});
+    if (!plain) return;
+    CHECK(same(render(*plain, in), got, split + fade));  // then exactly as never on
+    // On again before the ramp ends: from the gain it had reached, not from 0 dB at once.
+    auto again = build({utility(6.0, true)});
+    if (!again) return;
+    Stereo flip = in;
+    for (size_t start = 0; start < frames; start += 64) {
+        if (start == split) CHECK(again->setAutoGain(0, false));
+        if (start == split + 192) CHECK(again->setAutoGain(0, true));
+        again->process(flip.l.data() + start, flip.r.data() + start, 64, 48000.0, nullptr);
+    }
+    CHECK(largestStep(flip.l, split - 960, split + 1920) < 0.03);
+}
+
+TEST(auto_gain_ramps_from_its_trim_at_a_new_play_while_tails_sound) {
+    const size_t frames = 48000 * 10;
+    const Stereo in = cosine(frames + 48000);
+    const Stereo first{std::vector<float>(in.l.begin(), in.l.begin() + frames), std::vector<float>(in.r.begin(), in.r.begin() + frames)};
+    const Stereo then{std::vector<float>(in.l.begin() + frames, in.l.end()), std::vector<float>(in.r.begin() + frames, in.r.end())};
+    ChainTime t;
+    t.playEpoch = 1;
+    auto c = build({utility(6.0, true)});
+    if (!c) return;
+    const Stereo before = render(*c, first, 64, &t);
+    t.playEpoch = 2;  // Play again: the tails still sound
+    const Stereo after = render(*c, then, 64, &t);
+    // No jump from the -6 dB trim to 0 dB at the Play: the first frame after it is still about as loud as before.
+    CHECK_NEAR(after.l[0], before.l.back() * (then.l[0] / first.l.back()), 0.01);
+    std::vector<float> joined(before.l.end() - 960, before.l.end());
+    joined.insert(joined.end(), after.l.begin(), after.l.begin() + 960);
+    CHECK(largestStep(joined, 0, joined.size()) < 0.03);
+    // After the ramp, the render repeats from Play: as a fresh chain's.
+    ChainTime fresh;
+    fresh.playEpoch = 1;
+    auto d = build({utility(6.0, true)});
+    if (!d) return;
+    CHECK(same(render(*d, then, 64, &fresh), after, AutoGainMatcher::fadeFrames(48000.0)));
+}
+
+TEST(auto_gain_over_an_effect_that_sleeps_is_the_same_at_any_block_size) {
+    // Program with gaps of 300 ms (the utility sleeps after 50 ms of silence): while it sleeps the chain skips it,
+    // and its matcher must advance its grid and decay over those frames as if it had heard their silence.
+    Stereo in = program(48000 * 6);
+    for (size_t i = 0; i < in.l.size(); ++i)
+        if ((i / 4800) % 8 >= 5) in.l[i] = in.r[i] = 0.0f;  // 0.5 s on, 0.3 s off
+    auto make = [] { return build({utility(6.0, true)}); };
+    auto a = make();
+    if (!a) return;
+    const Stereo want = render(*a, in, 64);
+    float trimA = 0;
+    CHECK(a->autoGainDb(0, trimA));
+    CHECK(trimA < -1.0f);  // it did trim
+    for (uint32_t block : {37u, 16u, 1u}) {
+        auto b = make();
+        if (!b) return;
+        const Stereo got = render(*b, in, block);
+        if (!same(want, got)) cawtest::fail(__FILE__, __LINE__, "block " + std::to_string(block) + " differs");
+        float trimB = 0;
+        CHECK(b->autoGainDb(0, trimB));
+        CHECK_EQ(trimA, trimB);
+    }
+}
+
+TEST(per_note_fx_and_instruments_ignore_auto_gain) {
+    // "auto_gain" is read on any component entry, but only a track's or the master's effect chain has the trim.
+    std::string error;
+    auto noteFx = ComponentChain::buildNoteEffects(registry(), {utility(6.0, true)}, 48000.0, error);
+    CHECK(noteFx != nullptr);
+    if (!noteFx) return;
+    auto plain = ComponentChain::buildNoteEffects(registry(), {utility(6.0, false)}, 48000.0, error);
+    if (!plain) return;
+    const Stereo in = program(48000 * 5);
+    CHECK(same(render(*noteFx, in), render(*plain, in)));  // untrimmed: still +6 dB
+    float trim = 1;
+    CHECK(noteFx->autoGainDb(0, trim));
+    CHECK_EQ(trim, 0.0f);
+    CHECK(!noteFx->setAutoGain(0, true));  // and it can't be turned on
+    CHECK(!noteFx->currentSpecs()[0].autoGain);
+    ComponentSpec osc;
+    osc.id = "org.caw.test.osc";
+    osc.autoGain = true;
+    auto inst = ComponentChain::buildInstrument(registry(), osc, 48000.0, error);
+    CHECK(inst != nullptr);
+    if (!inst) return;
+    CHECK(!inst->setAutoGain(0, true));
+    CHECK(!inst->currentSpecs()[0].autoGain);
+    CHECK(inst->autoGainDb(0, trim));
+    CHECK_EQ(trim, 0.0f);
 }
 
 TEST(slot_meters_read_each_sides_peak_and_a_sticky_clip_then_reset) {

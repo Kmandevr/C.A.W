@@ -90,6 +90,8 @@ protected:
             for (float& v : h) v = 0.0f;
         grMax_ = grNow_ = 0.0;
         levelMax_ = keyMax_ = 0.0;
+        outRamp_.reset();
+        mixRamp_.reset();
     }
 
     void control(uint32_t at) noexcept override {
@@ -105,9 +107,12 @@ protected:
         rateFor_ = sr;
         holdFrames_ = static_cast<uint32_t>(std::max(0.0, param(kHold, at)) * 0.001 * sr + 0.5);
         detection_ = std::clamp(choice(kDetection, at), 0, 2);
+        // Output and Mix ramp in a straight line over the grid step to their values here (a knob's or a lane's
+        // per-frame values read every 16 frames would step: zipper noise).
         const double out = param(kOutput, at);
         if (out != outDb_) outDb_ = out, outGain_ = lib::dbToGain(out);
-        mix_ = std::clamp(param(kMix, at), 0.0, 1.0);
+        outRamp_.set(outGain_, kControlFrames);
+        mixRamp_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
         external_ = choice(kSidechain, at) == 1;
     }
 
@@ -194,7 +199,7 @@ protected:
             if (env_ != gainDb_) gainDb_ = env_, gainOf_ = lib::dbToGain(env_);
             grNow_ = env_;
             grMax_ = std::min(grMax_, env_);
-            const double g = outGain_ * (1.0 + (gainOf_ - 1.0) * mix_);
+            const double g = outRamp_.next() * (1.0 + (gainOf_ - 1.0) * mixRamp_.next());
             outL[i] = static_cast<float>(xl * g);
             outR[i] = static_cast<float>(xr * g);
         }
@@ -231,7 +236,8 @@ private:
     bool external_ = false;
     double threshold_ = -20, thresholdLin_ = 0.1, thresholdSq_ = 0.01, amount_ = 0.5;
     double attack_ = 0, release_ = 0, attackFor_ = -1, releaseFor_ = -1, rateFor_ = -1, rmsCoef_ = 0;
-    double outDb_ = 1e300, outGain_ = 1.0, mix_ = 1.0;
+    double outDb_ = 1e300, outGain_ = 1.0;
+    Ramp outRamp_, mixRamp_;  // the output gain and the mix, ramped over each grid step
     double gainDb_ = 0.0, gainOf_ = 1.0;  // dbToGain(gainDb_) last worked out
     double grNow_ = 0, grMax_ = 0, levelMax_ = 0, keyMax_ = 0;
 };

@@ -42,7 +42,11 @@ namespace caw {
 //   kMaxPortsPerNode ports per node; a bad spec fails closed with an error that names the node, wire or port.
 // - Changes compile off the audio thread (compilePatch) and swap whole (PatchRuntime); a crossfade is the caller's.
 //   Given the patch that plays, a compile keeps the instance (and so the running state: a reverb's tail) of every
-//   node whose id, kind and components are unchanged and only sets its values.
+//   node whose id, kind and components are unchanged and only sets its values: they ramp from where the playing
+//   patch has them (a kept Module from its last values, knob moves included; a Chain as setValues does) to the
+//   spec's, a value the spec does not name to its default, so a kept node sounds as a fresh build would.
+// - Memory (untrusted input): every wire's compensation delay within kMaxCompensationFrames, and all of a patch's
+//   delay lines together within kMaxDelayLineBytes; its Chain nodes' components within kMaxPatchChainComponents.
 namespace patch {
 inline constexpr uint32_t kMaxNodes = 64;
 inline constexpr uint32_t kMaxWires = 256;
@@ -52,6 +56,8 @@ inline constexpr uint32_t kMaxChainComponents = 64;    // components in one Chai
 inline constexpr std::size_t kMaxIdLength = 64;        // node ids and port names, bytes
 inline constexpr double kMaxWireGain = 16.0;           // |gain| (+24 dB)
 inline constexpr uint32_t kMaxCompensationFrames = 1u << 20;  // one wire's latency compensation
+inline constexpr std::size_t kMaxDelayLineBytes = std::size_t{64} << 20;  // all its compensation delays together
+inline constexpr uint32_t kMaxPatchChainComponents = 256;  // components in all its Chain nodes together
 inline constexpr uint32_t kSubBlock = 16;              // frames per sub-block with feedback; a feedback wire's delay
 inline constexpr uint32_t kWideSubBlock = 64;          // frames per sub-block without (a multiple of kSubBlock)
 inline constexpr float kFeedbackClamp = 16.0f;         // a feedback return without its limiter
@@ -134,6 +140,9 @@ private:
         PatchNodeKind kind = PatchNodeKind::Module;
         std::shared_ptr<patch_detail::NodeInstance> instance;  // Chain and Module (shared with a kept patch)
         uint32_t graphNode = UINT32_MAX;                       // its node in the executor
+        // Module: every parameter's value as the control thread last set it (the spec's, then setParameter's), so
+        // a recompile that keeps the node starts there.
+        std::vector<double> values;
     };
     std::vector<Node> nodes_;
     // Declaration order matters: the executor (borrowing the processors) goes first, then the processors, then the

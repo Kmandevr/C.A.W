@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -522,6 +523,111 @@ TEST(a_patch_sets_values_of_module_and_chain_nodes) {
     cawtest::Audio dc{std::vector<float>(48000, 0.5f), std::vector<float>(48000, 0.5f)};
     const cawtest::Audio out = renderPatch(*p, &dc, dc.frames(), 64);
     CHECK_NEAR(out.l.back(), 0.5 * std::pow(10.0, -12.0 / 20.0), 1e-3);  // both ramped to -6 dB
+}
+
+TEST(a_kept_module_node_carries_its_current_values_into_the_new_patch) {
+    // A knob moved on the playing patch (setParameter) is where a recompile that keeps the node starts: from there it
+    // ramps to the spec's value (a value the spec does not name: its default, as a fresh build and an export have
+    // it), never jumping at the swap.
+    for (bool named : {false, true}) {
+        PatchSpec s;
+        s.nodes = {node("in", PatchNodeKind::Input),
+                   module("u", named ? component("org.caw.utility", {{"gain", -3.0}}) : component("org.caw.utility")),
+                   node("out", PatchNodeKind::Output)};
+        s.wires = {wire("in.out", "u.in"), wire("u.out", "out.in")};
+        auto a = compile(s);
+        if (!a) return;
+        CHECK(a->setParameter("u", 0, "gain", -12.0));
+        cawtest::Audio dc{std::vector<float>(4800, 0.5f), std::vector<float>(4800, 0.5f)};
+        const cawtest::Audio before = renderPatch(*a, &dc, dc.frames(), 64);
+        CHECK_NEAR(before.l.back(), 0.5 * std::pow(10.0, -12.0 / 20.0), 1e-4);
+        auto kept = compile(s, a.get());
+        if (!kept) return;
+        CHECK_EQ(kept->keptNodes(), 1u);
+        a.reset();
+        const cawtest::Audio after = renderPatch(*kept, &dc, dc.frames(), 64);
+        CHECK_NEAR(after.l[0], before.l.back(), 2e-3);  // no jump at the swap
+        CHECK_NEAR(after.l.back(), 0.5 * std::pow(10.0, (named ? -3.0 : 0.0) / 20.0), 1e-4);  // then the spec's value
+        double most = 0;
+        for (size_t i = 1; i < after.frames(); ++i) most = std::max(most, std::fabs(double(after.l[i]) - after.l[i - 1]));
+        CHECK(most < 0.01);
+    }
+}
+
+namespace {
+// A pass-through effect that declares almost a full wire's compensation of latency.
+constexpr uint32_t kSlowLatency = patch::kMaxCompensationFrames - 64;
+class Slow final : public ModuleProcessor {
+public:
+    static const ModuleDescriptor& desc() {
+        static const PortDescriptor ports[] = {audioPort("in", true), audioPort("out", false)};
+        static const ModuleDescriptor d = [] {
+            ModuleDescriptor x{"org.caw.test.slow", 1, ports, 2, nullptr, 0};
+            x.name = "Slow";
+            x.role = ModuleRole::Effect;
+            x.latencyFrames = kSlowLatency;
+            return x;
+        }();
+        return d;
+    }
+    const ModuleDescriptor& descriptor() const noexcept override { return desc(); }
+    void process(const StereoProcessBlock& b) noexcept override {
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            b.outputLeft[i] = b.inputLeft ? b.inputLeft[i] : 0.0f;
+            b.outputRight[i] = b.inputRight ? b.inputRight[i] : 0.0f;
+        }
+    }
+};
+const ModuleRegistry& slowRegistry() {
+    static const ModuleRegistry r = [] {
+        ModuleRegistry x;
+        registerBuiltinComponents(x);
+        x.add(Slow::desc(), []() noexcept -> ModuleProcessor* { return new (std::nothrow) Slow(); });
+        return x;
+    }();
+    return r;
+}
+}  // namespace
+
+TEST(a_patch_has_a_budget_for_its_delay_lines_and_its_chains_components) {
+    // Every wire within its own 2^20 frames of compensation, but together past the patch's budget for delay lines:
+    // n empty chains beside a slow node each get a stereo delay of almost 2^20 frames (8 MiB each).
+    auto spec = [](int chains) {
+        PatchSpec s;
+        s.nodes = {node("in", PatchNodeKind::Input), module("slow", component("org.caw.test.slow")),
+                   node("out", PatchNodeKind::Output)};
+        s.wires = {wire("in.out", "slow.in"), wire("slow.out", "out.in")};
+        for (int k = 0; k < chains; ++k) {
+            const std::string id = "c" + std::to_string(k);
+            s.nodes.push_back(node(id, PatchNodeKind::Chain));
+            s.wires.push_back(wire("in.out", id + ".in"));
+            s.wires.push_back(wire(id + ".out", "out.in"));
+        }
+        return s;
+    };
+    std::string error;
+    auto two = compilePatch(slowRegistry(), spec(2), 48000, nullptr, error);
+    CHECK(two != nullptr);
+    if (two) CHECK_EQ(two->latencyFrames(), static_cast<uint64_t>(kSlowLatency));
+    auto nine = compilePatch(slowRegistry(), spec(9), 48000, nullptr, error);
+    CHECK(nine == nullptr);
+    if (error.find("delay lines") == std::string::npos || error.find("64 MiB") == std::string::npos)
+        cawtest::fail(__FILE__, __LINE__, "error \"" + error + "\" does not name the delay-line budget");
+    static_assert(patch::kMaxDelayLineBytes == std::size_t{64} << 20);
+    // Components across the chain nodes: at most kMaxPatchChainComponents in all (each node within its own 64).
+    PatchSpec many;
+    many.nodes = {node("in", PatchNodeKind::Input), node("out", PatchNodeKind::Output)};
+    many.wires = {wire("in.out", "out.in")};
+    const uint32_t per = patch::kMaxChainComponents;
+    for (uint32_t k = 0; k * per <= patch::kMaxPatchChainComponents; ++k)
+        many.nodes.push_back(node("c" + std::to_string(k), PatchNodeKind::Chain,
+                                  std::vector<ComponentSpec>(per, component("org.caw.utility"))));
+    error = refused(many);
+    if (error.find("components in its chain nodes, more than the " + std::to_string(patch::kMaxPatchChainComponents)) ==
+        std::string::npos)
+        cawtest::fail(__FILE__, __LINE__, "error \"" + error + "\" does not name the chain components' cap");
+    many.nodes.pop_back();
+    CHECK(compile(many) != nullptr);
 }
 
 TEST(a_patch_spec_is_refused_with_an_error_naming_the_problem) {
