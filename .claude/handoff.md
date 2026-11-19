@@ -14,8 +14,9 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **1.1.0 integrated on the session branch** (a3a3bc7: Delay, Reverb, Drive, Bits, Cab, MIDI effects at API 41, Meters, Lo-fi, Phase align, the Talon/Hatch/Duck split, Plume, Wah). ctest 13/13, app suite 2580.
-- **Running from a3a3bc7** (push them to `caw-backup-*` at check-ins): dsp-voice (Glint, Soar's Harmonizer and Octaver, Mimic), dsp-clean (Preen, Hush), ui-modes (pages for the new modes, by the approved device UI plan).
+- **1.1.0 on the session branch** (78c3eba): every engine part so far (Glint, Soar's Harmonizer and Octaver, Mimic, Preen, Hush, robust cost ceilings, key note-offs) and the 28 mode pages. ctest 15/15; the app suite fails only on Harmonizer and Octaver, which have no page yet.
+- **Running from 78c3eba** (push them to `caw-backup-*` at check-ins): ui-voice (pages for Harmonizer, Octaver, Glint, Mimic, Preen and Hush), dsp-lark (Lark, C API 42), dsp-pack (grain engine, Murmur, Peck, Bend, Iris).
+- **Next:** the instruments (Raven's synthesis, Timber, Flock, Magpie, Rook), then names, tags, theme, personality and Easter eggs, then the 1.1.0 PR.
 - **Follow-ups:** back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
 
 ## Rules for continuing
