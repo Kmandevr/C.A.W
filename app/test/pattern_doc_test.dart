@@ -182,7 +182,14 @@ void main() {
           err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
       expect(err('${head}0 A1 1 prob\n'), "line 4, col 8: 'prob' needs a number after it");
       expect(err('${head}0 A1 1 ratchet 2.5\n'), 'line 4, col 16: ratchet must be a whole number');
-      expect(err('${head}0 A1 1 ratchet 9\n'), 'line 4, col 16: ratchet must be 1 to 8');
+      expect(err('${head}0 A1 1 ratchet 65\n'), 'line 4, col 16: ratchet must be 1 to 64');
+      // Up to 64 repeats (owner, 2026-11-19), as the engine.
+      final r64 = PatternDoc.parse('${head}0 A1 4 1 ratchet 64\n');
+      expect(r64.ok, isTrue);
+      expect(r64.doc!.notes.single.ratchet, 64);
+      final n = r64.doc!.notes.single.id;
+      expect(r64.doc!.setRatchet({n}, 100).notes.single.ratchet, 64);
+      expect(r64.doc!.setRatchet({n}, 12).notes.single.ratchet, 12);
       final r = PatternDoc.parse('${head}0 A1 1 2\n');
       expect((r.ok, r.line, r.col), (false, 4, 8));
     });

@@ -4158,6 +4158,10 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
             continue;
         }
         if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
+        if (n.ratchet > 1) {  // a repeat shorter than a sample is not played: at most the note's samples sound
+            int64_t start = 0, stop = 0;
+            if (noteSpan(s, n, pe.sub, start, stop) && stop <= start) continue;
+        }
         if (pe.sub == 0 && n.slideFrom >= 0) {
             const PatternNote& from = pat->notes[static_cast<size_t>(n.slideFrom)];
             if (NoteEvents::Held* h = notes.findPattern(static_cast<uint32_t>(n.slideFrom), static_cast<uint16_t>(from.ratchet - 1))) {

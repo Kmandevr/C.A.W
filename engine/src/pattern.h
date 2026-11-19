@@ -12,7 +12,7 @@ namespace caw {
 // A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
 bool noteNumber(const std::string& s, double& out);
 
-constexpr int kMaxRatchet = 8;
+constexpr int kMaxRatchet = 64;  // repeats per note (owner, 2026-11-19); the engine plays only those a sample or longer
 
 constexpr double kMaxBend = 96.0;  // semitones either way, bend plus vibrato (#226: eight octaves; docs/decisions.md)
 

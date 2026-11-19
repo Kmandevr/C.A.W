@@ -405,3 +405,23 @@ TEST(device_midi_capi_and_position_at) {
     CHECK_EQ(caw_engine_midi_dropped(ce), 0);
     caw_engine_destroy(ce);
 }
+
+TEST(a_ratchet_plays_at_most_one_repeat_per_sample_of_its_note) {
+    // 64 repeats of a note 1/1000 step long (6 samples at 120 BPM and 48 kHz): only the repeats that last a sample
+    // sound, so a ratchet never plays more notes than its note has samples; a long note plays all 64.
+    for (const bool shortNote : {true, false}) {
+        Engine e(48000);
+        CHECK(loadRecorder(e));
+        ProjectSpec p = recorderTrack();
+        p.modules.push_back({"r", std::string("---\nkind: pattern\n---\n") + (shortNote ? "0 C4 1/1000 1 ratchet 64\n" : "0 C4 4 1 ratchet 64\n")});
+        p.layers[0].pattern = "r";
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        e.play();
+        std::vector<float> l(128), r(128);
+        for (int k = 0; k < 200; ++k) e.process(l.data(), r.data(), 128);
+        int ons = 0;
+        for (const Rec& x : records(e)) ons += x.type == kOn;
+        if (shortNote) CHECK(ons >= 1 && ons <= 6);
+        else CHECK_EQ(ons, 64);
+    }
+}

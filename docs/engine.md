@@ -60,7 +60,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
 - **Columns:** `at` and `len` are in 16ths and may be decimals or fractions (`13/3` lands exactly on a triplet). Notes are names (`A1`, `F#3`) or MIDI numbers, with fractions for microtones; commas make a chord. `vel` is 0–1 and optional (default 1).
 - **Extras:**
   - `prob P`: the note plays with chance P. The choice comes from the project seed, the note and which repeat of the pattern this is, so every project loop plays the same way and exports match playback.
-  - `ratchet N`: the note is split into N equal repeats (2–8).
+  - `ratchet N`: the note is split into N equal repeats (2–64; owner, 2026-11-19); a repeat shorter than a sample is not played, so a note sounds at most as many repeats as it lasts samples.
   - `slide`: the next note starting exactly where this one ends takes over the held note: no new note-on, the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
   - `bend`: per-note pitch curve in semitones, written as time/value points; optional segment bend handles use `~`. A bend plus the note's vibrato depth reaches ±96 semitones (eight octaves, `kMaxBend`; #226, [decisions](decisions.md)). The engine sends a pattern note's pitch to the instrument held between MIDI −60 and half the sample rate as a MIDI note (`Engine::safePitch`: 135.08 at 48 kHz), so no oscillator is driven past Nyquist; `the_built_in_instruments_stay_finite_at_extreme_pitches`.
   - `vib`: vibrato depth, rate in Hz and optional fade-in.
