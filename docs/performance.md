@@ -230,6 +230,7 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 ## Effects suite (2026-11-10)
 
 `caw_bench SECONDS 300` times each built-in effect (#173, [engine](engine.md)) alone on a busy stereo signal that never falls silent (so nothing sleeps), in the engine's 64-frame chain blocks, best of 3 runs. Microseconds of CPU per second of stereo audio (10,000 = 1 % of one core); 3 s runs on a shared x86-64 server (Intel Xeon 2.3 GHz, GCC 13 `-O3`), so ±30 % noise between runs (the existing chorus read 489 and 735 in two runs). Four rows compare the merged Pitch/Shift device's two variants with the old effect ids (FX consolidation): within noise of each other ([engine](engine.md)).
+After them it times 1.1.0's tools (`bench/tools_cost.cpp`, alone as `caw_bench SECONDS 301`): each MIDI effect on a busy part and each tool on the busy signal (Meters with a page reading it), in µs per second of audio and bytes per instance, against a ceiling of 2000 µs/s (light) or 8000 (medium); one over its ceiling makes the run exit 1. Numbers in [engine](engine.md#tools-meters-lo-fi-phase-align-110).
 
 | Effect | Cost |
 | --- | --- |

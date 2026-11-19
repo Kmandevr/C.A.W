@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-18
+updated: 2026-11-19
 covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/profile.hpp, engine/src/component_bench.*, engine/src/component_profile.*, engine/include/caw/instrument.hpp, engine/src/scan/declarations.*, engine/tests/fixtures/declared/, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
@@ -13,6 +13,7 @@ covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/
 - **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing. Since 1.0.7 every library is scanned before it is opened, and a component that uses a capability it does not declare is refused ([Declaring capabilities](#declaring-capabilities)).
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).
+- **MIDI effects** (2026-11-19, 1.1.0): a component with one event input and one event output (role `EventProcessor`, `processPorts`) runs in a track's `midiComponents` before its instrument; it writes its output events sorted by frame, each below the block's frame count, or its input passes on for that block. Keep the input's note ids for notes you only reshape and pick ids of your own (outside 1..2^31, which the Engine and the built-ins use) for notes you add ([engine](engine.md#midi-effects-110)).
 - **Testing:** an offline testing suite measures an effect (levels, THD+N, impulse response, latency and tail against the declared values, null tests, parameter sweeps, CPU per block) from the C API or `caw test-component`; instruments are not covered yet.
 - **CLAP and VST3 export:** a component library also builds as a `.clap` plug-in (2026-11-10) and a `.vst3` bundle (2026-11-11) for Linux and Windows hosts ("Export as a CLAP plug-in" and "Export as a VST3 plug-in" below).
 - **Still to come:** the UI, process isolation, signing, components with other ports, macOS plug-in bundles and an in-app Export button.
