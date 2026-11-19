@@ -46,12 +46,17 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.duck', 1, {}, 'duck_level'),
   ('org.caw.duck', 2, {}, 'duck_carve'),
   ('org.caw.tremolo', 2, {}, 'tremolo_shape'),
+  ('org.caw.meters', 0, {}, 'meters_analyzer'),
+  ('org.caw.meters', 1, {}, 'meters_tuner'),
+  ('org.caw.meters', 2, {}, 'meters_loudness'),
+  ('org.caw.lofi', 0, {'age': 0.5, 'band': 3}, 'lofi'),
+  ('org.caw.phasealign', 0, {'invert': 1}, 'phasealign'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
 /// A playing frame for [pageId] (the variant's page id, as the display decodes it) at [tick]: every float of its
 /// layout set like a drum loop.
-DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
+DeviceDisplayFrame modeFrame(String pageId, {int tick = 0, int variant = 0}) {
   final ph = (tick % 22) / 22;
   final hit = math.exp(-ph * 5);
   final level = -40 + 34 * hit;
@@ -115,11 +120,26 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
         raw[6 + 3 * k] = -6 * hit * math.exp(-math.pow((k - 7) / 2.5, 2));
         raw[7 + 3 * k] = -4 * hit * math.exp(-math.pow((k - 9) / 2, 2));
       }
+    case 'org.caw.meters':
+      // One layout per meter, told apart by what the test plays: the analyzer's first, then the tuner's and loudness'.
+      raw.setAll(2, [128, 1, 0, 4.5, 110, -12]);
+      for (var j = 0; j < 128; j++) {
+        raw[8 + j] = -20 - j * 0.15 + 8 * math.sin(j * 0.3) * hit - (j < 6 ? 20 : 0);
+        raw[136 + j] = raw[8 + j] - 6;
+      }
+    case 'org.caw.lofi':
+      raw.setAll(2, [0.5, 0.3, 0.5, 0.25, 0.25, 3, 0.1, 1.2, 9000, 12]);
+    case 'org.caw.phasealign':
+      raw.setAll(2, [1.6, 1, 1, 1, 1.6, 0.92, 0.6 + 0.2 * hit, level]);
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
         raw[22 + i] = i >= 8 && (i * 7 + tick) % 3 == 0 ? 1 : 0;
       }
+  }
+  if (pageId == 'org.caw.meters' && variant == 1) raw.setAll(2, [1, 110.4, 45, 12.3, 0.9, 440, 45.12]);
+  if (pageId == 'org.caw.meters' && variant == 2) {
+    raw.setAll(2, [-12 + 3 * hit, -13.5, -14.2, -9.8, -12.6, -1.4, -1.2, -0.8, 64, -14, -0.2]);
   }
   final f = List<double>.of(raw);
   return decodeDisplay(pageId, f, f.length);
@@ -157,7 +177,7 @@ void main() {
     s.project.layers.first.components.single.params.addAll(values);
     s.starting = false;
     s.history.reset(jsonEncode(s.project.toJson()));
-    display.frame.value = modeFrame(MergedDevices.isMerged(id) ? MergedDevices.pageId(id, variant) : id);
+    display.frame.value = modeFrame(MergedDevices.isMerged(id) ? MergedDevices.pageId(id, variant) : id, variant: variant);
     late BuildContext ctx;
     await pumpGolden(tester, Scaffold(body: Builder(builder: (c) {
       ctx = c;
@@ -385,6 +405,33 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('Tools: Analyzer drags its tilt, Lo-fi its Age, Phase align its delay; Learn turns Auto on', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.meters', 0);
+    final tilt = t.value('tilt');
+    await drag(tester, const ValueKey('analyzer-hero'), const Offset(0, -50));
+    expect(t.value('tilt'), greaterThan(tilt));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.meters', 2);
+    await tester.tap(find.byKey(const ValueKey('loudness-reset')));
+    await tester.pumpAndSettle();
+    expect(t.value('reset'), 1);
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.lofi', 0);
+    await drag(tester, const ValueKey('lofi-hero'), const Offset(0, -60));
+    expect(t.value('age'), greaterThan(0));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.phasealign', 0);
+    await drag(tester, const ValueKey('phase-hero'), const Offset(80, 0));
+    expect(t.value('delay'), greaterThan(0));
+    await tester.tap(find.byKey(const ValueKey('phase-learn')));
+    await tester.pumpAndSettle();
+    expect((t.value('mode'), t.value('learn')), (1, 1));
+    await tester.tap(find.byKey(const ValueKey('phase-invert')));
+    await tester.pumpAndSettle();
+    expect(t.value('invert'), 1);
+    await close(tester);
+  });
+
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {
     expect(bitwiseSample(0, bits: 12, shift: 0, xor: 0xffff, and: 0xffff), 0);
     expect(bitwiseSample(0.5, bits: 12, shift: 0, xor: 0, and: 0xffff), closeTo(0.5, 1e-3));
@@ -397,7 +444,7 @@ void main() {
         testWidgets('screen $name $label', (tester) async {
           await open(tester, id, variant, size: size, values: values);
           for (var i = 160; i >= 0; i--) {
-            display.frame.value = modeFrame(MergedDevices.isMerged(id) ? MergedDevices.pageId(id, variant) : id, tick: i + 3);
+            display.frame.value = modeFrame(MergedDevices.isMerged(id) ? MergedDevices.pageId(id, variant) : id, tick: i + 3, variant: variant);
             await tester.pump();
           }
           await tester.pumpAndSettle();
