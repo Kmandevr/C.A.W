@@ -4,6 +4,13 @@
 #include <cstdlib>
 #include <new>
 
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
+#include <dlfcn.h>
+
+#include <atomic>
+#define CAW_COUNT_LAZY_INITS 1
+#endif
+
 namespace {
 thread_local bool gCounting = false;
 thread_local std::size_t gAllocations = 0;
@@ -62,6 +69,33 @@ std::size_t AllocationScope::allocations() const noexcept { return gAllocations;
 std::size_t AllocationScope::deallocations() const noexcept { return gDeallocations; }
 unsigned long long threadAllocationsAndFrees() noexcept { return gTotal; }
 }  // namespace cawtest
+
+#if defined(CAW_COUNT_LAZY_INITS)
+namespace {
+thread_local long long gLazyInits = 0;
+}
+namespace cawtest {
+long long threadLazyInits() noexcept { return gLazyInits; }
+}  // namespace cawtest
+// The C++ runtime's guard for function-local statics (Itanium C++ ABI 3.3.2), counted and passed on: the binary's
+// own definition is found before the shared runtime's, which RTLD_NEXT then reaches.
+extern "C" int __cxa_guard_acquire(long long* guard) {
+    using Acquire = int (*)(long long*);
+    // Not a guarded static (that would call this again): a constant-initialised atomic, looked up on first use.
+    static std::atomic<Acquire> next{nullptr};
+    Acquire f = next.load(std::memory_order_acquire);
+    if (!f) {
+        f = reinterpret_cast<Acquire>(dlsym(RTLD_NEXT, "__cxa_guard_acquire"));
+        next.store(f, std::memory_order_release);
+    }
+    ++gLazyInits;
+    return f(guard);
+}
+#else
+namespace cawtest {
+long long threadLazyInits() noexcept { return -1; }
+}  // namespace cawtest
+#endif
 
 void* operator new(std::size_t size) { return allocate(size); }
 void* operator new[](std::size_t size) { return allocate(size); }

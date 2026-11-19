@@ -341,6 +341,7 @@ TEST(stress_json_has_features_and_parts) {
         CHECK(text && parseJson(text, r, error));
         caw_free(text);
         CHECK_EQ(r.string("feature"), std::string("routing"));
+        CHECK(r.get("spikes") != nullptr);  // callbacks over twice the p99
         const Json* parts = r.get("parts");
         CHECK(parts && parts->arr.size() == static_cast<size_t>(kPartCount));
         if (parts && !parts->arr.empty()) {
@@ -351,6 +352,19 @@ TEST(stress_json_has_features_and_parts) {
         caw_job_release(job);
     }
     caw_worker_pool_destroy(pool);
+}
+
+// Spikes: the callbacks over twice the p99, one-off stalls apart from the steady load the p99 describes.
+TEST(stress_stats_count_spikes_over_twice_the_p99) {
+    std::vector<double> us(1000, 100.0);
+    us[10] = 199.0;  // under 2x the p99 (100): not a spike
+    us[20] = 250.0;
+    us[30] = 900.0;
+    const SuiteStats s = stats(us, 0, us.size());
+    CHECK_NEAR(s.p99Us, 100.0, 1e-9);
+    CHECK_EQ(s.spikes, size_t{2});
+    CHECK_EQ(s.maxAt, size_t{30});
+    CHECK_EQ(stats(std::vector<double>(50, 7.0), 0, 50).spikes, size_t{0});
 }
 
 // Live: the device callback's time outside Engine::process is its device I/O, per callback and summed.

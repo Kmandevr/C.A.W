@@ -81,6 +81,7 @@ void fill(RunResult& out, const std::vector<double>& us, int64_t n, const RunReq
     out.meanUs = s.meanUs;
     out.p99Us = s.p99Us;
     out.worstUs = s.maxUs;
+    out.spikes = static_cast<int64_t>(s.spikes);
     out.worstAtS = out.warmupS + static_cast<double>(s.maxAt) * r.frames / r.rate;  // from Play
     out.callbacks = n;
     out.overBudget = 0;
