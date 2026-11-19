@@ -129,7 +129,8 @@ inline ModuleDescriptor withCpu(ModuleDescriptor d, CpuClass cpu) {
 // - sleep: after `idleFrames()` frames of silent input and output (below -110 dB), at a grid point, the state is
 //   cleared and the effect says it is quiet(); a sleeping effect (or one the host still runs) passes silence and
 //   wakes on the first input sample that is not 0, where its grid restarts, so where it sleeps and wakes doesn't
-//   depend on the block size either;
+//   depend on the block size either. A keyed effect's key counts as input: it doesn't sleep while its key sounds
+//   (whose followers would be cleared mid-duck) and wakes when it does;
 // - display: about 60 times a second fillDisplay() writes the effect's floats, which a UI reads through
 //   readDisplay() (caw/display.hpp); input and output peaks since the last publish are counted here.
 //

@@ -255,6 +255,104 @@ TEST(duck_follows_the_key_when_external_and_its_own_input_otherwise) {
     CHECK_NEAR(l.back(), 0.8f, 1e-6);
 }
 
+TEST(duck_keeps_ducking_through_a_gap_in_its_input_while_the_key_pumps) {
+    // External key, a gappy input: through 500 ms of silent input (ten times its 50 ms sleep) the key goes on, so
+    // the duck must not fall asleep (which clears it to 0 dB): the input coming back mid-duck is ducked at once.
+    const size_t frames = 48000;
+    Stereo in = constant(0.25, frames);
+    for (size_t i = 9600; i < 33600; ++i) in.l[i] = in.r[i] = 0.0f;
+    const Stereo key = constant(0.9, frames);
+    const Values v = {{"threshold", -30}, {"amount", 1}, {"attack", 5}, {"release", 150}, {"detection", 1}, {"sidechain", 1}};
+    const double ducked = -30.0 - db(0.9);
+    auto p = duck();
+    if (!p) return;
+    const Stereo out = run(*p, in, &key, v);
+    CHECK_NEAR(db(out.l[9599] / 0.25), ducked, 0.1);
+    CHECK_NEAR(db(out.l[33600] / 0.25), ducked, 0.1);  // back: still ducked, no pop at full level
+    // Asleep before the key began (silent input and key), it wakes on the key, not only on its input.
+    Stereo late = constant(0.0, frames);
+    for (size_t i = 24000; i < frames; ++i) late.l[i] = late.r[i] = 0.25f;
+    Stereo lateKey = constant(0.0, frames);
+    for (size_t i = 9600; i < frames; ++i) lateKey.l[i] = lateKey.r[i] = 0.9f;
+    p->reset();
+    const Stereo woke = run(*p, late, &lateKey, v);
+    CHECK_NEAR(db(woke.l[24000] / 0.25), ducked, 0.1);
+    // The same in a track's chain, which skips a sleeping effect: its key is heard there too.
+    std::string error;
+    ComponentSpec spec;
+    spec.id = kCompressor;
+    spec.params = {{"variant", 4}};
+    for (const auto& [id, x] : v) spec.params.emplace_back(id, x);
+    auto chain = ComponentChain::build(registry(), {spec}, 48000.0, error);
+    CHECK(chain != nullptr);
+    if (!chain) return;
+    Stereo got = late;
+    ChainTime t;
+    for (size_t at = 0; at < frames; at += 64) {
+        t.chunk = static_cast<int64_t>(at / 64);
+        ComponentChain::KeyInput* k = chain->keyInput(0);
+        CHECK(k != nullptr);
+        if (!k) return;
+        k->begin(t.chunk);
+        for (uint32_t i = 0; i < 64; ++i) k->l[i] = k->r[i] = lateKey.l[at + i];
+        chain->process(got.l.data() + at, got.r.data() + at, 64, 48000.0, &t);
+    }
+    CHECK_NEAR(db(got.l[24000] / 0.25), ducked, 0.1);
+}
+
+TEST(duck_ramps_its_output_and_mix_within_each_control_step) {
+    // Output and Mix moving (a knob's 10 ms ramp, automation) change the gain a little every frame, never in
+    // 16-frame steps: no zipper noise.
+    for (const char* knob : {"output", "mix"}) {
+        auto p = duck();
+        if (!p) return;
+        const ModuleDescriptor& d = p->descriptor();
+        std::vector<ParameterValue> params(d.parameterCount);
+        uint32_t moving = d.parameterCount;
+        for (uint32_t k = 0; k < d.parameterCount; ++k) {
+            params[k].value = d.parameters[k].defaultValue;
+            if (d.parameters[k].id == std::string("threshold")) params[k].value = -40;
+            if (d.parameters[k].id == std::string("amount")) params[k].value = 1;
+            if (d.parameters[k].id == std::string(knob)) moving = k;
+        }
+        CHECK(moving < d.parameterCount);
+        if (moving >= d.parameterCount) return;
+        const bool mix = std::string(knob) == "mix";
+        std::vector<double> samples(64);
+        const size_t frames = 4800;
+        const Stereo in = constant(0.25, frames);  // ducked by 28 dB: Mix moves the gain a lot
+        Stereo out = constant(0.0, frames);
+        for (size_t start = 0; start < frames; start += 64) {
+            for (uint32_t i = 0; i < 64; ++i) {
+                const double x = static_cast<double>(start + i) / static_cast<double>(frames);  // 0..1 over 100 ms
+                samples[i] = mix ? 1.0 - x : -12.0 * x;
+            }
+            params[moving].samples = samples.data();
+            const float* ic[2] = {in.l.data() + start, in.r.data() + start};
+            float* oc[2] = {out.l.data() + start, out.r.data() + start};
+            AudioProcessBlock b;
+            b.input = {ic, 2, 64};
+            b.output = {oc, 2, 64};
+            b.frames = 64;
+            b.sampleRate = 48000;
+            b.parameters = params.data();
+            b.parameterCount = d.parameterCount;
+            CHECK(p->process(b));
+        }
+        // Past the attack: the gain moves about as much every frame (a step would hold 15 frames, then jump 16 times
+        // as far).
+        double most = 0, sum = 0;
+        for (size_t i = 2400; i < frames; ++i) {
+            const double step = std::fabs(static_cast<double>(out.l[i]) - out.l[i - 1]);
+            most = std::max(most, step);
+            sum += step;
+        }
+        const double mean = sum / static_cast<double>(frames - 2400);
+        if (!(most < 2.0 * mean))
+            cawtest::fail(__FILE__, __LINE__, std::string(knob) + ": the largest step is " + std::to_string(most / mean) + " times the mean");
+    }
+}
+
 TEST(duck_gives_the_same_bits_at_any_block_size) {
     const Stereo in = bass(30000), key = kicks(30000);
     const Values v = {{"threshold", -30}, {"amount", 0.8}, {"attack", 0.5}, {"hold", 20}, {"release", 110}, {"detection", 2}, {"sidechain", 1}};
