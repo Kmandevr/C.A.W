@@ -40,7 +40,7 @@ bool sameKnob(ComponentParameterInfo a, ComponentParameterInfo b) =>
 }
 
 extension VariantEdit on AppState {
-  /// Puts device [t] (a merged device, or a merged device in a rack's slot) on [variant] as one undo step. The knobs
+  /// Puts device [t] (a merged device or instrument, or a merged device in a rack's slot) on [variant] as one undo step. The knobs
   /// the new variant doesn't share with the old one reset ([valuesForVariant]); lanes, modulation links and MIDI
   /// mappings on them go (their units changed). The engine rebuilds the device, crossfaded. [also] sets knobs of the
   /// new variant in the same step (a filter model picked from a strip: the variant and its type at once). False when
@@ -66,27 +66,31 @@ extension VariantEdit on AppState {
       return true;
     }
     final use = t.use;
-    if (use == null || t.isInstrument) return false;
+    if (use == null) return false;
     final from = base.forValues(use.params);
     if (from.variantIndex == variant) return false;
     final next = valuesForVariant(use.params, from, base.variants[variant], variant);
     next.values.addAll(_known(base.variants[variant], also));
     final laneLayer = engineLayerId(layer), mappingLayer = t.layerId, slot = t.slot;
+    // A merged instrument (Timber's models) has its lanes and links as the track's instrument's, not a slot's.
+    final inst = t.isInstrument;
+    final type = inst ? 'instrument' : 'component';
+    bool mine(int? component) => inst || component == slot;
     endUndoStep();
     editProject((p) {
       use.params = next.values;
       use.state = null;  // the old variant's saved state is another class's
       use.preset = null;
       p.automation.removeWhere((lane) =>
-          lane.targetType == 'component' && lane.layerId == laneLayer && lane.component == slot && !next.kept.contains(lane.target));
+          lane.targetType == type && lane.layerId == laneLayer && mine(lane.component) && !next.kept.contains(lane.target));
       if (laneLayer != null) {
         for (final clip in layer.clips) {
           clip.automation.removeWhere(
-              (lane) => lane.targetType == 'component' && lane.component == slot && !next.kept.contains(lane.target));
+              (lane) => lane.targetType == type && mine(lane.component) && !next.kept.contains(lane.target));
         }
       }
       p.modLinks.removeWhere((l) =>
-          l.target.type == 'component' && l.target.layerId == laneLayer && l.target.index == slot &&
+          l.target.type == type && l.target.layerId == laneLayer && mine(l.target.index) &&
           !next.kept.contains(l.target.param));
       p.midiMappings.removeWhere((m) => m.layerId == mappingLayer && m.slot == slot && !next.kept.contains(m.paramId));
     });
