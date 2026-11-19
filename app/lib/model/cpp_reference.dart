@@ -464,6 +464,15 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.disperser', 'Disperser', false, 'Up to 64 all-pass stages that smear transients into a chirp.',
       ['amount', 'freq', 'pinch', 'spread', 'mix']),
   // fx-filters end
+  // 1.1.0's tools (engine/src/builtin_fx_meters.cpp, builtin_fx_lofi.cpp, builtin_fx_phasealign.cpp)
+  CppBuiltin('org.caw.meters', 'Meters', false,
+      'Variants (`variant`): Analyzer, Tuner, Loudness (only the chosen one runs); the output is the input bit for bit.',
+      ['source', 'tilt', 'variant']),
+  CppBuiltin('org.caw.lofi', 'Lo-fi', false, 'Worn media: the Age macro over crackle, wear, hiss, wobble, a band limit and grit.',
+      ['age', 'crackle', 'wear', 'hiss', 'wobble', 'band', 'grit', 'seed', 'mix', 'output']),
+  CppBuiltin('org.caw.phasealign', 'Phase align', false,
+      'Delays (sub-sample) and inverts a track to line it up with its key; Auto learns the delay; 1 frame of latency.',
+      ['mode', 'delay', 'invert', 'learn', 'window']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
   CppBuiltin('org.caw.rack.fx', 'FX rack', false,
       'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '

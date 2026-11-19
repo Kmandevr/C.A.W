@@ -67,7 +67,9 @@ void main() {
       expect(DeviceEditors.custom(id, builtinInfo(id)), isNotNull, reason: id);
       await open(tester, id);
       expect(find.byKey(const ValueKey('device-fallback')), findsNothing, reason: id);
-      expect(find.byKey(const ValueKey('variant-pick-0')), findsNothing, reason: '$id: cards replace the pill');
+      // Bit distortion has two variants since 1.1.0 (Crush, Bitwise) and no cards yet: the generic pill picks them.
+      expect(find.byKey(const ValueKey('variant-pick-0')), id == 'org.caw.bits' ? findsOneWidget : findsNothing,
+          reason: '$id: cards replace the pill');
       expect(tester.takeException(), isNull);
       await close(tester);
     }

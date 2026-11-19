@@ -39,7 +39,7 @@ class MergedDevices {
   static const ids = [
     'org.caw.compressor', 'org.caw.gate', 'org.caw.duck', 'org.caw.limiter', 'org.caw.transient', 'org.caw.drive', 'org.caw.bits', 'org.caw.eq',
     'org.caw.filter', 'org.caw.utility', 'org.caw.chorus', 'org.caw.phaser', 'org.caw.tremolo', 'org.caw.delay',
-    'org.caw.reverb', 'org.caw.shift',
+    'org.caw.reverb', 'org.caw.shift', 'org.caw.convolver',
   ];
 
   /// The merged ids that no build before 1.0.8 knows (the others reuse an old effect's id as variant 0).
@@ -66,14 +66,23 @@ class MergedDevices {
     MergedVariant('org.caw.saturator', 'org.caw.drive', 1),
     MergedVariant('org.caw.clipper', 'org.caw.drive', 2),
     MergedVariant('org.caw.phasedist', 'org.caw.drive', 3),
+    // 1.1.0's new modes (engine/src/builtin_fx_*_modes.cpp, _bits_bitwise, _cab, _eq_plume, _filters_wah): no page of
+    // their own yet ([pagesToCome]).
+    MergedVariant('org.caw.drive.amp', 'org.caw.drive', 4, retired: false),
+    MergedVariant('org.caw.drive.pedal', 'org.caw.drive', 5, retired: false),
+    MergedVariant('org.caw.drive.bands', 'org.caw.drive', 6, retired: false),
     MergedVariant('org.caw.bitcrush', 'org.caw.bits', 0),
+    MergedVariant('org.caw.bits.bitwise', 'org.caw.bits', 1, retired: false),
     MergedVariant('org.caw.eq', 'org.caw.eq', 0),
     MergedVariant('org.caw.geq', 'org.caw.eq', 1),
     MergedVariant('org.caw.eq.dj', 'org.caw.eq', 2),
     MergedVariant('org.caw.tilt', 'org.caw.eq', 3),
+    MergedVariant('org.caw.eq.linear', 'org.caw.eq', 4, retired: false),
+    MergedVariant('org.caw.eq.match', 'org.caw.eq', 5, retired: false),
     MergedVariant('org.caw.filter', 'org.caw.filter', 0),
     MergedVariant('org.caw.ladder', 'org.caw.filter', 1),
     MergedVariant('org.caw.nlfilter', 'org.caw.filter', 2),
+    MergedVariant('org.caw.filter.wah', 'org.caw.filter', 3, retired: false),
     MergedVariant('org.caw.utility', 'org.caw.utility', 0),
     MergedVariant('org.caw.stereo.width', 'org.caw.utility', 1),
     MergedVariant('org.caw.stereo.balance', 'org.caw.utility', 2),
@@ -92,11 +101,30 @@ class MergedDevices {
     MergedVariant('org.caw.ducker', 'org.caw.tremolo', 2),  // Shape (1.0.8-1.0.9: the Compressor's variant 3)
     MergedVariant('org.caw.delay.pro', 'org.caw.delay', 0),
     MergedVariant('org.caw.delay.pingpong', 'org.caw.delay', 1),
+    MergedVariant('org.caw.delay.tape', 'org.caw.delay', 2, retired: false),
+    MergedVariant('org.caw.delay.reverse', 'org.caw.delay', 3, retired: false),
+    MergedVariant('org.caw.delay.multitap', 'org.caw.delay', 4, retired: false),
     MergedVariant('org.caw.reverb.pro', 'org.caw.reverb', 0),
     MergedVariant('org.caw.shimmer', 'org.caw.reverb', 1),
+    MergedVariant('org.caw.reverb.room', 'org.caw.reverb', 2, retired: false),
+    MergedVariant('org.caw.reverb.plate', 'org.caw.reverb', 3, retired: false),
+    MergedVariant('org.caw.reverb.spring', 'org.caw.reverb', 4, retired: false),
+    MergedVariant('org.caw.reverb.gated', 'org.caw.reverb', 5, retired: false),
+    MergedVariant('org.caw.reverb.reverse', 'org.caw.reverb', 6, retired: false),
     MergedVariant('org.caw.pitchshift', 'org.caw.shift', 0),
     MergedVariant('org.caw.freqshift', 'org.caw.shift', 1),
+    MergedVariant('org.caw.convolver', 'org.caw.convolver', 0),
+    MergedVariant('org.caw.convolver.cab', 'org.caw.convolver', 1, retired: false),
   ];
+
+  /// 1.1.0's new modes, which have no page of their own yet: each opens the fallback page (the generic knobs, the
+  /// shell's Variant pill), never its family's page, which does not know it.
+  static const pagesToCome = {
+    'org.caw.drive.amp', 'org.caw.drive.pedal', 'org.caw.drive.bands', 'org.caw.bits.bitwise', 'org.caw.eq.linear',
+    'org.caw.eq.match', 'org.caw.filter.wah', 'org.caw.delay.tape', 'org.caw.delay.reverse', 'org.caw.delay.multitap',
+    'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
+    'org.caw.reverb.reverse', 'org.caw.convolver.cab',
+  };
 
   /// The page id of the Ducker's Duck variant (org.caw.duck 0; 1.0.8-1.0.9 the Compressor's variant 4), which no
   /// old effect was. Its string stays as 1.0.8 named it.
