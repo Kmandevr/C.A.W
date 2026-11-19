@@ -14,6 +14,7 @@ import '../../theme.dart';
 import '../device_scope.dart';
 import '../kit/feel.dart';
 import '../../panel_motion.dart';
+import '../../crow.dart';
 
 /// The largest WAV file the flagship imports (kMaxWtWavBytes in engine/src/builtin_flagship.cpp).
 const maxWavetableBytes = 8 * 1024 * 1024;
@@ -183,7 +184,7 @@ class _ImportWavetableButtonState extends State<ImportWavetableButton> {
           color: Neon.dim,
           onPressed: _busy ? null : _import,
           icon: _busy
-              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const CrowLoader(size: 14)
               : const Icon(Icons.file_open))
       : Align(
         alignment: Alignment.centerLeft,
@@ -192,7 +193,7 @@ class _ImportWavetableButtonState extends State<ImportWavetableButton> {
           style: TextButton.styleFrom(foregroundColor: DeviceScope.of(context).accent),
           onPressed: _busy ? null : _import,
           icon: _busy
-              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const CrowLoader(size: 14)
               : const Icon(Icons.file_open, size: 16),
           label: const Text('Import wavetable…', style: TextStyle(fontSize: 12)),
         ),

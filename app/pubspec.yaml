@@ -87,6 +87,10 @@ flutter:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
         - asset: assets/fonts/JetBrainsMono-Bold.ttf
           weight: 700
+    # C.A.W's own line icons (scripts/icon-font.js): the family hints and the modulation quill.
+    - family: CawIcons
+      fonts:
+        - asset: assets/fonts/CawIcons.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

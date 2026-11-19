@@ -6,6 +6,14 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: The bird theme and personality in the app (Claude, building the owner's sound plan)
+
+**Owner (2026-11-19):** "a little bit of that theme", never distracting; personality that stays professional; the built-in themes renamed Raven, Jackdaw, Magpie and Jay; Parrot as a joke theme ([App](app.md)).
+- **Five families became four (Claude):** Neon's palette is Raven, Flat's is Jackdaw; Magpie (high contrast) and Jay (blue accent, light first) are new palettes. Dusk, Dawn and Amber are gone: a saved Dusk opens as Jackdaw, Dawn as Jay and Amber as Magpie (`migrateThemeName`), and settings.json writes `theme_families: 2` so a later bird name is never migrated twice. [Assumption] the owner wanted four families, not the old five renamed.
+- **Icons as a font (Claude):** the family hints are glyphs of a small icon font made by `scripts/icon-font.js` (plain Node, no package), so device headers and the browser show them through their existing `IconData` without changes there. **[Fact]** No new dependency.
+- **Sound:** the one sound the surprises make is synthesised in the app and played through the sample preview voice; nothing is downloaded or recorded.
+- **Left out:** the logo designs (each needs the owner's yes) and the restored-after-crash line (there is no such screen).
+
 ## 2026-11-19: Flock's mips read at most at rate 1; its sample is read in place (Claude, within the sound plan)
 
 **Context:** the sound design (grain engine, Flock) asks for half-band mip copies for reads more than an octave up (+50 % RAM) and a sample read from the sample store, read-only and shared.

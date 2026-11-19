@@ -646,6 +646,12 @@ class Settings extends ChangeNotifier {
   /// The template New project opens (`lib/model/templates.dart` ids; '' is a blank project).
   String newProjectTemplate = '';
 
+  /// New projects get generated names ("Low Roost") instead of "New project" (project_names.dart).
+  bool generatedProjectNames = true;
+
+  /// The hidden Parrot theme was found (About); until then it is not offered.
+  bool parrotUnlocked = false;
+
   /// Settings › Projects and export › Export: what the exporter opens with.
   String exportKind = 'loop';
   int exportSampleRate = 48000;
@@ -673,8 +679,10 @@ class Settings extends ChangeNotifier {
   int lookRevision = 0;
   String _shownLook = '';
 
-  List<CawTheme> get themes => [...starterThemes, ...customThemes];
-  bool isStarter(String name) => starterThemes.any((t) => t.name == name);
+  List<CawTheme> get themes => [...starterThemes, if (parrotUnlocked) parrotTheme, ...customThemes];
+
+  /// A built-in theme (Parrot too): never changed, only duplicated.
+  bool isStarter(String name) => starterThemes.any((t) => t.name == name) || name == parrotTheme.name;
   CawTheme themeNamed(String name) => themes.firstWhere((t) => t.name == name, orElse: () => calmNeon);
   /// The chosen theme in the palette shown ([showsLight]); the same object while the theme and mode stay.
   CawTheme get theme => themeNamed(themeName).shown(showsLight);
@@ -702,6 +710,7 @@ class Settings extends ChangeNotifier {
 
   Map<String, dynamic> toJson() => {
         'theme': themeName,
+        'theme_families': 2,
         'theme_mode': lookMode.name,
         'density': density.name,
         'live_update': liveUpdate,
@@ -796,6 +805,8 @@ class Settings extends ChangeNotifier {
         'new_project_bpm': newProjectBpm,
         'new_project_beats_per_bar': newProjectBeatsPerBar,
         'new_project_template': newProjectTemplate,
+        'generated_project_names': generatedProjectNames,
+        if (parrotUnlocked) 'parrot_unlocked': true,
         'export_kind': exportKind,
         'export_sample_rate': exportSampleRate,
         'export_float32': exportFloat32,
@@ -826,9 +837,13 @@ class Settings extends ChangeNotifier {
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
         values.where((e) => e.name == v).firstOrNull ?? fallback;
-    final savedTheme = j['theme'] as String?;
-    // A name from before the families (Calm neon, Night, Amber terminal) is that family, dark.
-    themeName = legacyThemeNames[savedTheme] ?? savedTheme ?? themeName;
+    final saved = j['theme'];
+    final savedTheme = saved is String ? saved : null;
+    parrotUnlocked = j['parrot_unlocked'] == true;
+    themeName = migrateThemeName(savedTheme, birdFamilies: j['theme_families'] == 2,
+        customNames: {for (final t in customThemes) t.name}) ?? themeName;
+    // Parrot is never the default: a file naming it before it was found opens Raven.
+    if (themeName == parrotTheme.name && !parrotUnlocked) themeName = calmNeon.name;
     lookMode = pick(LookMode.values, j['theme_mode'], lookMode);
     density = pick(Density.values, j['density'], density);
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
@@ -981,6 +996,7 @@ class Settings extends ChangeNotifier {
     if (save is num && autosaveDelays.contains(save.toInt())) autosaveMs = save.toInt();
     restorePointsKept = num_('restore_points_kept', 1, 100)?.round() ?? restorePointsKept;
     newProjectBpm = num_('new_project_bpm', 20, 400) ?? newProjectBpm;
+    if (j['generated_project_names'] is bool) generatedProjectNames = j['generated_project_names'] as bool;
     newProjectBeatsPerBar = num_('new_project_beats_per_bar', 1, 16)?.round() ?? newProjectBeatsPerBar;
     final template = j['new_project_template'];
     if (template is String && template.length <= 128) {
@@ -1037,7 +1053,7 @@ class Settings extends ChangeNotifier {
         try {
           final t = CawTheme.parse(await f.readAsString());
           // A custom theme named like a family added later (Flat, Dawn...) keeps its colours under a new name.
-          final named = isStarter(t.name) ? t.copyWith(name: '${t.name} (mine)') : t;
+          final named = isStarter(t.name) ? t.copyWith(name: '${t.name} (mine)') : t;  // Raven, Parrot...
           if (!isStarter(named.name) && !found.any((x) => x.name == named.name)) found.add(named);
         } catch (_) {
           // A damaged theme file is skipped, not fatal.
@@ -1300,6 +1316,12 @@ class Settings extends ChangeNotifier {
   /// of it). Leaving a starter theme keeps the current values as the starters' shared profile ([baseProfile]);
   /// choosing a starter puts that back. Saved.
   Future<void> chooseTheme(String name) => update((x) => x._choose(name));
+
+  /// The hidden theme found (About's version tapped seven times): offered from now on, not chosen.
+  Future<void> unlockParrot() async {
+    if (parrotUnlocked) return;
+    await update((x) => x.parrotUnlocked = true);
+  }
 
   void _choose(String name) {
     final next = themeNamed(name);

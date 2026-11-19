@@ -30,6 +30,7 @@ Future<void> _load() async {
         ..addFont(rootBundle.load('assets/fonts/JetBrainsMono-Regular.ttf'))
         ..addFont(rootBundle.load('assets/fonts/JetBrainsMono-Bold.ttf')))
       .load();
+  await (FontLoader('CawIcons')..addFont(rootBundle.load('assets/fonts/CawIcons.ttf'))).load();
   final root = Platform.environment['FLUTTER_ROOT'];
   if (root == null) throw StateError('FLUTTER_ROOT is not set; run golden tests with `flutter test`');
   final dir = '$root/bin/cache/artifacts/material_fonts';

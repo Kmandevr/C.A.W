@@ -15,7 +15,7 @@ Project automation supports song-time lanes for module parameters and shared glo
 | `app/` | Flutter app for Android and Windows: Build, Files and Arrange ([app](docs/app.md)) |
 | `examples/` | The C++ starters (`examples/cpp/`) and two example patterns the app bundles (`acid-line.caw`, `chords.caw`) |
 | `docs/` | Project documentation: current app/engine facts, decisions, architecture and the C++ creation platform ([index](docs/index.md)); planned work is tracked privately |
-| `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository; `agent-run.js` runs a chat agent's requested commands and writes its report, `agent-context.js` its start file; `update-delta.js` builds each release's small-update manifest and patches, for a list of named assets; `changelog-notes.js` prints a version's `CHANGELOG.md` entry for its release notes |
+| `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository; `agent-run.js` runs a chat agent's requested commands and writes its report, `agent-context.js` its start file; `update-delta.js` builds each release's small-update manifest and patches, for a list of named assets; `changelog-notes.js` prints a version's `CHANGELOG.md` entry for its release notes; `icon-font.js` builds the app's own icon font (`app/assets/fonts/CawIcons.ttf`) |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
 | `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, and hooks that make Graphify and Serena the default way to navigate code ([.claude/README.md](.claude/README.md)) |
 | `CLAUDE.md` | Instructions every AI session follows |

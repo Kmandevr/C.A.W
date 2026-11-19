@@ -103,6 +103,10 @@ class _ProjectsSettingsState extends State<ProjectsSettings> {
       settingDropdown<int>('projects.newMeter', s.newProjectBeatsPerBar,
           [for (var b = 1; b <= 16; b++) (b, '$b/4')], (v) => s.update((x) => x.newProjectBeatsPerBar = v),
           icon: Icons.straighten),
+      settingSwitch('projects.generatedNames', s.generatedProjectNames,
+          (v) => s.update((x) => x.generatedProjectNames = v),
+          icon: Icons.auto_awesome_outlined,
+          subtitle: s.generatedProjectNames ? 'A new project is called something like "Copper Wing"' : 'New projects are called "New project"'),
       ]),
       ExportCard(deps: widget.deps),
       SettingsCardView(card: SettingsCard.storage, rows: [

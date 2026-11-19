@@ -160,6 +160,9 @@ class _WhatsNewPageState extends State<WhatsNewPage> {
       );
 }
 
+/// The release notes' sign-off (the writing guide's one place for a light line after an update).
+const releaseSignOff = 'That\'s the news from the nest. Happy making.';
+
 /// After [AppPrompts] has given this launch its turn: for [WhatsNewDue.show], this version's entry as a sheet (a
 /// dialog on a wide screen), once; otherwise nothing is shown. Either way this version is stored as seen first, so
 /// the sheet never shows twice, even if the app closes while it is open. A version with no entry shows nothing.
@@ -176,7 +179,14 @@ Future<void> showWhatsNew(BuildContext context, Settings settings, WhatsNewDue d
       key: const ValueKey('whats-new-sheet'),
       scrollable: true,
       title: Text("What's new in v${entry.version}"),
-      content: ChangelogBlocks(entry.lines),
+      content: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        ChangelogBlocks(entry.lines),
+        const Padding(
+          padding: EdgeInsets.only(top: 12),
+          child: Text(releaseSignOff, key: ValueKey('whats-new-signoff'),
+              style: TextStyle(color: Neon.dim, fontSize: 12, fontStyle: FontStyle.italic)),
+        ),
+      ]),
       // One Wrap, as in the update prompt: it measures the rows it really makes on a narrow phone.
       actions: [
         Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 4, children: [

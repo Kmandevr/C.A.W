@@ -35,6 +35,7 @@ import 'automate_control.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
 import 'note_fx_section.dart';
+import '../crow.dart';
 
 /// Opens the Build tab for a C++ component (nothing without sections: tests).
 void openSource(BuildContext context, BuildTab tab) => SectionController.maybeOf(context)?.openBuild(tab);
@@ -313,7 +314,16 @@ class _FxStackState extends State<FxStack> {
       if (!_nativeOnly && layer.instrument != null && layer.noteComponents.isNotEmpty)
         NoteFxSection(key: const ValueKey('note-fx-section'), state: s, layer: layer),
       if (!_nativeOnly) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the instrument, before volume and pan'),
-      if (layer.components.isEmpty) const _GroupLabel('', 'None'),
+      if (layer.components.isEmpty)
+        const Padding(
+          key: ValueKey('fx-chain-empty'),
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Row(children: [
+            PerchedCrow(size: 28),
+            SizedBox(width: 8),
+            Expanded(child: Text('No effects yet. + FX adds one.', style: TextStyle(color: Neon.dim, fontSize: 11))),
+          ]),
+        ),
       if (layer.components.isNotEmpty)
         ReorderableListView(
           key: const ValueKey('fx-native-list'),

@@ -26,6 +26,7 @@ import '../flagship/flagship_tools.dart' show PanelDots;
 import '../kit/controls.dart';
 import '../kit/device_style.dart';
 import 'sampler_widgets.dart';
+import '../../crow.dart';
 
 export 'sampler_widgets.dart';
 
@@ -255,7 +256,7 @@ class _SamplerPageState extends State<SamplerPage> {
             overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Neon.dim))),
       const Spacer(),
       if (_busy) const Padding(padding: EdgeInsets.only(right: 6),
-          child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
+          child: CrowLoader(size: 14)),
       if (_selected.length > 1)
         act('sampler-round-robin', Icons.repeat, 'Round robin (${_selected.length})', () {
           _save(_saved..roundRobin(_selected.toList()..sort()));
@@ -644,7 +645,7 @@ class _MultisampleDialogState extends State<MultisampleDialog> {
         ]);
       case _RecPhase.cutting:
         body = const Row(children: [
-          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          CrowLoader(size: 16),
           SizedBox(width: 10),
           Text('Finding each note in the take…'),
         ]);

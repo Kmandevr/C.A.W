@@ -37,7 +37,7 @@ class LookSettings extends StatelessWidget {
       settingSwitch('look.glass', s.glass, (v) => s.update((x) => x.glass = v),
           icon: Icons.blur_on,
           subtitle: s.activeTheme.flat
-              ? 'Off in the Flat theme'
+              ? 'Off in the Jackdaw theme'
               : Neon.performanceMode >= 3
               ? 'Off while the Minimal profile is on'
               : 'See-through panels, tracks and controls over a soft background'),

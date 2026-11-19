@@ -39,6 +39,7 @@ import 'ui/shell.dart';
 import 'ui/startup_screen.dart';
 import 'ui/theme.dart';
 import 'ui/updates/update_prompt.dart';
+import 'ui/egg_layer.dart';
 
 Future<void> main(List<String> args) async {
   final startup = Stopwatch()..start(); // the telemetry report's startup time (to the first project open)
@@ -196,8 +197,8 @@ class _CawAppState extends State<CawApp> with WidgetsBindingObserver {
     // the system's.
     builder: (context, child) {
       // Keys from a page, menu or sheet in front reach the key router; the focus ring and the hint strip draw on top.
-      final body = GlassBackdrop(child: PageCloser(observer: _closer,
-          child: KeyboardLayer(observer: _closer, child: child ?? const SizedBox.shrink())));
+      final body = EggLayer(settings: state.settings, state: state, child: GlassBackdrop(child: PageCloser(observer: _closer,
+          child: KeyboardLayer(observer: _closer, child: child ?? const SizedBox.shrink()))));
       final scale = state.settings.textScale;
       if (scale == 1) return body;
       final mq = MediaQuery.of(context);

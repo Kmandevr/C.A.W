@@ -18,6 +18,7 @@ import 'audio_input_ui.dart';
 import 'sample_editor.dart';
 import 'take_chip.dart';
 import 'track_color.dart';
+import '../crow.dart';
 
 class AudioClipInspector extends StatelessWidget {
   const AudioClipInspector({super.key, required this.state, required this.layer});
@@ -218,7 +219,7 @@ class _TimeAndPitchState extends State<_TimeAndPitch> {
         const Spacer(),
         IconButton(key: const ValueKey('audio-tempo-detect'), tooltip: 'Detect from its hits', iconSize: 18,
             onPressed: _detecting || c.lock ? null : _detect,
-            icon: _detecting ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            icon: _detecting ? const CrowLoader(size: 14)
                 : const Icon(Icons.auto_awesome_outlined)),
       ])),
       AnimatedSwitcher(duration: EditMotion.of(context, EditMotionKind.panels) ?? Duration.zero,
