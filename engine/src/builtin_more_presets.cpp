@@ -3,6 +3,7 @@
 #include <string_view>
 #include <vector>
 
+#include "builtin_sampler.h"
 #include "fx_merged.h"
 #include "presets.h"
 
@@ -201,7 +202,7 @@ const std::vector<BuiltinPreset>* appendedPresets(std::string_view id) {
     if (id == "org.caw.disperser") return &disperser();
     if (id == "org.caw.resonator") return &resonator();
     if (id == "org.caw.formant") return &formant();
-    if (id == "org.caw.sampler") return &sampler();
+    if (id == kSamplerId) return &sampler();
     return nullptr;
 }
 
@@ -209,7 +210,7 @@ const std::vector<BuiltinPreset>* appendedPresets(std::string_view id) {
 std::span<const std::string_view> appendedPresetIds() {
     static constexpr std::string_view ids[] = {"org.caw.deesser", "org.caw.multiband", "org.caw.reverser", "org.caw.stutter",
                                                "org.caw.tapestop", "org.caw.trancegate", "org.caw.ringmod", "org.caw.comb",
-                                               "org.caw.disperser", "org.caw.resonator", "org.caw.formant", "org.caw.sampler"};
+                                               "org.caw.disperser", "org.caw.resonator", "org.caw.formant", kSamplerId};
     return ids;
 }
 
