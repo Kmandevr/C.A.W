@@ -8,6 +8,8 @@
 
 #include "caw/detmath.hpp"
 #include "caw/library/fastmath.hpp"
+#include "caw/library/filter.hpp"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0).
 
@@ -136,5 +138,68 @@ inline void panGains(double pan, double& l, double& r) noexcept {
     l = lib::fastSinCycles(p + 0.25);
     r = lib::fastSinCycles(p);
 }
+
+// x with NaN and infinities read as 0, both lanes (as finiteOr0).
+inline Pair finitePair(Pair x) noexcept { return pairOf(finiteOr0(lane(x, 0)), finiteOr0(lane(x, 1))); }
+
+// A stereo pair of state-variable filters set alike, run as one two-wide vector (stereo_pair.h): the Library's Svf
+// arithmetic (its set() works the coefficients out, skipping an unchanged cutoff), both sides' state in one Pair.
+struct PairSvf {
+    lib::Svf coef;  // only its coefficients are used
+    Pair s1{}, s2{};
+    void set(double hz, double q, double sr) noexcept { coef.set(hz, q, sr); }
+    void clear() noexcept { s1 = s2 = splat(0.0); }
+    void flush() noexcept { s1 = flushPair(s1), s2 = flushPair(s2); }
+    // One frame: v1 (band) and v2 (low); the high is x - k v1 - v2.
+    void step(Pair x, Pair& v1, Pair& v2) noexcept {
+        lib::Svf::step(x, s1, s2, splat(coef.a1()), splat(coef.a2()), splat(coef.a3()), splat(2.0), v1, v2);
+    }
+    Pair low(Pair x) noexcept {
+        Pair v1, v2;
+        step(x, v1, v2);
+        return v2;
+    }
+    Pair high(Pair x) noexcept {
+        Pair v1, v2;
+        step(x, v1, v2);
+        return x - splat(coef.k()) * v1 - v2;
+    }
+    // The 2nd-order all-pass: x - 2k v1.
+    Pair allpass(Pair x) noexcept {
+        Pair v1, v2;
+        step(x, v1, v2);
+        return x - splat(2.0 * coef.k()) * v1;
+    }
+};
+
+// A stereo pair of EQ bands (the Library's EqBand construction: m0 x + m1 band + m2 low on a state-variable
+// filter), one two-wide vector.
+struct PairEq {
+    enum Kind { LowShelf, Bell, HighShelf };
+    double a1 = 1, a2 = 0, a3 = 0, m0 = 1, m1 = 0, m2 = 0;
+    double hz_ = -1, db_ = 1e9, q_ = -1, rate_ = -1;
+    int kind_ = -1;
+    Pair s1{}, s2{};
+    void set(Kind kind, double hz, double db, double q, double sr) noexcept {
+        if (kind == kind_ && hz == hz_ && db == db_ && q == q_ && sr == rate_) return;
+        kind_ = kind, hz_ = hz, db_ = db, q_ = q, rate_ = sr;
+        const double f = std::clamp(hz, 10.0, 0.49 * sr), d = std::clamp(db, -48.0, 24.0), qq = std::clamp(q, 0.1, 40.0);
+        const double A = detPow(10.0, d / 40.0), rootA = detPow(10.0, d / 80.0);
+        double g = detTan(kPi * f / sr), k = 1.0 / qq;
+        if (kind == LowShelf) g /= rootA, m0 = 1.0, m1 = k * (A - 1.0), m2 = A * A - 1.0;
+        else if (kind == HighShelf) g *= rootA, m0 = A * A, m1 = k * (1.0 - A) * A, m2 = 1.0 - A * A;
+        else k = 1.0 / (qq * A), m0 = 1.0, m1 = k * (A * A - 1.0), m2 = 0.0;
+        a1 = 1.0 / (1.0 + g * (g + k));
+        a2 = g * a1;
+        a3 = g * a2;
+    }
+    void clear() noexcept { s1 = s2 = splat(0.0); }
+    void flush() noexcept { s1 = flushPair(s1), s2 = flushPair(s2); }
+    Pair process(Pair x) noexcept {
+        Pair v1, v2;
+        lib::Svf::step(x, s1, s2, splat(a1), splat(a2), splat(a3), splat(2.0), v1, v2);
+        return splat(m0) * x + splat(m1) * v1 + splat(m2) * v2;
+    }
+};
 
 }  // namespace caw::fx::modes
