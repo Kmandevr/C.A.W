@@ -414,13 +414,14 @@ void main() {
   });
 
   testWidgets('a section can pin the mod-source strip at the bottom of the full editor', (tester) async {
+    // A two-section test editor on a device with a mod matrix: one page pins the strip at the bottom, one doesn't.
     final t = DeviceTarget(s, 'a', DeviceTarget.instrumentSlot);
     final original = DeviceEditors.custom(flagshipComponentId, t.info)!;
     addTearDown(() => DeviceEditors.register(flagshipComponentId, original));
     DeviceEditors.register(flagshipComponentId, DeviceEditorEntry((target) => [
-      for (final (i, x) in original.sections(target).indexed)
-        DeviceSection(x.id, x.label, x.icon, x.builder, showsSources: x.showsSources, stripAtBottom: i == 0),
-    ], family: original.family, inline: original.inline));
+      DeviceSection('pinned', 'Pinned', Icons.tune, (_) => const SizedBox.expand(), stripAtBottom: true),
+      DeviceSection('top', 'Top', Icons.tune, (_) => const SizedBox.expand()),
+    ]));
     tester.view.physicalSize = const Size(412, 915);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -429,10 +430,11 @@ void main() {
     final bottom = find.byKey(const ValueKey('device-strip-bottom'));
     expect(find.descendant(of: bottom, matching: find.byKey(const ValueKey('mod-source-strip'))), findsOneWidget);
     expect(tester.getTopLeft(bottom).dy, greaterThan(600), reason: 'under the page');
-    await tester.tap(find.byKey(ValueKey('device-tab-${original.sections(t)[1].id}')));
+    await tester.tap(find.byKey(const ValueKey('device-tab-top')));
     await tester.pumpAndSettle();
     expect(bottom, findsNothing, reason: 'other sections keep it on top');
     expect(find.byKey(const ValueKey('mod-source-strip')), findsOneWidget);
+    expect(tester.getTopLeft(find.byKey(const ValueKey('mod-source-strip'))).dy, lessThan(400));
     await done(tester);
   });
 
