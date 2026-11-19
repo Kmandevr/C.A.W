@@ -16,9 +16,7 @@ void main() {
   // Every device, and every old effect's page as its merged device's variant (FX consolidation: the old ids name
   // them here, stateWith puts the merged device on that variant).
   final ids = [for (final info in builtinInfos()) info.id,
-    // 1.1.0's modes without a page yet (MergedDevices.pagesToCome) open the generic fallback, which this bench of
-    // the device pages leaves out until each has its page.
-    for (final v in MergedDevices.variants) if (v.oldId != v.id && !MergedDevices.pagesToCome.contains(v.oldId)) v.oldId];
+    for (final v in MergedDevices.variants) if (v.oldId != v.id) v.oldId];
   for (final id in ids) {
     testWidgets('$id: a knob step rebuilds the knob and its visuals', (tester) async {
       DeviceDisplaySource.current = FakeDisplay();
@@ -67,6 +65,6 @@ void main() {
 
 /// The devices whose knob step rebuilds more than the 80 widgets most do (docs/performance.md, a knob step).
 const _ceilings = {
-  'org.caw.eq': 190, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
+  'org.caw.eq': 190, 'org.caw.eq.linear': 190, 'org.caw.bits.bitwise': 240, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
   'org.caw.rack.fx': 1240, 'org.caw.rack.multiband': 890,
 };

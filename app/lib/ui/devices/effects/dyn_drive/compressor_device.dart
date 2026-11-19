@@ -19,22 +19,22 @@ import '../ducker_editor.dart' show duckAt;
 import '../effect_page.dart';
 import '../eqfilter/variant_cards.dart' show VariantCards;
 import 'common.dart';
+import 'dynamics_modes.dart';
 
 /// The cards' names for the variants (1.1.0: Down, Dynamics, Up, Bus). Gate, Shape and Duck left for Gate,
-/// Tremolo/Pan and Ducker, which open their own pages ([MergedDevices.pageId]). The Up and Bus cards, curves and
-/// knobs are an interim layout on this page until the owner approves the new device pages.
+/// Tremolo/Pan and Ducker, which open their own pages ([MergedDevices.pageId]).
 const compressorCardNames = ['Down', 'Dynamics', 'Up', 'Bus'];
 
 /// The Bus variant's stepped ratios (its `ratio` choice; the engine's builtin_fx_talon.cpp).
 const busRatios = [1.5, 2.0, 4.0, 10.0];
 
-/// Gate's and Ducker's cards (1.1.0: their own devices, on this page while their new pages wait for the owner).
+/// Gate's and Ducker's cards (1.1.0: their own devices, sharing this page's language).
 const gateCardNames = ['Gate', 'Expand', 'Pedal gate'];
 const duckCardNames = ['Duck', 'Level', 'Carve'];
 
 /// What this page draws for a device's variant: 0 Down, 1 Dynamics, 2 a gate or expander (Gate, Expand), 4 Duck,
-/// 5 Up, 6 Bus (the 1.0.9 Compressor's numbers kept for those it had); -1 the generic knobs under the cards (Pedal
-/// gate, Level, Carve, until their pages are approved).
+/// 5 Up, 6 Bus (the 1.0.9 Compressor's numbers kept for those it had); -1 a page of its own (Pedal gate, Level,
+/// Carve: dynamics_modes.dart).
 int compressorPageKind(String? id, int v) => switch (id) {
       'org.caw.gate' => v <= 1 ? 2 : -1,
       'org.caw.duck' => v == 0 ? 4 : -1,
@@ -101,23 +101,12 @@ class CompressorDevice extends StatelessWidget {
     final cards = Padding(padding: const EdgeInsets.only(bottom: 8),
         child: VariantCards(icon: icon, names: names, height: inline ? 46 : 54));
     if (v < 0) {
-      // Pedal gate, Level, Carve: their knobs and choices under the cards (no hero) until their pages are approved.
-      final variant = t.info?.variantIndex ?? 0;
-      final (main, more, chips) = switch ((id, variant)) {
-        ('org.caw.gate', _) => (const ['threshold', 'hysteresis', 'attack', 'hold', 'release'],
-            const ['range', 'tracking', 'sc_hpf'], const ['sidechain']),
-        ('org.caw.duck', 1) => (const ['target', 'max_boost', 'max_cut', 'speed', 'gate'], const <String>[],
-            const ['lookahead']),
-        _ => (const ['amount', 'range', 'threshold', 'attack', 'release'], const ['low', 'high'],
-            const ['bands', 'stereo', 'listen']),
+      // Pedal gate, Level and Carve: pages of their own (dynamics_modes.dart).
+      return switch ((id, t.info?.variantIndex ?? 0)) {
+        ('org.caw.gate', _) => PedalGatePage(cards: cards),
+        ('org.caw.duck', 1) => LevelPage(cards: cards),
+        _ => CarvePage(cards: cards),
       };
-      if (inline) return effectPage('compressor', [cards, KnobRow(main, size: 44)]);
-      return effectPage('compressor', [
-        cards,
-        KnobRow(main, size: 50),
-        chipWrap([for (final c in chips) if (t.param(c) != null) ChoiceChips(c, title: c.toUpperCase())]),
-        if (more.isNotEmpty) DeviceFold(child: ParamGrid(only: more)),
-      ]);
     }
     final caption = switch (v) {
       1 => 'DYNAMICS', 2 => (t.info?.variantIndex ?? 0) == 1 ? 'EXPAND' : 'GATE',
@@ -135,6 +124,7 @@ class CompressorDevice extends StatelessWidget {
           return Text('${g >= 0 ? '+' : ''}${g.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: g >= 0 ? scope.accent : Neon.yellow));
         }
         final gr = f.gainReductionDb ?? 0;
+        if (v == 5) return Text('LIFT +${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: scope.accent));
         return Text('GR ${gr.toStringAsFixed(1)} dB', style: Neon.code(size: 10, color: Neon.yellow));
       }),
       child: const _DynHero(),

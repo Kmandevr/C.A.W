@@ -20,6 +20,7 @@ import '../../kit/param_watch.dart';
 import '../../visuals/filter_curve.dart' show freqToX, xToFreq;
 import '../effect_page.dart';
 import '../filters/filters_shared.dart';
+import 'eq_filter_modes.dart';
 import 'variant_cards.dart';
 
 /// `org.caw.filter` Multimode's types as the drawing's shapes (flagship_shapes' numbering: ladder 0–2, SVF 3–6).
@@ -50,11 +51,12 @@ double _tanh(double x) {
 const _syncWhole = {'1/16': 1 / 16, '1/8': 1 / 8, '1/4': 1 / 4, '1/2': 1 / 2, '1 bar': 1.0, '2 bars': 2.0, '4 bars': 4.0};
 
 /// Each variant's type parameter (the "type within it" the strip picks) and short names for its choices.
-const _typeParam = ['type', 'mode', 'type'];
+const _typeParam = ['type', 'mode', 'type', 'curve'];
 const _short = [
   ['LP 12', 'LP 24', 'HP 12', 'HP 24', 'BP', 'NOTCH', 'LAD LP', 'LAD HP', 'LAD BP'],
   ['LP', 'BP', 'HP'],
   ['LP', 'BP', 'HP', 'NOTCH', 'AP'],
+  ['CLASSIC', 'VINTAGE', 'BASS', 'WIDE'],
 ];
 
 /// The filter's response in dB at [hz] for variant [v]'s values [value] at cutoff [cut] (the dry mix blended in).
@@ -82,6 +84,7 @@ class FilterDevicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    if (variantOf(context) == 3) return WahPage(strip: DeviceScope.isInline(context) ? null : const FilterModelStrip());
     final v = variantOf(context).clamp(0, 2);
     final inline = DeviceScope.isInline(context);
     final knob = inline ? 46.0 : 54.0;
@@ -168,7 +171,8 @@ class _FilterModelStripState extends State<FilterModelStrip> {
     final id = t.componentId;
     final base = id == null ? null : t.state.componentInfo(id);
     if (base == null || base.variants.length < 3) return const SizedBox.shrink();
-    final v = (t.info?.variantIndex ?? 0).clamp(0, 2);
+    final groups = math.min(base.variants.length, _typeParam.length);
+    final v = (t.info?.variantIndex ?? 0).clamp(0, groups - 1);
     final sel = t.value(_typeParam[v]).round();
     final c = scope.accent;
     Widget tile(int variant, int k, ComponentParameterInfo p) {
@@ -176,7 +180,7 @@ class _FilterModelStripState extends State<FilterModelStrip> {
       return Padding(padding: const EdgeInsets.only(right: 4), child: Semantics(
         button: true,
         selected: on,
-        label: '${const ['Multimode', 'Ladder', 'Nonlinear'][variant]} ${p.choices[k]}',
+        label: '${const ['Multimode', 'Ladder', 'Nonlinear', 'Wah'][variant]} ${p.choices[k]}',
         child: GestureDetector(
           key: ValueKey('filter-model-$variant-$k'),
           behavior: HitTestBehavior.opaque,
@@ -208,7 +212,7 @@ class _FilterModelStripState extends State<FilterModelStrip> {
     Widget group(int variant) {
       final p = base.variants[variant].param(_typeParam[variant]);
       if (p == null || !p.isChoice) return const SizedBox.shrink();
-      final names = base.param('variant')?.choices ?? const ['Multimode', 'Ladder', 'Nonlinear'];
+      final names = base.param('variant')?.choices ?? const ['Multimode', 'Ladder', 'Nonlinear', 'Wah'];
       return Padding(padding: const EdgeInsets.only(right: 10), child: Column(
         crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Text((variant < names.length ? names[variant] : '').toUpperCase(), style: TextStyle(fontSize: 9, letterSpacing: 1.2,
@@ -218,12 +222,12 @@ class _FilterModelStripState extends State<FilterModelStrip> {
         ]));
     }
 
-    _reveal(v, [for (var g = 0; g < 3; g++) base.variants[g].param(_typeParam[g])?.choices.length ?? 0]);
+    _reveal(v, [for (var g = 0; g < groups; g++) base.variants[g].param(_typeParam[g])?.choices.length ?? 0]);
     return SingleChildScrollView(
       key: const ValueKey('filter-models'),
       controller: _scroll,
       scrollDirection: Axis.horizontal,
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [for (var g = 0; g < 3; g++) group(g)]),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [for (var g = 0; g < groups; g++) group(g)]),
     );
   });
 }
@@ -237,6 +241,7 @@ class _ModelIcon extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r = Offset.zero & size;
+    if (variant == 3) return wahIcon(canvas, r, k, color);
     iconCurve(canvas, r, color, (x) {
       final hz = 1000 * math.pow(2, x * 4).toDouble();
       return switch (variant) {

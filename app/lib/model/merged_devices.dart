@@ -66,8 +66,8 @@ class MergedDevices {
     MergedVariant('org.caw.saturator', 'org.caw.drive', 1),
     MergedVariant('org.caw.clipper', 'org.caw.drive', 2),
     MergedVariant('org.caw.phasedist', 'org.caw.drive', 3),
-    // 1.1.0's new modes (engine/src/builtin_fx_*_modes.cpp, _bits_bitwise, _cab, _eq_plume, _filters_wah): no page of
-    // their own yet ([pagesToCome]).
+    // 1.1.0's new modes (engine/src/builtin_fx_*_modes.cpp, _bits_bitwise, _cab, _eq_plume, _filters_wah): each a
+    // mode of its family's page (the Convolver's Cab a page of its own).
     MergedVariant('org.caw.drive.amp', 'org.caw.drive', 4, retired: false),
     MergedVariant('org.caw.drive.pedal', 'org.caw.drive', 5, retired: false),
     MergedVariant('org.caw.drive.bands', 'org.caw.drive', 6, retired: false),
@@ -116,15 +116,6 @@ class MergedDevices {
     MergedVariant('org.caw.convolver', 'org.caw.convolver', 0),
     MergedVariant('org.caw.convolver.cab', 'org.caw.convolver', 1, retired: false),
   ];
-
-  /// 1.1.0's new modes, which have no page of their own yet: each opens the fallback page (the generic knobs, the
-  /// shell's Variant pill), never its family's page, which does not know it.
-  static const pagesToCome = {
-    'org.caw.drive.amp', 'org.caw.drive.pedal', 'org.caw.drive.bands', 'org.caw.bits.bitwise', 'org.caw.eq.linear',
-    'org.caw.eq.match', 'org.caw.filter.wah', 'org.caw.delay.tape', 'org.caw.delay.reverse', 'org.caw.delay.multitap',
-    'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
-    'org.caw.reverb.reverse', 'org.caw.convolver.cab',
-  };
 
   /// The page id of the Ducker's Duck variant (org.caw.duck 0; 1.0.8-1.0.9 the Compressor's variant 4), which no
   /// old effect was. Its string stays as 1.0.8 named it.

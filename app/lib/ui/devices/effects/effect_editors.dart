@@ -18,6 +18,8 @@ import 'filters/filters_editors.dart';
 import 'mod_editors.dart';
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
+import 'space/cab_device.dart';
+import 'tools/tools_devices.dart';
 import 'space/space_fx.dart'; // fx-space
 import 'space/space_devices.dart' show fxSpaceMergedEditors; // fx-space
 import 'utility_editors.dart';
@@ -82,10 +84,14 @@ final Map<String, DeviceEditorEntry> _byId = {
   // fx-space begin
   ...fxSpaceEditors,
   ...fxSpaceMergedEditors,  // the merged Space, Modulation, Utility and Pitch pages (every variant's id)
+  // The Convolver's Cab (1.1.0): its own page with the variant cards (the Convolver keeps its page and the pill).
+  'org.caw.convolver.cab': DeviceEditorEntry((t) => [DeviceSection('cab', 'CAB', Icons.speaker_outlined, (_) => const CabDevicePage())],
+      family: DeviceFamily.space, ownsVariant: true),
   // fx-space end
   // fx-filters begin
   ...filtersEditors,
   // fx-filters end
+  ...toolsEditors,  // Meters, Lo-fi, Phase align (1.1.0)
   // fx-racks begin
   ...rackEditors,
   // fx-racks end
