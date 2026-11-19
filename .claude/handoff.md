@@ -14,9 +14,9 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - The owner: rerun the Benchmark after 1.0.9; approve the logo designs; choose the pitch editor's look.
 
 ## In progress (pushed as backup branches)
-- **1.1.0 on the session branch** (d1f1e1c): every effect, the pack, Lark (API 42), Raven's synthesis, Magpie (API 43) and all their pages. The app suite passes 2692; ctest passes except `stress_profile_parts_add_up_and_name_the_feature`, which fails only under load (make it load-proof: thread CPU time).
-- **Running** (push them to `caw-backup-*` at check-ins): dsp-timber (Timber engine), inst-rook (Rook audit, sounds, groove, kits, Raven layout).
-- **Next:** Flock (the grain engine is in grain.hpp), Timber's page, Lark's page and editor (show the owner the editor-look options), names and tags, theme, personality, Easter eggs, logo previews, a final audio review, then the 1.1.0 PR.
+- **1.1.0 on the session branch** (1aad35b): every effect, the pack, Lark (API 42), Raven's synthesis, Magpie (API 43), Timber's engine (bench 321); pages for all but Lark and Timber. The app suite passes 2692; ctest passes except `stress_profile_parts_add_up_and_name_the_feature`, which fails only under load (make it load-proof: thread CPU time).
+- **Running** (push them to `caw-backup-*` at check-ins): inst-rook (Rook), dsp-flock (Flock engine, bench 322), ui-timber (Timber's page).
+- **Next:** Flock's page, Lark's page and editor (show the owner the editor-look options), names and tags, theme, personality, Easter eggs, logo previews, a final audio review, then the 1.1.0 PR.
 - **Follow-ups:** Magpie's keyboard zoom on phones;  back up a project before its first conversion; Pedal gate's pre-FX key; an armed signal for effects.
 
 ## Rules for continuing
