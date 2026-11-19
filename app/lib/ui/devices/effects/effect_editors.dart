@@ -14,7 +14,6 @@ import 'eq_editor.dart';
 // fx-filters begin
 import 'filters/filters_editors.dart';
 // fx-filters end
-import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
@@ -57,7 +56,7 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
 
 /// Every built-in effect's plugin UI, by id.
 final Map<String, DeviceEditorEntry> _byId = {
-  'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
+  // org.caw.eq and org.caw.filter (and their variants' old ids): filtersEditors, one page per merged device.
   'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
   // The Compressor's Duck variant: the compressor's page, its curve drawn from `amount`.
   MergedDevices.duckPageId: singlePage('duck', 'DUCK', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
@@ -70,7 +69,6 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.ducker': singlePage('ducker', 'DUCK', Icons.call_received, DeviceFamily.dynamics, () => const DuckerPage()),
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
-  'org.caw.filter': singlePage('filter', 'FILTER', Icons.filter_alt_outlined, DeviceFamily.filter, () => const FilterPage()),
   'org.caw.phaser': singlePage('phaser', 'PHASER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: false)),
   'org.caw.flanger': singlePage('flanger', 'FLANGER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: true)),
   'org.caw.chorus': singlePage('chorus', 'CHORUS', Icons.waves, DeviceFamily.modulation, () => const ChorusPage()),

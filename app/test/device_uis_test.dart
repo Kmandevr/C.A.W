@@ -164,7 +164,7 @@ void main() {
   });
 
   group('gestures', () {
-    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap resets, power and + in the strip, a tile sets the type', (tester) async {
+    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap resets, power, a tap adds a band, the type button sets the type', (tester) async {
       final s = await open(tester, 'org.caw.eq');
       final t = targetOf(s, 'org.caw.eq');
       final view = tester.getRect(find.byKey(const ValueKey('eq-view')));
@@ -203,24 +203,22 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('eq-band-power')));
       await tester.pumpAndSettle();
       expect(t.value('b6_on'), 0);
-      // "+" then a tap on the curve turns the first off band on there, selected, its values readable.
-      await tester.ensureVisible(find.byKey(const ValueKey('eq-add')));
-      await tester.tap(find.byKey(const ValueKey('eq-add')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('eq-add-hint')), findsOneWidget);
+      // A tap on the curve's open space turns the first off band on there, selected.
       final firstOff = [for (var n = 1; n <= 8; n++) if (t.param('b${n}_on') != null && t.value('b${n}_on') < 0.5) n].first;
       // The footer (device shell) takes room at the bottom: bring the curve back into view first.
       await tester.ensureVisible(find.byKey(const ValueKey('eq-view')));
       await tester.pumpAndSettle();
       final v2 = tester.getRect(find.byKey(const ValueKey('eq-view')));
-      await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 30));
+      await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 50));
       await tester.pumpAndSettle();
       expect(t.value('b${firstOff}_on'), 1);
       expect(t.value('b${firstOff}_freq'), closeTo(300, 30));
-      expect(find.byKey(const ValueKey('eq-add-hint')), findsNothing);
-      expect(find.descendant(of: find.byKey(const ValueKey('eq-readout')), matching: find.text('BAND $firstOff')), findsOneWidget);
-      // The band chips select; the selected band's type tiles set its type (Notch is tile 9).
+      expect(find.text('BAND $firstOff'), findsOneWidget);
+      // The band chips select; the selected band's type button lists the types (Notch is 9).
       await tester.tap(find.byKey(const ValueKey('eq-band-5')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-type')));
+      await tester.tap(find.byKey(const ValueKey('eq-type')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('eq-type-9')));
       await tester.pumpAndSettle();
@@ -363,14 +361,19 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('filter: the handle drags the cutoff and resonance; type and LFO shape are tiles', (tester) async {
+    testWidgets('filter: the puck drags the cutoff and resonance; the model strip sets the type, LFO shape tiles under MORE', (tester) async {
       final s = await open(tester, 'org.caw.filter');
       final t = targetOf(s, 'org.caw.filter');
       await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('filter-hero'))), const Offset(60, -40));
       await tester.pumpAndSettle();
       expect(t.value('cutoff'), greaterThan(1300));
       expect(t.value('resonance'), greaterThan(0.2));
-      await tester.tap(find.byKey(const ValueKey('mode-type-4')));
+      await tester.tap(find.byKey(const ValueKey('filter-model-0-4')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('device-fold')));
+      await tester.tap(find.byKey(const ValueKey('device-fold')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('mode-lfo_shape-2')));
       await tester.tap(find.byKey(const ValueKey('mode-lfo_shape-2')));
       await tester.pumpAndSettle();
       expect((t.value('type'), t.value('lfo_shape')), (4, 2));
