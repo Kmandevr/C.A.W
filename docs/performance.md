@@ -229,7 +229,7 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 
 ## Effects suite (2026-11-10)
 
-`caw_bench SECONDS 300` times each built-in effect (#173, [engine](engine.md)) alone on a busy stereo signal that never falls silent (so nothing sleeps), in the engine's 64-frame chain blocks, best of 3 runs. Microseconds of CPU per second of stereo audio (10,000 = 1 % of one core); 3 s runs on a shared x86-64 server (Intel Xeon 2.3 GHz, GCC 13 `-O3`), so ±30 % noise between runs (the existing chorus read 489 and 735 in two runs). Four rows compare the merged Pitch/Shift device's two variants with the old effect ids (FX consolidation): within noise of each other ([engine](engine.md)).
+`caw_bench SECONDS 300` times each built-in effect (#173, [engine](engine.md)) alone on a busy stereo signal that never falls silent (so nothing sleeps), in the engine's 64-frame chain blocks, best of 3 runs. Microseconds of CPU per second of stereo audio (10,000 = 1 % of one core); 3 s runs on a shared x86-64 server (Intel Xeon 2.3 GHz, GCC 13 `-O3`), so ±30 % noise between runs (the existing chorus read 489 and 735 in two runs). Four rows compare the merged Pitch/Shift device's two variants with the old effect ids (FX consolidation): within noise of each other ([engine](engine.md)). After the suite it times 1.1.0's new modes, each against a ceiling (its plan budget over 3, for a phone **[assumed]** 2–3× slower): one over fails the run with exit 1 ([engine, new modes](engine.md#new-modes-110)).
 
 | Effect | Cost |
 | --- | --- |

@@ -234,6 +234,40 @@ void effectsCost(double seconds) {
     for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));
 }
 
+// 1.1.0's new effect modes (`caw_bench SECONDS 300`, after the suite): each with a ceiling, so a regression fails
+// the run (exit 1). A ceiling is the mode's plan budget on one phone core (light 0.5 %, medium 2 %, heavy 6 %)
+// divided by 3, **[Assumption]** the Galaxy S22+ being 2-3x slower than an x86 box: light 1667, medium 6667,
+// heavy 20000 µs per second of audio here.
+bool modesCostOver(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    constexpr double kLight = 1667, kMedium = 6667, kHeavy = 20000;
+    (void)kLight;
+    (void)kHeavy;
+    struct Case {
+        const char* name;
+        const char* id;
+        Values values;
+        double ceiling;
+    };
+    const Case cases[] = {
+        {"Delay: Tape (default)", "org.caw.delay", {{"variant", 2}}, kMedium},
+        {"Delay: Tape, worn (wow, flutter, wear 1)", "org.caw.delay", {{"variant", 2}, {"wow", 1}, {"flutter", 1}, {"wear", 1}}, kMedium},
+        {"Delay: Reverse (default)", "org.caw.delay", {{"variant", 3}}, kMedium},
+        {"Delay: Multi-tap (default, unpitched)", "org.caw.delay", {{"variant", 4}}, kMedium},
+        {"Delay: Multi-tap, 4 pitched taps", "org.caw.delay", {{"variant", 4}, {"t1_pitch", 7}, {"t2_pitch", 12}, {"t3_pitch", -5}, {"t4_pitch", -12}, {"t4_level", 0.5}}, kMedium},
+        // modes-bench end
+    };
+    std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");
+    bool over = false;
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool bad = us > c.ceiling || us <= 0.0;
+        over = over || bad;
+        std::printf("  %-44s %8.0f  (ceiling %5.0f)%s\n", c.name, us, c.ceiling, bad ? "  OVER" : "");
+    }
+    return over;
+}
+
 void flagshipVoiceCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     const Values dry = {{"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0}};
@@ -905,7 +939,7 @@ int main(int argc, char** argv) {
     }
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
         effectsCost(secs);
-        return 0;
+        return modesCostOver(secs) ? 1 : 0;  // a 1.1.0 mode over its ceiling fails the run
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

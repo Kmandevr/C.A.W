@@ -184,7 +184,8 @@ TEST(merged_delay_and_reverb_list_their_variants_as_the_old_descriptors_plus_var
         const fx::MergedDevice* m = fx::findMergedDevice(dev->id);
         CHECK(m != nullptr);
         if (!m) continue;
-        CHECK_EQ(m->variants.size(), 2u);
+        // The old effects are variants 0 and 1; 1.1.0's new modes follow (fx_delay_modes_test.cpp).
+        CHECK_EQ(m->variants.size(), dev == &kDelay ? 5u : 2u);
         CHECK(registry().find(dev->id) == &m->variants[0].descriptor());
         for (uint32_t v = 0; v < 2; ++v) {
             const ModuleDescriptor& d = m->variants[v].descriptor();
@@ -201,7 +202,7 @@ TEST(merged_delay_and_reverb_list_their_variants_as_the_old_descriptors_plus_var
             CHECK(variant.id == fx::kVariantParam);
             CHECK(!variant.automatable && !variant.modulatable && !variant.midiMappable);
             CHECK_EQ(variant.defaultValue, static_cast<double>(v));
-            CHECK_EQ(variant.choiceCount, 2u);
+            CHECK_EQ(variant.choiceCount, static_cast<uint32_t>(m->variants.size()));
             CHECK_EQ(d.tailFrames, old->tailFrames);
             CHECK_EQ(d.latencyFrames, old->latencyFrames);
             CHECK(d.cpuClass == old->cpuClass);
@@ -294,7 +295,11 @@ TEST(merged_delay_and_reverb_resolve_the_old_presets_under_their_ids_with_equal_
                 CHECK(applyBuiltinPreset(dev->id, p.name, applied));
                 CHECK_EQ(valueOf(applied, "variant"), static_cast<double>(v));
             }
-        CHECK_EQ(builtinPresets(dev->id).size(), total);
+        // Then the new modes' own presets (1.1.0), each naming its variant past the old ones.
+        CHECK_EQ(builtinPresets(dev->id).size(), total + fx::newVariantPresets(dev->id).size());
+        for (size_t k = total; k < builtinPresets(dev->id).size(); ++k)
+            for (const auto& [key, x] : builtinPresets(dev->id)[k].values)
+                if (key == "variant") CHECK(x >= 2.0);
     }
     CHECK(builtinPresets(kReverb.id).size() >= 3u);  // the shimmer's (the others have none)
 }
@@ -459,6 +464,8 @@ TEST(the_components_json_lists_the_delay_and_reverb_variants) {
         CHECK(found != nullptr);
         if (!found) continue;
         const Json* variants = found->get("variants");
-        CHECK(variants && variants->arr.size() == 2u);
+        // Every variant, the old two and 1.1.0's new modes after them.
+        CHECK(variants && variants->arr.size() == fx::findMergedDevice(dev->id)->variants.size());
+        CHECK(fx::findMergedDevice(dev->id)->variants.size() == (dev == &kDelay ? 5u : 2u));
     }
 }

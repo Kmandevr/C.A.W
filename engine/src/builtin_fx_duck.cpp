@@ -279,8 +279,11 @@ ModuleProcessor* makeDuckAs(const ModuleDescriptor& variant) noexcept {
     return new (std::nothrow) Duck(variant);
 }
 
+std::span<const BuiltinPreset> delayModePresets();  // builtin_fx_delay_modes.cpp
+
 std::span<const BuiltinPreset> newVariantPresets(std::string_view id) {
     if (id == "org.caw.compressor") return duckPresets();
+    if (id == "org.caw.delay") return delayModePresets();
     return {};
 }
 
