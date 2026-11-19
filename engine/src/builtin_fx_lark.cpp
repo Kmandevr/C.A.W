@@ -101,11 +101,15 @@ uint32_t ringFor(double sr) noexcept {
     return n;
 }
 
-class PitchFix final : public EffectBase, public VariableLatency {
+class PitchFix final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return larkDescriptor(); }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
-        return latencyAt(rate(), values && count > pMonitor && values[pMonitor] >= 0.5);
+        return latencyAt(rate(), armed() || (values && count > pMonitor && values[pMonitor] >= 0.5));
+    }
+    // Armed: the 10 ms monitoring mode, as `monitor` On.
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return !(values && count > pMonitor && values[pMonitor] >= 0.5);
     }
     uint64_t idleFrames() const noexcept override { return delay_ + static_cast<uint64_t>(0.1 * rate()); }
 
@@ -148,7 +152,9 @@ protected:
 
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        if (!knobsUnchanged(knobs_, pCount, at) || first_) {
+        const bool armedNow = armed();
+        if (!knobsUnchanged(knobs_, pCount, at) || first_ || armedNow != armedSeen_) {
+            armedSeen_ = armedNow;
             key_ = std::clamp(choice(pKey, at), 0, 11);
             scale_ = std::clamp(choice(pScale, at), 0, lark::kScaleCount - 1);
             uint16_t custom = 0;
@@ -161,7 +167,7 @@ protected:
             keepVibrato_ = on(pVibrato, at);
             formantKeep_ = on(pFormantKeep, at);
             formant_ = detPow(2.0, std::clamp(param(pFormant, at), -12.0, 12.0) / 12.0);
-            const bool monitor = on(pMonitor, at);
+            const bool monitor = on(pMonitor, at) || armedNow;
             const double low = std::max(std::clamp(param(pLow, at), 50.0, 400.0), monitor ? 100.0 : 0.0);
             const double high = std::max(std::clamp(param(pHigh, at), 200.0, 1600.0), low * 2.0);
             const double sens = std::clamp(param(pSensitivity, at), 0.0, 1.0);
@@ -440,7 +446,7 @@ private:
     double knobs_[pCount] = {};
     int key_ = 0, scale_ = 0;
     uint16_t classes_ = 0xFFF;
-    bool midiTarget_ = false, keepVibrato_ = true, formantKeep_ = true, monitor_ = false, first_ = true;
+    bool midiTarget_ = false, keepVibrato_ = true, formantKeep_ = true, monitor_ = false, first_ = true, armedSeen_ = false;
     double speed_ = 0.04, humanize_ = 0, formant_ = 1;
     double dryTarget_ = 0, wetTarget_ = 1;
     uint32_t delay_ = 1200;

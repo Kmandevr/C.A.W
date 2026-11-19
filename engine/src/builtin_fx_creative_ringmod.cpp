@@ -4,6 +4,7 @@
 #include "builtin_fx_creative.h"
 #include "caw/library/filter.hpp"
 #include "caw/library/oversample.hpp"
+#include "fx_sidechain.h"
 
 // Original code (C.A.W. is Apache-2.0). Ring modulation is a multiplication (DAFX, 2nd ed., ch. 3): every
 // partial of the input meets every partial of the carrier at their sum and difference. Bias moves it toward
@@ -33,6 +34,7 @@ const ParamTable& ringParams() {
         p.num("bias", "Bias", 0.0, 0.0, 1.0);
         p.num("rectify", "Rectify", 0.0, -1.0, 1.0);
         p.num("mix", "Mix", 1.0, 0.0, 1.0);
+        addSidechainParams(p);  // 1.1.0: the key carrier's filter and Listen, appended off
         return p;
     }();
     return t;
@@ -86,8 +88,12 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return ringDescriptor(); }
 
 protected:
-    bool prepare(double, uint32_t) noexcept override { return true; }
+    bool prepare(double, uint32_t) noexcept override {
+        sc_.bind(descriptor());
+        return true;
+    }
     void clearState() noexcept override {
+        sc_.clear();
         carrier_[0].clear(0xa11ce);
         carrier_[1].clear(0xb0b);
         for (auto& o : up_) o.clear();
@@ -119,9 +125,11 @@ protected:
         bias_.set(clampTo(param(kBias, at), 0.0, 1.0), kControlFrames);
         rect_.set(clampTo(param(kRectify, at), -1.0, 1.0), kControlFrames);
         mix_.set(clampTo(param(kMixR, at), 0.0, 1.0), kControlFrames);
+        if (sc_.bound()) sc_.set(param(sc_.hp, at), param(sc_.lp, at), on(sc_.li, at), sr);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const float* key[2] = {keyLeft(), keyRight()};
+        sc_.apply(key[0], key[1], n);  // the key carrier through the sidechain filter (nothing while off)
         for (uint32_t i = 0; i < n; ++i) {
             const double x[2] = {inL[i], inR[i]};
             const double b = bias_.next(), r = rect_.next(), m = mix_.next();
@@ -140,6 +148,7 @@ protected:
                 (c ? outR : outL)[i] = static_cast<float>(x[c] + (y - x[c]) * m);
             }
         }
+        if (sc_.listen) sc_.listenTo(key[0], key[1], outL, outR, n);
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();
@@ -168,6 +177,7 @@ private:
     Ramp bias_, rect_, mix_;
     int source_ = kSine;
     bool oversampled_ = false;
+    SidechainFilter sc_;
     double freq_[2] = {440.0, 440.0}, dt_[2] = {0.01, 0.01}, noiseGain_[2] = {1.0, 1.0}, carrierPeak_ = 0.0;
 };
 

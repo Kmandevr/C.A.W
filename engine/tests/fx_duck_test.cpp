@@ -143,9 +143,12 @@ TEST(duck_is_the_duckers_first_variant_keyed_without_latency) {
     CHECK(ComponentChain::isKeyedEffect(d));
     CHECK_EQ(d.latencyFrames, 0u);
     const char* ids[] = {"threshold", "amount", "attack", "hold", "release", "detection", "output", "mix", "sidechain", "variant"};
-    CHECK_EQ(d.parameterCount, 10u);
+    // 1.1.0 appends the sidechain filter after `variant` (sc_hpf, sc_lpf, sc_listen), so `variant` keeps its place.
+    CHECK_EQ(d.parameterCount, 13u);
     for (uint32_t k = 0; k < d.parameterCount && k < 10; ++k) CHECK(d.parameters[k].id == std::string(ids[k]));
-    const ParameterDescriptor& variant = d.parameters[d.parameterCount - 1];
+    CHECK(d.parameters[10].id == std::string("sc_hpf") && d.parameters[11].id == std::string("sc_lpf") &&
+          d.parameters[12].id == std::string("sc_listen"));
+    const ParameterDescriptor& variant = d.parameters[9];
     CHECK_EQ(variant.defaultValue, 0.0);
     CHECK(!variant.automatable && !variant.modulatable);
     CHECK_EQ(d.parameters[5].choiceCount, 3u);  // RMS, Peak, ISP

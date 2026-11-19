@@ -81,14 +81,18 @@ bool loadProfile(const uint8_t* src, uint32_t size, float* const* out, uint32_t 
     return true;
 }
 
-class Denoise final : public EffectBase, public VariableLatency {
+class Denoise final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     explicit Denoise(const ModuleDescriptor& d) noexcept : d_(d) {}
     const ModuleDescriptor& descriptor() const noexcept override { return d_; }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
         const int q = count > kQuality ? static_cast<int>(values[kQuality] + 0.5) : 1;
-        const bool mon = count > kMonitor && values[kMonitor] >= 0.5;
+        const bool mon = armed() || (count > kMonitor && values[kMonitor] >= 0.5);
         return clean::tierWindow(q, mon, rate());
+    }
+    // Armed: the monitoring window, as `monitor` On.
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return !(count > kMonitor && values[kMonitor] >= 0.5);
     }
     uint32_t stateVersion() const noexcept override { return 1; }
     bool saveState(uint8_t* dst, uint32_t capacity, uint32_t& written) const noexcept override {
@@ -160,7 +164,7 @@ protected:
 
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        const uint32_t n = clean::tierWindow(choice(kQuality, at), on(kMonitor, at), sr);
+        const uint32_t n = clean::tierWindow(choice(kQuality, at), on(kMonitor, at) || armed(), sr);
         if (n != n_) {
             n_ = n;
             stft_.setSize(n);

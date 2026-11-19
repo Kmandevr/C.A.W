@@ -267,9 +267,11 @@ TEST(merged_dynamics_devices_list_their_variants_with_the_old_descriptors) {
         CHECK(old.id == c.old);
         if (const ModuleDescriptor* listed = registry().find(c.old); listed && !c.reused) CHECK(listed == &old);
         CHECK(d.id == c.merged);
-        // `variant` right after the old parameters; Talon's (1.1.0) then Down's extras and the talon_layout marker.
+        // `variant` right after the old parameters; Talon's (1.1.0) then Down's extras and the talon_layout marker;
+        // the Gate's (Gate, Pedal) and the Limiter's then 1.1.0's appended sidechain filter or loudness target (two).
         const bool talon = c.merged == std::string(kCompressor);
-        const uint32_t after = talon ? (c.variant == 0 ? 4u : 1u) : 0u;
+        const bool appended = c.merged == std::string(kGate) ? c.variant != 1 : c.merged == std::string(kLimiter);
+        const uint32_t after = talon ? (c.variant == 0 ? 4u : 1u) : (appended ? 2u : 0u);
         CHECK_EQ(d.parameterCount, old.parameterCount + 1 + after);
         for (uint32_t k = 0; k < old.parameterCount; ++k) CHECK(d.parameters[k].id == old.parameters[k].id);
         const ParameterDescriptor& variant = d.parameters[old.parameterCount];
@@ -485,9 +487,10 @@ TEST(a_racks_old_dynamics_children_migrate_with_their_values_and_routes_and_soun
                   {"s4_fx", h("org.caw.transient")}, {"s4.attack", 0.5},  {"mod1_src", 1},
                   {"mod1_amt", 0.4},                {"mod2_src", 1},       {"mod2_amt", -0.3}};
     // The routes as a pre-1.0.8 rack had them: today's rack reads s1's hash as Gate's own id (1.1.0), whose list
-    // ends with `variant`; the old gate's had none, so everything after s1 sat one place earlier.
-    old.params.emplace_back("mod1_dst", destination(kFxRackId, old.params, "s3.depth") - 1);
-    old.params.emplace_back("mod2_dst", destination(kFxRackId, old.params, "s4.sustain") - 1);
+    // has `variant` and then 1.1.0's sc_lpf and sc_listen (rack layout 4); the old gate's had none of them, so
+    // everything after s1 sat three places earlier.
+    old.params.emplace_back("mod1_dst", destination(kFxRackId, old.params, "s3.depth") - 3);
+    old.params.emplace_back("mod2_dst", destination(kFxRackId, old.params, "s4.sustain") - 3);
     CHECK(valueOf(old.params, "mod1_dst") > 0 && valueOf(old.params, "mod2_dst") > 0);
     ComponentSpec m = old;
     CHECK(fx::migrateLegacyEffect(m));
@@ -505,7 +508,7 @@ TEST(a_racks_old_dynamics_children_migrate_with_their_values_and_routes_and_soun
     // The old rack's sound: the same children with its routes on s3.depth and s4.sustain as today's rack reads them.
     ComponentSpec heard = old;
     for (auto& [k, v] : heard.params)
-        if (k == "mod1_dst" || k == "mod2_dst") v += 1.0;
+        if (k == "mod1_dst" || k == "mod2_dst") v += 3.0;
     const Stereo in = music(48000);
     const Stereo a = renderChain({heard}, in), b = renderChain({m}, in);
     CHECK(sameBits(a, b));

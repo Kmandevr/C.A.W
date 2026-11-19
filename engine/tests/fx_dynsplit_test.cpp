@@ -291,8 +291,10 @@ TEST(an_old_racks_compressor_children_move_with_their_routes_and_sound_the_same)
         if (k == "s2.variant") v = 4;
         if (k == "s3.variant") v = 2;
     }
+    // Layout 2: s1's Compressor without Down's extras and marker (4 fewer); s2's Duck and s3's Gate also without
+    // 1.1.0's appended sidechain filter (3 and 2 fewer, rack layout 4), which only s4's route sits after.
     old.emplace_back("mod1_dst", amount - 4);
-    old.emplace_back("mod2_dst", sustain - 4);
+    old.emplace_back("mod2_dst", sustain - 4 - 3 - 2);
     old.emplace_back(std::string(kRackLayoutParam), 2.0);
     now.emplace_back("mod1_dst", amount);
     now.emplace_back("mod2_dst", sustain);

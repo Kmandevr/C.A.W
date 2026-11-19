@@ -1544,6 +1544,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         const ComponentSpec* instrument = nullptr;  // the layer's native instrument, if any
         std::string outputId;  // "output": the bus its audio goes to instead of its folder's ("": that)
         const std::vector<ComponentSpec>* midi = nullptr;  // the layer's MIDI effects (its instrument's entries 1..)
+        // The armed signal (1.1.0): an audio track armed with monitoring on or auto plays its inserts' near-zero-delay
+        // versions (ArmedVersion); an export never does.
+        bool armed = false;
     };
     std::vector<Want> wants;
     int order = 0;
@@ -1556,6 +1559,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         order_.push_back(l.id);
         wants.push_back({l.id, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components,
                          l.hasInstrument && !l.folder ? &l.instrument : nullptr, l.outputId, &l.midiComponents});
+        const auto& track = l.instrument.audioTrack;
+        wants.back().armed = !offline && !l.folder && track && track->input.present && track->input.armed &&
+                             track->input.monitor != 0;
     }
 
     // Pass 1: whether each layer plays (a track needs an instrument), its notes, and its slot.
@@ -1803,6 +1809,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 inserts.slot = ls.slot;
                 ComponentChain* sent = made != nextInserts.end() ? made->second.release() : nullptr;
                 if (sent) attachAutomation(*sent, w.id);
+                if (sent) sent->setArmed(w.armed);
                 inserts.masterChain = sent;
                 if (send(inserts)) {
                     ls.inserts = sent;
@@ -1814,6 +1821,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             } else if (wantsInserts && ls.inserts) {
                 ls.inserts->setValues(*w.components);
                 updateAutomation(ls.slot, *ls.inserts, w.id, ls.insertsAutomationKey);
+                ls.inserts->setArmed(w.armed);  // updateCompensation below follows its latency
             }
         };
         if (!w.bus) {
@@ -2498,6 +2506,16 @@ int32_t Engine::componentMeter(const std::string& layerId, uint32_t index, float
     if (index != kInstrumentIndex && (index & kNoteComponentFlag)) return -1;
     ComponentChain* chain = ctlComponentChain(layerId, index);
     return chain && chain->readSlotMeter(index, peakL, peakR, clipped) ? 1 : -1;
+}
+
+int32_t Engine::componentCost(const std::string& layerId, uint32_t index, double& share, uint32_t& latency, bool& armed) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag)) return -1;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    if (!chain || !chain->readSlotCost(index, share, latency)) return -1;
+    armed = chain->slotArmed(index);
+    return 1;
 }
 
 bool Engine::setModulatorParam(const std::string& modulatorId, const std::string& param, double value) {

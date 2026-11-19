@@ -78,6 +78,18 @@ struct ProfileScope {
     }
 };
 
+// Adds one slot's time for a block to its cost counter (readSlotCost; null: not timed). Single writer.
+struct CostScope {
+    std::atomic<uint64_t>* acc;
+    uint64_t t0;
+    explicit CostScope(std::atomic<uint64_t>* a) noexcept : acc(a), t0(a ? nowNs() : 0) {}
+    ~CostScope() {
+        if (acc) acc->store(acc->load(std::memory_order_relaxed) + (nowNs() - t0), std::memory_order_relaxed);
+    }
+    CostScope(const CostScope&) = delete;
+    CostScope& operator=(const CostScope&) = delete;
+};
+
 }  // namespace
 
 uint64_t PartProfile::now() noexcept { return nowNs(); }
@@ -363,6 +375,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             }
         }
         e->structure = componentStructure(spec);  // a rack's children, a merged device's variant
+        if (kind == Kind::Effects) e->armedIf = dynamic_cast<ArmedVersion*>(e->processor.get());  // the armed signal
         const ModuleDescriptor& own = e->processor->descriptor();  // lives as long as the processor
         const uint32_t count = own.parameterCount;
         e->resolvers.resize(count);
@@ -628,21 +641,57 @@ uint32_t ComponentChain::tailFrames() const noexcept {
     return tail;
 }
 
+uint32_t ComponentChain::slotLatency(std::size_t index) const noexcept {
+    if (index >= entries_.size()) return 0;
+    const Entry& e = *entries_[index];
+    if (e.bypass.load(std::memory_order_relaxed)) return 0;  // a bypassed effect passes its input on undelayed
+    if (const auto* v = dynamic_cast<const VariableLatency*>(e.processor.get())) {
+        // Control thread: as many values as it has (a rack has hundreds).
+        std::vector<double> values(e.resolvers.size());
+        const uint32_t n = static_cast<uint32_t>(values.size());
+        for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e.held[k].load(std::memory_order_relaxed));
+        return v->latencyFor(values.data(), n);
+    }
+    return e.processor->descriptor().latencyFrames;
+}
+
 uint64_t ComponentChain::latencyFrames() const noexcept {
     uint64_t latency = 0;
-    for (const auto& e : entries_) {  // a bypassed effect passes its input on undelayed
-        if (e->bypass.load(std::memory_order_relaxed)) continue;
-        if (const auto* v = dynamic_cast<const VariableLatency*>(e->processor.get())) {
-            // Control thread: as many values as it has (a rack has hundreds).
-            std::vector<double> values(e->resolvers.size());
-            const uint32_t n = static_cast<uint32_t>(values.size());
-            for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e->held[k].load(std::memory_order_relaxed));
-            latency += v->latencyFor(values.data(), n);
-        } else {
-            latency += e->processor->descriptor().latencyFrames;
-        }
-    }
+    for (std::size_t i = 0; i < entries_.size(); ++i) latency += slotLatency(i);
     return latency;
+}
+
+void ComponentChain::setArmed(bool armed) noexcept {
+    armed_.store(armed, std::memory_order_relaxed);
+    for (const auto& e : entries_)
+        if (e->armedIf) e->armedIf->setArmed(armed);
+}
+
+bool ComponentChain::slotArmed(std::size_t index) const noexcept {
+    if (index >= entries_.size() || !armed()) return false;
+    const Entry& e = *entries_[index];
+    if (!e.armedIf || e.bypass.load(std::memory_order_relaxed)) return false;
+    std::vector<double> values(e.resolvers.size());
+    const uint32_t n = static_cast<uint32_t>(values.size());
+    for (uint32_t k = 0; k < n; ++k) values[k] = fromBits(e.held[k].load(std::memory_order_relaxed));
+    return e.armedIf->armedDiffers(values.data(), n);
+}
+
+bool ComponentChain::readSlotCost(std::size_t index, double& share, uint32_t& latency) const noexcept {
+    if (index >= entries_.size()) return false;
+    cpuAsked_.fetch_add(1, std::memory_order_relaxed);  // keep (or start) timing
+    const Entry& e = *entries_[index];
+    const uint64_t ns = e.cpuNs.load(std::memory_order_relaxed), frames = cpuFrames_.load(std::memory_order_relaxed);
+    const uint64_t dn = ns - e.cpuNsSeen, df = frames - e.cpuFramesSeen;
+    if (df > 0 && sampleRate_ > 0) {
+        const double now = static_cast<double>(dn) * 1e-9 / (static_cast<double>(df) / sampleRate_);
+        // Smoothed across reads: a quarter of the way each time (a UI reading 4-10 times a second sees about a second).
+        e.cpuShare = e.cpuShare < 0 ? now : e.cpuShare + (now - e.cpuShare) * 0.25;
+        e.cpuNsSeen = ns, e.cpuFramesSeen = frames;
+    }
+    share = e.cpuShare;
+    latency = slotLatency(index);
+    return true;
 }
 
 // clean_ lets reset() skip a reset that would change nothing. It is only right while every path that runs a
@@ -895,9 +944,22 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
     ChainProfile* const profile = time ? time->profile : nullptr;
     const std::size_t audioEntries = entries_.size() - midiCount_;  // an instrument's MIDI effects ran before
+    // Per-slot cost: timed only for kCpuWatchSeconds after a read (readSlotCost), else one relaxed load a block.
+    if (const uint32_t asked = cpuAsked_.load(std::memory_order_relaxed); asked != cpuAskedSeen_) {
+        cpuAskedSeen_ = asked;
+        cpuWatchLeft_ = kCpuWatchSeconds * sampleRate;
+    }
+    // One block in four is timed (a clock read costs about 30 ns here): the share is their time over their frames.
+    bool timing = false;
+    if (cpuWatchLeft_ > 0) {
+        cpuWatchLeft_ -= m;
+        timing = (++cpuPhase_ & 3u) == 0;
+        if (timing) cpuFrames_.store(cpuFrames_.load(std::memory_order_relaxed) + m, std::memory_order_relaxed);
+    }
     for (std::size_t index = 0; index < audioEntries; ++index) {
         Entry& e = *entries_[index];
         ProfileScope scope(profile, e.processor.get(), &e.id);
+        const CostScope cost(timing ? &e.cpuNs : nullptr);
         // The Benchmark's parts: a sample player's time is Samples (the rest stays the caller's part, Devices or
         // Master), and resolving its values (lanes, ramps, modulation) is Automation.
         PartProfile* const parts = profile ? &profile->parts : nullptr;

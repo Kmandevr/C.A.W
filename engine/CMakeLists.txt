@@ -339,6 +339,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters
   target_sources(caw_tests PRIVATE tests/fx_dynsplit_test.cpp)  # 1.1.0: the Talon/Hatch/Duck split and its migration
+  target_sources(caw_tests PRIVATE tests/fx_extras_test.cpp)  # 1.1.0: armed versions, sidechain filter, LUFS target, slot cost
   target_sources(caw_tests PRIVATE tests/fx_merged_stereomod_test.cpp)  # FX consolidation D: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan
   target_sources(caw_tests PRIVATE tests/modulation_test.cpp)  # #161: project modulators and links
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
@@ -451,6 +452,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
   target_sources(caw_rt_tests PRIVATE tests/fx_clean_rt_test.cpp)  # 1.1.0: Preen and Hush
+  target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
   target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
   target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing

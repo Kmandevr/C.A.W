@@ -209,13 +209,15 @@ struct LinKey {
     }
 };
 
-class LinearEq final : public EffectBase, public VariableLatency {
+class LinearEq final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     explicit LinearEq(const ModuleDescriptor& d) noexcept : d_(d) {}
     const ModuleDescriptor& descriptor() const noexcept override { return d_; }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
+        if (armed()) return 0;  // armed: the bands as minimum-phase filters
         return linLatency(count > kLinQuality ? static_cast<int>(values[kLinQuality] + 0.5) : 1);
     }
+    bool armedDiffers(const double*, uint32_t) const noexcept override { return true; }
     uint32_t stateVersion() const noexcept override { return 1; }
     bool saveState(uint8_t* dst, uint32_t capacity, uint32_t& written) const noexcept override {
         return match_.learner.save(dst, capacity, written);
@@ -252,6 +254,7 @@ protected:
         analyzer_.clear();
         for (auto& s : soloL_) s.clear();
         for (auto& s : soloR_) s.clear();
+        clearMinimum();
         first_ = true;
     }
     uint64_t idleFrames() const noexcept override { return linTaps(2) + kLinBlock + static_cast<uint64_t>(0.05 * rate()); }
@@ -259,6 +262,19 @@ protected:
     void control(uint32_t at) noexcept override {
         const bool same = knobsUnchanged(knobs_, kLinCount, at);
         if (!same || first_) readKnobs(at);
+        // The armed signal: the same bands as minimum-phase filters (no latency, no Match curve: that is a FIR),
+        // designed when it turns on and when a knob moves. Switching starts the other path from silence.
+        const bool armedNow = armed();
+        if (armedNow != minimum_) {
+            minimum_ = armedNow;
+            clearMinimum();
+            if (!minimum_) conv_.clear();
+        }
+        if (minimum_ && (!same || first_ || !minimumSet_)) {
+            for (uint32_t b = 0; b < kEqBands; ++b)
+                if (want_.use[b]) minFilter_[b].set(static_cast<lib::EqType>(want_.type[b]), want_.freq[b], want_.gain[b], want_.q[b], rate());
+            minimumSet_ = true;
+        }
         if (match_.learning()) match_.learner.step();
         if (phase_ == kIdle && !(want_ == built_)) startJob();
         if (phase_ != kIdle) {
@@ -274,7 +290,19 @@ protected:
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         float m[kControlFrames], s[kControlFrames], ym[kControlFrames], ys[kControlFrames];
         for (uint32_t i = 0; i < n; ++i) m[i] = 0.5f * (inL[i] + inR[i]), s[i] = 0.5f * (inL[i] - inR[i]);
-        conv_.process(m, s, ym, ys, n);
+        if (minimum_) {
+            for (uint32_t i = 0; i < n; ++i) ym[i] = m[i], ys[i] = s[i];
+            for (uint32_t b = 0; b < kEqBands; ++b) {  // only the bands that are on
+                if (!want_.use[b]) continue;
+                const lib::EqFilter& f = minFilter_[b];
+                if (want_.channel[b] != kEqSide)
+                    for (uint32_t i = 0; i < n; ++i) ym[i] = static_cast<float>(f.process(minState_[b][0], ym[i]));
+                if (want_.channel[b] != kEqMid)
+                    for (uint32_t i = 0; i < n; ++i) ys[i] = static_cast<float>(f.process(minState_[b][1], ys[i]));
+            }
+        } else {
+            conv_.process(m, s, ym, ys, n);
+        }
         double L[kControlFrames], R[kControlFrames];
         if (out_ == outTarget_) {
             for (uint32_t i = 0; i < n; ++i) L[i] = (static_cast<double>(ym[i]) + ys[i]) * out_, R[i] = (static_cast<double>(ym[i]) - ys[i]) * out_;
@@ -328,8 +356,8 @@ protected:
         out[kLOutput + 2] = outPeakDb();
         out[kLSolo] = static_cast<float>(solo_);
         const int tier = std::max(0, built_.tier);
-        out[kLLatency] = static_cast<float>(linLatency(tier) * 1000.0 / rate());
-        out[kLLatency + 1] = static_cast<float>(linTaps(tier));
+        out[kLLatency] = minimum_ ? 0.0f : static_cast<float>(linLatency(tier) * 1000.0 / rate());
+        out[kLLatency + 1] = minimum_ ? 0.0f : static_cast<float>(linTaps(tier));
         out[kLLatency + 2] = phase_ != kIdle ? 1.0f : 0.0f;
         match_.display(out + kLMatch, watched, rate());
         return kLSize;
@@ -337,6 +365,16 @@ protected:
 
 private:
     enum Phase { kIdle, kMag, kFft, kStage };
+
+    void clearMinimum() noexcept {
+        for (auto& band : minState_)
+            for (auto& lane : band)
+                for (auto& st : lane) st.clear();
+        minimumSet_ = false;
+    }
+    lib::EqFilter minFilter_[kEqBands];
+    lib::SvfState minState_[kEqBands][2][lib::EqFilter::kMaxStages];  // mid and side
+    bool minimum_ = false, minimumSet_ = false;  // audio thread: playing the armed (minimum-phase) version
 
     void readKnobs(uint32_t at) noexcept {
         const double sr = rate();

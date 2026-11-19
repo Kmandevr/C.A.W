@@ -319,13 +319,17 @@ size_t revHistoryFloats(double sr) {
     return most;
 }
 
-class DeReverb final : public EffectBase, public VariableLatency {
+class DeReverb final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     explicit DeReverb(const ModuleDescriptor& d) noexcept : d_(d) {}
     const ModuleDescriptor& descriptor() const noexcept override { return d_; }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
         const int q = count > kRQuality ? static_cast<int>(values[kRQuality] + 0.5) : 1;
-        return clean::tierWindow(q, count > kRMonitor && values[kRMonitor] >= 0.5, rate());
+        return clean::tierWindow(q, armed() || (count > kRMonitor && values[kRMonitor] >= 0.5), rate());
+    }
+    // Armed: the monitoring window, as `monitor` On.
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return !(count > kRMonitor && values[kRMonitor] >= 0.5);
     }
     uint64_t idleFrames() const noexcept override { return stft_.size() + static_cast<uint64_t>(0.05 * rate()); }
 
@@ -364,7 +368,7 @@ protected:
     }
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        const uint32_t n = clean::tierWindow(choice(kRQuality, at), on(kRMonitor, at), sr);
+        const uint32_t n = clean::tierWindow(choice(kRQuality, at), on(kRMonitor, at) || armed(), sr);
         if (n != n_) {
             n_ = n;
             stft_.setSize(n);

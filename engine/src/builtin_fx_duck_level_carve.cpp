@@ -8,6 +8,7 @@
 #include "component_chain.h"
 #include "fx_bandbank.h"
 #include "fx_merged.h"
+#include "fx_sidechain.h"
 
 // Original code (C.A.W. is Apache-2.0).
 // Level: the input's momentary loudness (BS.1770's K-weighting, its two filters designed at the rate from the
@@ -97,12 +98,15 @@ void kWeighting(double sr, double shelf[5], double hp[5]) noexcept {
 
 namespace {
 
-class DuckLevel final : public EffectBase, public VariableLatency {
+class DuckLevel final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     explicit DuckLevel(const ModuleDescriptor& d) noexcept : d_(d) {}
     const ModuleDescriptor& descriptor() const noexcept override { return d_; }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
-        return count > kLLookahead ? levelLookahead(values[kLLookahead], rate()) : 0;
+        return count > kLLookahead && !armed() ? levelLookahead(values[kLLookahead], rate()) : 0;  // armed: none
+    }
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return count > kLLookahead && levelLookahead(values[kLLookahead], rate()) > 0;
     }
     // Asleep only once the look-ahead line has emptied too.
     uint64_t idleFrames() const noexcept override { return look_ + static_cast<uint64_t>(0.05 * rate()); }
@@ -145,7 +149,7 @@ protected:
         const double speed = param(kLSpeed, at);
         if (speed != speedFor_) speedFor_ = speed, speedCoef_ = lib::timeCoefficient(speed, stepCoefRate_);
         gate_ = param(kLGate, at);
-        look_ = levelLookahead(param(kLLookahead, at), rate());
+        look_ = armed() ? 0 : levelLookahead(param(kLLookahead, at), rate());
         // The momentary loudness of the last 400 ms (the block sums so far), and the gain's step toward the target.
         const double ms = sum_ / (static_cast<double>(window_) * kControlFrames);
         loudness_ = ms > 1e-12 ? -0.691 + 10.0 * std::log10(ms) : -120.0;
@@ -253,6 +257,7 @@ protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         count_ = 0;  // set up on the first control()
         sr_ = sampleRate;
+        sc_.bind(descriptor());
         return true;
     }
     void clearState() noexcept override {
@@ -261,6 +266,7 @@ protected:
         out_.reset();
         for (auto& s : dip_) std::fill(std::begin(s), std::end(s), 0.0f);
         keyMax_ = 0.0;
+        sc_.clear();
     }
     void control(uint32_t at) noexcept override {
         const uint32_t count = choice(kCBands, at) == 1 ? 24u : 16u;
@@ -283,6 +289,7 @@ protected:
         const double lo = std::log2(std::max(20.0, param(kCLow, at))), hi = std::log2(std::max(20.0, param(kCHigh, at)));
         mode_ = std::clamp(choice(kCStereo, at), 0, 2);
         listen_ = on(kCListen, at);
+        if (sc_.bound()) sc_.set(param(sc_.hp, at), param(sc_.lp, at), on(sc_.li, at), sr_);
         const int sides = mode_ == 0 ? 1 : 2;
         // Only the bands inside the window are measured (with half an octave either side for the edges).
         uint32_t first = count_, last = 0;
@@ -323,6 +330,7 @@ protected:
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const float* kl = keyLeft();
         const float* kr = keyRight();
+        sc_.apply(kl, kr, n);  // the sidechain filter (nothing while off)
         // The key's bands (no key: silence, so nothing dips).
         for (uint32_t i = 0; i < n; ++i) {
             const float l = kl ? static_cast<float>(caw::finiteOr0(kl[i])) : 0.0f, r = kr ? static_cast<float>(caw::finiteOr0(kr[i])) : 0.0f;  // a NaN never sticks
@@ -347,6 +355,7 @@ protected:
             outL[i] = l * o;
             outR[i] = r * o;
         }
+        if (sc_.listen) sc_.listenTo(kl, kr, outL, outR, n);
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         // [0] in peak, [1] out peak, [2] the key's peak, [3] band count, [4] the stereo mode, then each band's
@@ -439,6 +448,7 @@ private:
     Ramp out_;
     int mode_ = 0;
     bool listen_ = false;
+    SidechainFilter sc_;
 };
 
 const ModuleDescriptor& levelBase() {

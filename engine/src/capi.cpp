@@ -223,6 +223,29 @@ int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t 
     return 0;
 }
 
+int32_t caw_engine_component_cost(CawEngine* e, const char* layer_id, uint32_t index, CawSlotCost* out) try {
+    if (!e || !e->engine) return -1;
+    double share = -1.0;
+    uint32_t latency = 0;
+    bool armed = false;
+    const int32_t got = e->engine->componentCost(layer_id ? layer_id : "", index, share, latency, armed);
+    if (out && out->struct_size >= sizeof(uint32_t)) {
+        CawSlotCost c{};
+        c.struct_size = static_cast<uint32_t>(sizeof(CawSlotCost));
+        c.cpu_share = got == 1 ? static_cast<float>(share) : -1.0f;
+        c.latency_frames = got == 1 ? latency : 0;
+        const double rate = e->engine->sampleRate();
+        c.latency_ms = got == 1 && rate > 0 ? static_cast<float>(latency * 1000.0 / rate) : 0.0f;
+        c.armed = got == 1 && armed ? 1 : 0;
+        const uint32_t size = out->struct_size < sizeof(CawSlotCost) ? out->struct_size : static_cast<uint32_t>(sizeof(CawSlotCost));
+        c.struct_size = out->struct_size;  // the caller's size stays
+        std::memcpy(out, &c, size);
+    }
+    return got;
+} catch (...) {
+    return 0;
+}
+
 char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     if (!e || !e->engine) return nullptr;
     return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));

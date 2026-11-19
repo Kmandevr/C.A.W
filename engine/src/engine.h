@@ -144,6 +144,10 @@ public:
     // Per-slot output meter (1.0.8, API 39; ComponentChain::readSlotMeter): read and reset. 1, 0 busy, -1 none.
     // The instrument (kInstrumentIndex) has one too.
     int32_t componentMeter(const std::string& layerId, uint32_t index, float& peakL, float& peakR, bool& clipped);
+    // Per-slot cost and the armed badge (1.1.0, API 44; ComponentChain::readSlotCost, slotArmed): the slot's smoothed
+    // CPU share (-1 until measured; a read starts the timing), its latency now in frames, and whether it plays its
+    // armed (near-zero-delay) version. 1, 0 busy, -1 none. The instrument (kInstrumentIndex) has one too.
+    int32_t componentCost(const std::string& layerId, uint32_t index, double& share, uint32_t& latency, bool& armed);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // A send while it plays (send `index` of the layer's project "sends"): its level (linear, 0..+12 dB), pre- or
     // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets
