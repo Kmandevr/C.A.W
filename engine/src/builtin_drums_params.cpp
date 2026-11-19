@@ -54,6 +54,13 @@ constexpr std::string_view kModes[] = {"Kit", "Single"};
 constexpr std::string_view kGlobalChans[] = {"Any", "1", "2", "3", "4", "5", "6", "7", "8",
                                              "9", "10", "11", "12", "13", "14", "15", "16"};
 constexpr std::string_view kKitDrives[] = {"Off", "Soft", "Tape", "Hard", "Crush"};
+constexpr std::string_view kPhysModels[] = {"String", "Pipe", "Stiff string"};
+constexpr std::string_view kPhysExciters[] = {"Pluck", "Noise", "Layers"};
+constexpr std::string_view kTexModes[] = {"Bands", "Dust", "Crackle"};
+constexpr std::string_view kSwingGrids[] = {"1/16", "1/8"};
+constexpr std::string_view kAccentOns[] = {"Beats", "Bar starts", "Off-beats", "Loud hits"};
+constexpr std::string_view kGrooves[] = {"Off", "Shuffle", "Laid back", "Gallop", "Broken", "Half-time"};
+constexpr std::string_view kEchoSyncs[] = {"Free", "1/16", "1/8", "1/8 dotted", "1/4", "1/8 triplet"};
 
 // The note choices: Auto, Off, Any other, then every MIDI note (C4 = 60).
 struct NoteLabels {
@@ -270,6 +277,63 @@ const Spec* padSpecs() {
         {"rnd_pan", "Random pan", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_level", "Random level", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_pos", "Random strike position", "var", Kind::Num, 0, 1, 0, {}},
+
+        CHOICE("fm_on", "FM", "fm", 0, kOffOn),
+        {"fm_freq", "FM pitch", "fm", Kind::Exp, 20, 4000, 200, "Hz"},
+        {"fm_ratio", "FM ratio", "fm", Kind::Exp, 0.25, 16, 1.41, {}},
+        {"fm_index", "FM depth", "fm", Kind::Num, 0, 20, 3, {}},
+        {"fm_idecay", "FM depth decay", "fm", Kind::Exp, 0.002, 4, 0.08, "s"},
+        {"fm_feedback", "FM feedback", "fm", Kind::Num, 0, 1, 0, {}},
+        {"fm_pitch", "FM pitch drop", "fm", Kind::Num, 0, 48, 0, "st"},
+        {"fm_ptime", "FM drop time", "fm", Kind::Exp, 0.001, 1, 0.03, "s"},
+        {"fm_attack", "FM attack", "fm", Kind::Exp, 0.0001, 0.5, 0.0005, "s"},
+        {"fm_decay", "FM decay", "fm", Kind::Exp, 0.005, 10, 0.3, "s"},
+        {"fm_dcurve", "FM decay curve", "fm", Kind::Num, -1, 1, 0, {}},
+        {"fm_level", "FM level", "fm", Kind::Num, -60, 12, 0, "dB"},
+
+        CHOICE("phys_on", "Physical", "phys", 0, kOffOn),
+        CHOICE("phys_model", "Physical model", "phys", kPhysString, kPhysModels),
+        {"phys_freq", "Physical pitch", "phys", Kind::Exp, 30, 2000, 110, "Hz"},
+        {"phys_decay", "Physical decay", "phys", Kind::Exp, 0.02, 20, 1, "s"},
+        {"phys_damp", "Physical damping", "phys", Kind::Num, 0, 1, 0.4, {}},
+        {"phys_pick", "Pluck position", "phys", Kind::Num, 0, 1, 0.2, {}},
+        CHOICE("phys_exciter", "Physical exciter", "phys", kPhysPluck, kPhysExciters),
+        {"phys_input", "Layers into physical", "phys", Kind::Num, 0, 1, 0.3, {}},
+        {"phys_level", "Physical level", "phys", Kind::Num, -60, 12, 0, "dB"},
+
+        CHOICE("tex_on", "Texture", "tex", 0, kOffOn),
+        CHOICE("tex_mode", "Texture mode", "tex", kTexBands, kTexModes),
+        {"tex_freq", "Texture frequency", "tex", Kind::Exp, 40, 16000, 3000, "Hz"},
+        {"tex_spread", "Texture spread", "tex", Kind::Num, 0, 4, 1.5, "oct"},
+        {"tex_res", "Texture resonance", "tex", Kind::Num, 0, 1, 0.3, {}},
+        {"tex_tilt", "Texture tilt", "tex", Kind::Num, -1, 1, 0, {}},
+        {"tex_density", "Grain density", "tex", Kind::Exp, 10, 20000, 1500, "Hz"},
+        {"tex_attack", "Texture attack", "tex", Kind::Exp, 0.0001, 1, 0.001, "s"},
+        {"tex_decay", "Texture decay", "tex", Kind::Exp, 0.005, 10, 0.25, "s"},
+        {"tex_dcurve", "Texture decay curve", "tex", Kind::Num, -1, 1, 0, {}},
+        {"tex_level", "Texture level", "tex", Kind::Num, -60, 12, 0, "dB"},
+
+        {"smp_pitch", "Sample pitch drop", "smp", Kind::Num, 0, 48, 0, "st"},
+        {"smp_ptime", "Sample drop time", "smp", Kind::Exp, 0.001, 1, 0.05, "s"},
+        {"smp_hold", "Sample hold", "smp", Kind::Num, 0, 2, 0, "s"},
+        {"smp_dcurve", "Sample decay curve", "smp", Kind::Num, -1, 1, 0, {}},
+        {"smp_vel_start", "Velocity to start", "smp", Kind::Num, 0, 1, 0, {}},
+        {"smp_rnd_start", "Random start", "smp", Kind::Num, 0, 1, 0, {}},
+
+        {"ring_mix", "Ring mod", "fx", Kind::Num, 0, 1, 0, {}},
+        {"ring_freq", "Ring frequency", "fx", Kind::Exp, 20, 8000, 440, "Hz"},
+        {"echo_send", "Echo send", "fx", Kind::Num, 0, 1, 0, {}},
+        {"bus_send", "Kit bus send", "fx", Kind::Num, 0, 1, 1, {}},
+
+        {"swing", "Swing", "groove", Kind::Num, 0, 1, 0, {}},
+        CHOICE("swing_grid", "Swing grid", "groove", kGrid16, kSwingGrids),
+        {"humanize", "Humanize", "groove", Kind::Num, 0, 1, 0, {}},
+        {"accent", "Accent", "groove", Kind::Num, 0, 1, 0, {}},
+        CHOICE("accent_on", "Accent on", "groove", kAccentBeats, kAccentOns),
+        {"flam", "Flam", "groove", Kind::Num, 0, 1, 0, {}},
+        {"flam_time", "Flam time", "groove", Kind::Exp, 0.005, 0.06, 0.02, "s"},
+        CHOICE("groove", "Groove", "groove", kGrooveOff, kGrooves),
+        {"groove_amt", "Groove amount", "groove", Kind::Num, 0, 1, 1, {}},
     };
     return specs;
 }
@@ -300,6 +364,12 @@ const Spec* globalSpecs() {
         {"kit_high", "Kit high shelf", "eq", Kind::Num, -12, 12, 0, "dB"},
         CHOICE("kit_clip", "Kit clipper", "clip", kClipOff, kClips),
         {"kit_clip_gain", "Kit clipper drive", "clip", Kind::Num, 0, 24, 0, "dB"},
+        {"echo", "Echo", "echo", Kind::Num, 0, 1, 0, {}},
+        {"echo_time", "Echo time", "echo", Kind::Exp, 0.01, 2, 0.375, "s"},
+        CHOICE("echo_sync", "Echo sync", "echo", kEcho8Dotted, kEchoSyncs),
+        {"echo_feedback", "Echo feedback", "echo", Kind::Num, 0, 0.95, 0.35, {}},
+        {"echo_tone", "Echo tone", "echo", Kind::Exp, 500, 16000, 5000, "Hz"},
+        {"echo_spread", "Echo spread", "echo", Kind::Num, 0, 1, 0.6, {}},
     };
     return specs;
 }
@@ -417,6 +487,80 @@ double constrainPad(uint32_t p, double v) {
     v = v < s.lo ? s.lo : (v > s.hi ? s.hi : v);
     if (s.kind == Kind::Choice || s.kind == Kind::Whole) v = std::floor(v + 0.5);
     return v;
+}
+
+const std::vector<NeedRule>& needs() {
+    static const std::vector<NeedRule> rules = [] {
+        std::vector<NeedRule> r;
+        auto add = [&](uint32_t p, std::vector<Need> all, bool global = false) { r.push_back({p, global, std::move(all)}); };
+        const Need nz = {0, false, {}};
+        auto on = [](uint32_t p) { return Need{p, false, {1}}; };
+        auto in = [](uint32_t p, std::vector<int> v) { return Need{p, false, std::move(v)}; };
+        auto nonzero = [&](uint32_t p) { Need n = nz; n.param = p; return n; };
+        // A layer's settings need it on (its power is a "<layer>_on" choice).
+        const Spec* s = padSpecs();
+        for (uint32_t k = 0; k < kPadParams; ++k) {
+            const std::string_view layer = s[k].layer;
+            uint32_t power = kPadParams;
+            for (uint32_t j = 0; j < kPadParams; ++j)
+                if (s[j].layer == layer && s[j].suffix.size() == layer.size() + 3 && s[j].suffix.substr(0, layer.size()) == layer &&
+                    s[j].suffix.substr(layer.size()) == "_on")
+                    power = j;
+            if (layer == "penv") power = kBodyOn;
+            if (power == kPadParams || power == k || k == kBodyFreq) continue;  // body_freq: the sub's pitch too
+            std::vector<Need> all = {on(power)};
+            if (layer == "penv" && k != kPenvMode) all.push_back(in(kPenvMode, {kPenvPoints}));
+            if (k == kBodyPTime || k == kBodyPCurve) all.push_back(in(kPenvMode, {kPenvCurve}));
+            if (k == kBodyP2Ratio) all.push_back(nonzero(kBodyP2Level));
+            if (k == kSubFollow) all.push_back(on(kBodyOn));
+            if (k == kNoiseBursts || k == kNoiseSpacing) all.push_back(in(kNoiseMode, {kNoiseClap}));
+            if (k == kNoiseRes) all.push_back(in(kNoiseFilter, {kFilterLp, kFilterBp, kFilterHp}));
+            if (k == kMetalFm) all.push_back(in(kMetalMode, {kMetalFmPairs}));
+            if (k == kMetalColor) all.push_back(nonzero(kMetalBand));
+            if (k == kPhysInput) all.push_back(in(kPhysExciter, {kPhysLayers}));
+            if (k == kTexDensity) all.push_back(in(kTexMode, {kTexDust, kTexCrackle}));
+            if (k == kTexSpread || k == kTexTilt) all.push_back(in(kTexMode, {kTexBands}));
+            if (k == kSmpPTime) all.push_back(nonzero(kSmpPitch));
+            add(k, all);
+        }
+        const std::vector<int> drives = {1, 2, 3, 4, 5, 6, 7, 8}, filters = {1, 2, 3, 4};
+        for (uint32_t k : {kDrive, kDriveLo, kDriveHi, kDriveMix, kPressDrive}) add(k, {in(kDriveType, drives)});
+        add(PadParam::kDrivePos, {in(kDriveType, drives), in(kFlt, filters)});
+        for (uint32_t k : {kCutoff, kFltEnv}) add(k, {in(kFlt, filters)});
+        add(kFltRes, {in(kFlt, {kVfLp12, kVfHp, kVfBp})});
+        add(kFltDecay, {in(kFlt, filters), nonzero(kFltEnv)});
+        add(kEqLowFreq, {nonzero(kEqLow)});
+        add(kEqFreq, {nonzero(kEqMid)});
+        add(kEqQ, {nonzero(kEqMid)});
+        add(kEqHighFreq, {nonzero(kEqHigh)});
+        add(kCompAttack, {nonzero(kComp)});
+        add(kCompRelease, {nonzero(kComp)});
+        add(kClipGain, {in(kClip, {kClipSoft, kClipHard})});
+        add(kWidthHz, {nonzero(kWidth)});
+        add(kRoomSend, {Need{kRoom, true, {}}});
+        add(kEchoSend, {Need{kEcho, true, {}}});
+        add(kRingFreq, {nonzero(kRingMix)});
+        add(kGlide, {on(kMono), on(kTrack)});
+        add(kRoot, {on(kTrack)});
+        add(kRelease, {in(kTrig, {kGate})});
+        add(kVelPunch, {on(kBodyOn)});
+        add(kVelClick, {on(kClickOn)});
+        add(kRndPos, {on(kResOn)});
+        add(kSwingGrid, {nonzero(kSwing)});
+        add(kAccentOn, {nonzero(kAccent)});
+        add(kFlamTime, {nonzero(kFlam)});
+        add(kGrooveAmt, {in(kGroove, {1, 2, 3, 4, 5})});
+        // Kit-wide.
+        auto g = [](uint32_t p, std::vector<int> v = {}) { return Need{p, true, std::move(v)}; };
+        for (uint32_t k : {kGlueThreshold, kGlueRatio, kGlueAttack, kGlueRelease, kGlueMakeup}) add(k, {g(kGlue)}, true);
+        for (uint32_t k : {kKitDrive, kKitDriveMix}) add(k, {g(kKitDriveType, {1, 2, 3, 4})}, true);
+        for (uint32_t k : {kRoomSize, kRoomDecay, kRoomDamping, kRoomPredelay}) add(k, {g(kRoom)}, true);
+        add(kKitClipGain, {g(kKitClip, {1, 2})}, true);
+        for (uint32_t k : {kEchoSync, kEchoFeedback, kEchoTone, kEchoSpread}) add(k, {g(kEcho)}, true);
+        add(kEchoTime, {g(kEcho), g(kEchoSync, {kEchoFree})}, true);
+        return r;
+    }();
+    return rules;
 }
 
 std::string_view typeName(int type) { return type >= 0 && type < kTypeCount ? kTypes[type] : std::string_view("Perc"); }

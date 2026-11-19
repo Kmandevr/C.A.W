@@ -229,13 +229,13 @@ const char* kBusy =
 
 }  // namespace
 
-TEST(drums_descriptor_has_64_pads_of_162_grouped_parameters) {
+TEST(drums_descriptor_has_64_pads_of_213_grouped_parameters) {
     std::unique_ptr<ModuleProcessor> p = makeDrums();
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.drums"));
     CHECK_EQ(d.name, std::string_view("Drums"));
-    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 162u);
+    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 213u);
     CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
     CHECK_EQ(d.parameters[0].id, std::string_view("mode"));
     CHECK_EQ(d.parameters[padParam(0, kBodyFreq)].id, std::string_view("a1_body_freq"));
@@ -505,6 +505,12 @@ TEST(drums_presets_sound_like_their_names) {
         {"Conga", 180, 240, 0.1, 0.6, 0, 2500},          {"Bongo", 350, 460, 0.05, 0.4, 0, 3500},
         {"Woodblock", 950, 1250, 0.02, 0.3, 700, 6000},  {"Clave", 2200, 2800, 0.01, 0.3, 1500, 6000},
         {"Triangle", 1450, 1750, 0.8, 4.0, 1000, 12000}, {"Zap", 0, 0, 0.05, 0.6, 0, 3000},
+        // 1.1.0: the FM, physical and texture layers
+        {"FM Kick", 40, 65, 0.3, 1.4, 0, 400},           {"FM Tom", 105, 140, 0.15, 0.8, 0, 1500},
+        {"FM Bell", 0, 0, 0.6, 4.0, 1500, 6000},          {"Log Drum", 115, 145, 0.08, 0.6, 0, 2000},
+        {"Plucked Tom", 88, 110, 0.15, 1.2, 0, 2500},    {"Kalimba", 480, 570, 0.3, 3.0, 400, 6000},
+        {"Pipe Knock", 0, 0, 0.08, 1.0, 300, 3000},      {"Brush Snare", 0, 0, 0.1, 0.8, 1000, 8000},
+        {"Rain Shaker", 0, 0, 0.05, 0.6, 3000, 14000},   {"Gravel Step", 0, 0, 0.03, 0.4, 200, 6000},
     };
     const bool print = std::getenv("CAW_PRINT_DRUMS") != nullptr;
     const char* wavs = std::getenv("CAW_DRUM_WAVS");
@@ -623,10 +629,10 @@ TEST(drums_info_and_explode) {
     CHECK(parseJson(info, j, err));
     caw_free(info);
     CHECK_EQ(j.number("pads", 0), 64.0);
-    CHECK_EQ(j.number("pad_parameters", 0), 162.0);
+    CHECK_EQ(j.number("pad_parameters", 0), 213.0);
     CHECK(j.get("sounds") && j.get("sounds")->arr.size() >= 40);
-    CHECK(j.get("kits") && j.get("kits")->arr.size() == 6);
-    CHECK(j.get("layers") && j.get("layers")->arr.size() == 17);
+    CHECK(j.get("kits") && j.get("kits")->arr.size() == 22);
+    CHECK(j.get("layers") && j.get("layers")->arr.size() == 22);
     CHECK(j.get("gm") && j.get("gm")->arr.front().number("note", 0) == 35.0);
     // The default kit explodes into its 16 bank-A pads, each a Single-mode Drums with that pad's sound on A1.
     char* x = caw_drums_explode(R"({"id":"org.caw.drums","params":{"a3_note":3,"a5_level":-60},"samples":[{"slot":2,"builtin":"Clap"}]})");

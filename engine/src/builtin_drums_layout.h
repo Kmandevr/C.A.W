@@ -23,6 +23,8 @@ enum GlobalParam : uint32_t {
     kKitDriveType, kKitDrive, kKitDriveMix,
     kRoom, kRoomSize, kRoomDecay, kRoomDamping, kRoomPredelay,
     kKitLow, kKitHigh, kKitClip, kKitClipGain,
+    // 1.1.0, appended: the kit's echo, a send bus as the room is
+    kEcho, kEchoTime, kEchoSync, kEchoFeedback, kEchoTone, kEchoSpread,
     kGlobalCount
 };
 
@@ -67,9 +69,24 @@ enum PadParam : uint32_t {
     // variation
     kVelLevel, kVelPitch, kVelDecay, kVelTone, kVelClick, kVelPunch, kRndPitch, kRndDecay, kRndTone, kRndPan, kRndLevel,
     kRndPos,
+    // ---- 1.1.0, appended (saved values keep their meaning; at their defaults a pad sounds as before) ----
+    // fm: a two-operator FM tone (a modulator with feedback, its index falling on its own envelope)
+    kFmOn, kFmFreq, kFmRatio, kFmIndex, kFmIDecay, kFmFeedback, kFmPitch, kFmPTime, kFmAttack, kFmDecay, kFmDCurve,
+    kFmLevel,
+    // phys: a plucked or blown waveguide (string, pipe, stiff string)
+    kPhysOn, kPhysModel, kPhysFreq, kPhysDecay, kPhysDamp, kPhysPick, kPhysExciter, kPhysInput, kPhysLevel,
+    // tex: shaped noise (two resonant bands, sparse dust or crackle)
+    kTexOn, kTexMode, kTexFreq, kTexSpread, kTexRes, kTexTilt, kTexDensity, kTexAttack, kTexDecay, kTexDCurve, kTexLevel,
+    // smp, more: a pitch drop, hold and curve, and where a hit starts
+    kSmpPitch, kSmpPTime, kSmpHold, kSmpDCurve, kSmpVelStart, kSmpRndStart,
+    // fx: a ring modulator, and the sends to the kit's echo and its bus (glue and kit drive)
+    kRingMix, kRingFreq, kEchoSend, kBusSend,
+    // groove: timing and dynamics, seeded and deterministic
+    kSwing, kSwingGrid, kHumanize, kAccent, kAccentOn, kFlam, kFlamTime, kGroove, kGrooveAmt,
     kPadParams
 };
-static_assert(kPadParams == 162, "the pad layout is documented in docs/engine.md");
+static_assert(kPadParams == 213, "the pad layout is documented in docs/engine.md");
+inline constexpr uint32_t kPadParams110 = kRndPos + 1;  // the pad's parameters before 1.1.0 (162)
 inline constexpr uint32_t kParamCount = kGlobalCount + kPads * kPadParams;
 
 constexpr uint32_t padParam(uint32_t pad, uint32_t p) noexcept { return kGlobalCount + pad * kPadParams + p; }
@@ -97,6 +114,28 @@ enum SubWave : int { kSubSine, kSubTriangle, kSubWarm };
 enum SubRoute : int { kSubClean, kSubThroughFx };
 enum ClipType : int { kClipOff, kClipSoft, kClipHard };
 enum TrigMode : int { kOneShot, kGate };
+enum PhysModel : int { kPhysString, kPhysPipe, kPhysStiff };
+enum PhysExciter : int { kPhysPluck, kPhysNoise, kPhysLayers };
+enum TexMode : int { kTexBands, kTexDust, kTexCrackle };
+enum SwingGrid : int { kGrid16, kGrid8 };
+enum AccentOn : int { kAccentBeats, kAccentBars, kAccentOffbeats, kAccentLoud };
+enum GrooveKind : int { kGrooveOff, kGrooveShuffle, kGrooveLaidBack, kGrooveGallop, kGrooveBroken, kGrooveHalfTime,
+                        kGrooveCount };
+enum EchoSync : int { kEchoFree, kEcho16, kEcho8, kEcho8Dotted, kEcho4, kEcho8Triplet };
+
+// When a setting is heard (the app dims it otherwise; drums_audit_test checks both ways): every condition must hold.
+// A condition is on a pad parameter (or, `global`, a kit-wide one): non-zero, or one of `in`.
+struct Need {
+    uint32_t param;
+    bool global;
+    std::vector<int> in;  // empty: non-zero
+};
+struct NeedRule {
+    uint32_t param;  // a pad parameter (PadParam), or a global one when `global`
+    bool global;
+    std::vector<Need> all;
+};
+const std::vector<NeedRule>& needs();
 
 // "a1" .. "d16" and "A1" .. "D16".
 std::string padId(uint32_t pad);
