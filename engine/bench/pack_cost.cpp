@@ -98,12 +98,17 @@ struct Case {
 int packCost(double seconds) {
     const char* murmur = "org.caw.pack.granular";
     const size_t mb = fx::murmurBytes(kRate);
+    const char* peck = "org.caw.pack.glitch";
+    const size_t pb = fx::peckBytes(kRate);
     const Case cases[] = {
         {"Murmur: default (80 ms, 20 Hz)", murmur, {}, mb, 8000},
         {"Murmur: dense, Normal cap 32", murmur, {{"size", 300}, {"density", 150}, {"spray", 50}}, mb, 24000},
         {"Murmur: dense, Eco cap 16 (linear)", murmur, {{"size", 300}, {"density", 150}, {"spray", 50}}, mb, 8000, kQualityEco},
         {"Murmur: dense, High cap 64", murmur, {{"size", 500}, {"density", 200}, {"spray", 50}}, mb, 24000, kQualityHigh},
         {"Murmur: frozen, scanning, fed back", murmur, {{"freeze", 1}, {"scan", 0.5}, {"feedback", 0.5}, {"size", 200}, {"density", 40}}, mb, 8000},
+        {"Peck: default (1/16, chaos 0.35)", peck, {}, pb, 2000},
+        {"Peck: every slice, 1/32, pitch heavy", peck, {{"chaos", 1}, {"grid", 0}, {"pitch", 1}, {"repeat", 0.2}}, pb, 2000},
+        {"Peck: held", peck, {{"hold", 1}}, pb, 2000},
     };
     int over = 0;
     std::printf("AutoStacc beta pack (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");

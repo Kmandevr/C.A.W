@@ -21,6 +21,7 @@ using namespace modes_test;
 namespace {
 
 constexpr const char* kMurmur = "org.caw.pack.granular";
+constexpr const char* kPeck = "org.caw.pack.glitch";
 
 // The error of `out` against `want` delayed by `lag`, from `from` on, in dB of `want`'s power.
 double errorDb(const Stereo& out, const Stereo& want, size_t lag, size_t from) {
@@ -77,7 +78,7 @@ void checkPackPresets(const char* id, size_t least, const Stereo& in) {
 TEST(pack_devices_are_marked_as_the_autostacc_beta_pack) {
     Engine e(48000);
     const std::string json = e.nativeComponentsJson();
-    for (const char* id : {kMurmur}) {
+    for (const char* id : {kMurmur, kPeck}) {
         CHECK(fx::packOf(id) == "autostacc-beta");
         const size_t at = json.find(std::string("\"id\":\"") + id + "\"");
         CHECK(at != std::string::npos);
@@ -216,4 +217,137 @@ TEST(murmur_matches_its_reference_renders) {
     check("murmur_default", {});
     check("murmur_scatter", {{"spray", 150}, {"spread", 12}, {"scale", 5}, {"reverse", 0.4}, {"pan", 0.8}, {"mix", 1}});
     check("murmur_freeze", {{"buffer", 0.5}, {"freeze", 1}, {"size", 200}, {"density", 30}, {"mix", 1}});
+}
+
+namespace {
+// A run of `p` over `in` with the song playing from beat 0 at 120 BPM (the grid locked to it).
+Stereo runPlaying(ModuleProcessor& p, const Stereo& in, const Values& values, uint32_t block = 64) {
+    const ModuleDescriptor& d = p.descriptor();
+    std::vector<ParameterValue> params(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) {
+        params[k].value = d.parameters[k].defaultValue;
+        for (const auto& [id, v] : values)
+            if (d.parameters[k].id == id) params[k].value = v;
+    }
+    Stereo out = silence(in.size());
+    Transport tr;
+    tr.playing = true;
+    tr.tempo = 120;
+    for (size_t start = 0; start < in.size(); start += block) {
+        const uint32_t n = static_cast<uint32_t>(std::min<size_t>(block, in.size() - start));
+        const float* ic[2] = {in.l.data() + start, in.r.data() + start};
+        float* oc[2] = {out.l.data() + start, out.r.data() + start};
+        tr.beat = static_cast<double>(start) * 2.0 / 48000.0;
+        AudioProcessBlock b;
+        b.input = {ic, 2, n};
+        b.output = {oc, 2, n};
+        b.frames = n;
+        b.sampleRate = 48000;
+        b.parameters = params.data();
+        b.parameterCount = d.parameterCount;
+        b.transport = &tr;
+        CHECK(p.process(b));
+    }
+    return out;
+}
+// A ramp: frame i is i / n (each frame tells where it came from).
+Stereo ramp(size_t n) {
+    Stereo s = silence(n);
+    for (size_t i = 0; i < n; ++i) s.l[i] = s.r[i] = static_cast<float>(static_cast<double>(i) / static_cast<double>(n));
+    return s;
+}
+}  // namespace
+
+TEST(peck_chaos_0_passes_the_input_and_each_action_does_its_job) {
+    const Stereo in = music(48000);
+    const Stereo out = render(kPeck, {{"chaos", 0}}, in);
+    CHECK(same(out, in));
+    // At 120 BPM a sixteenth is 6000 frames. With only one action weighted and chaos 1, every slice does it.
+    const size_t L = 6000;
+    const Stereo r = ramp(48000 * 2);
+    auto only = [](const char* action) {
+        Values v = {{"chaos", 1}, {"repeat", 0}, {"stutter", 0}, {"reverse", 0}, {"gate", 0}, {"pitch", 0}, {"smooth", 0.5}};
+        for (auto& [k, x] : v)
+            if (k == action) x = 1;
+        return v;
+    };
+    auto p = make(kPeck, only("repeat"));
+    if (!p) return;
+    Stereo o = runPlaying(*p, r, only("repeat"));
+    // Repeat: the middle of slice 3 plays the middle of slice 2.
+    CHECK(std::fabs(o.l[3 * L + L / 2] - r.l[2 * L + L / 2]) < 1e-6);
+    p = make(kPeck, only("reverse"));
+    o = runPlaying(*p, r, only("reverse"));
+    CHECK(std::fabs(o.l[3 * L + 1000] - r.l[3 * L - 1 - 1000]) < 1e-6);
+    p = make(kPeck, only("gate"));
+    o = runPlaying(*p, r, only("gate"));
+    bool closed = false;
+    for (size_t s = 2; s < 8; ++s) closed = closed || std::fabs(o.l[s * L + L * 7 / 8 - 200]) < 1e-9;
+    CHECK(closed);
+    // Stutter: the slice's first 1/N comes back: frame sub + 10 equals frame 10 of the slice.
+    p = make(kPeck, only("stutter"));
+    o = runPlaying(*p, r, only("stutter"));
+    const std::vector<float> d = display(*p);
+    CHECK(d.size() == 40);
+    bool repeated = false;
+    for (int n : {2, 3, 4}) repeated = repeated || std::fabs(o.l[5 * L + L / n + 100] - r.l[5 * L + 100]) < 1e-6;
+    CHECK(repeated);
+    // Pitch: a 1 kHz tone moves by whole semitones (energy leaves 1 kHz in most slices).
+    p = make(kPeck, only("pitch"));
+    const Stereo tone = sine(1000, 0.3, 48000 * 2);
+    o = runPlaying(*p, tone, only("pitch"));
+    CHECK(goertzelDb(o.l, 1000, 6000, 96000) < goertzelDb(tone.l, 1000, 6000, 96000) - 6.0);
+}
+
+TEST(peck_plays_the_same_glitches_wherever_playback_starts_and_shows_them_first) {
+    const Values v = {{"chaos", 0.6}, {"seed", 9}};
+    const Stereo in = music(48000 * 2);
+    auto a = make(kPeck, v);
+    if (!a) return;
+    runPlaying(*a, in, v);
+    const std::vector<float> lane = display(*a);
+    // The lane shows a bar of plans: a fresh instance shows the same plans for the same bar.
+    auto b = make(kPeck, v);
+    runPlaying(*b, in, v);
+    CHECK(display(*b) == lane);
+    // Seeds differ: the plans differ.
+    Values w = v;
+    w[1].second = 10;
+    auto c = make(kPeck, w);
+    runPlaying(*c, in, w);
+    const std::vector<float> other = display(*c);
+    CHECK(other.size() == 40 && !std::equal(other.begin() + 8, other.end(), lane.begin() + 8));
+}
+
+TEST(peck_hold_repeats_the_slice_before_it) {
+    const Stereo r = ramp(48000);
+    const Values v = {{"hold", 1}, {"smooth", 0.5}};
+    auto p = make(kPeck, v);
+    if (!p) return;
+    const Stereo o = runPlaying(*p, r, v);
+    // Every slice after the first plays the one before the hold (slice -1, silent before the start) or loops it.
+    CHECK(std::fabs(o.l[6000 * 4 + 300] - o.l[6000 * 5 + 300]) < 1e-6);
+    CHECK(display(*p).at(6) == 1.0f);
+}
+
+TEST(peck_is_block_size_independent_and_survives_bad_input) {
+    const Stereo in = music(48000);
+    const Values all[] = {{}, {{"chaos", 1}, {"grid", 0}}, {{"chaos", 0.8}, {"pitch", 1}, {"range", 24}, {"grid", 3}}};
+    for (size_t k = 0; k < std::size(all); ++k) {
+        checkBlockSizes(kPeck, all[k], in, "peck " + std::to_string(k));
+        checkBadInput(kPeck, all[k], "peck " + std::to_string(k));
+    }
+}
+
+TEST(peck_presets_render) { checkPackPresets(kPeck, 8, music(48000 * 2)); }
+
+TEST(peck_matches_its_reference_renders) {
+    const Stereo in = music(48000 * 2);
+    cawtest::References refs("pack_peck");
+    auto check = [&](const char* name, const Values& v) {
+        const Stereo out = render(kPeck, v, in);
+        CHECK_REFERENCE(refs, name, (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);
+    };
+    check("peck_default", {});
+    check("peck_chaos", {{"chaos", 1}, {"grid", 0}, {"range", 7}});
 }
