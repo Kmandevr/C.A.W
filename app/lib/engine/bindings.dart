@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 41;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 42;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -521,6 +521,33 @@ class Bindings {
           Pointer<Utf8>, Pointer<Utf8>, Int32),
       int Function(Pointer<Utf8>, Pointer<CawTempoPointStruct>, int, Pointer<CawTimeSigStruct>, int, int, Pointer<Utf8>,
           Pointer<Utf8>, int)>('caw_pattern_export_song');
+
+  // API 42: the clip pitch editor's engine (Lark; caw.h). Call these off the UI isolate (Isolate.run): they
+  // allocate and work through a whole clip. No UI uses them yet.
+  /// caw_pitch_clip_analyse(left, right or null, frames, sample_rate, options JSON or null, out clip): the notes as
+  /// JSON (free with [free]); `*out` is the clip handle, or null on failure.
+  late final Pointer<Utf8> Function(Pointer<Float>, Pointer<Float>, int, int, Pointer<Utf8>, Pointer<Pointer<Void>>)
+      pitchClipAnalyse = _lib.lookupFunction<
+          Pointer<Utf8> Function(Pointer<Float>, Pointer<Float>, Int64, Int32, Pointer<Utf8>, Pointer<Pointer<Void>>),
+          Pointer<Utf8> Function(Pointer<Float>, Pointer<Float>, int, int, Pointer<Utf8>, Pointer<Pointer<Void>>)>(
+          'caw_pitch_clip_analyse');
+  /// caw_pitch_clip_curve(clip, midi, voicing, rms_db, max): copies up to max hops (any pointer may be null) and
+  /// returns the hop count (-1: no clip).
+  late final int Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Pointer<Float>, int) pitchClipCurve =
+      _lib.lookupFunction<Int64 Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Pointer<Float>, Int64),
+          int Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Pointer<Float>, int)>('caw_pitch_clip_curve');
+  /// caw_pitch_clip_render(clip, left, right or null, frames, edits JSON or null, out_left, out_right): the result
+  /// JSON (free with [free]).
+  late final Pointer<Utf8> Function(
+          Pointer<Void>, Pointer<Float>, Pointer<Float>, int, Pointer<Utf8>, Pointer<Float>, Pointer<Float>)
+      pitchClipRender = _lib.lookupFunction<
+          Pointer<Utf8> Function(
+              Pointer<Void>, Pointer<Float>, Pointer<Float>, Int64, Pointer<Utf8>, Pointer<Float>, Pointer<Float>),
+          Pointer<Utf8> Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, int, Pointer<Utf8>, Pointer<Float>,
+              Pointer<Float>)>('caw_pitch_clip_render');
+  /// caw_pitch_clip_free(clip).
+  late final void Function(Pointer<Void>) pitchClipFree =
+      _lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_pitch_clip_free');
 
   static Bindings get instance => _instance ??= Bindings._(DynamicLibrary.open(engineLibraryPath()));
 

@@ -1,10 +1,13 @@
 // Tempo detection and slices through the real engine (API 32, #208; needs CAW_LIB): a click track's tempo and its
-// transients come back over dart:ffi from a worker isolate.
+// transients come back over dart:ffi from a worker isolate; the clip pitch editor's engine (API 42) binds.
+import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:caw/engine/bindings.dart';
+import 'package:ffi/ffi.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/audio_analysis.dart';
@@ -49,7 +52,7 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('caw-analysis'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  test('the bindings carry API 41', () => expect(cawApiVersion, 41));
+  test('the bindings carry API 42', () => expect(cawApiVersion, 42));
 
   test('a click track at 128 BPM is detected, and its clicks are the slices', () async {
     final e = Engine.create();
@@ -100,6 +103,38 @@ void main() {
       s.engine = null;
       s.dispose();
       e.dispose();
+    }
+  }, skip: skip);
+  test('the clip pitch editor analyses a held note and renders an edit (API 42)', () {
+    final b = Bindings.instance;
+    const frames = 48000;
+    final left = calloc<Float>(frames), outL = calloc<Float>(frames);
+    final clip = calloc<Pointer<Void>>();
+    try {
+      for (var i = 0; i < frames; ++i) {
+        var v = 0.0;
+        for (var k = 1; k <= 8; ++k) v += math.cos(2 * math.pi * k * 220.0 * i / 48000) / k;
+        left[i] = 0.2 * v;
+      }
+      final r = b.pitchClipAnalyse(left, nullptr, frames, 48000, nullptr, clip);
+      final notes = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+      b.free(r);
+      expect(notes['ok'], isTrue, reason: '${notes['error']}');
+      expect((notes['notes'] as List).length, 1);
+      expect(((notes['notes'] as List)[0] as Map)['pitch'] as num, closeTo(57, 0.05));
+      expect(b.pitchClipCurve(clip.value, nullptr, nullptr, nullptr, 0), greaterThan(100));
+      final edits = '{"edits":[{"note":0,"pitch":2}]}'.toNativeUtf8();
+      final out = b.pitchClipRender(clip.value, left, nullptr, frames, edits, outL, nullptr);
+      calloc.free(edits);
+      final done = jsonDecode(out.toDartString()) as Map<String, dynamic>;
+      b.free(out);
+      expect(done['ok'], isTrue, reason: '${done['error']}');
+      expect(done['notes_edited'], 1);
+    } finally {
+      if (clip.value != nullptr) b.pitchClipFree(clip.value);
+      calloc.free(clip);
+      calloc.free(left);
+      calloc.free(outL);
     }
   }, skip: skip);
 }
