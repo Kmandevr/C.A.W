@@ -1,21 +1,28 @@
 # Handoff
 
-Commit: 9eedcc0 (Main: v1.0.6-alpha.1 published; 1.0.7 silent work merged through PR #252)
-Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Plans, the vision and feature tasks live in the private Kmandevr/AutoStacc-Hub (docs/caw/, its Issues); this repository's Issues are public bugs only.
+Commit: b0228c1 (Main: v1.0.8-alpha.1 released 2026-11-19, PR #255 merged as 78c994b)
+Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Plans live in the private Kmandevr/AutoStacc-Hub (`docs/caw/`); the 1.1.0 plan is `docs/caw/sound-plan.md`.
 
 ## Goal
-1.0.7: security and the AutoStacc Hub (owner, 2026-11-18), plus silent groundwork. The Hub is AutoStacc's app and C.A.W's companion, package `com.autostacc.hub`, in the private repo.
+1. **1.0.9:** a performance release (owner, 2026-11-19).
+   - Keep the audio core fast on the S22+: its performance hint is unsupported, so live playback spikes at a 634 MHz clock.
+   - Remove one-off spikes and the 13 ms cold first callback.
+   - Make the Benchmark fair: warm-up, clock and heat recorded, results adjusted for clock.
+   - Make Flagship, EQ and Compressor cheaper.
+   - After release, ask the owner to rerun the S22+ Benchmark.
+2. **1.1.0:** the effects and instruments suite, names, theme, personality and Easter eggs (all in the private plan). Engine work starts where it doesn't touch 1.0.9's files.
 
-## Done and verified
-- General mixer routing, engine and app model, no screens (owner: engine only for now); C API 36; file version 6 only when used. Checks: `ctest` 11/11, `CAW_LIB=… flutter test` 2372, every CI job green on PR #252.
-- C.A.W accepts the Hub only by its pinned certificate (`HUB_CERT_SHA256`, empty = none), binds with `BIND_ALLOW_ACTIVITY_STARTS` on Android 14+. Security review: nothing exploitable.
-- The Hub's first Android build (service + site window) in the Hub repo, reviewed and hardened; its tests and builds pass locally.
+## In progress (local worktrees under `.claude/worktrees/`, unpushed; merge each into the session branch and push as soon as it reports)
+- **perf-live:** platform core speed (stabilizer), spikes, Benchmark fairness.
+- **perf-dsp:** Flagship, EQ, Compressor optimisation; the sound must not change.
+- **dsp-drive:** 1.1.0 Delay, Reverb, Drive, Bits and Cab modes.
+- **dsp-tools:** 1.1.0 MIDI effects, Meters, Lo-fi, Phase align.
 
-## Open
-- Owner: the Hub's signing key and secrets, `CAW_CERT_SHA256` (Hub) and `HUB_CERT_SHA256` (C.A.W) variables, an icon; which release channel the Hub installs; a foreground service for long downloads.
-- First device test once the keys exist: a wrongly signed Hub is refused; an update installs through the Hub.
-- #251 (music video switches erase manual work), #20 (keyboard Backspace).
+If a worktree is gone after a container restart, its agent's work is lost: re-run that part from the plan.
 
 ## Next
-1. Wait for the owner's keys and answers; then run the Hub's Actions build and test on the S22+.
-2. Other 1.0.7 work from the private roadmap.
+- Merge each finished part; run `ctest` and the full `CAW_LIB=… flutter test` (roll_preview flakes under load; rerun it alone).
+- Then the 1.0.9 version bump, CHANGELOG, PR and release.
+- The PR also fixes public `docs/decisions.md`: the Hub goes into use with 1.2.0, not 1.1.0.
+- Then the rest of 1.1.0: Talon, Gate and Duck split with migration; Plume's dynamic EQ; Raven's synthesis; the instruments (Raven layout for all); the pages; names and tags.
+- A recurring check-in (every 5 hours) resumes work after usage resets.
