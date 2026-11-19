@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cstring>
 #include <deque>
+#include <mutex>
 #include <filesystem>
 #include <new>
 #include <utility>
@@ -27,6 +28,7 @@
 #include "caw_component.h"
 #include "component_profile.h"
 #include "json.h"
+#include "library_warm.h"
 #include "scan/scan_file.h"
 
 namespace caw {
@@ -102,6 +104,14 @@ struct ComponentFile {
         }
     }
 };
+
+static std::mutex gLastWarmMutex;
+static LibraryWarmStats gLastWarm;
+
+static void rememberLibraryWarm(const LibraryWarmStats& stats) {
+    std::lock_guard<std::mutex> lock(gLastWarmMutex);
+    gLastWarm = stats;
+}
 
 struct NativeLibrary {
 #ifdef _WIN32
@@ -646,6 +656,9 @@ ModuleLoadResult ModuleRegistry::openScanned(const std::string& path, ComponentF
         if (!entry)
             return {false, ModuleLoadError::MissingEntryPoint, std::string(expectedId),
                     "The library does not export caw_get_component_v3 (build it with this C.A.W. SDK)."};
+        // Its code and read-only data paged in here, on the control thread, so the audio thread's first call into
+        // it does not wait on page faults (library_warm.h). Never fails the load.
+        rememberLibraryWarm(warmLibrary(reinterpret_cast<const void*>(entry)));
         // A library may be a bundle: take the component with the expected id, checking each entry's
         // version and sizes before reading its id.
         const CawComponentV3* table = nullptr;
@@ -1011,6 +1024,11 @@ std::unique_ptr<ModuleProcessor> ModuleRegistry::createDualMono(std::string_view
     } catch (...) {
         return {};
     }
+}
+
+LibraryWarmStats lastLibraryWarmForTest() noexcept {
+    std::lock_guard<std::mutex> lock(gLastWarmMutex);
+    return gLastWarm;
 }
 
 }  // namespace caw
