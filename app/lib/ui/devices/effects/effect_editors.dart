@@ -20,6 +20,7 @@ import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'space/cab_device.dart';
 import 'tools/tools_devices.dart';
+import 'voice/voice_devices.dart' show voiceEditors;
 import 'space/space_fx.dart'; // fx-space
 import 'space/space_devices.dart' show fxSpaceMergedEditors; // fx-space
 import 'utility_editors.dart';
@@ -92,6 +93,7 @@ final Map<String, DeviceEditorEntry> _byId = {
   ...filtersEditors,
   // fx-filters end
   ...toolsEditors,  // Meters, Lo-fi, Phase align (1.1.0)
+  ...voiceEditors,  // Glint, Mimic, Preen, Hush (1.1.0)
   // fx-racks begin
   ...rackEditors,
   // fx-racks end

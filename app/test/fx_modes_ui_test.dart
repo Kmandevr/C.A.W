@@ -12,6 +12,7 @@ import 'package:caw/model/variant_edit.dart';
 import 'package:caw/ui/devices/device_registry.dart';
 import 'package:caw/ui/devices/effects/dyn_drive/bitwise_device.dart';
 import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
+import 'package:caw/ui/devices/kit/presets.dart' show DevicePresets;
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -52,6 +53,17 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.lofi', 0, {'age': 0.5, 'band': 3}, 'lofi'),
   ('org.caw.phasealign', 0, {'invert': 1}, 'phasealign'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
+  ('org.caw.shift', 2, {'voices': 3}, 'shift_harmonizer'),
+  ('org.caw.shift', 3, {'up': 0.4}, 'shift_octaver'),
+  ('org.caw.exciter', 0, {}, 'glint_exciter'),
+  ('org.caw.exciter', 1, {}, 'glint_bass'),
+  ('org.caw.vocoder', 0, {}, 'mimic'),
+  ('org.caw.clean', 0, {}, 'preen_denoise'),
+  ('org.caw.clean', 1, {}, 'preen_dehum'),
+  ('org.caw.clean', 2, {}, 'preen_dereverb'),
+  ('org.caw.vocalclean', 0, {}, 'hush_declick'),
+  ('org.caw.vocalclean', 1, {}, 'hush_deplosive'),
+  ('org.caw.vocalclean', 2, {}, 'hush_breath'),
 ];
 
 /// A playing frame for [pageId] (the variant's page id, as the display decodes it) at [tick]: every float of its
@@ -131,6 +143,39 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0, int variant = 0}) {
       raw.setAll(2, [0.5, 0.3, 0.5, 0.25, 0.25, 3, 0.1, 1.2, 9000, 12]);
     case 'org.caw.phasealign':
       raw.setAll(2, [1.6, 1, 1, 1, 1.6, 0.92, 0.6 + 0.2 * hit, level]);
+    case 'org.caw.shift.harmonizer':
+      raw.setAll(2, [1, 220, 57 + 0.2 * math.sin(tick * 0.5), 0, 0, 3, 3, 7, -5, 0, 60, 64, 52, -1, 21.5, 0.9]);
+    case 'org.caw.shift.octaver':
+      raw.setAll(2, [0, 110, 0.85, 0.8, level - 4, level - 12]);
+    case 'org.caw.exciter':
+      raw.setAll(2, [variant.toDouble(), variant == 0 ? 3000 : 100, level, level - 14, 0.35, 8]);
+      for (var k = 0; k < 8; k++) {
+        raw[8 + k] = k < (variant == 0 ? 2 : 4) ? -6 - 5.0 * k + 3 * hit : -120;
+      }
+      raw[16] = variant == 0 ? 2 : 1;
+    case 'org.caw.vocoder':
+      raw.setAll(2, [20, 0, 3, 0, 0, -120]);
+      for (var k = 0; k < 20; k++) {
+        final hz = 80 * math.pow(150, (k + 0.5) / 20).toDouble();
+        raw[8 + 3 * k] = hz;
+        raw[9 + 3 * k] = -50 + 36 * math.exp(-math.pow((k - 6 - 2 * math.sin(tick * 0.3)) / 3, 2)) * hit + 6 * math.sin(k * 1.1);
+        raw[10 + 3 * k] = -30 - k * 0.8;
+      }
+    case 'org.caw.clean' when variant == 0:
+      raw.setAll(2, [0, 4.2, 1, 43, 2048, -6.5, 0, 32]);
+      for (var k = 0; k < 32; k++) {
+        raw[10 + k] = -75 + 12 * math.exp(-k / 5) - k * 0.3;
+        raw[42 + k] = -12 * (0.6 + 0.4 * math.sin(k * 0.7 + tick * 0.2).abs()) * (1 - 0.5 * hit);
+      }
+    case 'org.caw.clean' when variant == 1:
+      raw.setAll(2, [50.1, 1, 0, 8]);
+      for (var k = 0; k < 8; k++) {
+        raw[6 + k] = -70 - 3.0 * k;
+      }
+    case 'org.caw.clean':
+      raw.setAll(2, [1.3, 1.3, 12, 43, 2048, -4, 32]);
+    case 'org.caw.vocalclean':
+      raw.setAll(2, [variant == 0 ? 17 : -9, variant == 0 ? 1 : 4, 0.4, 6, 0.2, 5]);
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -403,6 +448,75 @@ void main() {
     await drag(tester, const ValueKey('carve-hero'), const Offset(0, -40));
     expect(t.value('amount'), greaterThan(amount));
     await close(tester);
+  });
+
+  testWidgets('Harmonizer: a voice lane drags its interval by whole degrees; Octaver: each half drags sub and up', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.shift', 2);
+    final d1 = t.value('v1_degree');
+    await drag(tester, const ValueKey('harmonizer-hero'), const Offset(60, 0), at: const Offset(0, 12));
+    expect(t.value('v1_degree'), greaterThan(d1));
+    expect(t.value('v1_degree') % 1, 0);
+    expect(t.value('v2_degree'), t.param('v2_degree')!.defaultValue);
+    await tester.tap(find.byKey(const ValueKey('voices-4')));
+    await tester.pumpAndSettle();
+    expect(t.value('voices'), 4);
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.shift', 3);
+    final sub = t.value('sub');
+    final r = tester.getRect(find.byKey(const ValueKey('octaver-hero')));
+    await drag(tester, const ValueKey('octaver-hero'), const Offset(0, -40), at: Offset(-r.width / 4, 0));
+    expect(t.value('sub'), greaterThan(sub));
+    await drag(tester, const ValueKey('octaver-hero'), const Offset(0, -40), at: Offset(r.width / 4, 0));
+    expect(t.value('up'), greaterThan(0));
+    await close(tester);
+  });
+
+  testWidgets('Glint, Mimic, Preen and Hush: their pictures drag their knobs; Learn learns', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.exciter', 0);
+    final amount = t.value('amount');
+    await drag(tester, const ValueKey('glint-hero'), const Offset(40, -50));
+    expect(t.value('amount'), greaterThan(amount));
+    expect(t.value('character'), greaterThan(t.param('character')!.defaultValue));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.vocoder', 0);
+    await drag(tester, const ValueKey('mimic-hero'), const Offset(60, 0));
+    expect(t.value('formant'), greaterThan(0));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.clean', 0);
+    final reduction = t.value('reduction');
+    await drag(tester, const ValueKey('denoise-hero'), const Offset(0, -50));
+    expect(t.value('reduction'), greaterThan(reduction));
+    await tester.tap(find.byKey(const ValueKey('preen-learn')));
+    await tester.pumpAndSettle();
+    expect((t.value('learn'), t.value('adaptive')), (1, 0));
+    await tester.tap(find.byKey(const ValueKey('preen-learn')));
+    await tester.pumpAndSettle();
+    expect(t.value('learn'), 0);
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.clean', 1);
+    await drag(tester, const ValueKey('dehum-hero'), const Offset(0, 50));
+    expect(t.value('depth'), lessThan(1));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.clean', 2);
+    final dr = t.value('amount');
+    await drag(tester, const ValueKey('dereverb-hero'), const Offset(0, -40));
+    expect(t.value('amount'), greaterThan(dr));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.vocalclean', 2);
+    final sens = t.value('sensitivity');
+    await drag(tester, const ValueKey('hush-hero'), const Offset(0, -40));
+    expect(t.value('sensitivity'), greaterThan(sens));
+    await close(tester);
+  });
+
+  test("Mimic's Talking crow stays out of the preset list", () {
+    final s = stateWith('org.caw.vocoder', make: PreviewState.new);
+    final t = targetOf(s, 'org.caw.vocoder');
+    expect(t.info!.presets.map((p) => p.name), contains('Talking crow'));
+    final names = DevicePresets.factory(t).map((p) => p.name).toList();
+    expect(names, isNot(contains('Talking crow')));
+    expect(names.length, greaterThan(5));
+    s.dispose();
   });
 
   testWidgets('Tools: Analyzer drags its tilt, Lo-fi its Age, Phase align its delay; Learn turns Auto on', (tester) async {

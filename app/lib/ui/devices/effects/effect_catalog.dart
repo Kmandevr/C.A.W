@@ -123,7 +123,12 @@ class EffectCatalog {
     ('org.caw.tremolo', 'Modulation', 'Tremolo, Pan or Shape (the drawn duck): level or place moving in time', Icons.swap_horiz),
     ('org.caw.delay', 'Space', 'Digital (synced, dual, drive in the loop) or Ping-pong echoes', Icons.blur_linear),
     ('org.caw.reverb', 'Space', 'Hall (rooms to halls, ducking and freeze) or Shimmer', Icons.blur_on),
-    ('org.caw.shift', 'Pitch & Time', 'Pitch (semitones and cents) or Frequency (every partial by the same hertz)', Icons.height),
+    ('org.caw.shift', 'Pitch & Time', 'Pitch, Frequency, Harmonizer (voices in key) or Octaver (an octave under and over)', Icons.height),
+    // 1.1.0's new devices (Glint, Mimic, Preen, Hush).
+    ('org.caw.exciter', 'Drive', 'Exciter (air and presence) or Bass (low harmonics that carry on small speakers)', Icons.auto_awesome),
+    ('org.caw.vocoder', 'Creative', 'A vocoder: the voice speaks through a synth playing the key track\'s notes, or its audio', Icons.record_voice_over_outlined),
+    ('org.caw.clean', 'Utility', 'Clean-up: Denoise (learn the noise), De-hum or De-reverb', Icons.cleaning_services_outlined),
+    ('org.caw.vocalclean', 'Utility', 'Vocal clean-up: De-click, De-plosive or Breath', Icons.mic_none),
   ];
 
   static const List<EffectEntry> _entries = [

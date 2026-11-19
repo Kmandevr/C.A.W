@@ -49,8 +49,13 @@ class DevicePresets {
 
   static List<DevicePreset> fromDescriptor(DeviceTarget target) => [
         for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
-          if (p.name != 'Init') DevicePreset(p.name, p.params, category: 'Factory'),
+          if (p.name != 'Init' && !(hidden[target.componentId]?.contains(p.name) ?? false))
+            DevicePreset(p.name, p.params, category: 'Factory'),
       ];
+
+  /// The engine's presets the browser leaves out, by component: Mimic's "Talking crow" is the device UI plan's
+  /// hidden preset, to be found by scrolling past the list's end (that reveal is not built yet).
+  static const hidden = {'org.caw.vocoder': {'Talking crow'}};
 
   static void register(String componentId, List<DevicePreset> presets) => _byId[componentId] = presets;
 
