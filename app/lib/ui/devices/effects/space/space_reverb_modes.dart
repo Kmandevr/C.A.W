@@ -9,6 +9,7 @@ import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
+import '../../kit/param_watch.dart';
 import '../../../../model/device_display.dart';
 import '../effect_page.dart';
 import '../modes_kit.dart';
@@ -149,7 +150,9 @@ class _GateLamp extends StatelessWidget {
   const _GateLamp();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     return DeviceDisplay(builder: (context, f) {
       final open = (f?.raw == null ? 0.0 : f!.at(3)) > 0.5;

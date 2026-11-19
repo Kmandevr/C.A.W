@@ -9,6 +9,7 @@ import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
+import '../../kit/param_watch.dart';
 import '../effect_page.dart';
 import '../modes_kit.dart';
 
@@ -182,8 +183,11 @@ class _Lanes extends StatelessWidget {
   const _Lanes({required this.op});
   final int op;
 
+  // Its own watch: the bits and masks it draws rebuild it alone.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final bits = t.value('bits').round().clamp(2, 16);

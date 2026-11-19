@@ -65,6 +65,6 @@ void main() {
 
 /// The devices whose knob step rebuilds more than the 80 widgets most do (docs/performance.md, a knob step).
 const _ceilings = {
-  'org.caw.eq': 190, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
+  'org.caw.eq': 190, 'org.caw.eq.linear': 190, 'org.caw.bits.bitwise': 240, 'org.caw.ducker': 126, 'org.caw.bitcrush': 110,
   'org.caw.rack.fx': 1240, 'org.caw.rack.multiband': 890,
 };

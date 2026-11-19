@@ -9,6 +9,7 @@ import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
+import '../../kit/param_watch.dart';
 import '../effect_page.dart';
 import '../modes_kit.dart';
 import 'common.dart';
@@ -146,8 +147,11 @@ class _ThresholdBarState extends State<_ThresholdBar> {
   double _thr = 0;
   bool _active = false;
 
+  // Its own watch: the threshold it draws rebuilds it alone.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => watchDevice(context, _body);
+
+  Widget _body(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     return LayoutBuilder(builder: (context, box) => GrabGesture(
