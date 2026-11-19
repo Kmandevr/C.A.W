@@ -65,6 +65,12 @@ ParameterDescriptor variantParameter(std::span<const std::string_view> labels, u
 const ModuleDescriptor& legacyVariantDescriptor(const ModuleDescriptor& legacy, std::string_view id,
                                                 std::string_view name, std::span<const std::string_view> labels,
                                                 uint32_t index) {
+    return extendedVariantDescriptor(legacy, id, name, labels, index, {});
+}
+
+const ModuleDescriptor& extendedVariantDescriptor(const ModuleDescriptor& legacy, std::string_view id,
+                                                  std::string_view name, std::span<const std::string_view> labels,
+                                                  uint32_t index, std::span<const ParameterDescriptor> after) {
     struct Built {
         std::vector<ParameterDescriptor> params;
         ModuleDescriptor desc;
@@ -75,6 +81,7 @@ const ModuleDescriptor& legacyVariantDescriptor(const ModuleDescriptor& legacy, 
     Built& b = store.emplace_back();
     b.params.assign(legacy.parameters, legacy.parameters + legacy.parameterCount);
     b.params.push_back(variantParameter(labels, index));
+    b.params.insert(b.params.end(), after.begin(), after.end());
     b.desc = legacy;
     b.desc.id = id;
     b.desc.name = name;

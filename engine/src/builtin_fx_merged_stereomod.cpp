@@ -9,7 +9,8 @@
 // Chorus/Flanger ("org.caw.chorus", reused): Chorus (variant 0, builtin_components.cpp), Ensemble, Doubler
 //   (builtin_fx_space_mod.cpp), Flanger (builtin_effects_kit.cpp), Vibrato and Rotary (builtin_fx_space_mod.cpp).
 // Phaser ("org.caw.phaser", reused): Phaser (builtin_effects_kit.cpp), its only variant for now.
-// Tremolo/Pan ("org.caw.tremolo", reused): Tremolo (variant 0) and Pan (org.caw.autopan), builtin_fx_space_mod.cpp.
+// Tremolo/Pan ("org.caw.tremolo", reused): Tremolo (variant 0) and Pan (org.caw.autopan), builtin_fx_space_mod.cpp;
+// Shape (2, 1.1.0: the drawn-shape ducker, builtin_ducker.cpp).
 // No new DSP here: the plan's new modes (M/S and the like) come in a later part.
 
 namespace caw::fx {
@@ -74,10 +75,12 @@ const Variant kPhaser[] = {
 
 constexpr std::string_view kTremoloId = "org.caw.tremolo";
 constexpr std::string_view kTremoloName = "Tremolo/Pan";
-constexpr std::string_view kTremoloVariants[] = {"Tremolo", "Pan"};
+constexpr std::string_view kTremoloVariants[] = {"Tremolo", "Pan", "Shape"};
 const Variant kTremolo[] = {
     Wrapped<kTremoloId, kTremoloName, kTremoloVariants, 0, &legacyTremoloDescriptor, &makeTremoloAs>::variant(),
     Wrapped<kTremoloId, kTremoloName, kTremoloVariants, 1, &legacyAutopanDescriptor, &makeAutopanAs>::variant(),
+    // 1.1.0: the drawn-shape ducker (org.caw.ducker; 1.0.8-1.0.9 the Compressor's variant 3), periodic volume.
+    Wrapped<kTremoloId, kTremoloName, kTremoloVariants, 2, &legacyDuckerDescriptor, &makeDuckerAs>::variant(),
 };
 
 const MergedDevice kDevices[] = {

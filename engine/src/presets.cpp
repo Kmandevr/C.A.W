@@ -307,7 +307,7 @@ const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string
 bool applyBuiltinPreset(std::string_view componentId, std::string_view name,
                         std::vector<std::pair<std::string, double>>& params) {
     const BuiltinPreset* preset = findBuiltinPreset(componentId, name);
-    if (!preset) return false;
+    if (!preset) return fx::applyMovedPreset(componentId, name, params);  // a 1.0.9 preset whose variant moved
     std::vector<std::pair<std::string, double>> out;
     out.reserve(preset->values.size() + params.size());
     for (const auto& [k, v] : preset->values) out.emplace_back(std::string(k), v);

@@ -1,4 +1,4 @@
-// The Compressor's "Duck" variant (1.0.8): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
+// Duck's "Duck" variant (org.caw.duck variant 0; 1.0.8-1.0.9 the Compressor's variant 4): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
 #include "builtin_effects.h"
 
 #include <algorithm>
@@ -53,7 +53,7 @@ const ParamTable& duckParams() {
 
 // Its own table as a "legacy" descriptor (never registered): legacyVariantDescriptor appends `variant`.
 const ModuleDescriptor& duckBaseDescriptor() {
-    static const ModuleDescriptor d = keyedEffectDescriptor("org.caw.compressor", "Compressor", duckParams(), 0, 0, false);
+    static const ModuleDescriptor d = keyedEffectDescriptor("org.caw.duck", "Ducker", duckParams(), 0, 0, false);
     return d;
 }
 
@@ -242,57 +242,39 @@ private:
     double grNow_ = 0, grMax_ = 0, levelMax_ = 0, keyMax_ = 0;
 };
 
-// Its presets (job-named; `variant` 4). A keyed one says so: the app turns Sidechain to External with a key.
+// Its presets (job-named; `variant` 0 of org.caw.duck: 1.0.9 had them under org.caw.compressor variant 4). A keyed one says so: the app turns Sidechain to External with a key.
 const std::vector<BuiltinPreset>& duckPresets() {
     static const std::vector<BuiltinPreset> p = {
         {"Kick duck bass", "Key it from the kick: the bass dips under each hit and is back before the next",
-         {{"threshold", -30}, {"amount", 0.8}, {"attack", 0.5}, {"hold", 20}, {"release", 110}, {"detection", 1}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -30}, {"amount", 0.8}, {"attack", 0.5}, {"hold", 20}, {"release", 110}, {"detection", 1}, {"sidechain", 1}, {"variant", 0}}},
         {"Voice over music", "Key it from the voice: the music steps back while someone talks",
-         {{"threshold", -40}, {"amount", 0.5}, {"attack", 15}, {"hold", 250}, {"release", 600}, {"detection", 0}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -40}, {"amount", 0.5}, {"attack", 15}, {"hold", 250}, {"release", 600}, {"detection", 0}, {"sidechain", 1}, {"variant", 0}}},
         {"Pad pump", "Key it from the kick: a deep, slow-recovering pump on pads and chords",
-         {{"threshold", -36}, {"amount", 1}, {"attack", 1}, {"hold", 0}, {"release", 220}, {"detection", 1}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -36}, {"amount", 1}, {"attack", 1}, {"hold", 0}, {"release", 220}, {"detection", 1}, {"sidechain", 1}, {"variant", 0}}},
         {"Snare makes room", "Key it from the snare: a short dip so the crack comes through",
-         {{"threshold", -28}, {"amount", 0.6}, {"attack", 0.2}, {"hold", 10}, {"release", 70}, {"detection", 2}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -28}, {"amount", 0.6}, {"attack", 0.2}, {"hold", 10}, {"release", 70}, {"detection", 2}, {"sidechain", 1}, {"variant", 0}}},
         {"Gentle leveller", "Its own input: evens out a part that comes and goes, slowly",
-         {{"threshold", -24}, {"amount", 0.35}, {"attack", 30}, {"hold", 100}, {"release", 800}, {"detection", 0}, {"variant", 4}}},
+         {{"threshold", -24}, {"amount", 0.35}, {"attack", 30}, {"hold", 100}, {"release", 800}, {"detection", 0}, {"variant", 0}}},
         {"Vocal rider", "Its own input: holds a voice's loud words near the threshold",
-         {{"threshold", -20}, {"amount", 0.6}, {"attack", 10}, {"hold", 50}, {"release", 300}, {"detection", 0}, {"output", 2}, {"variant", 4}}},
+         {{"threshold", -20}, {"amount", 0.6}, {"attack", 10}, {"hold", 50}, {"release", 300}, {"detection", 0}, {"output", 2}, {"variant", 0}}},
         {"Peak catcher", "Its own input: true-peak detection pulls fast peaks to the threshold",
-         {{"threshold", -6}, {"amount", 1}, {"attack", 0.05}, {"hold", 5}, {"release", 60}, {"detection", 2}, {"variant", 4}}},
+         {{"threshold", -6}, {"amount", 1}, {"attack", 0.05}, {"hold", 5}, {"release", 60}, {"detection", 2}, {"variant", 0}}},
         {"Bus glue", "Its own input: a light, even hold on a group or the mix",
-         {{"threshold", -18}, {"amount", 0.25}, {"attack", 20}, {"hold", 30}, {"release", 250}, {"detection", 0}, {"variant", 4}}},
+         {{"threshold", -18}, {"amount", 0.25}, {"attack", 20}, {"hold", 30}, {"release", 250}, {"detection", 0}, {"variant", 0}}},
         {"Parallel duck", "Key it from the kick: half the ducked signal under the dry, a gentle groove",
-         {{"threshold", -32}, {"amount", 1}, {"attack", 0.5}, {"hold", 15}, {"release", 140}, {"detection", 1}, {"mix", 0.5}, {"sidechain", 1}, {"variant", 4}}},
+         {{"threshold", -32}, {"amount", 1}, {"attack", 0.5}, {"hold", 15}, {"release", 140}, {"detection", 1}, {"mix", 0.5}, {"sidechain", 1}, {"variant", 0}}},
     };
     return p;
 }
 
 }  // namespace
 
-const ModuleDescriptor& duckVariantDescriptor(std::span<const std::string_view> labels, uint32_t index) {
-    static const ModuleDescriptor& d =
-        legacyVariantDescriptor(duckBaseDescriptor(), "org.caw.compressor", "Compressor", labels, index);
-    return d;
-}
+const ModuleDescriptor& duckBaseVariantDescriptor() { return duckBaseDescriptor(); }
 
 ModuleProcessor* makeDuckAs(const ModuleDescriptor& variant) noexcept {
     return new (std::nothrow) Duck(variant);
 }
 
-std::span<const BuiltinPreset> delayModePresets();   // builtin_fx_delay_modes.cpp
-std::span<const BuiltinPreset> reverbModePresets();  // builtin_fx_reverb_modes.cpp
-std::span<const BuiltinPreset> driveModePresets();   // builtin_fx_drive_modes.cpp
-std::span<const BuiltinPreset> bitwisePresets();     // builtin_fx_bits_bitwise.cpp
-std::span<const BuiltinPreset> cabPresets();         // builtin_fx_cab.cpp
-
-std::span<const BuiltinPreset> newVariantPresets(std::string_view id) {
-    if (id == "org.caw.compressor") return duckPresets();
-    if (id == "org.caw.delay") return delayModePresets();
-    if (id == "org.caw.reverb") return reverbModePresets();
-    if (id == "org.caw.drive") return driveModePresets();
-    if (id == "org.caw.bits") return bitwisePresets();
-    if (id == "org.caw.convolver") return cabPresets();
-    return {};
-}
+const std::vector<BuiltinPreset>& duckVariantPresets() { return duckPresets(); }
 
 }  // namespace caw::fx

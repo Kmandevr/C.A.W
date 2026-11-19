@@ -340,10 +340,17 @@ class ComponentUseDoc {
   /// other rack is saved with `rack_layout` (the engine's current layout), whatever values it holds.
   bool legacyRack = false;
 
-  /// Whether this entry names something the FX consolidation replaced: a retired effect id or a [legacyRack].
-  bool get needsResolving => legacyRack || MergedDevices.isRetired(id);
+  /// A Compressor read from a file older than 1.1.0 (no `talon_layout`): written back as it was until the engine
+  /// migrates it ([ProjectDoc.resolveComponents]; its variants 2-4 left for Gate, Tremolo/Pan and Ducker). Every
+  /// other Compressor entry is saved with `talon_layout`.
+  bool legacyTalon = false;
+
+  /// Whether this entry names something the FX consolidation or 1.1.0's split replaced: a retired effect id, a
+  /// [legacyRack] or a [legacyTalon].
+  bool get needsResolving => legacyRack || legacyTalon || MergedDevices.isRetired(id);
 
   bool get _isRack => id.startsWith('org.caw.rack.');
+  bool get _isTalon => id == talonId;
 
   /// Passes its input through and is not run.
   bool bypass;
@@ -371,12 +378,13 @@ class ComponentUseDoc {
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
   Object toJson({bool withKey = true}) => params.isEmpty && !bypass && !autoGain && state == null && preset == null &&
-          (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack)
+          (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack) && !(_isTalon && !legacyTalon)
       ? id
       : {
           'id': id,
           if (preset != null) 'preset': preset,
           if (_isRack && !legacyRack) 'params': {...params, rackLayoutParam: rackLayoutCurrent}
+          else if (_isTalon && !legacyTalon) 'params': {...params, talonLayoutParam: talonLayoutCurrent}
           else if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
           if (autoGain) 'auto_gain': true,
@@ -389,7 +397,7 @@ class ComponentUseDoc {
   static ComponentUseDoc? fromJson(Object? j) {
     if (j is String) {
       final id = _boundedProjectText(j, 128);
-      return id.isEmpty ? null : ComponentUseDoc(id);
+      return id.isEmpty ? null : (ComponentUseDoc(id)..legacyTalon = id == talonId);
     }
     if (j is! Map) return null;
     final id = _boundedProjectText(j['id'], 128);
@@ -416,7 +424,8 @@ class ComponentUseDoc {
       ..autoGain = j['auto_gain'] == true
       ..key = ComponentKeyDoc.fromJson(j['key'])
       ..samples = ComponentSampleDoc.listFromJson(j['samples'])
-      ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent;
+      ..legacyRack = id.startsWith('org.caw.rack.') && (params[rackLayoutParam] ?? 0) < rackLayoutCurrent
+      ..legacyTalon = MergedDevices.isLegacyTalon(id, params);
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
@@ -1401,6 +1410,7 @@ class ProjectDoc {
         };
         if (r['keeps_state'] == false) use.state = null;
         use.legacyRack = false;
+        use.legacyTalon = false;
         automation.removeWhere((lane) {
           if (lane.targetType != laneType || lane.layerId != layerId || lane.component != i) return false;
           final to = moved(lane.target);

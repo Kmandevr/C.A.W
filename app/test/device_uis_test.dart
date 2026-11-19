@@ -243,10 +243,10 @@ void main() {
     testWidgets('the Compressor\'s Duck opens the compressor page: its curve from amount, up in the knee graph lowers it',
         (tester) async {
       const id = MergedDevices.duckPageId;
-      expect(DeviceEditors.custom('org.caw.compressor', builtinInfo(id)), isNotNull);
+      expect(DeviceEditors.custom('org.caw.duck', builtinInfo(id)), isNotNull);
       final s = await open(tester, id);
       final t = targetOf(s, id);
-      expect(t.info!.variantIndex, 4);
+      expect(t.info!.variantIndex, 0);  // 1.1.0: the Ducker's first (1.0.8-1.0.9: the Compressor's variant 4)
       expect(find.byKey(const ValueKey('device-fallback')), findsNothing);
       expect(find.text('DUCK'), findsWidgets);
       expect(find.byKey(const ValueKey('dknob-amount')), findsOneWidget);

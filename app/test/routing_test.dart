@@ -101,12 +101,12 @@ void main() {
     expect(bass.components[0].params['sidechain'], 0);
   });
 
-  test('a key on the Compressor\'s Duck turns its sidechain to External, and back to Internal without', () {
+  test('a key on the Ducker\'s Duck turns its sidechain to External, and back to Internal without', () {
     final s = AppState(settings: Settings());
     s.project = _project();
     final bass = s.project.layers[1];
-    bass.components.add(ComponentUseDoc('org.caw.compressor', {'variant': 4}));
-    expect(MergedDevices.pageIdOf('org.caw.compressor', bass.components[0].params), MergedDevices.duckPageId);
+    bass.components.add(ComponentUseDoc('org.caw.duck', {'variant': 0}));  // 1.0.8-1.0.9: the Compressor's variant 4
+    expect(MergedDevices.pageIdOf('org.caw.duck', bass.components[0].params), MergedDevices.duckPageId);
     expect(s.setComponentKey(bass, 0, 'kick'), isTrue);
     expect(bass.components[0].params['sidechain'], 1);
     expect(bass.components[0].key?.layer, 'kick');

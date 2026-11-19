@@ -33,6 +33,7 @@ using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
+int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
 
 namespace {
 
@@ -186,10 +187,10 @@ void effectsCost(double seconds) {
           {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}},
         {"compressor (default: peak, linked)", "org.caw.compressor", {}},
         {"compressor, RMS, unlinked, sidechain HPF", "org.caw.compressor", {{"detect", 1}, {"link", 0}, {"sc_hpf", 120}}},
-        // 1.0.8: the Compressor's Duck variant (its own input, no key: a leveller) in each detection mode.
-        {"Compressor: Duck (default: RMS)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}}},
-        {"Compressor: Duck, Peak", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
-        {"Compressor: Duck, ISP (4x true peak)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
+        // 1.0.8's Duck (1.1.0: Ducker's variant 0; its own input, no key: a leveller) in each detection mode.
+        {"Ducker: Duck (default: RMS)", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}}},
+        {"Ducker: Duck, Peak", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
+        {"Ducker: Duck, ISP (4x true peak)", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
         {"limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}},
         {"limiter, sample peak", "org.caw.limiter", {{"gain", 12}, {"true_peak", 0}}},
         {"reverb (default: modulated)", "org.caw.reverb.pro", {}},
@@ -954,11 +955,13 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
+    if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
         effectsCost(secs);
         const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
         const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
-        return (modesOver || toolsOver) ? 1 : 0;
+        const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
+        return (modesOver || toolsOver || dynsplitOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
