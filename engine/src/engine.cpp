@@ -2662,7 +2662,7 @@ void Engine::setMidiOptions(bool mpe, double bendRange, double noteBendRange, do
 }
 
 uint64_t Engine::midiDropped() const noexcept {
-    return midiIn_.dropped() + midiPendingDropped_.load(std::memory_order_relaxed);
+    return midiIn_.dropped();
 }
 
 int64_t Engine::positionAt(int64_t timeNs) const noexcept {
@@ -3026,6 +3026,10 @@ SongTime Engine::songTime() {
 }
 
 Meters Engine::meters() {
+    {  // the UI reads meters often: values merged under pressure go into the MIDI queue as space returns
+        std::unique_lock<std::mutex> midi(midiPush_, std::try_to_lock);
+        if (midi) midiIn_.flush();
+    }
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Meters m;
@@ -3732,12 +3736,9 @@ void Engine::takeDeviceMidi(int frames) noexcept {
     cbTimeNs_.store(now, std::memory_order_relaxed);
     cbPos_.store(playing_ ? g_ : -1, std::memory_order_release);
     midiChunkFrom_ = 0;
+    // A full list leaves the rest in the queue for a later callback (the producer drops or merges, never here).
     Midi2Event e;
-    while (midiIn_.pop(e)) {
-        if (midiPendingCount_ == Midi2InputQueue::kCapacity) {
-            midiPendingDropped_.fetch_add(1, std::memory_order_relaxed);
-            continue;
-        }
+    while (midiPendingCount_ < Midi2InputQueue::kCapacity && midiIn_.pop(e)) {
         PendingMidi& p = midiPending_[midiPendingCount_++];
         p.e = e;
         p.done = false;
@@ -3755,10 +3756,26 @@ void Engine::takeDeviceMidi(int frames) noexcept {
                 else s.deviceNotes.reset();
             }
             p.done = true;
+            p.frame = 0;
             continue;
         }
         p.frame = deviceMidiFrame(p.e.timeNs, now, frames, sr_, delay);
-        if (p.frame >= frames) continue;  // a later callback's
+    }
+    // Lower frame first, then lower sequence (a value merged under pressure arrives late with its own). Insertion
+    // sort: bounded by the list, and the list is nearly in order already.
+    for (uint32_t k = 1; k < midiPendingCount_; ++k) {
+        const PendingMidi x = midiPending_[k];
+        uint32_t j = k;
+        for (; j > 0; --j) {
+            const PendingMidi& y = midiPending_[j - 1];
+            if (y.frame < x.frame || (y.frame == x.frame && static_cast<int32_t>(y.e.seq - x.e.seq) < 0)) break;
+            midiPending_[j] = y;
+        }
+        midiPending_[j] = x;
+    }
+    for (uint32_t k = 0; k < midiPendingCount_; ++k) {
+        PendingMidi& p = midiPending_[k];
+        if (p.done || p.frame >= frames) continue;  // an AllOff already applied, or a later callback's
         if (p.e.target < 0 || p.e.target >= slotCount_) {
             p.done = true;
             continue;

@@ -342,12 +342,54 @@ TEST(device_midi_release_ends_held_notes_and_a_full_queue_counts_drops) {
     CHECK_EQ(rec.size(), 2u);
     if (rec.size() == 2) CHECK_EQ(rec[1].type, kOff);
     CHECK_EQ(e.midiBytes("nope", on, 3, 0), 0);  // no such track
-    // 1,100 messages before a callback: the queue takes 1,024.
+    // 1,100 controller moves before a callback: the shared slots fill and the rest merge into the latest value.
     std::vector<uint8_t> many;
     for (int i = 0; i < 1100; ++i) many.insert(many.end(), {0xB0, 1, static_cast<uint8_t>(i & 0x7F)});
-    CHECK_EQ(e.midiBytes("t", many.data(), static_cast<int>(many.size()), 1), 1024);
-    CHECK_EQ(e.midiDropped(), 76u);
+    CHECK_EQ(e.midiBytes("t", many.data(), static_cast<int>(many.size()), 1), 1100);
+    CHECK_EQ(e.midiDropped(), 0u);
     e.process(l.data(), r.data(), 128);
+    // 1,100 note ons: the merged value goes in first, then the note ons up to the shared slots; the rest drop.
+    many.clear();
+    for (int i = 0; i < 1100; ++i) many.insert(many.end(), {0x90, static_cast<uint8_t>(i & 0x7F), 100});
+    const int normal = static_cast<int>(Midi2InputQueue::kCapacity - Midi2InputQueue::kReserved);
+    CHECK_EQ(e.midiBytes("t", many.data(), static_cast<int>(many.size()), 1), normal - 1);
+    CHECK_EQ(e.midiDropped(), static_cast<uint64_t>(1100 - (normal - 1)));
+    e.process(l.data(), r.data(), 128);
+}
+
+TEST(device_midi_flood_never_drops_a_note_off) {
+    // Track t holds 16 keys while another track floods the shared queue with note ons and controller moves; t's
+    // note offs still all go in (the reserve), so every key on t ends, after its note on.
+    Engine e(48000);
+    CHECK(loadRecorder(e));
+    ProjectSpec p = recorderTrack();
+    LayerSpec u = p.layers[0];
+    u.id = u.name = "u";
+    p.layers.push_back(u);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(128), r(128);
+    e.setMidiClockForTest(1'000'000'000);
+    std::vector<uint8_t> ons, flood, offs;
+    for (int n = 0; n < 16; ++n) ons.insert(ons.end(), {0x90, static_cast<uint8_t>(40 + n), 100});
+    for (int i = 0; i < 3000; ++i) {
+        flood.insert(flood.end(), {0xB0, 1, static_cast<uint8_t>(i & 0x7F)});
+        flood.insert(flood.end(), {0x90, static_cast<uint8_t>(i & 0x7F), 90});
+    }
+    for (int n = 0; n < 16; ++n) offs.insert(offs.end(), {0x80, static_cast<uint8_t>(40 + n), 0});
+    CHECK_EQ(e.midiBytes("t", ons.data(), static_cast<int>(ons.size()), 1), 16);
+    e.midiBytes("u", flood.data(), static_cast<int>(flood.size()), 1);
+    CHECK(e.midiDropped() > 0u);  // u's note ons were dropped
+    CHECK_EQ(e.midiBytes("t", offs.data(), static_cast<int>(offs.size()), 1), 16);
+    for (int k = 0; k < 4; ++k) e.process(l.data(), r.data(), 128);
+    const std::vector<Rec> rec = records(e);
+    int on = 0, off = 0;
+    for (const Rec& x : rec) {
+        if (x.type == kOn) ++on;
+        if (x.type == kOff) ++off;
+    }
+    CHECK_EQ(on, 16);
+    CHECK_EQ(off, 16);  // every note off reached the instrument
+    if (rec.size() == 32) CHECK_EQ(rec[16].type, kOff);  // and after every note on: the order held
 }
 
 TEST(device_midi_capi_and_position_at) {

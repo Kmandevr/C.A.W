@@ -729,7 +729,6 @@ private:
     std::unique_ptr<PendingMidi[]> midiPending_;
     uint32_t midiPendingCount_ = 0;
     int midiChunkFrom_ = 0;  // audio thread: the chunk's first frame in the callback
-    std::atomic<uint64_t> midiPendingDropped_{0};
     std::atomic<bool> midiMpe_{false};
     std::atomic<double> midiBendRange_{2}, midiNoteBendRange_{48};
     std::atomic<int64_t> midiDelayNs_{0};
