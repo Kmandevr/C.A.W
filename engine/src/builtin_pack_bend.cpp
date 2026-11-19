@@ -140,9 +140,10 @@ protected:
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const lib::grain::Source src = ring_.source(true);
         const double len = ring_.length();
+        // Age a (frames back; 1 is the frame just recorded) is at ring frame head - a, wrapped once.
         auto read = [&](double age, float& l, float& r) noexcept {
-            double p = static_cast<double>(written_) - age;
-            p -= len * std::floor(p / len);
+            double p = static_cast<double>(ring_.head()) - age;
+            if (p < 0.0) p += len;
             const auto k = static_cast<uint32_t>(p);
             const float t = static_cast<float>(p - k);
             l = cubic(src.l + k, t), r = cubic(src.r + k, t);
@@ -168,8 +169,8 @@ protected:
                 age_ = clampTo(age_ + step_, lo, hi);
                 read(age_, wl, wr);
             }
-            float dl, dr;
-            read(kBase, dl, dr);  // the dry sound as late as the newest read
+            const uint32_t h = ring_.head(), dk = h >= kBase ? h - kBase : h + ring_.length() - kBase;
+            const float dl = src.l[dk], dr = src.r[dk];  // the dry sound as late as the newest read
             const double d = dry_.next(), w = wet_.next();
             outL[i] = static_cast<float>(d * dl + w * wl);
             outR[i] = static_cast<float>(d * dr + w * wr);
