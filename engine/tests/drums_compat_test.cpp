@@ -59,13 +59,16 @@ uint64_t renderHash(const std::vector<std::pair<std::string, double>>& params) {
 // Recorded from the drums before 1.1.0 (20bcb8b), every preset on the busy bar for 2 s (CAW_PRINT_DRUM_HASHES=1
 // prints this table). Bits are only promised per platform (the engine's own code fuses multiply-adds where the CPU
 // has them, docs/engine.md "Determinism"), so each architecture has the old code's own table: x86-64 recorded there,
-// Arm64 from 20bcb8b built for aarch64 with this test (2026-11-19).
+// Arm64 from 20bcb8b built for aarch64 with this test, Windows x64 (clang-cl, its own C runtime's maths) from
+// 20bcb8b on CI's Windows runner (2026-11-19).
 struct Known {
     const char* preset;
     uint64_t hash;
 };
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include "drums_compat_hashes_arm64.inc"
+#elif defined(_WIN32)
+#include "drums_compat_hashes_win64.inc"
 #else
 #include "drums_compat_hashes.inc"
 #endif
