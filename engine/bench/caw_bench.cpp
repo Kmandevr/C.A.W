@@ -184,6 +184,10 @@ void effectsCost(double seconds) {
           {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}},
         {"compressor (default: peak, linked)", "org.caw.compressor", {}},
         {"compressor, RMS, unlinked, sidechain HPF", "org.caw.compressor", {{"detect", 1}, {"link", 0}, {"sc_hpf", 120}}},
+        // 1.0.8: the Compressor's Duck variant (its own input, no key: a leveller) in each detection mode.
+        {"Compressor: Duck (default: RMS)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}}},
+        {"Compressor: Duck, Peak", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
+        {"Compressor: Duck, ISP (4x true peak)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
         {"limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}},
         {"limiter, sample peak", "org.caw.limiter", {{"gain", 12}, {"true_peak", 0}}},
         {"reverb (default: modulated)", "org.caw.reverb.pro", {}},

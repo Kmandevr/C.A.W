@@ -2425,6 +2425,29 @@ int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, flo
     return chain->readDisplay(index, out, max);
 }
 
+bool Engine::setComponentAutoGain(const std::string& layerId, uint32_t index, bool on) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    if (index == kInstrumentIndex || (index & kNoteComponentFlag)) return false;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->setAutoGain(index, on);
+}
+
+int32_t Engine::componentAutoGain(const std::string& layerId, uint32_t index, float& db) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    if (index == kInstrumentIndex || (index & kNoteComponentFlag)) return -1;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->autoGainDb(index, db) ? 1 : -1;
+}
+
+int32_t Engine::componentMeter(const std::string& layerId, uint32_t index, float& peakL, float& peakR, bool& clipped) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    if (!lock.owns_lock()) return 0;
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag)) return -1;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    return chain && chain->readSlotMeter(index, peakL, peakR, clipped) ? 1 : -1;
+}
+
 bool Engine::setModulatorParam(const std::string& modulatorId, const std::string& param, double value) {
     std::lock_guard<std::mutex> lock(ctl_);
     return modulation_->setModulatorParam(modulatorId, param, value);

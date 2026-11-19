@@ -37,6 +37,7 @@ struct ComponentSpec {
     std::string id;
     std::vector<std::pair<std::string, double>> params;
     bool bypass = false;            // passes its input through (crossfaded) and stops processing
+    bool autoGain = false;          // "auto_gain": a loudness-matching trim after it (auto_gain.h; 1.0.8)
     bool hasState = false;          // `state` holds what the component's save_state wrote
     bool lenient = false;           // a rebuild: values the new build lacks and a state it refuses are dropped
     uint32_t stateVersion = 1;

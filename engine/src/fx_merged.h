@@ -21,6 +21,7 @@
 // adds every variant's ("variants"). The old ids it replaces migrate to it (fx_migrate.h).
 
 namespace caw {
+struct BuiltinPreset;  // presets.h
 namespace fx {
 
 inline constexpr std::string_view kVariantParam = "variant";
@@ -44,6 +45,10 @@ std::span<const MergedDevice> mergedDriveDevices();     // builtin_fx_merged_dri
 std::span<const MergedDevice> mergedEqFilterDevices();  // builtin_fx_merged_eqfilter.cpp: EQ, Filter
 std::span<const MergedDevice> mergedStereoModDevices(); // builtin_fx_merged_stereomod.cpp: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan
 std::span<const MergedDevice> mergedSpaceDevices();     // builtin_fx_merged_space.cpp: Delay, Reverb, Pitch/Shift
+
+// Presets of a merged device's variants that are new DSP (no old effect to migrate them from), appended after its
+// old effects' (fx::mergedPresets): the Compressor's Duck (builtin_fx_duck.cpp). Each names its `variant`.
+std::span<const BuiltinPreset> newVariantPresets(std::string_view id);
 
 // Every merged device, in family order.
 const std::vector<const MergedDevice*>& mergedDevices();

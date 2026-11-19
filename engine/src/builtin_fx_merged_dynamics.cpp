@@ -3,8 +3,8 @@
 
 // The ids this part replaces (retired: no longer registered, migrated to these):
 // Compressor (variants: the old compressor; dynamics; gate; the ducker as "Shape", today's drawn-shape ducker,
-//   where old projects open unchanged; later, new DSP: "Duck" (Compactor-style, following a sidechain level), the
-//   expander and upward compression) replaces:
+//   where old projects open unchanged; "Duck", new DSP (builtin_fx_duck.cpp: a Compactor-style ducker and leveller,
+//   following a sidechain's level or its own); later the expander and upward compression) replaces:
 //   org.caw.compressor (builtin_effects_dynamics.cpp), org.caw.dynamics (builtin_fx_dynamics.cpp),
 //   org.caw.ducker (builtin_ducker.cpp), org.caw.gate (builtin_effects_dynamics.cpp).
 //   Keyed: keep the descriptor's real "sidechain" input on the variants that have one today.
@@ -27,6 +27,8 @@ const ModuleDescriptor& legacyDynamicsDescriptor();  // builtin_fx_dynamics.cpp
 ModuleProcessor* makeDynamicsAs(const ModuleDescriptor& variant) noexcept;
 const ModuleDescriptor& legacyDuckerDescriptor();  // builtin_ducker.cpp
 ModuleProcessor* makeDuckerAs(const ModuleDescriptor& variant) noexcept;
+const ModuleDescriptor& duckVariantDescriptor(std::span<const std::string_view> labels, uint32_t index);  // builtin_fx_duck.cpp
+ModuleProcessor* makeDuckAs(const ModuleDescriptor& variant) noexcept;
 
 namespace {
 
@@ -35,11 +37,12 @@ namespace {
 // org.caw.compressor, org.caw.limiter and org.caw.transient, each with its old effect as variant 0.
 // Compressor's variants keep their own ports: Compressor and Gate a "sidechain" input, Shape (the drawn-shape
 // ducker) a "sidechain" and "key_notes", Dynamics none (and it may still run per note); the chain wires each by
-// the chosen variant's descriptor. Left for later (new DSP): the Compactor-style "Duck", the expander and upward
+// the chosen variant's descriptor. Duck (variant 4, owner 2026-11-18) is new DSP with its own table and a
+// "sidechain" input, appended so saved indices keep their meaning. Left for later: the expander and upward
 // compression.
 constexpr std::string_view kCompressorId = "org.caw.compressor";
 constexpr std::string_view kCompressorName = "Compressor";
-constexpr std::string_view kCompressorVariants[] = {"Compressor", "Dynamics", "Gate", "Shape"};
+constexpr std::string_view kCompressorVariants[] = {"Compressor", "Dynamics", "Gate", "Shape", "Duck"};
 constexpr std::string_view kLimiterId = "org.caw.limiter";
 constexpr std::string_view kLimiterName = "Limiter";
 constexpr std::string_view kLimiterVariants[] = {"Limiter"};
@@ -67,6 +70,7 @@ const ModuleDescriptor& shapeVariant() {
         legacyVariantDescriptor(legacyDuckerDescriptor(), kCompressorId, kCompressorName, kCompressorVariants, 3);
     return d;
 }
+const ModuleDescriptor& duckVariant() { return duckVariantDescriptor(kCompressorVariants, 4); }
 const ModuleDescriptor& limiterVariant() {
     static const ModuleDescriptor& d =
         legacyVariantDescriptor(legacyLimiterDescriptor(), kLimiterId, kLimiterName, kLimiterVariants, 0);
@@ -81,13 +85,15 @@ ModuleProcessor* makeCompressor() noexcept { return makeCompressorAs(compressorV
 ModuleProcessor* makeDynamics() noexcept { return makeDynamicsAs(dynamicsVariant()); }
 ModuleProcessor* makeGate() noexcept { return makeGateAs(gateVariant()); }
 ModuleProcessor* makeShape() noexcept { return makeDuckerAs(shapeVariant()); }
+ModuleProcessor* makeDuck() noexcept { return makeDuckAs(duckVariant()); }
 ModuleProcessor* makeLimiter() noexcept { return makeLimiterAs(limiterVariant()); }
 ModuleProcessor* makeTransient() noexcept { return makeTransientAs(transientVariant()); }
 
 const Variant kCompressor[] = {{kCompressorVariants[0], &compressorVariant, &makeCompressor},
                                {kCompressorVariants[1], &dynamicsVariant, &makeDynamics},
                                {kCompressorVariants[2], &gateVariant, &makeGate},
-                               {kCompressorVariants[3], &shapeVariant, &makeShape}};
+                               {kCompressorVariants[3], &shapeVariant, &makeShape},
+                               {kCompressorVariants[4], &duckVariant, &makeDuck}};
 const Variant kLimiter[] = {{kLimiterVariants[0], &limiterVariant, &makeLimiter}};
 const Variant kTransient[] = {{kTransientVariants[0], &transientVariant, &makeTransient}};
 

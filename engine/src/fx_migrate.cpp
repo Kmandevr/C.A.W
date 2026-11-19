@@ -369,6 +369,9 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
                 it->second.push_back(std::move(out));
             }
         }
+        // Then the presets of variants with new DSP, as they are (each names its `variant`).
+        for (const MergedDevice* d : mergedDevices())
+            for (const BuiltinPreset& p : newVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         return m;
     }();
     const auto it = all.find(id);
