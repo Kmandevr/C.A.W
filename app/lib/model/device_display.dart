@@ -149,17 +149,7 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
         for (var s = 1; s <= sources; ++s) 'src$s': at(2 + s),
         for (var r = 0; r < 16; ++r) 'route${r + 1}': at(3 + sources + r)});
     // fx-racks end
-    case 'org.caw.eq':
-      final bins = at(0).toInt();
-      final watched = at(3) > 0.5;
-      final post = 4 + bins;
-      return DeviceDisplayFrame(
-        spectrum: watched && post + bins <= n
-            ? [for (var j = 0; j < bins; ++j) ((f[post + j] + 90) / 90).clamp(0.0, 1.0).toDouble()]
-            : null,
-        inputDb: at(4 + 3 * bins + 48 + 1),
-        outputDb: at(4 + 3 * bins + 48 + 2),
-        values: {'output_db': at(4 + 3 * bins + 48)});
+    // org.caw.eq and org.caw.filter: decodeFiltersDisplay (fx-filters).
     case 'org.caw.compressor':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(3),
           values: named(['gr_max', 'gr', 'detector_db', 'threshold', 'ratio', 'knee', 'makeup_db', 'lookahead_ms'], 2));
@@ -190,9 +180,6 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
       });
     case 'org.caw.transient':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['gain_db', 'boost_db', 'cut_db'], 2));
-    case 'org.caw.filter':
-      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
-          values: named(['type', 'cutoff_l', 'cutoff_r', 'resonance', 'lfo', 'envelope'], 2));
     case 'org.caw.phaser':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['lfo_l', 'lfo_r', 'freq_l', 'freq_r', 'stages'], 2));
     case 'org.caw.flanger':

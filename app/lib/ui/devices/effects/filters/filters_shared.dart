@@ -160,6 +160,26 @@ void paintFrequencyGrid(Canvas canvas, Size size, double zeroY) {
   canvas.drawLine(Offset(0, zeroY), Offset(w, zeroY), Paint()..color = Neon.ink.withValues(alpha: 0.1));
 }
 
+/// The EQ's grid, shared by its four modes so each draws on the same log axis: lines at 50 Hz .. 10 kHz with their
+/// labels along the foot, and ±6 / ±12 dB lines (those within [rangeDb]) labelled at the right, the 0 dB line
+/// stronger.
+void paintEqGrid(Canvas canvas, Size size, double Function(double db) y, {double rangeDb = 18}) {
+  final w = size.width, h = size.height;
+  final grid = Paint()..color = Neon.ink.withValues(alpha: 0.05);
+  for (final (hz, label) in [(50.0, '50'), (100.0, '100'), (200.0, '200'), (500.0, '500'), (1000.0, '1k'), (2000.0, '2k'),
+      (5000.0, '5k'), (10000.0, '10k')]) {
+    final x = freqToX(hz, w);
+    canvas.drawLine(Offset(x, 0), Offset(x, h), grid);
+    paintLabel(canvas, label, Offset(x + 2, h - 7), Neon.dim.withValues(alpha: 0.7), size: 8);
+  }
+  for (final db in [-12.0, -6.0, 6.0, 12.0]) {
+    if (db.abs() > rangeDb) continue;
+    canvas.drawLine(Offset(0, y(db)), Offset(w, y(db)), grid);
+    paintLabel(canvas, '${db > 0 ? '+' : ''}${db.round()}', Offset(w - 4, y(db)), Neon.dim.withValues(alpha: 0.7), size: 8, align: 1);
+  }
+  canvas.drawLine(Offset(0, y(0)), Offset(w, y(0)), Paint()..color = Neon.ink.withValues(alpha: 0.12));
+}
+
 /// The path of y = [db](hz) across the width, [y] mapping dB to pixels.
 Path responsePath(Size size, double Function(double hz) db, double Function(double db) y, {int steps = 160,
     double lo = -80, double hi = 40}) {

@@ -9,6 +9,7 @@ import '../arrange/long_press_menu.dart';
 import '../feedback.dart';
 import '../haptics.dart';
 import '../theme.dart';
+import 'device_registry.dart';
 
 /// Shown for a merged device with more than one variant (Drive, Delay...): picking another is one undo step that
 /// resets the knobs the new variant doesn't share ([VariantEdit.setDeviceVariant]). `variant` is set here only: it
@@ -26,6 +27,8 @@ class VariantBar extends StatelessWidget {
     if (base == null || info == null || base.variants.length < 2 || !MergedDevices.isMerged(id!)) {
       return const SizedBox.shrink();
     }
+    // A page with its own mode cards picks the variant there.
+    if (DeviceEditors.custom(id, info)?.ownsVariant ?? false) return const SizedBox.shrink();
     final names = _names(base.variants.length, base.param(variantParam)?.choices ?? const []);
     final current = _current(t, base.variants.length);
     return SizedBox(height: 40, child: SingleChildScrollView(
