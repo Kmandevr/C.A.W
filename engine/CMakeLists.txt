@@ -184,6 +184,7 @@ target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_dynamics.cpp src/fx_migrate_dynamics.cpp src/builtin_fx_duck.cpp
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
+  src/builtin_fx_eq_plume.cpp src/eq_design.cpp src/builtin_fx_filters_wah.cpp  # 1.1.0: the EQ's Linear and Match, the Filter's Wah
   src/builtin_fx_merged_stereomod.cpp src/fx_migrate_stereomod.cpp
   src/builtin_fx_merged_space.cpp src/fx_migrate_space.cpp)
 # modulators begin (#161: project modulation, its built-in modulators)
@@ -305,6 +306,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_merged_drive_test.cpp)  # FX consolidation part B: Drive and Bit distortion
   target_sources(caw_tests PRIVATE tests/fx_merged_space_test.cpp)  # FX consolidation part E: Delay and Reverb
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters
   target_sources(caw_tests PRIVATE tests/fx_merged_stereomod_test.cpp)  # FX consolidation D: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan

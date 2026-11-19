@@ -222,7 +222,8 @@ TEST(merged_eq_and_filter_list_the_old_effects_as_variants) {
         const fx::MergedDevice* m = fx::findMergedDevice(o.merged);
         CHECK(m != nullptr);
         if (!m) return;
-        CHECK_EQ(m->variants.size(), std::string_view(o.merged) == kEq ? 4u : 3u);
+        // 1.1.0 appended EQ 4 Linear, 5 Match and Filter 3 Wah (new DSP: fx_eq_plume_test.cpp).
+        CHECK_EQ(m->variants.size(), std::string_view(o.merged) == kEq ? 6u : 4u);
         const ModuleDescriptor& d = m->variants[o.variant].descriptor();
         const ModuleDescriptor& old = o.descriptor();
         CHECK(old.id == o.id);
@@ -240,9 +241,14 @@ TEST(merged_eq_and_filter_list_the_old_effects_as_variants) {
         CHECK(d.cpuClass == old.cpuClass);
         std::unique_ptr<ModuleProcessor> p = createComponent(registry(), o.merged, {{"variant", static_cast<double>(o.variant)}});
         CHECK(p && &p->descriptor() == &d);
-        // No optional ports: none of the old classes makes a low and high output alongside its response.
+        // No optional ports: none of the old classes makes a low and high output alongside its response. Bands
+        // has one input since 1.1.0: its dynamic bands' key.
         auto* fx = dynamic_cast<fx::EffectBase*>(p.get());
-        CHECK(fx && fx->optionalPorts().empty());
+        if (o.variant == 0 && std::string_view(o.merged) == kEq) {
+            CHECK(fx && fx->optionalPorts().size() == 1 && fx->optionalPorts()[0].input && fx->optionalPorts()[0].id == "key");
+        } else {
+            CHECK(fx && fx->optionalPorts().empty());
+        }
     }
     // The registry lists each merged id (its first variant once the reused id's old registration gives way).
     for (const char* id : {kEq, kFilter}) {
@@ -326,8 +332,9 @@ TEST(merged_eq_and_filter_resolve_the_old_presets_under_their_ids_with_equal_val
             CHECK(applyBuiltinPreset(o.merged, p->name, applied));
             CHECK_EQ(valueOf(applied, "variant"), static_cast<double>(o.variant));
         }
-    CHECK_EQ(builtinPresets(kEq).size(), total[kEq]);
-    CHECK_EQ(builtinPresets(kFilter).size(), total[kFilter]);
+    // Then the 1.1.0 modes' own presets (Bands' dynamics, Linear, Match; Wah), each naming its variant.
+    CHECK_EQ(builtinPresets(kEq).size(), total[kEq] + fx::newEqFilterVariantPresets(kEq).size());
+    CHECK_EQ(builtinPresets(kFilter).size(), total[kFilter] + fx::newEqFilterVariantPresets(kFilter).size());
     CHECK(total[kEq] >= 10u && total[kFilter] >= 6u);
 }
 
