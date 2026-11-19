@@ -527,6 +527,11 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
     add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
     add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
+    # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
+    # x64 runner then measured cases 10-20 % over their usual figure (Timber's organ 8,002 against 8,000 on PR #258).
+    set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
+                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost
+                         PROPERTIES RUN_SERIAL TRUE)
   endif()
 endif()
 
