@@ -14,6 +14,7 @@ import '../../kit/repaint.dart';
 import '../dyn_drive/common.dart' show ChoiceChips, chipWrap, clampParam;
 import '../effect_page.dart';
 import '../modes_kit.dart' show ChoicePill;
+import '../voice/voice_devices.dart' show knobWrap;
 import 'space_devices.dart' show mergedPage, smallLabel, controlsRow;
 
 /// The Harmonizer's scales, as the engine's (builtin_fx_shift_voices.cpp): each one's pitch classes from its key.
@@ -331,8 +332,8 @@ class OctaverPage extends StatelessWidget {
         }),
         child: const _OctaveHero(),
       )),
-      rows: [chipWrap([const ChoiceChips('tracking', title: 'TRACKING'), const ChoiceChips('range', title: 'RANGE')])],
-      knobs: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+      rows: [chipWrap([FittedBox(fit: BoxFit.scaleDown, child: ChoiceChips('tracking', title: 'TRACKING')), FittedBox(fit: BoxFit.scaleDown, child: ChoiceChips('range', title: 'RANGE'))])],
+      knobs: knobWrap([
         DeviceKnob('sub', size: 64, label: 'Sub', color: scope.accent),
         const DeviceKnob('up', size: 54, label: 'Up', color: Neon.yellow),
         const DeviceKnob('dry', size: 46, label: 'Dry'),
