@@ -27,6 +27,9 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.drive', 4, {}, 'drive_amp'),
   ('org.caw.drive', 5, {}, 'drive_pedal'),
   ('org.caw.drive', 6, {}, 'drive_bands'),
+  ('org.caw.delay', 2, {'sync': 0}, 'delay_tape'),
+  ('org.caw.delay', 3, {}, 'delay_reverse'),
+  ('org.caw.delay', 4, {}, 'delay_multitap'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
@@ -46,6 +49,14 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
         raw[6 + k * 5] = level - 4 * k;
         raw[7 + k * 5] = level - 2 - 3 * k;
         raw[10 + k * 5] = 1;
+      }
+    case 'org.caw.delay.tape':
+      raw.setAll(3, [0.375, 0.39, 0.45, 2.4 * math.sin(tick * 0.4), 0.25, 0.15, 0.3, 0.35, 0.15, 1]);
+    case 'org.caw.delay.reverse':
+      raw.setAll(3, [0.5, (tick % 20) / 20, ((tick + 10) % 20) / 20, 0.3, 0]);
+    case 'org.caw.delay.multitap':
+      for (var k = 0; k < 4; k++) {
+        raw[9 + k * 5] = level - 6 * k;
       }
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
@@ -206,6 +217,34 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('bit-lane-15')));
     await tester.pumpAndSettle();
     expect(t.value('and').round(), 65535 ^ (1 << 15));
+    await close(tester);
+  });
+
+  testWidgets('Delay modes: the picture drags time and feedback; a tap drags its pan', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.delay', 2, values: {'sync': 0});
+    final time = t.value('time'), fb = t.value('feedback');
+    await drag(tester, const ValueKey('tape-hero'), const Offset(60, -50));
+    expect(t.value('time'), greaterThan(time));
+    expect(t.value('feedback'), greaterThan(fb));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.delay', 3);
+    final sync = t.value('sync');
+    await drag(tester, const ValueKey('reverse-hero'), const Offset(70, 0));
+    expect(t.value('sync'), greaterThan(sync), reason: 'in sync, sideways steps the division');
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.delay', 4, values: {'t1_pan': 0});
+    final box = tester.getRect(find.byKey(const ValueKey('taps-hero')));
+    // Straight: tap 1 at 1 step of 4.48 across the plot.
+    final at = Offset(box.left + 14 + (box.width - 28) / 4.48, box.top + 26 + (box.height - 38) / 2);
+    final g = await tester.startGesture(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    for (var i = 1; i <= 8; i++) {
+      await g.moveTo(at + Offset(0, 30.0 * i / 8));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(t.value('t1_pan'), greaterThan(0.2));
     await close(tester);
   });
 

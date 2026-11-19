@@ -121,7 +121,7 @@ class MergedDevices {
   /// shell's Variant pill), never its family's page, which does not know it.
   static const pagesToCome = {
     'org.caw.eq.linear',
-    'org.caw.eq.match', 'org.caw.filter.wah', 'org.caw.delay.tape', 'org.caw.delay.reverse', 'org.caw.delay.multitap',
+    'org.caw.eq.match', 'org.caw.filter.wah', 
     'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
     'org.caw.reverb.reverse', 'org.caw.convolver.cab',
   };
