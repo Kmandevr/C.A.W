@@ -39,6 +39,12 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.eq', 4, {'b3_gain': 6, 'b6_gain': -4}, 'eq_linear'),
   ('org.caw.eq', 5, {}, 'eq_match'),
   ('org.caw.filter', 3, {}, 'filter_wah'),
+  ('org.caw.compressor', 2, {}, 'compressor_up'),
+  ('org.caw.compressor', 3, {}, 'compressor_bus'),
+  ('org.caw.gate', 1, {}, 'gate_expand'),
+  ('org.caw.gate', 2, {}, 'gate_pedal'),
+  ('org.caw.duck', 1, {}, 'duck_level'),
+  ('org.caw.duck', 2, {}, 'duck_carve'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
@@ -91,6 +97,23 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
       }
     case 'org.caw.filter.wah':
       raw.setAll(2, [400 * math.pow(5.5, 0.3 + 0.5 * hit).toDouble(), 0.3 + 0.5 * hit, level, 0, 80, 8000, 0]);
+    case 'org.caw.compressor.up':
+      raw.setAll(2, [6 * (1 - hit), 8, level, -30]);
+    case 'org.caw.compressor.bus' || 'org.caw.gate.expand':
+      raw.setAll(2, [5, 4 * hit, level, -18]);
+      if (pageId == 'org.caw.gate.expand') raw.setAll(2, [12 * (1 - hit), 20, level, -40]);
+    case 'org.caw.gate.pedal':
+      raw.setAll(2, [hit > 0.2 ? 0 : 60, 60, level, -50, -56, hit > 0.2 ? 1 : 0, 80]);
+    case 'org.caw.duck.level':
+      raw.setAll(2, [-24 + 10 * hit, -18, 4 - 6 * hit, 6, -12, -50, 1]);
+    case 'org.caw.duck.carve':
+      raw.setAll(2, [level, 16, 1]);
+      for (var k = 0; k < 16; k++) {
+        final hz = 40 * math.pow(400, k / 15).toDouble();
+        raw[5 + 3 * k] = hz;
+        raw[6 + 3 * k] = -6 * hit * math.exp(-math.pow((k - 7) / 2.5, 2));
+        raw[7 + 3 * k] = -4 * hit * math.exp(-math.pow((k - 9) / 2, 2));
+      }
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -342,6 +365,25 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('Pedal gate, Level and Carve: their visuals drag threshold, target, amount and the window', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.gate', 2);
+    expect(find.byKey(const ValueKey('gate-light')), findsOneWidget);
+    final thr = t.value('threshold');
+    await drag(tester, const ValueKey('gate-threshold-bar'), const Offset(50, 0));
+    expect(t.value('threshold'), greaterThan(thr));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.duck', 1);
+    final target = t.value('target');
+    await drag(tester, const ValueKey('level-hero'), const Offset(0, -40));
+    expect(t.value('target'), greaterThan(target));
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.duck', 2);
+    final amount = t.value('amount');
+    await drag(tester, const ValueKey('carve-hero'), const Offset(0, -40));
+    expect(t.value('amount'), greaterThan(amount));
+    await close(tester);
+  });
+
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {
     expect(bitwiseSample(0, bits: 12, shift: 0, xor: 0xffff, and: 0xffff), 0);
     expect(bitwiseSample(0.5, bits: 12, shift: 0, xor: 0, and: 0xffff), closeTo(0.5, 1e-3));
@@ -353,7 +395,7 @@ void main() {
       for (final MapEntry(key: label, value: size) in const {'phone': Size(412, 915), 'wide': Size(1280, 800)}.entries) {
         testWidgets('screen $name $label', (tester) async {
           await open(tester, id, variant, size: size, values: values);
-          for (var i = 60; i >= 0; i--) {
+          for (var i = 160; i >= 0; i--) {
             display.frame.value = modeFrame(MergedDevices.isMerged(id) ? MergedDevices.pageId(id, variant) : id, tick: i + 3);
             await tester.pump();
           }
