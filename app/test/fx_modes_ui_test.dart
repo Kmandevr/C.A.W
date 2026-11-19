@@ -52,6 +52,8 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.lofi', 0, {'age': 0.5, 'band': 3}, 'lofi'),
   ('org.caw.phasealign', 0, {'invert': 1}, 'phasealign'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
+  ('org.caw.shift', 2, {'voices': 3}, 'shift_harmonizer'),
+  ('org.caw.shift', 3, {'up': 0.4}, 'shift_octaver'),
 ];
 
 /// A playing frame for [pageId] (the variant's page id, as the display decodes it) at [tick]: every float of its
@@ -131,6 +133,10 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0, int variant = 0}) {
       raw.setAll(2, [0.5, 0.3, 0.5, 0.25, 0.25, 3, 0.1, 1.2, 9000, 12]);
     case 'org.caw.phasealign':
       raw.setAll(2, [1.6, 1, 1, 1, 1.6, 0.92, 0.6 + 0.2 * hit, level]);
+    case 'org.caw.shift.harmonizer':
+      raw.setAll(2, [1, 220, 57 + 0.2 * math.sin(tick * 0.5), 0, 0, 3, 3, 7, -5, 0, 60, 64, 52, -1, 21.5, 0.9]);
+    case 'org.caw.shift.octaver':
+      raw.setAll(2, [0, 110, 0.85, 0.8, level - 4, level - 12]);
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -402,6 +408,27 @@ void main() {
     final amount = t.value('amount');
     await drag(tester, const ValueKey('carve-hero'), const Offset(0, -40));
     expect(t.value('amount'), greaterThan(amount));
+    await close(tester);
+  });
+
+  testWidgets('Harmonizer: a voice lane drags its interval by whole degrees; Octaver: each half drags sub and up', (tester) async {
+    var (_, t) = await open(tester, 'org.caw.shift', 2);
+    final d1 = t.value('v1_degree');
+    await drag(tester, const ValueKey('harmonizer-hero'), const Offset(60, 0), at: const Offset(0, 12));
+    expect(t.value('v1_degree'), greaterThan(d1));
+    expect(t.value('v1_degree') % 1, 0);
+    expect(t.value('v2_degree'), t.param('v2_degree')!.defaultValue);
+    await tester.tap(find.byKey(const ValueKey('voices-4')));
+    await tester.pumpAndSettle();
+    expect(t.value('voices'), 4);
+    await close(tester);
+    (_, t) = await open(tester, 'org.caw.shift', 3);
+    final sub = t.value('sub');
+    final r = tester.getRect(find.byKey(const ValueKey('octaver-hero')));
+    await drag(tester, const ValueKey('octaver-hero'), const Offset(0, -40), at: Offset(-r.width / 4, 0));
+    expect(t.value('sub'), greaterThan(sub));
+    await drag(tester, const ValueKey('octaver-hero'), const Offset(0, -40), at: Offset(r.width / 4, 0));
+    expect(t.value('up'), greaterThan(0));
     await close(tester);
   });
 

@@ -160,10 +160,6 @@ class MergedDevices {
 
   /// The old effect [id]'s variant [variant] plays (its device page and display layout; a new variant's page id, the
   /// Duck's [duckPageId]), or [id] itself for any other id.
-  /// 1.1.0 modes with no page of their own yet: each opens the fallback page (the generic knobs, the shell's
-  /// Variant pill), never its family's page, which does not know it.
-  static const pagesToCome = {'org.caw.shift.harmonizer', 'org.caw.shift.octaver'};
-
   static String pageId(String id, int variant) => _byVariant['$id#$variant']?.oldId ?? id;
 
   /// The engine's caw_migrate_component (`Engine.resolveComponent`), once the engine has loaded (AppState sets it);
