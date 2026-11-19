@@ -55,7 +55,7 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
       // The merged devices (FX consolidation) that have new ids; a reused id keeps its family.
       'org.caw.drive' || 'org.caw.bits' => DeviceFamily.drive,
       'org.caw.delay' || 'org.caw.reverb' => DeviceFamily.space,
-      'org.caw.shift' => DeviceFamily.creative,
+      'org.caw.shift' || 'org.caw.pitchfix' => DeviceFamily.creative,
       // fx-dynamics
       'org.caw.dynamics' || 'org.caw.multiband' || 'org.caw.deesser' => DeviceFamily.dynamics,
       'org.caw.clipper' || 'org.caw.phasedist' => DeviceFamily.drive,

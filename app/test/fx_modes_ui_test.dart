@@ -68,6 +68,7 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.vocalclean', 0, {}, 'hush_declick'),
   ('org.caw.vocalclean', 1, {}, 'hush_deplosive'),
   ('org.caw.vocalclean', 2, {}, 'hush_breath'),
+  ('org.caw.pitchfix', 0, {'scale': 1}, 'lark'),
   // The AutoStacc pack (1.1.0).
   (murmurId, 0, {}, 'pack_murmur'),
   (peckId, 0, {}, 'pack_peck'),
@@ -185,6 +186,17 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0, int variant = 0}) {
       raw.setAll(2, [1.3, 1.3, 12, 43, 2048, -4, 32]);
     case 'org.caw.vocalclean':
       raw.setAll(2, [variant == 0 ? 17 : -9, variant == 0 ? 1 : 4, 0.4, 6, 0.2, 5]);
+    case 'org.caw.pitchfix':
+      raw.setAll(2, [1, 61.7, 62, 0.3, 0.8, 25, 0, 2, 1, 0]);
+      for (var k = 0; k < 12; k++) {
+        raw[12 + k] = const {0, 2, 4, 5, 7, 9, 11}.contains((k + 10) % 12) ? 1 : 0;
+      }
+      raw[25] = 64;
+      for (var k = 0; k < 64; k++) {
+        final m = k < 6 ? -1.0 : 60.5 + 1.5 * math.min(1, (k - 6) / 10) + 0.3 * math.sin((k + tick) * 0.55);
+        raw[26 + k] = m;
+        raw[90 + k] = m < 0 ? -1 : 62 + 0.3 * math.sin((k + tick) * 0.55) * 0.8;
+      }
     case murmurId:
       raw.setAll(2, [14, 32, 0, 0, 2, 0.3, 80, 40, 14]);
       for (var i = 0; i < 32; i++) {
