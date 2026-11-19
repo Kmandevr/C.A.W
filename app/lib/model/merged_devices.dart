@@ -138,8 +138,12 @@ class MergedDevices {
   static final Map<String, MergedVariant> _byOld = {for (final v in variants) if (v.retired) v.oldId: v};
   static final Map<String, MergedVariant> _byVariant = {for (final v in variants) '${v.id}#${v.variant}': v};
 
-  /// Whether [id] is a merged device.
-  static bool isMerged(String id) => ids.contains(id);
+  /// Merged instruments (1.1.0): Timber, whose `variant` ("Model") picks the model that runs. Not effects, so the
+  /// effect catalog's [ids] leave them out; no old id became one.
+  static const instrumentIds = ['org.caw.timber'];
+
+  /// Whether [id] is a merged device (an effect or an instrument).
+  static bool isMerged(String id) => ids.contains(id) || instrumentIds.contains(id);
 
   /// Whether [id] is an old effect id a merged device retired (not a reused id, which is still a device).
   static bool isRetired(String id) {
