@@ -12,12 +12,13 @@
 #include "timber_core.h"
 #include "timber_keys.h"
 #include "timber_piano.h"
+#include "timber_strings.h"
 
 namespace caw::timber {
 namespace {
 
 constexpr std::string_view kName = "Timber";
-constexpr std::string_view kModels[] = {"Piano", "Electric piano", "Organ"};
+constexpr std::string_view kModels[] = {"Piano", "Electric piano", "Organ", "Plucked", "Bowed"};
 constexpr uint32_t kModelCount = sizeof(kModels) / sizeof(kModels[0]);
 
 constexpr PortDescriptor kPorts[] = {
@@ -132,6 +133,39 @@ const ModuleDescriptor& organDescriptor() {
 }
 static_assert(Organ::kModelParams == 15);
 
+// ---------- Plucked ----------
+constexpr std::string_view kPlucked[] = {"Steel guitar", "Nylon guitar", "Harp", "Koto"};
+void pluckParams(fx::ParamTable& t) {
+    t.pick("instrument", "Instrument", 0.0, kPlucked).group = "plucked";
+    t.num("position", "Pluck position", 0.2, 0.02, 0.5).group = "plucked";
+    t.num("pick", "Pick", 0.5, 0.0, 1.0).group = "plucked";
+    t.num("damping", "Damping", 0.0, 0.0, 1.0).group = "plucked";
+    t.num("brightness", "Brightness", 0.5, 0.0, 1.0).group = "plucked";
+    t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "plucked";
+}
+const ModuleDescriptor& pluckDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<Pluck>(3, 0.15, 0.5, 0.12, CpuClass::Medium, &pluckParams);
+    return d;
+}
+static_assert(Pluck::kModelParams == 6);
+
+// ---------- Bowed ----------
+constexpr std::string_view kSections[] = {"Violin", "Viola", "Cello", "Bass"};
+void bowedParams(fx::ParamTable& t) {
+    t.pick("section", "Instrument", 0.0, kSections).group = "bowed";
+    t.num("pressure", "Bow pressure", 0.5, 0.0, 1.0).group = "bowed";
+    t.num("speed", "Bow speed", 0.5, 0.0, 1.0).group = "bowed";
+    t.num("position", "Bow position", 0.12, 0.03, 0.3).group = "bowed";
+    t.num("vibrato", "Vibrato", 0.3, 0.0, 1.0).group = "bowed";
+    t.expo("vib_rate", "Vibrato rate", 5.5, 2.0, 9.0, "Hz").group = "bowed";
+    t.expo("attack", "Attack", 0.12, 0.005, 2.0, "s").group = "bowed";
+}
+const ModuleDescriptor& bowedDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<Bowed>(4, 0.25, 0.6, 0.2, CpuClass::Medium, &bowedParams);
+    return d;
+}
+static_assert(Bowed::kModelParams == 7);
+
 template <class M, const ModuleDescriptor& (*D)(), int Index>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) Instrument<M>(D(), Index);
@@ -141,6 +175,8 @@ const fx::Variant kVariants[] = {
     {kModels[0], &pianoDescriptor, &make<Piano, &pianoDescriptor, 0>},
     {kModels[1], &epianoDescriptor, &make<EPiano, &epianoDescriptor, 1>},
     {kModels[2], &organDescriptor, &make<Organ, &organDescriptor, 2>},
+    {kModels[3], &pluckDescriptor, &make<Pluck, &pluckDescriptor, 3>},
+    {kModels[4], &bowedDescriptor, &make<Bowed, &bowedDescriptor, 4>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kModelCount);
 const fx::MergedDevice kDevices[] = {{kTimberId, kName, kVariants}};
@@ -162,6 +198,8 @@ size_t timberBytes(uint32_t variant, double sampleRate) noexcept {
         case 0: return static_cast<Instrument<Piano>&>(*p).bytes();
         case 1: return static_cast<Instrument<EPiano>&>(*p).bytes();
         case 2: return static_cast<Instrument<Organ>&>(*p).bytes();
+        case 3: return static_cast<Instrument<Pluck>&>(*p).bytes();
+        case 4: return static_cast<Instrument<Bowed>&>(*p).bytes();
         default: return 0;
     }
 }

@@ -198,24 +198,28 @@ TEST(timber_models_render_the_same_bits_at_any_block_size) {
 TEST(timber_models_keep_to_their_voice_cap_and_steal_without_a_click) {
     const fx::MergedDevice* m = fx::findMergedDevice(kTimber);
     for (uint32_t k = 0; m && k < m->variants.size(); ++k) {
-        const Values v = withModel(static_cast<int>(k), {{"voices", 4}, {"space", 0}});
-        auto p = make(v);
-        std::vector<Note> n;
-        for (int i = 0; i < 10; ++i) n.push_back({0.05 * i, -1, 48.0 + 3 * i, 0.8});
-        const Stereo s = play(*p, v, n, 0.8);
-        float shown[64];
-        const uint32_t got = p->readDisplay(shown, 64);
-        CHECK(got >= 9u);
-        if (got >= 9) CHECK(shown[2] <= 5.0f);  // 4 and at most one fading
-        // No click: the largest step between frames stays near what the notes themselves make.
-        float step = 0, level = 0;
-        for (size_t i = 1; i < s.size(); ++i) {
-            step = std::max(step, std::fabs(s.l[i] - s.l[i - 1]));
-            level = std::max(level, std::fabs(s.l[i]));
+        // The same ten notes with a cap of 4 and with the model's own cap: stealing adds no step the notes don't make.
+        float steps[2] = {}, level = 0;
+        for (int run = 0; run < 2; ++run) {
+            const Values v = withModel(static_cast<int>(k), {{"voices", run == 0 ? 4.0 : 128.0}, {"space", 0}});
+            auto p = make(v);
+            std::vector<Note> n;
+            for (int i = 0; i < 10; ++i) n.push_back({0.05 * i, -1, 48.0 + 3 * i, 0.8});
+            const Stereo s = play(*p, v, n, 0.8);
+            if (run == 0) {
+                float shown[64];
+                const uint32_t got = p->readDisplay(shown, 64);
+                CHECK(got >= 9u);
+                if (got >= 9) CHECK(shown[2] <= 5.0f && shown[3] == 4.0f);  // 4 and at most one fading
+            }
+            for (size_t i = 1; i < s.size(); ++i) {
+                steps[run] = std::max(steps[run], std::fabs(s.l[i] - s.l[i - 1]));
+                level = std::max(level, std::fabs(s.l[i]));
+            }
         }
-        if (verbose()) std::printf("model %u: peak %.3f, largest step %.3f\n", k, level, step);
-        CHECK(level > 0.01f && level < 4.0f);
-        CHECK(step < 0.6f * level + 0.05f);
+        if (verbose()) std::printf("model %u: peak %.3f, largest step capped %.3f, free %.3f\n", k, level, steps[0], steps[1]);
+        CHECK(level > 0.01f && level < 2.0f);
+        CHECK(steps[0] < 1.25f * steps[1] + 0.02f);
     }
 }
 
@@ -351,3 +355,59 @@ TEST(timber_organ_percussion_is_single_triggered_and_the_rotary_moves) {
         else CHECK(hi - lo > 2);
     }
 }
+// ---------- Plucked ----------
+
+TEST(timber_pluck_is_in_tune_its_position_notches_and_the_harp_rings_on) {
+    for (double key : {40.0, 52.0, 64.0, 76.0, 88.0}) {
+        const Values v = withModel(3, {{"space", 0}, {"body", 0}});
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, key, 0.7}}, 1.0).mono();
+        const double err = cents(peakHz(m, hzOf(key), 20, 4800, 33600, 48000), hzOf(key));
+        if (verbose()) std::printf("pluck key %.0f: %+.2f ct\n", key, err);
+        CHECK(std::fabs(err) < 1.0);
+    }
+    // Plucked at a quarter of the string, the 4th harmonic (a node there) is far under the 3rd and the 5th.
+    {
+        const Values v = withModel(3, {{"space", 0}, {"body", 0}, {"position", 0.25}, {"pick", 1}, {"brightness", 1}});
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, 45, 1.0}}, 0.5).mono();
+        const double f = hzOf(45);
+        const double h3 = bandDb(m, 3 * f, 2400, 9600, 48000), h4 = bandDb(m, 4 * f, 2400, 9600, 48000), h5 = bandDb(m, 5 * f, 2400, 9600, 48000);
+        if (verbose()) std::printf("pluck harmonics 3/4/5: %.1f %.1f %.1f dB\n", h3, h4, h5);
+        CHECK(h4 < std::min(h3, h5) - 12);
+    }
+    // Damping shortens it; a released guitar string stops, a harp's rings on.
+    auto level = [](const Values& v, double off, double at) {
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, off, 57, 0.8}}, 1.5).mono();
+        return rmsDb(m, static_cast<size_t>(at * 48000), 4800) - rmsDb(m, 2400, 4800);
+    };
+    const double open = level(withModel(3, {{"space", 0}}), -1, 1.0), muted = level(withModel(3, {{"space", 0}, {"damping", 0.8}}), -1, 1.0);
+    const double guitar = level(withModel(3, {{"space", 0}, {"release", 0.1}}), 0.3, 1.0);
+    const double harp = level(withModel(3, {{"space", 0}, {"release", 0.1}, {"instrument", 2}}), 0.3, 1.0);
+    const double harpHeld = level(withModel(3, {{"space", 0}, {"release", 0.1}, {"instrument", 2}}), -1, 1.0);
+    if (verbose()) std::printf("pluck: open %.1f, muted %.1f, guitar released %.1f, harp released %.1f held %.1f\n", open, muted, guitar, harp, harpHeld);
+    CHECK(muted < open - 15);
+    CHECK(guitar < open - 30);
+    CHECK(std::fabs(harp - harpHeld) < 0.5);
+}
+
+// ---------- Bowed ----------
+
+TEST(timber_bowed_string_sustains_in_tune_while_bowed_and_stops_after) {
+    for (int section = 0; section < 4; ++section) {
+        static constexpr double kKey[4] = {69, 62, 48, 36};
+        const double key = kKey[section];
+        const Values v = withModel(4, {{"space", 0}, {"vibrato", 0}, {"section", section}, {"release", 0.15}});
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, 1.5, key, 0.8}}, 2.5).mono();
+        const double a = rmsDb(m, 38400, 9600), b = rmsDb(m, 60000, 9600), after = rmsDb(m, 96000, 9600);
+        const double err = cents(peakHz(m, hzOf(key), 60, 24000, 38400, 48000), hzOf(key));
+        if (verbose()) std::printf("bowed %d: %.1f / %.1f dB held, %.1f after, %+.1f ct\n", section, a, b, after, err);
+        CHECK(a > -40);
+        CHECK(std::fabs(a - b) < 4);  // it sustains
+        CHECK(after < b - 40);
+        CHECK(std::fabs(err) < 15);  // [Assumption] the bow's own pull on pitch: within 15 cents
+    }
+}
+

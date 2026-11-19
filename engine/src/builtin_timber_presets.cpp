@@ -40,6 +40,20 @@ const std::vector<BuiltinPreset>& list() {
         {"Ballad soft", "Organ: flutes 8' and 4' on a slow rotary, for quiet backing", with(2, {{"db16", 0}, {"db513", 0}, {"db8", 6}, {"db4", 4}, {"vibrato", 5}, {"drive", 0.0}, {"click", 0.1}})},
         {"Church flutes", "Organ: soft stops without the rotary, for hymns and pads", with(2, {{"db16", 6}, {"db513", 0}, {"db8", 8}, {"db4", 6}, {"db2", 4}, {"rotary", 0}, {"click", 0.0}, {"space", 0.35}, {"release", 0.3}})},
         {"Reggae bubble", "Organ: a short, percussive mid registration for skank chords", with(2, {{"db16", 0}, {"db513", 0}, {"db8", 8}, {"db4", 8}, {"db223", 8}, {"perc", 1}, {"perc_decay", 1}, {"rotary", 1}})},
+        // Plucked (3)
+        {"Steel strummer", "Plucked: a bright steel-string acoustic for strummed chords", with(3, {{"brightness", 0.6}, {"pick", 0.6}})},
+        {"Fingerstyle nylon", "Plucked: a warm nylon-string guitar plucked with the fingers", with(3, {{"instrument", 1}, {"pick", 0.2}, {"position", 0.25}, {"brightness", 0.3}})},
+        {"Palm-muted picking", "Plucked: steel strings muted at the bridge, for tight rhythm parts", with(3, {{"damping", 0.8}, {"pick", 0.8}, {"position", 0.1}})},
+        {"Concert harp", "Plucked: a harp whose strings ring on after the key, for glissandos and arpeggios", with(3, {{"instrument", 2}, {"pick", 0.25}, {"space", 0.3}, {"position", 0.3}})},
+        {"Koto", "Plucked: a bright, near-bridge koto pluck", with(3, {{"instrument", 3}, {"position", 0.07}, {"pick", 0.8}, {"brightness", 0.7}})},
+        {"Music box pluck", "Plucked: short, thin and bright, for lullabies and sound design", with(3, {{"decay", 0.4}, {"position", 0.05}, {"brightness", 0.9}, {"body", 0.1}})},
+        // Bowed (4)
+        {"Solo violin", "Bowed: an expressive violin with vibrato, for melodies", with(4, {{"vibrato", 0.5}, {"space", 0.25}})},
+        {"Viola legato", "Bowed: a mellow viola with a soft attack, for inner voices", with(4, {{"section", 1}, {"attack", 0.25}, {"vibrato", 0.35}})},
+        {"Cello lament", "Bowed: a warm, singing cello", with(4, {{"section", 2}, {"pressure", 0.6}, {"vibrato", 0.45}, {"space", 0.3}})},
+        {"Bass pizz-like bow", "Bowed: a short, heavy double bass bow for low lines", with(4, {{"section", 3}, {"attack", 0.03}, {"release", 0.1}, {"pressure", 0.7}})},
+        {"Sul ponticello", "Bowed: bowed near the bridge, glassy and thin, for tension cues", with(4, {{"position", 0.04}, {"pressure", 0.3}, {"vibrato", 0.0}})},
+        {"Slow swell", "Bowed: long attacks and no vibrato, for string pads", with(4, {{"attack", 1.0}, {"release", 0.8}, {"vibrato", 0.1}, {"space", 0.4}})},
     };
     return p;
 }
