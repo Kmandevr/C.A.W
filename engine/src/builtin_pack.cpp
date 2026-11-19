@@ -10,6 +10,7 @@ void registerPack(ModuleRegistry& registry) {
     (void)lib::grain::windows();  // the shared window tables, built here so no grain ever builds them
     registerMurmur(registry);
     registerPeck(registry);
+    registerBend(registry);
 }
 
 std::string_view packOf(std::string_view id) noexcept {
@@ -22,6 +23,7 @@ std::string_view packOf(std::string_view id) noexcept {
 const std::vector<BuiltinPreset>* packPresets(std::string_view id) {
     if (id == "org.caw.pack.granular") return &murmurPresets();
     if (id == "org.caw.pack.glitch") return &peckPresets();
+    if (id == "org.caw.pack.warp") return &bendPresets();
     return nullptr;
 }
 

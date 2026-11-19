@@ -22,6 +22,7 @@ namespace {
 
 constexpr const char* kMurmur = "org.caw.pack.granular";
 constexpr const char* kPeck = "org.caw.pack.glitch";
+constexpr const char* kBend = "org.caw.pack.warp";
 
 // The error of `out` against `want` delayed by `lag`, from `from` on, in dB of `want`'s power.
 double errorDb(const Stereo& out, const Stereo& want, size_t lag, size_t from) {
@@ -78,7 +79,7 @@ void checkPackPresets(const char* id, size_t least, const Stereo& in) {
 TEST(pack_devices_are_marked_as_the_autostacc_beta_pack) {
     Engine e(48000);
     const std::string json = e.nativeComponentsJson();
-    for (const char* id : {kMurmur, kPeck}) {
+    for (const char* id : {kMurmur, kPeck, kBend}) {
         CHECK(fx::packOf(id) == "autostacc-beta");
         const size_t at = json.find(std::string("\"id\":\"") + id + "\"");
         CHECK(at != std::string::npos);
@@ -350,4 +351,56 @@ TEST(peck_matches_its_reference_renders) {
     };
     check("peck_default", {});
     check("peck_chaos", {{"chaos", 1}, {"grid", 0}, {"range", 7}});
+}
+
+TEST(bend_with_no_depth_is_the_input_three_frames_late_and_reports_it) {
+    const Stereo in = music(48000);
+    for (double mix : {1.0, 0.5, 0.0}) {
+        const Stereo out = render(kBend, {{"depth", 0}, {"mix", mix}}, in);
+        for (size_t i = 3; i < in.size(); ++i)
+            if (std::fabs(out.l[i] - in.l[i - 3]) > 1e-6f) {
+                cawtest::fail(__FILE__, __LINE__, "mix " + std::to_string(mix) + ": frame " + std::to_string(i) + " is not the input 3 frames late");
+                break;
+            }
+    }
+    const ModuleDescriptor* d = registry().find(kBend);
+    CHECK(d && d->latencyFrames == 3u);
+}
+
+TEST(bend_time_curve_slope_sets_the_pitch_and_speed_mode_sets_the_speed) {
+    const Stereo tone = sine(1000, 0.3, 48000 * 2);
+    // Time: the delay rises by a third of real time over the first three quarters of the bar (2 s at 120 BPM).
+    const Values rise = {{"depth", 500}, {"points", 0}, {"shape", 0}, {"smooth", 0}, {"p0", -1}, {"p1", -1.0 / 3}, {"p2", 1.0 / 3}, {"p3", 1}};
+    Stereo out = runPlaying(*make(kBend, rise), tone, rise);
+    CHECK(goertzelDb(out.l, 1000 * 2.0 / 3, 9600, 67200) - goertzelDb(out.l, 1000, 9600, 67200) > 20.0);
+    // Speed: every point -1 at a range of one octave: half speed, an octave down.
+    const Values half = {{"mode", 1}, {"range", 1}, {"smooth", 0}, {"p0", -1}, {"p1", -1}, {"p2", -1}, {"p3", -1}, {"p4", -1}, {"p5", -1}, {"p6", -1}, {"p7", -1}};
+    auto p = make(kBend, half);
+    if (!p) return;
+    out = runPlaying(*p, tone, half);
+    CHECK(goertzelDb(out.l, 500, 9600, 72000) - goertzelDb(out.l, 1000, 9600, 72000) > 20.0);
+    const std::vector<float> d = display(*p);
+    CHECK(d.size() == 88 && d[2] == 1.0f && std::fabs(d[6] - 0.5f) < 1e-3 && d[8] == -1.0f);
+}
+
+TEST(bend_is_block_size_independent_and_survives_bad_input) {
+    const Stereo in = music(48000);
+    const Values all[] = {{}, {{"depth", 600}, {"shape", 2}, {"smooth", 0}}, {{"mode", 1}, {"cycle", 0}, {"range", 2}}, {{"mode", 1}, {"resync", 0}, {"shape", 0}}};
+    for (size_t k = 0; k < std::size(all); ++k) {
+        checkBlockSizes(kBend, all[k], in, "bend " + std::to_string(k));
+        checkBadInput(kBend, all[k], "bend " + std::to_string(k));
+    }
+}
+
+TEST(bend_presets_render) { checkPackPresets(kBend, 8, music(48000 * 2)); }
+
+TEST(bend_matches_its_reference_renders) {
+    const Stereo in = music(48000 * 2);
+    cawtest::References refs("pack_bend");
+    auto check = [&](const char* name, const Values& v) {
+        const Stereo out = render(kBend, v, in);
+        CHECK_REFERENCE(refs, name, (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);
+    };
+    check("bend_time", {{"depth", 80}, {"cycle", 1}});
+    check("bend_speed", {{"mode", 1}, {"cycle", 1}});
 }
