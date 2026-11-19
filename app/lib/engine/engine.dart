@@ -70,6 +70,14 @@ class NoteFxStats {
   final bool overflowing;
 }
 
+/// An effect slot's output meter since the last read (caw_engine_component_meter, API 39): each side's peak (linear)
+/// and whether a sample went over full scale.
+class SlotMeter {
+  const SlotMeter({required this.peakL, required this.peakR, required this.clipped});
+  final double peakL, peakR;
+  final bool clipped;
+}
+
 /// Where the transport is (caw_engine_position): its sample, beats, seconds, the tempo there, and the 0-based bar,
 /// the beat within it (quarter notes) and the signature.
 class EnginePosition {
@@ -735,6 +743,49 @@ class Engine implements TempoEngine {
     final n = _b.componentDisplay(_handle, _displayLayer!, index, _display, max);
     if (n > 0) out.setRange(0, n, _display.asTypedList(n));
     return n;
+  }
+
+  /// Per-slot auto gain (API 39): turns on or off the trim after effect [index] of a layer's chain (null [layerId]:
+  /// the master) that matches its output's loudness to its input's, for comparing with its bypass by ear. The
+  /// project entry's "auto_gain" sets it again on the next update, so store it there too. False when there is no
+  /// such effect (the instrument has none).
+  bool setComponentAutoGain(String? layerId, int index, bool on) {
+    final l = (layerId ?? '').toNativeUtf8();
+    try {
+      return _b.setComponentAutoGain(_handle, l, index, on ? 1 : 0) == 1;
+    } finally {
+      calloc.free(l);
+    }
+  }
+
+  /// The trim auto gain applies after effect [index] now, in dB (0 while off); null when the engine is busy with a
+  /// project update (keep the last value) or there is no such effect. Never blocks.
+  double? componentAutoGain(String? layerId, int index) {
+    if (_nativeDestroyed) return null;
+    final l = (layerId ?? '').toNativeUtf8();
+    final out = calloc<Float>();
+    try {
+      return _b.componentAutoGain(_handle, l, index, out) == 1 ? out.value : null;
+    } finally {
+      calloc.free(l);
+      calloc.free(out);
+    }
+  }
+
+  /// Effect slot [index]'s output meter (API 39; [index] CAW_INSTRUMENT_INDEX: the instrument), read and reset: the
+  /// peaks and clip flag since the last call. Null when the engine is busy (try next frame) or there is no such slot.
+  SlotMeter? componentMeter(String? layerId, int index) {
+    if (_nativeDestroyed) return null;
+    final l = (layerId ?? '').toNativeUtf8();
+    final out = calloc<CawSlotMeterStruct>();
+    try {
+      if (_b.componentMeter(_handle, l, index, out) != 1) return null;
+      final r = out.ref;
+      return SlotMeter(peakL: r.peakL, peakR: r.peakR, clipped: r.clipped != 0);
+    } finally {
+      calloc.free(l);
+      calloc.free(out);
+    }
   }
 
   void setLayerMix(String layerId, double volume, double pan, bool mute, bool solo) {

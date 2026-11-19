@@ -196,6 +196,33 @@ int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_
     return 0;
 }
 
+int32_t caw_engine_set_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, int32_t on) try {
+    return e && e->engine && e->engine->setComponentAutoGain(layer_id ? layer_id : "", index, on != 0) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
+int32_t caw_engine_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, float* trim_db) try {
+    if (!e || !e->engine) return -1;
+    float db = 0.0f;
+    const int32_t r = e->engine->componentAutoGain(layer_id ? layer_id : "", index, db);
+    if (trim_db) *trim_db = r == 1 ? db : 0.0f;
+    return r;
+} catch (...) {
+    return 0;
+}
+
+int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t index, CawSlotMeter* out) try {
+    if (!e || !e->engine) return -1;
+    float l = 0.0f, r = 0.0f;
+    bool clipped = false;
+    const int32_t got = e->engine->componentMeter(layer_id ? layer_id : "", index, l, r, clipped);
+    if (out) *out = CawSlotMeter{got == 1 ? l : 0.0f, got == 1 ? r : 0.0f, got == 1 && clipped ? 1 : 0};
+    return got;
+} catch (...) {
+    return 0;
+}
+
 char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     if (!e || !e->engine) return nullptr;
     return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));

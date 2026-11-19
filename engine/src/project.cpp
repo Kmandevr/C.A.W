@@ -40,13 +40,15 @@ bool wholeIn(double v, int lo, int hi, int& out) {
 
 std::string range(int lo, int hi) { return std::to_string(lo) + " to " + std::to_string(hi); }
 
-// One component entry: an id string, or {"id", "params": {name: number}, "bypass", "state", "state_version"}.
+// One component entry: an id string, or {"id", "params": {name: number}, "bypass", "auto_gain", "state",
+// "state_version"}.
 bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, std::string& error) {
     if (j.type == Json::Type::String) {
         c.id = j.str;
     } else if (j.type == Json::Type::Object) {
         c.id = j.string("id");
         c.bypass = j.boolean("bypass", false);
+        c.autoGain = j.boolean("auto_gain", false);
         if (const Json* st = j.get("state"); st && st->type == Json::Type::String) {
             constexpr size_t kMaxStateText = 16u << 20;  // 12 MB of state; a component's own limit is checked at build
             if (st->str.size() > kMaxStateText || !base64Decode(st->str, c.state)) {

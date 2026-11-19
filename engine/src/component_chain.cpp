@@ -366,6 +366,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         const bool bypass = spec.bypass;
         e->bypass.store(bypass, std::memory_order_relaxed);
         e->mix = bypass ? 0.0 : 1.0;
+        e->autoGain.store(spec.autoGain, std::memory_order_relaxed);
+        e->matcher.prepare(sampleRate);
         // Prepared here, on the control thread: the audio thread only processes.
         if (!e->processor->activate(sampleRate, kMaxFrames)) {
             error = "native component " + quoted(spec.id) + " could not prepare for playback";
@@ -445,6 +447,7 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
         }
         e.generation.fetch_add(1, std::memory_order_release);  // after the values
         e.bypass.store(specs[i].bypass, std::memory_order_relaxed);
+        e.autoGain.store(specs[i].autoGain, std::memory_order_relaxed);
     }
 }
 
@@ -466,6 +469,29 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
 bool ComponentChain::setBypass(std::size_t index, bool bypass) noexcept {
     if (index >= entries_.size()) return false;
     entries_[index]->bypass.store(bypass, std::memory_order_relaxed);
+    return true;
+}
+
+bool ComponentChain::setAutoGain(std::size_t index, bool on) noexcept {
+    if (index >= entries_.size()) return false;
+    entries_[index]->autoGain.store(on, std::memory_order_relaxed);
+    return true;
+}
+
+bool ComponentChain::autoGainDb(std::size_t index, float& db) const noexcept {
+    if (index >= entries_.size()) return false;
+    db = entries_[index]->autoGain.load(std::memory_order_relaxed)
+             ? entries_[index]->autoGainDb.load(std::memory_order_relaxed)
+             : 0.0f;
+    return true;
+}
+
+bool ComponentChain::readSlotMeter(std::size_t index, float& peakL, float& peakR, bool& clipped) const noexcept {
+    if (index >= entries_.size()) return false;
+    const Entry& e = *entries_[index];
+    peakL = e.peakL.exchange(0.0f, std::memory_order_relaxed);
+    peakR = e.peakR.exchange(0.0f, std::memory_order_relaxed);
+    clipped = e.clipped.exchange(false, std::memory_order_relaxed);
     return true;
 }
 
@@ -493,6 +519,7 @@ std::vector<ComponentSpec> ComponentChain::currentSpecs() const {
         for (uint32_t k = 0; k < d.parameterCount; ++k)
             specs[i].params.emplace_back(std::string(d.parameters[k].id), fromBits(e.held[k].load(std::memory_order_relaxed)));
         specs[i].bypass = e.bypass.load(std::memory_order_relaxed);
+        specs[i].autoGain = e.autoGain.load(std::memory_order_relaxed);
         if (states[i].ok && !states[i].data.empty()) {
             specs[i].hasState = true;
             
@@ -754,6 +781,15 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
     return ok;
 }
 
+// Audio thread: raises a slot's output meter by this block (one writer; a reader's exchange may lose at most this
+// block's raise, never a later one).
+void ComponentChain::meterSlot(Entry& e, const float* left, const float* right, uint32_t m) noexcept {
+    const float l = peakAbs(left, m), r = peakAbs(right, m);
+    if (l > e.peakL.load(std::memory_order_relaxed)) e.peakL.store(l, std::memory_order_relaxed);
+    if (r > e.peakR.load(std::memory_order_relaxed)) e.peakR.store(r, std::memory_order_relaxed);
+    if (l > 1.0f || r > 1.0f) e.clipped.store(true, std::memory_order_relaxed);
+}
+
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
     clean_ = false;  // processors run below (see reset())
@@ -781,8 +817,18 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             const PartScope automation(parts, Part::Automation);
             resolveEntry(e, index, m, time, playing, newPlay);
         }
+        // Auto gain: turned on, or a new Play, starts its matcher from 0 dB (a render from Play repeats).
+        const bool autoGain = e.autoGain.load(std::memory_order_relaxed);
+        if (autoGain && (!e.autoGainWas || newPlay)) {
+            e.matcher.reset();
+            e.autoGainDb.store(0.0f, std::memory_order_relaxed);
+        }
+        e.autoGainWas = autoGain;
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
-        if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
+        if (e.mix == 0.0 && target == 0.0) {  // bypassed: not run, input passes on untouched
+            meterSlot(e, left, right, m);
+            continue;
+        }
         assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
         if (e.mix == 0.0) e.processor->reset();  // back from a bypass: no audio from before it
         // Asleep (fallen silent) and still nothing coming in: not run. Its output is silence, which is already
@@ -870,6 +916,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
         sanitize(left, m);
         sanitize(right, m);
+        if (autoGain && !notes_) {  // after the effect, before its bypass crossfade
+            e.matcher.process(stageL_.data(), stageR_.data(), left, right, m);
+            e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
+        }
         // Only a component that says so sleeps: one put to sleep by its declared tail alone would fall asleep on a
         // block boundary with its timed state (an LFO, a control grid) frozen there, and wake differently for
         // each device buffer size than in an export.
@@ -882,6 +932,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
                 right[i] = stageR_[i] + (right[i] - stageR_[i]) * w;
             }
         }
+        meterSlot(e, left, right, m);
     }
     if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
     noteEvents_ = nullptr;  // per-note FX: set again before each call

@@ -158,8 +158,15 @@ extern "C" {
    The old ids are retired: no longer listed, and not made as a device of their own; a project, preset, rack or
    call naming one (the component testing suite, the plug-in benchmark, the sample-pack maker) plays the merged
    device's variant (its lanes and links follow), and caw_migrate_component turns an entry into its merged form
-   for the app's document. */
-#define CAW_API_VERSION 38
+   for the app's document.
+   39 (2026-11-18, 1.0.8): per-slot auto gain and output meters. A component entry's optional "auto_gain": true (absent:
+   off, so older projects play and read as before) puts a loudness-matching trim after that effect (K-weighted
+   energies of its input and output over a 3 s equivalent window, the trim clamped to +-24 dB, held below -70 LUFS,
+   from 0 dB at each Play); caw_engine_set_component_auto_gain turns it on or off while playing and
+   caw_engine_component_auto_gain reads the trim. caw_engine_component_meter reads and resets an effect's output
+   peaks and its clip flag (CawSlotMeter). The Compressor (org.caw.compressor) gains a fifth variant, "Duck" (4).
+   Nothing else changes. */
+#define CAW_API_VERSION 39
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -326,6 +333,27 @@ CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_
    docs/engine.md ("Display data"). */
 CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_t index, float* out,
                                              int32_t max);
+/* Per-slot auto gain (API version 39): on != 0 puts a trim after effect `index` (addressed as in
+   caw_engine_set_component_param; not the instrument or per-note FX) that matches its output's short-term loudness
+   to its input's, so it can be compared with its bypass by ear: K-weighted, a 3 s equivalent window, the trim moving
+   slowly, clamped to +-24 dB and held while either side is below -70 LUFS; it starts from 0 dB at each Play, so a
+   render repeats, and a render plays it exactly when the project's entry says "auto_gain": true. A bypassed effect
+   plays its input untrimmed. A later project update sets it again from the entry. 1 on success, 0 if there is no
+   such effect. */
+CAW_API int32_t caw_engine_set_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, int32_t on);
+/* The trim auto gain applies after effect `index` now, in dB (0 while off), into *trim_db (may be NULL). Returns 1,
+   0 when the engine is busy with a project update (call again; never blocks) or -1 when there is no such effect. */
+CAW_API int32_t caw_engine_component_auto_gain(CawEngine* e, const char* layer_id, uint32_t index, float* trim_db);
+/* An effect slot's output meter (API version 39), for a device's footer. */
+typedef struct CawSlotMeter {
+    float peak_l;     /* each side's peak (linear) of what the slot passes on since the last read */
+    float peak_r;
+    int32_t clipped;  /* 1: a sample went over full scale (|x| > 1) since the last read */
+} CawSlotMeter;
+/* Reads and resets slot `index`'s meter (addressed as in caw_engine_set_component_param; CAW_INSTRUMENT_INDEX the
+   instrument; not per-note FX): what it passes on, after its auto gain and bypass. Lock-free on the audio side; 1,
+   0 when the engine is busy with a project update (out is zeroed; call again) or -1 when there is no such slot. */
+CAW_API int32_t caw_engine_component_meter(CawEngine* e, const char* layer_id, uint32_t index, CawSlotMeter* out);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
    {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
    index CAW_INSTRUMENT_INDEX). Store "state" and

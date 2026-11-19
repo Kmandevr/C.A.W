@@ -282,7 +282,7 @@ TEST(merged_dynamics_devices_list_their_variants_with_the_old_descriptors) {
         CHECK(p && &p->descriptor() == &d);
     }
     const fx::MergedDevice* comp = fx::findMergedDevice(kCompressor);
-    CHECK(comp && comp->variants.size() == 4u && comp->variants[3].name == "Shape");
+    CHECK(comp && comp->variants.size() == 5u && comp->variants[3].name == "Shape" && comp->variants[4].name == "Duck");
     CHECK(fx::findMergedDevice(kLimiter)->variants.size() == 1u && fx::findMergedDevice(kTransient)->variants.size() == 1u);
     // The keyed variants keep a real sidechain input; Dynamics has none; Shape also takes the key's notes.
     CHECK(ComponentChain::isKeyedEffect(comp->variants[0].descriptor()));
@@ -373,7 +373,13 @@ TEST(merged_dynamics_resolves_the_old_presets_under_its_id_with_equal_values) {
         }
     }
     CHECK(total[kCompressor] >= 10u);  // the dynamics processor's and the ducker's
-    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor]);
+    // ... followed by the Duck variant's own (new DSP, no old effect): each names variant 4.
+    size_t duck = 0;
+    for (const BuiltinPreset& p : builtinPresets(kCompressor))
+        for (const auto& [k, x] : p.values)
+            if (k == "variant" && x == 4.0) ++duck;
+    CHECK(duck >= 8u);
+    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor] + duck);
     CHECK(builtinPresets(kLimiter).empty() && builtinPresets(kTransient).empty());
 }
 
@@ -555,7 +561,7 @@ TEST(the_components_json_lists_the_merged_dynamics_variants) {
     std::map<std::string, size_t> variants;
     for (const Json& c : list->arr)
         if (const Json* v = c.get("variants")) variants[c.string("id")] = v->arr.size();
-    CHECK_EQ(variants[kCompressor], 4u);
+    CHECK_EQ(variants[kCompressor], 5u);
     CHECK_EQ(variants[kLimiter], 1u);
     CHECK_EQ(variants[kTransient], 1u);
 }
