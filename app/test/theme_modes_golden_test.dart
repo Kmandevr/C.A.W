@@ -50,11 +50,11 @@ void main() {
   });
 
   const looks = {
-    'dawn_light': ('Dawn', LookMode.light),
-    'neon_light': ('Neon', LookMode.light),
+    'jay_light': ('Jay', LookMode.light),
+    'raven_light': ('Raven', LookMode.light),
   };
 
-  for (final e in {...looks, 'flat_dark': ('Flat', LookMode.dark)}.entries) {
+  for (final e in {...looks, 'jackdaw_dark': ('Jackdaw', LookMode.dark)}.entries) {
     testWidgets('golden: Arrange at phone size, ${e.key}', (tester) async {
       final s = AppState(settings: Settings());
       final sections = SectionController();
@@ -73,7 +73,7 @@ void main() {
     });
   }
 
-  for (final e in {...looks, 'flat_light': ('Flat', LookMode.light)}.entries) {
+  for (final e in {...looks, 'jackdaw_light': ('Jackdaw', LookMode.light)}.entries) {
     testWidgets('golden: the EQ editor at phone size, ${e.key}', (tester) async {
       final source = DeviceDisplaySource.current;
       final display = FakeDisplay();

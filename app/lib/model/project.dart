@@ -1053,6 +1053,11 @@ class ProjectDoc {
   /// (2026-11-12), shown as unknown. Copies (Duplicate) start again; imports keep the original's.
   DateTime? created;
 
+  /// Seconds spent with the project open and the app in front (Files › Projects' card), and when it was last
+  /// exported (null: never). Stats, not edits: an undo keeps them.
+  int timeSpentSeconds = 0;
+  DateTime? lastExport;
+
   /// The app version and build that last wrote the file this was read from (`saved_with`; null before 2026-11-12,
   /// shown as unknown). [toJson] always writes the running app's.
   String? savedWithVersion;
@@ -1340,6 +1345,8 @@ class ProjectDoc {
         if (automationFollowsClips) 'automation_follows_clips': true,
         if (recentAutomation.isNotEmpty) 'recent_automation': recentAutomation,
         if (created != null) 'created': created!.toUtc().toIso8601String(),
+        if (timeSpentSeconds > 0) 'time_spent_s': timeSpentSeconds,
+        if (lastExport != null) 'last_export': lastExport!.toUtc().toIso8601String(),
         'saved_with': {'version': appVersion, 'build': appBuild},
       };
 
@@ -1525,6 +1532,8 @@ class ProjectDoc {
           if (k is String && k.length <= 512) k,
       ]
       ..created = projectCreatedFromJson(j['created'])
+      ..timeSpentSeconds = projectTimeSpentFromJson(j['time_spent_s'])
+      ..lastExport = projectCreatedFromJson(j['last_export'])
       ..savedWithVersion = savedWithFromJson(j['saved_with']).version
       ..savedWithBuild = savedWithFromJson(j['saved_with']).build;
 
@@ -1680,6 +1689,9 @@ List<(int, String)> lengthChoices(int stepsPerBar) => [
 /// `created` from untrusted JSON: an ISO-8601 time of at most 40 characters, else null (unknown).
 DateTime? projectCreatedFromJson(Object? raw) =>
     raw is String && raw.length <= 40 ? DateTime.tryParse(raw)?.toUtc() : null;
+
+/// `time_spent_s` from untrusted JSON: whole seconds, at most about a century, else 0.
+int projectTimeSpentFromJson(Object? raw) => raw is int && raw > 0 && raw < 1 << 32 ? raw : 0;
 
 /// `saved_with` from untrusted JSON: a version of at most 40 printable characters and a build in 0..2^31, else nulls.
 ({String? version, int? build}) savedWithFromJson(Object? raw) {

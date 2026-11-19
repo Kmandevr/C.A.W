@@ -14,6 +14,7 @@ import '../theme.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
 import '../pointer_input.dart';
+import '../crow.dart';
 
 /// The device rows' ids, in their order.
 const midiDeviceRows = ['midi.devices', 'midi.bluetooth', 'midi.mpe', 'midi.bendRange', 'midi.mappings'];
@@ -185,7 +186,7 @@ class _BluetoothScan extends StatelessWidget {
                 icon: Icons.bluetooth_searching,
                 subtitle: problem ?? (b.scanning ? 'Looking for Bluetooth MIDI devices…' : null),
                 trailing: b.scanning
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const CrowLoader(size: 18)
                     : const Icon(Icons.chevron_right),
                 onTap: () => bluetooth.scan(!b.scanning)),
             for (final d in b.found)

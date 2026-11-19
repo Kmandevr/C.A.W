@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../engine/component_info.dart';
 import '../../../model/device_names.dart';
 import '../../../model/merged_devices.dart';
+import '../../caw_icons.dart';
 import '../../theme.dart';
 import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
 import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
@@ -22,7 +23,7 @@ enum EffectCategory {
   pitchTime('Pitch & Time', Icons.timelapse),
   creative('Creative', Icons.auto_awesome),
   utility('Utility', Icons.tune),
-  racks('Racks', Icons.view_agenda_outlined),
+  racks('Racks', CawIcons.nest),
   autostacc('AutoStacc pack', Icons.toys_outlined);
 
   const EffectCategory(this.label, this.icon);

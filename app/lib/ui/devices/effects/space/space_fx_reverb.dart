@@ -16,6 +16,7 @@ import '../../kit/feel.dart';
 import '../../kit/hero.dart';
 import '../effect_page.dart';
 import 'space_fx.dart';
+import '../../../crow.dart';
 
 /// The convolver: the impulse response's envelope (the engine's, once built; else drawn from the knobs ≈) on a pad of
 /// decay (sideways) and size (up), the impulse picker, reverse, then pre-delay, damping, length, tone, width and mix.
@@ -119,7 +120,7 @@ class _LoadImpulseButtonState extends State<LoadImpulseButton> {
         style: TextButton.styleFrom(foregroundColor: DeviceScope.of(context).accent),
         onPressed: _busy ? null : _load,
         icon: _busy
-            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const CrowLoader(size: 14)
             : const Icon(Icons.file_open, size: 16),
         label: const Text('Load WAV…', style: TextStyle(fontSize: 12)),
       );

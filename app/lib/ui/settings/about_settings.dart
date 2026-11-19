@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../model/easter_eggs.dart';
 import '../../model/problem_log.dart';
 import '../../model/telemetry/telemetry.dart';
 import '../../model/updates/update_service.dart';
@@ -11,6 +12,8 @@ import '../../platform/distribution.dart';
 import '../../version.dart';
 import '../privacy/feedback_sheet.dart';
 import '../startup_screen.dart' show openAlphaNotice;
+import '../crow.dart';
+import '../haptics.dart';
 import '../theme.dart';
 import '../whats_new.dart';
 import 'engine_diagnostics.dart';
@@ -27,9 +30,7 @@ class AboutSettings extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SettingsCardView(card: SettingsCard.about, rows: [
-        settingAction('about.beta',
-            icon: Icons.science_outlined, iconColor: Neon.yellow,
-            subtitle: 'C.A.W v$appVersion · $openAlphaNotice Projects are saved as you go.'),
+        const AboutCrowRow(),
         // The changelog, bundled (the sheet after an update shows this version's entry).
         settingAction('about.whatsNew',
             icon: Icons.new_releases_outlined, iconColor: Neon.violet, onTap: () => showWhatsNewPage(context)),
@@ -44,7 +45,7 @@ class AboutSettings extends StatelessWidget {
         ], more: [
         settingAction('about.licences',
             icon: Icons.description_outlined, iconColor: Neon.dim,
-            subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1)',
+            subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1). Every feather accounted for.',
             onTap: () => showLicensePage(context: context, applicationName: 'C.A.W')),
         ]),
         // Updates (owner, 2026-11-12); where Settings opens without the app, an inert service that checks nothing. The
@@ -84,4 +85,44 @@ class AboutSettings extends StatelessWidget {
         ),
         ]),
       ]);
+}
+
+/// About's first row: the crow (hold it and it caws), C.A.W and the version (it counts taps), the open-alpha notice
+/// and a light line.
+class AboutCrowRow extends StatelessWidget {
+  const AboutCrowRow({super.key, this.eggs});
+  final EasterEggs? eggs;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = eggs ?? EasterEggs.instance;
+    return SettingRow(
+      id: 'about.beta',
+      child: ListTile(
+        key: const ValueKey('action-about.beta'),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        leading: GestureDetector(
+          key: const ValueKey('about-crow'),
+          onLongPress: () {
+            Haptics.tap();
+            e.caw();
+          },
+          child: SizedBox.square(
+              dimension: 32, child: CustomPaint(painter: CrowPainter(color: Neon.text, eye: Neon.pink))),
+        ),
+        title: const Text('Version'),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          GestureDetector(
+            key: const ValueKey('about-version'),
+            behavior: HitTestBehavior.opaque,
+            onTap: e.versionTapped,
+            child: Text('C.A.W v$appVersion · $openAlphaNotice Projects are saved as you go.',
+                style: const TextStyle(color: Neon.dim, fontSize: 12)),
+          ),
+          const Text('Built by a small flock, one note at a time.', style: TextStyle(color: Neon.dim, fontSize: 11)),
+        ]),
+      ),
+    );
+  }
 }

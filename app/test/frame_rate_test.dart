@@ -104,7 +104,7 @@ void main() {
     });
 
     test('a file from before the setting, or with an unknown value, is Auto', () {
-      final s = Settings()..fromJson({'theme': 'Neon'});
+      final s = Settings()..fromJson({'theme': 'Raven'});
       expect(s.frameRate, FrameRateController.auto);
       for (final bad in [75, -1, 'fast', 1e9, null]) {
         final t = Settings()..fromJson({'frame_rate': bad});

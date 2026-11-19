@@ -53,9 +53,18 @@ class DevicePresets {
             DevicePreset(p.name, p.params, category: 'Factory'),
       ];
 
-  /// The engine's presets the browser leaves out, by component: Mimic's "Talking crow" is the device UI plan's
-  /// hidden preset, to be found by scrolling past the list's end (that reveal is not built yet).
-  static const hidden = {'org.caw.vocoder': {'Talking crow'}};
+  /// The engine's presets the browser leaves out of its list, by component: each is found by scrolling past the
+  /// list's end ([hiddenOf]).
+  static const hidden = {
+    'org.caw.vocoder': {'Talking crow'},
+    'org.caw.pack.granular': {'Crow flock'},
+  };
+
+  /// The device's hidden presets, as the engine has them (empty for most devices).
+  static List<DevicePreset> hiddenOf(DeviceTarget target) => [
+        for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
+          if (hidden[target.componentId]?.contains(p.name) ?? false) DevicePreset(p.name, p.params, category: 'Factory'),
+      ];
 
   static void register(String componentId, List<DevicePreset> presets) => _byId[componentId] = presets;
 

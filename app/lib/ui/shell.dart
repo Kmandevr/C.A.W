@@ -57,6 +57,7 @@ import 'music_video/video_setup_sheet.dart';
 import 'privacy/feedback_sheet.dart';
 import 'startup_screen.dart';
 import 'music_video/video_render_chip.dart';
+import 'egg_layer.dart' show TempoLeet;
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [Panels.builder, Panels.arrangement, Panels.files];
@@ -887,7 +888,7 @@ class _BpmButton extends StatelessWidget {
             child: mapped
                 ? LiveIsland(child: ValueListenableBuilder<int>(valueListenable: state.tick,
                     builder: (context, _, _) => text(here())))
-                : text(bpm),
+                : TempoLeet(bpm: bpm, style: Neon.code(size: 14, color: Neon.blue), child: text(bpm)),
           ),
         ),
       ),

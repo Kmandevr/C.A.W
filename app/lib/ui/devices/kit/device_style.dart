@@ -1,6 +1,7 @@
 // Each device family's colour identity (two accents from the theme's neon slots, an icon), so devices read apart at a glance.
 import 'package:flutter/material.dart';
 
+import '../../caw_icons.dart';
 import '../../theme.dart';
 import '../effects/space/space_fx.dart' show fxSpaceFamilies; // fx-space
 // fx-filters begin
@@ -33,9 +34,9 @@ Color get _red => Neon.layers[7];
 
 /// The style of [family]. Colours come from theme slots, so a user theme recolours every device consistently.
 DeviceStyle deviceStyle(DeviceFamily family) => switch (family) {
-      DeviceFamily.eq => DeviceStyle(family, Neon.blue, _mint, Icons.graphic_eq, 'EQ'),
-      DeviceFamily.dynamics => DeviceStyle(family, Neon.yellow, _orange, Icons.compress, 'DYNAMICS'),
-      DeviceFamily.space => DeviceStyle(family, Neon.violet, Neon.blue, Icons.blur_on, 'SPACE'),
+      DeviceFamily.eq => DeviceStyle(family, Neon.blue, _mint, CawIcons.plume, 'EQ'),
+      DeviceFamily.dynamics => DeviceStyle(family, Neon.yellow, _orange, CawIcons.talon, 'DYNAMICS'),
+      DeviceFamily.space => DeviceStyle(family, Neon.violet, Neon.blue, CawIcons.roost, 'SPACE'),
       DeviceFamily.drive => DeviceStyle(family, _orange, _red, Icons.whatshot_outlined, 'DRIVE'),
       DeviceFamily.filter => DeviceStyle(family, _mint, Neon.green, Icons.filter_alt_outlined, 'FILTER'),
       DeviceFamily.modulation => DeviceStyle(family, Neon.blue, Neon.violet, Icons.waves, 'MOD'),
