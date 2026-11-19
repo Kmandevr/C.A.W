@@ -390,9 +390,13 @@ const cppBuiltins = <CppBuiltin>[
       'Variants (`variant`): Bands, Graphic, DJ, Tilt; these knobs are the first\'s. 8 bands (bell, shelves, cuts at 12/24/48 dB, notch, band-pass, tilt), each stereo, mid, side, left or right; '
       'knobs b1_..b8_ on, type, freq, gain, q, channel; a live spectrum.',
       ['variant', 'output']),
-  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Compressor, Dynamics, Gate, Shape; these knobs are the first\'s. Soft knee, auto release and makeup, RMS or peak, link, sidechain filter.',
+  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Variants (`variant`): Down, Dynamics, Up, Bus; these knobs are Down\'s. Soft knee, auto release and makeup, peak, RMS or ISP, link, sidechain filters, character, output. Always send talon_layout 1 (an entry without it is read as 1.0.9\'s).',
       ['variant', 'threshold', 'ratio', 'knee', 'attack', 'release', 'auto_release', 'makeup', 'auto_makeup', 'mix', 'lookahead', 'detect',
-       'link', 'sc_hpf', 'sc_listen', 'sidechain']),
+       'link', 'sc_hpf', 'sc_listen', 'sidechain', 'sc_lpf', 'character', 'output']),
+  CppBuiltin('org.caw.gate', 'Gate', false, 'Variants (`variant`): Gate, Expand, Pedal gate; these knobs are the first\'s. Threshold, range, ratio, hold, sidechain filter and key.',
+      ['variant', 'threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf', 'sidechain']),
+  CppBuiltin('org.caw.duck', 'Ducker', false, 'Variants (`variant`): Duck, Level, Carve; these knobs are the first\'s. Ducks under a key (or levels its own input) by an amount above a threshold.',
+      ['variant', 'threshold', 'amount', 'attack', 'hold', 'release', 'detection', 'output', 'mix', 'sidechain']),
   CppBuiltin('org.caw.limiter', 'Limiter', false, 'A look-ahead limiter with a true-peak estimate.',
       ['gain', 'ceiling', 'release', 'lookahead', 'true_peak']),
   CppBuiltin('org.caw.transient', 'Transient shaper', false, 'More or less attack and sustain.', ['attack', 'sustain', 'output', 'mix']),
@@ -447,7 +451,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.convolver', 'Convolver', false,
       'Convolution reverb: generated rooms, halls, plates, springs, chambers and odd spaces, or a loaded WAV; 512 frames of latency.',
       ['source', 'decay', 'size', 'damping', 'length', 'reverse', 'predelay', 'low_cut', 'high_cut', 'width', 'mix']),
-  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan; these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
+  CppBuiltin('org.caw.tremolo', 'Tremolo', false, 'Variants (`variant`): Tremolo, Pan, Shape (the drawn duck); these knobs are the first\'s. Level modulation in seven shapes, classic or harmonic.',
       ['variant', 'rate', 'sync', 'depth', 'shape', 'smooth', 'stereo', 'mode']),
   // fx-space end
   // fx-filters begin
@@ -460,6 +464,15 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.disperser', 'Disperser', false, 'Up to 64 all-pass stages that smear transients into a chirp.',
       ['amount', 'freq', 'pinch', 'spread', 'mix']),
   // fx-filters end
+  // 1.1.0's tools (engine/src/builtin_fx_meters.cpp, builtin_fx_lofi.cpp, builtin_fx_phasealign.cpp)
+  CppBuiltin('org.caw.meters', 'Meters', false,
+      'Variants (`variant`): Analyzer, Tuner, Loudness (only the chosen one runs); the output is the input bit for bit.',
+      ['source', 'tilt', 'variant']),
+  CppBuiltin('org.caw.lofi', 'Lo-fi', false, 'Worn media: the Age macro over crackle, wear, hiss, wobble, a band limit and grit.',
+      ['age', 'crackle', 'wear', 'hiss', 'wobble', 'band', 'grit', 'seed', 'mix', 'output']),
+  CppBuiltin('org.caw.phasealign', 'Phase align', false,
+      'Delays (sub-sample) and inverts a track to line it up with its key; Auto learns the delay; 1 frame of latency.',
+      ['mode', 'delay', 'invert', 'learn', 'window']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
   CppBuiltin('org.caw.rack.fx', 'FX rack', false,
       'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 40;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 41;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;

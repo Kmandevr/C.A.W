@@ -67,31 +67,36 @@ void main() {
       expect(DeviceEditors.custom(id, builtinInfo(id)), isNotNull, reason: id);
       await open(tester, id);
       expect(find.byKey(const ValueKey('device-fallback')), findsNothing, reason: id);
-      expect(find.byKey(const ValueKey('variant-pick-0')), findsNothing, reason: '$id: cards replace the pill');
+      // Bit distortion has two variants since 1.1.0 (Crush, Bitwise) and no cards yet: the generic pill picks them.
+      expect(find.byKey(const ValueKey('variant-pick-0')), id == 'org.caw.bits' ? findsOneWidget : findsNothing,
+          reason: '$id: cards replace the pill');
       expect(tester.takeException(), isNull);
       await close(tester);
     }
   });
 
   testWidgets('a Compressor card switches the variant in one undo step, resetting the knobs it doesn\'t share', (tester) async {
-    final (s, t) = await open(tester, 'org.caw.compressor', values: {'threshold': -30, 'attack': 40});
-    expect(find.byKey(const ValueKey('variant-card-4')), findsOneWidget);
+    // 1.1.0: Down, Dynamics, Up and Bus (Gate, Shape and Duck are their own devices' now).
+    final (s, t) = await open(tester, 'org.caw.compressor', values: {'threshold': -20, 'attack': 40});
+    expect(find.byKey(const ValueKey('variant-card-3')), findsOneWidget);
+    expect(find.byKey(const ValueKey('variant-card-4')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('variant-card-2')));
     await tester.pumpAndSettle();
     expect(t.info!.variantIndex, 2);
-    // The Gate's threshold has another range (−80..0): a different knob, so it starts at its default.
-    expect(t.value('threshold'), -40);
-    expect(find.text('GATE'), findsWidgets);
+    // Up's threshold has another range (−80..0): a different knob, so it starts at its default.
+    expect(t.value('threshold'), -30);
+    expect(find.text('UP'), findsWidgets);
     expect(find.byKey(const ValueKey('dknob-range')), findsOneWidget);
     expect(s.undo(), isTrue);
     await tester.pumpAndSettle();
     expect(t.info!.variantIndex, 0);
-    expect((t.value('threshold'), t.value('attack')), (-30, 40));
+    expect((t.value('threshold'), t.value('attack')), (-20, 40));
     expect(find.byKey(const ValueKey('dknob-ratio')), findsOneWidget);
-    // Shape keeps the drawn duck as its hero.
+    // Bus: its stepped ratio as chips.
     await tester.tap(find.byKey(const ValueKey('variant-card-3')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('duck-hero')), findsOneWidget);
+    expect(find.text('BUS'), findsWidgets);
+    expect(find.byKey(const ValueKey('chip-ratio-3')), findsOneWidget, reason: '1.5, 2, 4 and 10:1');
     expect(tester.takeException(), isNull);
     await close(tester);
   });
@@ -143,7 +148,7 @@ void main() {
       expect(t.value('high_ratio'), lessThan(2));
       await close(tester);
 
-      (_, t) = await open(tester, 'org.caw.compressor', variant: 2);
+      (_, t) = await open(tester, 'org.caw.gate');  // 1.1.0: the Gate's own device (1.0.9: the Compressor's 2)
       hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
       await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -30));
       await tester.pumpAndSettle();
@@ -160,7 +165,7 @@ void main() {
       expect(t.value('range'), greaterThan(-80));
       await close(tester);
 
-      (_, t) = await open(tester, 'org.caw.compressor', variant: 4);
+      (_, t) = await open(tester, 'org.caw.duck');  // 1.1.0: the Ducker's first (1.0.9: the Compressor's 4)
       expect(find.byKey(const ValueKey('chip-detection-2')), findsOneWidget, reason: 'RMS, Peak, ISP');
       await tester.tap(find.byKey(const ValueKey('chip-detection-2')));
       await tester.pumpAndSettle();

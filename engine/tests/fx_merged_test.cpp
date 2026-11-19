@@ -229,10 +229,18 @@ TEST(a_merged_device_reusing_an_old_id_replaces_its_registration_in_place) {
     for (const fx::MergedDevice* d : fx::mergedDevices()) {
         const ModuleDescriptor* listed = registry().find(d->id);
         CHECK(listed == &d->variants[0].descriptor());
-        CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
+        // `variant` last, but for Talon (1.1.0), whose list goes on with Down's extras and the talon_layout marker.
+        bool has = false;
+        for (uint32_t k = 0; listed && k < listed->parameterCount; ++k) has = has || listed->parameters[k].id == fx::kVariantParam;
+        CHECK(has);
+        if (d->id != "org.caw.compressor")
+            CHECK(listed && listed->parameterCount > 0 && listed->parameters[listed->parameterCount - 1].id == fx::kVariantParam);
     }
     // A merged id's presets are its own (a reused id's, variant 0) and its old effects'; any other id's are its own.
-    CHECK(&builtinPresets("org.caw.convolver") == &ownBuiltinPresets("org.caw.convolver"));  // stays its own device
+    CHECK(&builtinPresets("org.caw.downmix") == &ownBuiltinPresets("org.caw.downmix"));  // stays its own device
+    // The Convolver (merged in 1.1.0, its id reused): its own presets first, then its Cab's.
+    CHECK_EQ(builtinPresets("org.caw.convolver").size(),
+             ownBuiltinPresets("org.caw.convolver").size() + fx::newVariantPresets("org.caw.convolver").size());
     CHECK(ownBuiltinPresets(kShift).empty() && builtinPresets(kShift).size() >= 10u);
 }
 
@@ -243,7 +251,7 @@ TEST(the_old_ids_are_retired_but_still_play_as_their_merged_devices) {
     registerBuiltinComponents(plain);
     Engine e(48000);
     const std::string json = e.nativeComponentsJson();
-    CHECK(fx::legacyEffects().size() == 30u);
+    CHECK(fx::legacyEffects().size() == 29u);  // 1.1.0: org.caw.gate is a device's own id again
     for (const fx::LegacyEffect* old : fx::legacyEffects()) {
         const std::string id(old->from);
         CHECK(plain.find(id) == nullptr);

@@ -125,8 +125,19 @@ public:
     // A track's instrument: one component with one event input and one stereo audio output (and no
     // other ports), played by the notes in notes(). Everything else (values, bypass, state,
     // automation, tails, latency, rebuilds) works as for an effect chain of one.
+    // `midi`: the track's MIDI effects (1.1.0, midi_fx.h), at most midifx::kMaxPerTrack, run on the notes before the
+    // instrument hears them (runMidiEffects). They are entries 1.. of the chain (the instrument is 0), so values,
+    // bypass, state, display and automation ("instrument" lanes with component 1..) address them by index.
     static std::unique_ptr<ComponentChain> buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
-                                                           double sampleRate, std::string& error);
+                                                           double sampleRate, std::string& error,
+                                                           const std::vector<ComponentSpec>& midi = {});
+    // Audio thread, an instrument with MIDI effects: runs them on this block's events in notes() (sorted), each one's
+    // output the next one's input, and puts the last one's output in notes(). A bypassed one passes its input on; one
+    // that fails a block, or writes events out of order or past the block, passes its input on for that block.
+    // process() runs them itself when nothing has this block (so a fading or tail render maps its note-offs too).
+    void runMidiEffects(uint32_t m, double sampleRate, const ChainTime* time) noexcept;
+    // How many MIDI effects the instrument has (entries 1..).
+    std::size_t midiEffects() const noexcept { return midiCount_; }
     // Whether a descriptor has an instrument's ports (one event input, one stereo audio output).
     static bool isInstrument(const ModuleDescriptor& d) noexcept;
     // One slot of a layer's per-note FX (#127, note_fx_host.h): effects as build() takes them (keyed ones excepted),
@@ -346,6 +357,9 @@ private:
     // Set at build only for chains of built-ins (make()); a chain holding a loaded component is reset on the
     // audio thread as before.
     bool clean_ = false;
+    std::size_t midiCount_ = 0;         // an instrument's MIDI effects: the last midiCount_ entries
+    bool midiRan_ = false;              // audio thread: runMidiEffects ran for the block process() is about to play
+    std::vector<Event> midiScratch_;    // their ping-pong buffer (NoteEvents::kCapacity; only with MIDI effects)
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects

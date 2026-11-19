@@ -403,7 +403,7 @@ private:
 // audio thread (every 16 frames: 4,096 frames generated, or two head partitions transformed, or every fourth step
 // one tail partition: about a quarter of a second for a 5 s response) and crossfades to it over one partition, so
 // turning a knob never clicks or blocks. Responses run up to 5 s at High quality, 3.5 s at Normal and 2 s at Eco.
-class Convolver final : public EffectBase {
+class Convolver : public EffectBase {  // not final: variant 0 of the merged Convolver (AsVariant)
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return convDescriptor(); }
 
@@ -812,6 +812,12 @@ private:
 };
 
 }  // namespace
+
+// The convolver as variant 0 of the merged Convolver (builtin_fx_merged_space.cpp, 1.1.0, with Cab as 1).
+const ModuleDescriptor& convolverDescriptor() { return convDescriptor(); }
+ModuleProcessor* makeConvolverAs(const ModuleDescriptor& variant) noexcept {
+    return new (std::nothrow) AsVariant<Convolver>(variant);
+}
 
 // The shimmer reverb as a variant of Reverb (builtin_fx_merged_space.cpp): its own (legacy) descriptor, and an
 // instance of the same class under a variant's descriptor (fx_merged.h, AsVariant).

@@ -37,6 +37,9 @@ const ModuleDescriptor& legacyAutopanDescriptor();
 ModuleProcessor* makeAutopanAs(const ModuleDescriptor& variant) noexcept;
 // builtin_effects_kit.cpp: org.caw.phaser, org.caw.flanger, org.caw.utility (its class with optional mid and side
 // outputs, unconnected by default).
+// builtin_ducker.cpp: org.caw.ducker (Shape, 1.1.0).
+const ModuleDescriptor& legacyDuckerDescriptor();
+ModuleProcessor* makeDuckerAs(const ModuleDescriptor& variant) noexcept;
 const ModuleDescriptor& legacyPhaserDescriptor();
 ModuleProcessor* makePhaserAs(const ModuleDescriptor& variant) noexcept;
 const ModuleDescriptor& legacyFlangerDescriptor();

@@ -1,6 +1,8 @@
 // C.A.W. Library: EQ bands on state-variable filters (a three-band EQ and a 12-type parametric band); header-only, allocation-free.
 #pragma once
 
+#include <cmath>
+
 #include "../detmath.hpp"
 
 namespace caw::lib {
@@ -145,7 +147,8 @@ class EqFilter {
 public:
     static constexpr int kMaxStages = 8;
     void set(EqType type, double hz, double db, double q, double sampleRate) noexcept {
-        if (type == type_ && hz == hz_ && db == db_ && q == q_ && sampleRate == rate_) return;
+        if (exact_ && type == type_ && hz == hz_ && db == db_ && q == q_ && sampleRate == rate_) return;
+        exact_ = true;
         type_ = type, hz_ = hz, db_ = db, q_ = q, rate_ = sampleRate;
         double f = finiteOr0(hz);
         const double top = 0.49 * sampleRate;
@@ -155,6 +158,7 @@ public:
         double qq = finiteOr0(q);
         qq = qq < 0.1 ? 0.1 : (qq > 40.0 ? 40.0 : qq);
         const double g = detTan(kPi * f / sampleRate);
+        g_ = g, qq_ = qq;
         scale_ = 1.0;
         identity_ = false;
         switch (type) {
@@ -163,17 +167,7 @@ public:
             case EqType::HighShelf:
             case EqType::Tilt: {
                 identity_ = d == 0.0;  // no gain: the band is the input, exactly
-                const double A = detPow(10.0, d / 40.0), rootA = detPow(10.0, d / 80.0), k = 1.0 / qq;
-                stages_ = 1;
-                if (type == EqType::Bell) {
-                    const double kb = 1.0 / (qq * A);
-                    mix_[0].set(g, kb, 1.0, kb * (A * A - 1.0), 0.0);
-                } else if (type == EqType::LowShelf) {
-                    mix_[0].set(g / rootA, k, 1.0, k * (A - 1.0), A * A - 1.0);
-                } else {
-                    mix_[0].set(g * rootA, k, A * A, k * (1.0 - A) * A, 1.0 - A * A);
-                    if (type == EqType::Tilt) scale_ = 1.0 / A;  // 10^(-d/40): half the gain down
-                }
+                gainStage(type, detPow(10.0, d / 40.0), detPow(10.0, d / 80.0));
                 break;
             }
             case EqType::LowCut12: case EqType::LowCut24: case EqType::LowCut48:
@@ -216,6 +210,20 @@ public:
             }
         }
     }
+    // A bell's, shelf's or tilt's gain moved (a dynamic band, at control rate), its type, frequency and Q as
+    // set() left them: the gain's powers from fastExp instead of detPow (a few ulps apart, on every platform the
+    // same), the frequency's tan kept. The next set() works everything out again. Other types: nothing.
+    void setGainFast(double db) noexcept {
+        if (type_ != EqType::Bell && type_ != EqType::LowShelf && type_ != EqType::HighShelf && type_ != EqType::Tilt) return;
+        double d = finiteOr0(db);
+        d = d < -48.0 ? -48.0 : (d > 24.0 ? 24.0 : d);
+        exact_ = false;
+        db_ = d;
+        identity_ = d == 0.0;
+        scale_ = 1.0;
+        gainStage(type_, fastGain(d * 0.057564627324851142), fastGain(d * 0.028782313662425571));  // ln 10 / 40, / 80
+    }
+
     // One sample through the band, with `state` this channel's kMaxStages stage states. A caller may skip an
     // identity() band (and clear its state, so it starts clean when it gains a gain again).
     double process(SvfState* state, double x) const noexcept {
@@ -238,7 +246,42 @@ public:
     }
 
 private:
+    // exp(x) for |x| <= 2.8 (a gain within +-24 dB): a 2^k split and a degree-11 series (|r| <= ln 2 / 2).
+    static double fastGain(double x) noexcept {
+        const double k = std::floor(x * 1.4426950408889634 + 0.5);
+        const double r = x - k * 0.69314718055994531;
+        double p = 1.0 / 39916800.0;
+        p = p * r + 1.0 / 3628800.0;
+        p = p * r + 1.0 / 362880.0;
+        p = p * r + 1.0 / 40320.0;
+        p = p * r + 1.0 / 5040.0;
+        p = p * r + 1.0 / 720.0;
+        p = p * r + 1.0 / 120.0;
+        p = p * r + 1.0 / 24.0;
+        p = p * r + 1.0 / 6.0;
+        p = p * r + 0.5;
+        p = p * r + 1.0;
+        p = p * r + 1.0;
+        return std::ldexp(p, static_cast<int>(k));
+    }
+    // The one stage of a bell, shelf or tilt for A = 10^(d/40) and rootA = 10^(d/80) (g_, qq_ from set()).
+    void gainStage(EqType type, double A, double rootA) noexcept {
+        const double g = g_, qq = qq_, k = 1.0 / qq;
+        stages_ = 1;
+        if (type == EqType::Bell) {
+            const double kb = 1.0 / (qq * A);
+            mix_[0].set(g, kb, 1.0, kb * (A * A - 1.0), 0.0);
+        } else if (type == EqType::LowShelf) {
+            mix_[0].set(g / rootA, k, 1.0, k * (A - 1.0), A * A - 1.0);
+        } else {
+            mix_[0].set(g * rootA, k, A * A, k * (1.0 - A) * A, 1.0 - A * A);
+            if (type == EqType::Tilt) scale_ = 1.0 / A;  // 10^(-d/40): half the gain down
+        }
+    }
+
     SvfMix mix_[kMaxStages];
+    double g_ = 0, qq_ = 1;
+    bool exact_ = true;  // set() made these (setGainFast: not)
     int stages_ = 1;
     double scale_ = 1.0;
     bool identity_ = true;

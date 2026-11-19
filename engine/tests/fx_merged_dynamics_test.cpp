@@ -1,4 +1,4 @@
-// FX consolidation, part A: the merged Compressor (Compressor, Dynamics, Gate, Shape), Limiter and Transient against the old ids they replace.
+// FX consolidation, part A: the merged Compressor (Down, Dynamics), Gate, Shape (Tremolo/Pan's since 1.1.0), Limiter and Transient against the old ids they replace.
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -47,6 +47,8 @@ using Values = std::vector<std::pair<std::string, double>>;
 constexpr const char* kCompressor = "org.caw.compressor";
 constexpr const char* kLimiter = "org.caw.limiter";
 constexpr const char* kTransient = "org.caw.transient";
+constexpr const char* kGate = "org.caw.gate";        // 1.1.0: its own device again (1.0.8-1.0.9: the Compressor's variant 2)
+constexpr const char* kTremolo = "org.caw.tremolo";  // 1.1.0: Shape is its variant 2 (1.0.8-1.0.9: the Compressor's 3)
 
 // Each variant and the old id it replaces (`reused`: the merged device has the old id itself).
 struct Case {
@@ -60,8 +62,8 @@ struct Case {
 const Case kCases[] = {
     {kCompressor, 0, "org.caw.compressor", true, &fx::legacyCompressorDescriptor, &fx::makeCompressorAs},
     {kCompressor, 1, "org.caw.dynamics", false, &fx::legacyDynamicsDescriptor, &fx::makeDynamicsAs},
-    {kCompressor, 2, "org.caw.gate", false, &fx::legacyGateDescriptor, &fx::makeGateAs},
-    {kCompressor, 3, "org.caw.ducker", false, &fx::legacyDuckerDescriptor, &fx::makeDuckerAs},
+    {kGate, 0, "org.caw.gate", true, &fx::legacyGateDescriptor, &fx::makeGateAs},
+    {kTremolo, 2, "org.caw.ducker", false, &fx::legacyDuckerDescriptor, &fx::makeDuckerAs},
     {kLimiter, 0, "org.caw.limiter", true, &fx::legacyLimiterDescriptor, &fx::makeLimiterAs},
     {kTransient, 0, "org.caw.transient", true, &fx::legacyTransientDescriptor, &fx::makeTransientAs},
 };
@@ -166,7 +168,9 @@ ComponentSpec merged(const Case& c, const Values& values) {
     spec.id = c.old;
     spec.params = values;
     if (c.reused) {
-        CHECK(!fx::migrateLegacyEffect(spec));  // the merged device's own id: nothing to migrate
+        // The merged device's own id: nothing to migrate, but a Compressor entry without talon_layout is older than
+        // 1.1.0 and gets it (its variant 0 stays).
+        CHECK_EQ(fx::migrateLegacyEffect(spec), c.merged == std::string(kCompressor));
         spec.params.emplace_back(std::string(fx::kVariantParam), 0.0);
     } else {
         CHECK(fx::migrateLegacyEffect(spec));
@@ -263,9 +267,16 @@ TEST(merged_dynamics_devices_list_their_variants_with_the_old_descriptors) {
         CHECK(old.id == c.old);
         if (const ModuleDescriptor* listed = registry().find(c.old); listed && !c.reused) CHECK(listed == &old);
         CHECK(d.id == c.merged);
-        CHECK_EQ(d.parameterCount, old.parameterCount + 1);
+        // `variant` right after the old parameters; Talon's (1.1.0) then Down's extras and the talon_layout marker.
+        const bool talon = c.merged == std::string(kCompressor);
+        const uint32_t after = talon ? (c.variant == 0 ? 4u : 1u) : 0u;
+        CHECK_EQ(d.parameterCount, old.parameterCount + 1 + after);
         for (uint32_t k = 0; k < old.parameterCount; ++k) CHECK(d.parameters[k].id == old.parameters[k].id);
-        const ParameterDescriptor& variant = d.parameters[d.parameterCount - 1];
+        const ParameterDescriptor& variant = d.parameters[old.parameterCount];
+        if (talon) {
+            const ParameterDescriptor& marker = d.parameters[d.parameterCount - 1];
+            CHECK(marker.id == std::string("talon_layout") && marker.defaultValue == 1.0 && !marker.automatable && !marker.modulatable);
+        }
         CHECK(variant.id == fx::kVariantParam);
         CHECK(!variant.automatable && !variant.modulatable && !variant.midiMappable);
         CHECK_EQ(variant.defaultValue, static_cast<double>(c.variant));
@@ -282,14 +293,19 @@ TEST(merged_dynamics_devices_list_their_variants_with_the_old_descriptors) {
         CHECK(p && &p->descriptor() == &d);
     }
     const fx::MergedDevice* comp = fx::findMergedDevice(kCompressor);
-    CHECK(comp && comp->variants.size() == 5u && comp->variants[3].name == "Shape" && comp->variants[4].name == "Duck");
+    CHECK(comp && comp->variants.size() == 4u && comp->variants[0].name == "Down" && comp->variants[2].name == "Up" &&
+          comp->variants[3].name == "Bus");
+    const fx::MergedDevice* gate = fx::findMergedDevice(kGate);
+    const fx::MergedDevice* trem = fx::findMergedDevice(kTremolo);
+    CHECK(gate && gate->variants.size() == 3u && trem && trem->variants.size() == 3u && trem->variants[2].name == "Shape");
+    if (!comp || !gate || !trem) return;
     CHECK(fx::findMergedDevice(kLimiter)->variants.size() == 1u && fx::findMergedDevice(kTransient)->variants.size() == 1u);
     // The keyed variants keep a real sidechain input; Dynamics has none; Shape also takes the key's notes.
     CHECK(ComponentChain::isKeyedEffect(comp->variants[0].descriptor()));
     CHECK(!ComponentChain::isKeyedEffect(comp->variants[1].descriptor()));
-    CHECK(ComponentChain::isKeyedEffect(comp->variants[2].descriptor()));
-    CHECK(ComponentChain::isKeyedEffect(comp->variants[3].descriptor()) && comp->variants[3].descriptor().portCount == 4u);
-    CHECK(isOtherVariantParameter(kCompressor, "high_threshold") && isOtherVariantParameter(kCompressor, "depth"));
+    CHECK(ComponentChain::isKeyedEffect(gate->variants[0].descriptor()));
+    CHECK(ComponentChain::isKeyedEffect(trem->variants[2].descriptor()) && trem->variants[2].descriptor().portCount == 4u);
+    CHECK(isOtherVariantParameter(kCompressor, "high_threshold") && isOtherVariantParameter(kTremolo, "depth"));
     CHECK(!isOtherVariantParameter(kCompressor, "cutoff"));
     // Not merged here: the multiband and the de-esser stay their own ids.
     CHECK(!fx::findLegacyEffect("org.caw.multiband") && !fx::findLegacyEffect("org.caw.deesser"));
@@ -365,6 +381,7 @@ TEST(merged_dynamics_resolves_the_old_presets_under_its_id_with_equal_values) {
             std::map<std::string, double> want, got;
             for (const auto& [k, x] : p.values) want[std::string(k)] = x;
             want["variant"] = c.variant;
+            if (c.merged == std::string(kCompressor)) want["talon_layout"] = 1.0;  // 1.1.0: every Talon preset says so
             for (const auto& [k, x] : found->values) got[std::string(k)] = x;
             CHECK(want == got);
             Values applied;
@@ -372,14 +389,20 @@ TEST(merged_dynamics_resolves_the_old_presets_under_its_id_with_equal_values) {
             CHECK_EQ(valueOf(applied, "variant"), static_cast<double>(c.variant));
         }
     }
-    CHECK(total[kCompressor] >= 10u);  // the dynamics processor's and the ducker's
-    // ... followed by the Duck variant's own (new DSP, no old effect): each names variant 4.
-    size_t duck = 0;
-    for (const BuiltinPreset& p : builtinPresets(kCompressor))
-        for (const auto& [k, x] : p.values)
-            if (k == "variant" && x == 4.0) ++duck;
-    CHECK(duck >= 8u);
-    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor] + duck);
+    CHECK(total[kCompressor] >= 1u && total[kTremolo] >= 1u);  // the dynamics processor's; the ducker's
+    // ... followed by Up's and Bus's own (1.1.0, new DSP, no old effect): each names variant 2 or 3. Every Talon
+    // preset carries talon_layout.
+    size_t fresh = 0;
+    for (const BuiltinPreset& p : builtinPresets(kCompressor)) {
+        bool marked = false;
+        for (const auto& [k, x] : p.values) {
+            if (k == "variant" && (x == 2.0 || x == 3.0)) ++fresh;
+            marked = marked || (k == "talon_layout" && x == 1.0);
+        }
+        CHECK(marked);
+    }
+    CHECK(fresh >= 16u);
+    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor] + fresh);
     CHECK(builtinPresets(kLimiter).empty() && builtinPresets(kTransient).empty());
 }
 
@@ -423,17 +446,30 @@ TEST(a_saved_project_with_the_old_dynamics_ids_lanes_and_a_rack_plays_the_merged
     CHECK(fx::migrateLegacyEffects(p));
     CHECK(!fx::hasLegacyEffects(p));
     const auto& t = p.layers[1].components;
-    CHECK(t[0].id == kCompressor && t[1].id == kCompressor && t[2].id == kCompressor && p.masterComponents[0].id == kCompressor);
-    CHECK(valueOf(t[0].params, "variant") == 1 && valueOf(t[1].params, "variant") == 2 && valueOf(t[2].params, "variant") == 3);
+    CHECK(t[0].id == kCompressor && t[1].id == kGate && t[2].id == kTremolo && p.masterComponents[0].id == kTremolo);
+    CHECK(valueOf(t[0].params, "variant") == 1 && valueOf(t[1].params, "variant") == -12345 && valueOf(t[2].params, "variant") == 2);
     CHECK(t[1].hasKey && t[2].hasKey);  // the keys stay
-    CHECK(valueOf(t[3].params, "s1_fx") == rackChildHash(kCompressor) && valueOf(t[3].params, "s2.variant") == 3);
+    CHECK(valueOf(t[3].params, "s1_fx") == rackChildHash(kGate) && valueOf(t[3].params, "s1.variant") == 0);
+    CHECK(valueOf(t[3].params, "s2_fx") == rackChildHash(kTremolo) && valueOf(t[3].params, "s2.variant") == 2);
+    CHECK(valueOf(t[3].params, "rack_layout") == kRackLayoutCurrent);
     CHECK(t[4].id == kTransient && t[5].id == kCompressor && valueOf(t[5].params, "variant") == -12345);  // reused: untouched
+    CHECK(valueOf(t[0].params, "talon_layout") == 1 && valueOf(t[5].params, "talon_layout") == 1);  // marked 1.1.0
     CHECK_EQ(p.automation.size(), 3u);
+    // The 1.0.9 form (Gate and Shape as the Compressor's variants 2 and 3, no talon_layout) moves the same way.
+    ProjectSpec q;
+    CHECK(parseProject(newJson, q, error));
+    CHECK(fx::hasLegacyEffects(q) && fx::migrateLegacyEffects(q) && !fx::hasLegacyEffects(q));
+    const auto& u = q.layers[1].components;
+    CHECK(u[1].id == kGate && valueOf(u[1].params, "variant") == 0 && u[2].id == kTremolo && valueOf(u[2].params, "variant") == 2);
+    CHECK(valueOf(u[3].params, "s1_fx") == rackChildHash(kGate) && valueOf(u[3].params, "s1.variant") == 0);
+    CHECK(valueOf(u[3].params, "s2_fx") == rackChildHash(kTremolo) && valueOf(u[3].params, "s2.variant") == 2);
+    CHECK(q.masterComponents[0].id == kTremolo && u[5].id == kCompressor && valueOf(u[5].params, "talon_layout") == 1);
+    CHECK_EQ(q.automation.size(), 3u);
     // caw_migrate_component for the app's document.
     char* text = caw_migrate_component(R"({"id":"org.caw.ducker","preset":"Pump","params":{"mode":1}})");
     Json j;
-    CHECK(text && parseJson(text, j, error) && j.boolean("migrated", false) && j.string("id") == kCompressor);
-    CHECK(j.get("params") && j.get("params")->number("variant", -1) == 3 && j.get("params")->number("mode", -1) == 1);
+    CHECK(text && parseJson(text, j, error) && j.boolean("migrated", false) && j.string("id") == kTremolo);
+    CHECK(j.get("params") && j.get("params")->number("variant", -1) == 2 && j.get("params")->number("mode", -1) == 1);
     caw_free(text);
     text = caw_migrate_component(R"({"id":"org.caw.limiter","params":{"gain":3}})");
     CHECK(text && parseJson(text, j, error) && !j.boolean("migrated", true) && j.string("id") == kLimiter);
@@ -448,24 +484,30 @@ TEST(a_racks_old_dynamics_children_migrate_with_their_values_and_routes_and_soun
                   {"s2.high_ratio", 5},             {"s3_fx", h("org.caw.ducker")}, {"s3.mode", 2},
                   {"s4_fx", h("org.caw.transient")}, {"s4.attack", 0.5},  {"mod1_src", 1},
                   {"mod1_amt", 0.4},                {"mod2_src", 1},       {"mod2_amt", -0.3}};
-    old.params.emplace_back("mod1_dst", destination(kFxRackId, old.params, "s3.depth"));
-    old.params.emplace_back("mod2_dst", destination(kFxRackId, old.params, "s4.sustain"));
+    // The routes as a pre-1.0.8 rack had them: today's rack reads s1's hash as Gate's own id (1.1.0), whose list
+    // ends with `variant`; the old gate's had none, so everything after s1 sat one place earlier.
+    old.params.emplace_back("mod1_dst", destination(kFxRackId, old.params, "s3.depth") - 1);
+    old.params.emplace_back("mod2_dst", destination(kFxRackId, old.params, "s4.sustain") - 1);
     CHECK(valueOf(old.params, "mod1_dst") > 0 && valueOf(old.params, "mod2_dst") > 0);
     ComponentSpec m = old;
     CHECK(fx::migrateLegacyEffect(m));
-    CHECK_EQ(valueOf(m.params, "s1_fx"), h(kCompressor));
+    CHECK_EQ(valueOf(m.params, "s1_fx"), h(kGate));  // 1.1.0: the gate's own id again
     CHECK_EQ(valueOf(m.params, "s2_fx"), h(kCompressor));
-    CHECK_EQ(valueOf(m.params, "s3_fx"), h(kCompressor));
+    CHECK_EQ(valueOf(m.params, "s3_fx"), h(kTremolo));
     CHECK_EQ(valueOf(m.params, "s4_fx"), h(kTransient));  // the merged id's own: unchanged
-    CHECK_EQ(valueOf(m.params, "s1.variant"), 2.0);
+    CHECK_EQ(valueOf(m.params, "s1.variant"), 0.0);
     CHECK_EQ(valueOf(m.params, "s2.variant"), 1.0);
-    CHECK_EQ(valueOf(m.params, "s3.variant"), 3.0);
+    CHECK_EQ(valueOf(m.params, "s3.variant"), 2.0);
     CHECK_EQ(valueOf(m.params, "mod1_dst"), destination(kFxRackId, m.params, "s3.depth"));
     CHECK_EQ(valueOf(m.params, "mod2_dst"), destination(kFxRackId, m.params, "s4.sustain"));
     CHECK(valueOf(m.params, "mod2_dst") != valueOf(old.params, "mod2_dst"));
     CHECK(!fx::migrateLegacyEffect(m));
+    // The old rack's sound: the same children with its routes on s3.depth and s4.sustain as today's rack reads them.
+    ComponentSpec heard = old;
+    for (auto& [k, v] : heard.params)
+        if (k == "mod1_dst" || k == "mod2_dst") v += 1.0;
     const Stereo in = music(48000);
-    const Stereo a = renderChain({old}, in), b = renderChain({m}, in);
+    const Stereo a = renderChain({heard}, in), b = renderChain({m}, in);
     CHECK(sameBits(a, b));
     CHECK(peak(b.l) > 0.01);
 }
@@ -528,7 +570,8 @@ TEST(a_variant_change_between_keyed_and_plain_rewires_the_chain) {
         ComponentSpec c = spec(kCompressor, {{"variant", variant}});
         if (variant == 0) c.params = {{"variant", 0.0}, {"sidechain", 1.0}, {"threshold", -30.0}, {"ratio", 20.0},
                                       {"knee", 0.0}, {"auto_makeup", 0.0}, {"attack", 0.05}};
-        if (variant == 3) c.params = {{"variant", 3.0}, {"mode", 1.0}, {"depth", 1.0}, {"attack", 0.5}, {"hold", 5.0}, {"release", 60.0}};
+        if (variant == 3) c.params = {{"variant", 3.0}, {"sidechain", 1.0}, {"threshold", -30.0}, {"ratio", 3.0}, {"attack", 0.1}};
+        c.params.emplace_back("talon_layout", 1.0);  // 1.1.0's variants (Bus is 3)
         return keyedB(c, true);
     };
     Engine e(48000);
@@ -561,7 +604,10 @@ TEST(the_components_json_lists_the_merged_dynamics_variants) {
     std::map<std::string, size_t> variants;
     for (const Json& c : list->arr)
         if (const Json* v = c.get("variants")) variants[c.string("id")] = v->arr.size();
-    CHECK_EQ(variants[kCompressor], 5u);
+    CHECK_EQ(variants[kCompressor], 4u);
+    CHECK_EQ(variants[kGate], 3u);
+    CHECK_EQ(variants["org.caw.duck"], 3u);
+    CHECK_EQ(variants[kTremolo], 3u);
     CHECK_EQ(variants[kLimiter], 1u);
     CHECK_EQ(variants[kTransient], 1u);
 }

@@ -1,5 +1,7 @@
 // Built-in presets (named parameter sets of built-in components) and the migration of the retired synths to Flagship presets.
 #include "presets.h"
+#include "builtin_fx_tools.h"
+#include "midi_fx.h"
 
 #include <cmath>
 #include <cstdio>
@@ -271,6 +273,8 @@ const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
 
 const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
+    if (const auto* p = midifx::presets(componentId)) return *p;  // MIDI effects (1.1.0)
+    if (const auto* p = fx::toolsPresets(componentId)) return *p;  // Meters, Lo-fi, Phase align (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();
@@ -303,7 +307,7 @@ const BuiltinPreset* findBuiltinPreset(std::string_view componentId, std::string
 bool applyBuiltinPreset(std::string_view componentId, std::string_view name,
                         std::vector<std::pair<std::string, double>>& params) {
     const BuiltinPreset* preset = findBuiltinPreset(componentId, name);
-    if (!preset) return false;
+    if (!preset) return fx::applyMovedPreset(componentId, name, params);  // a 1.0.9 preset whose variant moved
     std::vector<std::pair<std::string, double>> out;
     out.reserve(preset->values.size() + params.size());
     for (const auto& [k, v] : preset->values) out.emplace_back(std::string(k), v);

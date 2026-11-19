@@ -11,6 +11,7 @@ import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/hero.dart';
 import '../effect_page.dart';
+import '../ducker_editor.dart' show DuckerPage, duckAt;
 import '../mod_editors.dart' show CombHero, modRateHz;
 import 'space_devices.dart';
 import 'space_fx.dart' show liveHero;
@@ -260,7 +261,8 @@ class PhaserDevicePage extends StatelessWidget {
 // ---------------------------------------------------------------------------------------------------------------
 // Tremolo/Pan
 
-/// Tremolo/Pan: the two as cards; the LFO's shape over two cycles with where it is now, and under it the stereo
+/// Tremolo/Pan: Tremolo, Pan and (1.1.0) Shape as cards. Shape, the drawn-shape ducker, keeps the ducker's page
+/// under the cards until the owner approves its page. Tremolo and Pan: the LFO's shape over two cycles with where it is now, and under it the stereo
 /// puck (Pan: the sound's place swinging; Tremolo: the left and right levels dipping), on a pad of rate (free only)
 /// and depth; shape tiles, sync, then smooth and the rest.
 class TremoloDevicePage extends StatelessWidget {
@@ -271,10 +273,11 @@ class TremoloDevicePage extends StatelessWidget {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final pan = variantOf(context) == 1;
-    return mergedPage(context, 'tremolo',
-      cards: VariantCards(height: 48, icon: (c, r, i, col) {
+    final cards = VariantCards(height: 48, icon: (c, r, i, col) {
         if (i == 0) {
           iconCurve(c, r, col, (x) => 0.75 * math.sin(x * math.pi * 2).abs() * 2 - 0.75);
+        } else if (i == 2) {
+          iconCurve(c, r, col, (x) => 0.8 - 1.6 * duckAt((x + 1) / 2 * 300, 5, 20, 220, 0.5));
         } else {
           c.drawLine(Offset(r.left + 4, r.center.dy), Offset(r.right - 4, r.center.dy), Paint()
             ..color = col.withValues(alpha: 0.5)
@@ -282,7 +285,16 @@ class TremoloDevicePage extends StatelessWidget {
           c.drawCircle(Offset(r.left + r.width * 0.68, r.center.dy), 4.5, Paint()..color = col);
           c.drawCircle(Offset(r.left + r.width * 0.42, r.center.dy), 3, Paint()..color = col.withValues(alpha: 0.45));
         }
-      }),
+      });
+    if (variantOf(context) == 2) {
+      if (DeviceScope.isInline(context)) return const DuckerPage();
+      return Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(14, 12, 14, 0), child: cards),
+        const Expanded(child: DuckerPage()),
+      ]);
+    }
+    return mergedPage(context, 'tremolo',
+      cards: cards,
       hero: HeroWithMeters(height: 200, gr: false, hero: DeviceDisplay(builder: (context, f) => DevicePhase(
         builder: (context, secs) => XYPad(xParam: 'rate', yParam: 'depth', height: 200, caption: pan ? 'PAN' : 'TREMOLO',
           painter: (dot) => LfoPuckPainter(secs: secs, rate: modRateHz(scope), depth: t.value('depth'),

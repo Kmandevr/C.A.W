@@ -12,6 +12,7 @@
 #include "builtin_fx_racks.h"
 #include "fx_merged.h"
 #include "json.h"
+#include "midi_fx.h"
 #include "mod_route.h"
 #include "route_math.h"
 
@@ -151,14 +152,36 @@ std::unique_ptr<ComponentChain> ComponentChain::buildNoteEffects(const ModuleReg
 }
 
 bool ComponentChain::quiet() const noexcept {
-    for (const auto& e : entries_)
-        if (!(e->asleep || (e->mix == 0.0 && e->bypass.load(std::memory_order_relaxed)))) return false;
+    const std::size_t audio = entries_.size() - midiCount_;
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& e = *entries_[i];
+        const bool bypassed = e.bypass.load(std::memory_order_relaxed);
+        if (i >= audio) {  // a MIDI effect: quiet while it holds and schedules nothing
+            if (!bypassed && !e.processor->quiet()) return false;
+        } else if (!(e.asleep || (e.mix == 0.0 && bypassed))) {
+            return false;
+        }
+    }
     return true;
 }
 
 std::unique_ptr<ComponentChain> ComponentChain::buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
-                                                                double sampleRate, std::string& error) {
-    return make(registry, {spec}, sampleRate, Kind::Instrument, error);
+                                                                double sampleRate, std::string& error,
+                                                                const std::vector<ComponentSpec>& midi) {
+    if (midi.size() > midifx::kMaxPerTrack) {
+        error = "a track takes at most " + std::to_string(midifx::kMaxPerTrack) + " MIDI effects";
+        return nullptr;
+    }
+    std::vector<ComponentSpec> specs;
+    specs.reserve(1 + midi.size());
+    specs.push_back(spec);
+    specs.insert(specs.end(), midi.begin(), midi.end());
+    auto chain = make(registry, specs, sampleRate, Kind::Instrument, error);
+    if (chain && !midi.empty()) {
+        chain->midiCount_ = midi.size();
+        chain->midiScratch_.resize(NoteEvents::kCapacity);
+    }
+    return chain;
 }
 
 bool ComponentChain::isModulator(const ModuleDescriptor& d) noexcept {
@@ -258,9 +281,19 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         if (const fx::MergedDevice* m = registry.isBuiltin(spec.id) ? fx::findMergedDevice(spec.id) : nullptr;
             m && !m->variants.empty())
             d = &m->variants[fx::variantIndex(*m, spec.params)].descriptor();
-        if (instrument && !isInstrument(*d)) {
+        const bool midiEffect = instrument && !chain->entries_.empty();  // an instrument's entries 1..: its MIDI effects
+        if (instrument && !midiEffect && !isInstrument(*d)) {
             error = "native component " + quoted(spec.id) +
                     " can't be an instrument: an instrument has one event input and one stereo audio output";
+            return nullptr;
+        }
+        if (midiEffect && !midifx::isMidiEffect(*d)) {
+            error = "native component " + quoted(spec.id) +
+                    " is not a MIDI effect: a MIDI effect has one event input and one event output and nothing else";
+            return nullptr;
+        }
+        if (!instrument && midifx::isMidiEffect(*d)) {
+            error = "native component " + quoted(spec.id) + " is a MIDI effect: add it to the track's midiComponents";
             return nullptr;
         }
         if (kind == Kind::Modulators) {
@@ -274,7 +307,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " is a modulator: add it to the project's modulators";
             return nullptr;
         }
-        if (!instrument && isInstrument(*d)) {
+        if ((!instrument || midiEffect) && isInstrument(*d)) {
             error = "native component " + quoted(spec.id) + " is an instrument: choose it as the track's instrument";
             return nullptr;
         }
@@ -308,6 +341,14 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
             return nullptr;
+        }
+        if (midiEffect) {
+            if (!e->processor->usesProcessPorts()) {
+                error = "native component " + quoted(spec.id) + " has event ports but does not process ports";
+                return nullptr;
+            }
+            // Its own note ids: 0x80000000 + its place << 24 (the Engine's ids count up from 1).
+            midifx::setNoteIdBase(*e->processor, 0x80000000u + (static_cast<uint32_t>(chain->entries_.size() - 1) << 24));
         }
         if (kind == Kind::Modulators && !e->processor->usesProcessPorts()) {
             error = "native component " + quoted(spec.id) + " has modulation outputs but does not process ports";
@@ -782,6 +823,51 @@ bool ComponentChain::runModulator(std::size_t index, uint32_t m, double sampleRa
     return ok;
 }
 
+void ComponentChain::runMidiEffects(uint32_t m, double sampleRate, const ChainTime* time) noexcept {
+    if (!notes_ || midiCount_ == 0 || m == 0 || m > kMaxFrames) return;
+    clean_ = false;  // processors run below (see reset())
+    midiRan_ = true;
+    notes_->sort();
+    const bool playing = time && time->playing;
+    const bool newPlay = playing && time->playEpoch != playEpoch_;  // process() records the Play
+    Transport transport;
+    if (time) transport = time->transportAt(playing);
+    ChainProfile* const profile = time ? time->profile : nullptr;
+    // Ping-pong between the notes' own storage and one scratch list, so nothing is copied unless it ends in scratch.
+    Event* bufs[2] = {notes_->storage(), midiScratch_.data()};
+    int cur = 0;
+    uint32_t count = notes_->count();
+    for (std::size_t index = entries_.size() - midiCount_; index < entries_.size(); ++index) {
+        Entry& e = *entries_[index];
+        ProfileScope scope(profile, e.processor.get(), &e.id);
+        resolveEntry(e, index, m, time, playing, newPlay);
+        e.mix = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;  // events don't crossfade
+        if (e.mix == 0.0) continue;
+        scope.ran = true;
+        const EventInput in{bufs[cur], count};
+        EventOutput out{bufs[1 - cur], NoteEvents::kCapacity, 0};
+        ProcessBlock ports;
+        ports.frames = m;
+        ports.sampleRate = sampleRate;
+        ports.eventIn = &in;
+        ports.eventInCount = 1;
+        ports.eventOut = &out;
+        ports.eventOutCount = 1;
+        ports.parameters = e.values.empty() ? nullptr : modulated(e, index, m, time);
+        ports.parameterCount = static_cast<uint32_t>(e.values.size());
+        ports.transport = time ? &transport : nullptr;
+        assert(!clean_ && "a path that runs a processor must clear clean_ first (reset() would skip a needed reset)");
+        bool ok = e.processor->processPorts(ports) && out.count <= NoteEvents::kCapacity;
+        for (uint32_t i = 0; ok && i < out.count; ++i)
+            ok = out.events[i].frame < m && (i == 0 || out.events[i - 1].frame <= out.events[i].frame);
+        if (!ok) continue;  // its input passes on
+        cur = 1 - cur;
+        count = out.count;
+    }
+    if (cur == 1) std::copy_n(midiScratch_.data(), count, notes_->storage());
+    notes_->setCount(count);
+}
+
 // Audio thread: raises a slot's output meter by this block (one writer; a reader's exchange may lose at most this
 // block's raise, never a later one).
 void ComponentChain::meterSlot(Entry& e, const float* left, const float* right, uint32_t m) noexcept {
@@ -797,6 +883,8 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
         std::fill_n(left, m, 0.0f);
         std::fill_n(right, m, 0.0f);
+        if (midiCount_ && !midiRan_) runMidiEffects(m, sampleRate, time);
+        midiRan_ = false;
         notes_->sort();
     }
     const bool playing = time && time->playing;
@@ -806,7 +894,8 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     if (time) transport = time->transportAt(playing);
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
     ChainProfile* const profile = time ? time->profile : nullptr;
-    for (std::size_t index = 0; index < entries_.size(); ++index) {
+    const std::size_t audioEntries = entries_.size() - midiCount_;  // an instrument's MIDI effects ran before
+    for (std::size_t index = 0; index < audioEntries; ++index) {
         Entry& e = *entries_[index];
         ProfileScope scope(profile, e.processor.get(), &e.id);
         // The Benchmark's parts: a sample player's time is Samples (the rest stays the caller's part, Devices or

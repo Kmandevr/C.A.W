@@ -165,7 +165,7 @@ void main() {
       expect(EffectCatalog.of('org.caw.drive')!.category, EffectCategory.drive);
       expect(EffectCatalog.of('org.caw.drive')!.matches('saturator', 'Drive'), isTrue);
       expect(EffectCatalog.of('org.caw.delay')!.matches('ping pong', 'Delay'), isTrue);
-      expect(EffectCatalog.of('org.caw.compressor')!.matches('ducker', 'Compressor'), isTrue);
+      expect(EffectCatalog.of('org.caw.tremolo')!.matches('ducker', 'Tremolo/Pan'), isTrue);  // 1.1.0: Shape moved there
       expect(EffectCatalog.of('org.caw.stutter')!.matches('beat repeat', 'Stutter'), isTrue);
       expect(EffectCategory.byLabel('EQ & Filter'), EffectCategory.eqFilter);
       expect(EffectCategory.byLabel('Nope'), isNull);

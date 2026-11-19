@@ -16,7 +16,9 @@ void main() {
   // Every device, and every old effect's page as its merged device's variant (FX consolidation: the old ids name
   // them here, stateWith puts the merged device on that variant).
   final ids = [for (final info in builtinInfos()) info.id,
-    for (final v in MergedDevices.variants) if (v.oldId != v.id) v.oldId];
+    // 1.1.0's modes without a page yet (MergedDevices.pagesToCome) open the generic fallback, which this bench of
+    // the device pages leaves out until each has its page.
+    for (final v in MergedDevices.variants) if (v.oldId != v.id && !MergedDevices.pagesToCome.contains(v.oldId)) v.oldId];
   for (final id in ids) {
     testWidgets('$id: a knob step rebuilds the knob and its visuals', (tester) async {
       DeviceDisplaySource.current = FakeDisplay();

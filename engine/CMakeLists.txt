@@ -182,10 +182,15 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 # FX consolidation (1.0.8): merged devices and the migration of the ids they replace; one file pair per family part.
 target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_dynamics.cpp src/fx_migrate_dynamics.cpp src/builtin_fx_duck.cpp
+  src/builtin_fx_talon.cpp src/builtin_fx_hatch.cpp src/builtin_fx_duck_level_carve.cpp src/builtin_fx_dynsplit_presets.cpp  # 1.1.0: the Talon/Hatch/Duck split
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
+  src/builtin_fx_eq_plume.cpp src/eq_design.cpp src/builtin_fx_filters_wah.cpp  # 1.1.0: the EQ's Linear and Match, the Filter's Wah
   src/builtin_fx_merged_stereomod.cpp src/fx_migrate_stereomod.cpp
   src/builtin_fx_merged_space.cpp src/fx_migrate_space.cpp)
+# 1.1.0: new modes of merged devices (Delay, Reverb, Drive, Bit distortion, Convolver).
+target_sources(caw_core PRIVATE src/builtin_fx_delay_modes.cpp src/builtin_fx_reverb_modes.cpp
+  src/builtin_fx_drive_modes.cpp src/builtin_fx_bits_bitwise.cpp src/builtin_fx_cab.cpp)
 # modulators begin (#161: project modulation, its built-in modulators)
 target_sources(caw_core PRIVATE src/modulation_links.cpp src/builtin_modulators.cpp)
 # modulators end
@@ -221,6 +226,8 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden C_VISIBIL
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 target_sources(caw_core PRIVATE src/component_profile.cpp src/component_bench.cpp)  # the plug-in benchmark (#197)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
+target_sources(caw_core PRIVATE src/midi_fx.cpp src/midi_fx_effects.cpp)  # 1.1.0: MIDI effects before an instrument
+target_sources(caw_core PRIVATE src/builtin_fx_meters.cpp src/builtin_fx_lofi.cpp src/builtin_fx_phasealign.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
 target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/scan/parse_pe.cpp
@@ -299,14 +306,23 @@ target_include_directories(caw_cli PRIVATE src)
   # fx-filters begin
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   target_sources(caw_tests PRIVATE tests/note_fx_test.cpp)  # per-note FX (#127): slots, overflow, tails, parity
+  target_sources(caw_tests PRIVATE tests/midi_fx_test.cpp)  # 1.1.0: MIDI effects before the instrument
+  target_sources(caw_tests PRIVATE tests/fx_tools_test.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   target_sources(caw_tests PRIVATE tests/fx_merged_test.cpp)  # FX consolidation: merged devices, migration, optional ports
   target_sources(caw_tests PRIVATE tests/fx_merged_drive_test.cpp)  # FX consolidation part B: Drive and Bit distortion
   target_sources(caw_tests PRIVATE tests/fx_merged_space_test.cpp)  # FX consolidation part E: Delay and Reverb
+  target_sources(caw_tests PRIVATE tests/fx_delay_modes_test.cpp)  # 1.1.0: the Delay's Tape, Reverse and Multi-tap
+  target_sources(caw_tests PRIVATE tests/fx_reverb_modes_test.cpp)  # 1.1.0: the Reverb's Room, Plate, Spring, Gated and Reverse
+  target_sources(caw_tests PRIVATE tests/fx_drive_modes_test.cpp)  # 1.1.0: the Drive's Amp, Pedal and Bands
+  target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
+  target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters
+  target_sources(caw_tests PRIVATE tests/fx_dynsplit_test.cpp)  # 1.1.0: the Talon/Hatch/Duck split and its migration
   target_sources(caw_tests PRIVATE tests/fx_merged_stereomod_test.cpp)  # FX consolidation D: Utility/Stereo, Chorus/Flanger, Phaser, Tremolo/Pan
   target_sources(caw_tests PRIVATE tests/modulation_test.cpp)  # #161: project modulators and links
   target_sources(caw_tests PRIVATE tests/midi_device_test.cpp)  # MIDI from devices (API 15): edge conversion, timing, notes
@@ -415,13 +431,16 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_drive_rt_test.cpp)  # part B: a Drive variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_space_rt_test.cpp)  # part E: Delay and Reverb variant changes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
+  target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
   target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
   target_sources(caw_rt_tests PRIVATE tests/modulation_rt_test.cpp)  # #161: project modulation
   target_sources(caw_rt_tests PRIVATE tests/note_fx_rt_test.cpp)  # #127: per-note FX
+  target_sources(caw_rt_tests PRIVATE tests/midi_fx_rt_test.cpp)  # 1.1.0: MIDI effects
   target_sources(caw_rt_tests PRIVATE tests/sample_preview_rt_test.cpp)  # #229: the sample preview
   target_sources(caw_rt_tests PRIVATE tests/stress_rt_test.cpp)  # the Benchmark: its timed loop
   target_sources(caw_rt_tests PRIVATE tests/first_callback_rt_test.cpp)
@@ -452,7 +471,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_test(NAME caw_exact_tests COMMAND caw_exact_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -461,6 +480,13 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp src/capi_modulation.cp
   target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_patch_bench PRIVATE src)
   target_link_libraries(caw_patch_bench PRIVATE caw_core)
+  # 1.1.0's tools (MIDI effects, Meters, Lo-fi, Phase align) against their cost ceilings: a Release build only (a
+  # Debug or sanitized one is slower by design).
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_test(NAME caw_tools_cost COMMAND caw_bench 0.5 301)
+    # 1.1.0's dynamics split against its cost ceilings.
+    add_test(NAME caw_dynsplit_cost COMMAND caw_bench 0.5 302)
+  endif()
 endif()
 
 # The strict reference the timing tests compare with (an option on a source comes after the target's). It includes no

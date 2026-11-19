@@ -91,6 +91,33 @@ void moveParams(const LegacyEffect& e, Values& values, const std::string& prefix
     values = std::move(out);
 }
 
+const LayoutDevice* layoutDevice(std::string_view id) noexcept {
+    for (const LayoutDevice& d : layoutDevices())
+        if (d.id == id) return &d;
+    return nullptr;
+}
+
+bool hasMarker(const LayoutDevice& d, const Values& values, const std::string& prefix) noexcept {
+    return !std::isnan(valueOf(values, prefix + std::string(d.marker), NAN));
+}
+
+// An older entry's `variant` among the device's old variants (rounded and held, as variantIndex was then).
+uint32_t oldVariant(const LayoutDevice& d, const Values& values, const std::string& prefix) noexcept {
+    const double v = valueOf(values, prefix + std::string(kVariantParam), 0.0);
+    if (!std::isfinite(v) || v < 0.0 || d.oldCount == 0) return 0;
+    const double last = static_cast<double>(d.oldCount - 1);
+    return static_cast<uint32_t>(std::floor((v > last ? last : v) + 0.5));
+}
+
+// The index of `variant` in a descriptor's list (its count when it has none).
+uint32_t variantAt(const ModuleDescriptor& d) noexcept {
+    for (uint32_t k = 0; k < d.parameterCount; ++k)
+        if (d.parameters[k].id == kVariantParam) return k;
+    return d.parameterCount;
+}
+
+double rackLayoutOf(const Values& values) noexcept { return valueOf(values, kRackLayoutParam, 0.0); }
+
 // A current rack child's descriptor: the built-in with that hash (a merged device's `variant`'s).
 const ModuleDescriptor* currentChild(uint32_t hash, double variant) {
     for (const ModuleDescriptor* d : builtins().builtinComponents()) {
@@ -106,13 +133,13 @@ const ModuleDescriptor* currentChild(uint32_t hash, double variant) {
 
 // Whether a rack entry carries today's layout version (builtin_fx_racks.h); one without it is older than the merged
 // devices.
-bool currentLayout(const Values& values) noexcept { return valueOf(values, kRackLayoutParam, 0.0) >= kRackLayoutCurrent; }
+bool currentLayout(const Values& values) noexcept { return rackLayoutOf(values) >= kRackLayoutCurrent; }
 
 // The slots of a rack older than the merged devices whose child is a merged device's own id (one reusing an old id,
 // as org.caw.utility) with no `<slot>.variant`: that child was the old effect, whose list lacked `variant`.
 std::vector<std::string> preVariantSlots(const ModuleDescriptor& rack, const Values& values) {
     std::vector<std::string> out;
-    if (currentLayout(values)) return out;
+    if (rackLayoutOf(values) >= 2.0) return out;  // layout 2 (1.0.8) on: its merged children list `variant`
     for (uint32_t k = 0; k < rack.parameterCount; ++k) {
         const std::string_view id = rack.parameters[k].id;
         if (!endsWith(id, "_fx")) continue;
@@ -145,13 +172,32 @@ std::vector<std::string> rackLayout(std::string_view rackId, const Values& value
         const uint32_t hash = hashValue(valueOf(values, id, 0.0));
         if (hash == 0) continue;
         const ModuleDescriptor* child = nullptr;
-        if (const LegacyEffect* e = legacy ? legacyByHash(hash) : nullptr)
+        const std::string prefix = slot + ".";
+        const double variant = valueOf(values, prefix + std::string(kVariantParam), 0.0);
+        const bool older = legacy && rackLayoutOf(values) < kRackLayoutCurrent;  // before 1.1.0's split
+        bool merged = false;
+        if (const LegacyEffect* e = legacy ? legacyByHash(hash) : nullptr) {
             child = e->legacy ? &e->legacy() : builtins().find(e->from);
-        else
-            child = currentChild(hash, valueOf(values, slot + "." + std::string(kVariantParam), 0.0));
+        } else {
+            child = currentChild(hash, variant);
+            merged = child && findMergedDevice(child->id);
+            // A variant that left its device since: the one it is now (the same class and parameters).
+            for (const LayoutDevice& d : layoutDevices()) {
+                if (!older || rackChildHash(d.id) != hash) continue;
+                const uint32_t v = oldVariant(d, values, prefix);
+                if (v >= d.firstMove && v - d.firstMove < d.moves.size())
+                    child = currentChild(rackChildHash(d.moves[v - d.firstMove].to), d.moves[v - d.firstMove].variant);
+                else
+                    child = currentChild(hash, static_cast<double>(v));
+            }
+        }
         if (!child) continue;
         uint32_t count = child->parameterCount;
-        if (legacy && count > 0 && std::find(preVariant.begin(), preVariant.end(), slot) != preVariant.end()) --count;
+        // Before 1.1.0 a merged child's list ended at `variant` (Talon's extras and marker came after); before 1.0.8
+        // it had none.
+        if (older && merged) count = std::min(count, variantAt(*child) + 1);
+        if (legacy && std::find(preVariant.begin(), preVariant.end(), slot) != preVariant.end())
+            count = std::min(count, variantAt(*child));
         for (uint32_t c = 0; c < count; ++c) ids.push_back(slot + "." + std::string(child->parameters[c].id));
     }
     for (uint32_t k = own; k < d->parameterCount; ++k) ids.emplace_back(d->parameters[k].id);
@@ -178,6 +224,22 @@ bool migrateRack(ComponentSpec& spec, ParamRenames& renames) {
         if (!e->keepsState) spec.hasState = false;  // the rack's state holds each child's
     }
     for (const std::string& slot : preVariant) set(spec.params, slot + "." + std::string(kVariantParam), 0.0);
+    // 1.1.0's split: an older rack's Compressor child whose variant left becomes the device it is now.
+    if (!currentLayout(spec.params)) {
+        for (uint32_t k = 0; k < d->parameterCount; ++k) {
+            const std::string_view id = d->parameters[k].id;
+            if (!endsWith(id, "_fx")) continue;
+            const std::string slot(id.substr(0, id.size() - 3));
+            const uint32_t hash = hashValue(valueOf(spec.params, id, 0.0));
+            for (const LayoutDevice& dev : layoutDevices()) {
+                if (rackChildHash(dev.id) != hash) continue;
+                if (const LayoutMove* m = findLayoutMove(dev.id, spec.params, slot + ".")) {
+                    set(spec.params, id, static_cast<double>(rackChildHash(m->to)));
+                    set(spec.params, slot + "." + std::string(kVariantParam), static_cast<double>(m->variant));
+                }
+            }
+        }
+    }
     set(spec.params, kRackLayoutParam, kRackLayoutCurrent);  // migrated once
     const std::vector<std::string> after = rackLayout(spec.id, spec.params, false);
     // The routes' destinations: an index + 1 into the flattened list, which the new children moved.
@@ -196,6 +258,7 @@ bool migrateRack(ComponentSpec& spec, ParamRenames& renames) {
 
 bool needsMigration(const ComponentSpec& spec) {
     if (findLegacyEffect(spec.id)) return true;
+    if (const LayoutDevice* d = layoutDevice(spec.id)) return !hasMarker(*d, spec.params, {});
     if (!isRackId(spec.id)) return false;
     if (!currentLayout(spec.params)) return true;  // older than the merged devices: re-pointed and marked
     for (const auto& [name, v] : spec.params)
@@ -271,6 +334,16 @@ bool migrateLegacyEffect(ComponentSpec& spec, ParamRenames* renames) {
     ParamRenames own;
     ParamRenames& out = renames ? *renames : own;
     if (isRackId(spec.id)) return migrateRack(spec, out);
+    if (const LayoutDevice* d = layoutDevice(spec.id)) {  // 1.1.0's split
+        if (hasMarker(*d, spec.params, {})) return false;
+        if (const LayoutMove* m = findLayoutMove(spec.id, spec.params)) {
+            spec.id = std::string(m->to);
+            set(spec.params, kVariantParam, static_cast<double>(m->variant));
+        } else {
+            set(spec.params, d->marker, d->current);
+        }
+        return true;
+    }
     const LegacyEffect* e = findLegacyEffect(spec.id);
     if (!e) return false;
     spec.id = std::string(e->to);
@@ -280,7 +353,8 @@ bool migrateLegacyEffect(ComponentSpec& spec, ParamRenames* renames) {
 }
 
 bool migrateLegacyId(std::string& id, std::vector<std::pair<std::string, double>>& params) {
-    if (!findLegacyEffect(id)) return false;
+    const LayoutDevice* d = layoutDevice(id);
+    if (!findLegacyEffect(id) && !(d && !hasMarker(*d, params, {}))) return false;
     ComponentSpec c;
     c.id = id;
     c.params = std::move(params);
@@ -306,6 +380,39 @@ bool migrateLegacyEffects(ProjectSpec& project) {
         changed = migrateList(project, l.noteComponents, "noteComponent", l.id) || changed;
     }
     return changed;
+}
+
+const LayoutMove* findLayoutMove(std::string_view id, const std::vector<std::pair<std::string, double>>& values,
+                                 const std::string& prefix) noexcept {
+    const LayoutDevice* d = layoutDevice(id);
+    if (!d) return nullptr;
+    const uint32_t v = oldVariant(*d, values, prefix);
+    return v >= d->firstMove && v - d->firstMove < d->moves.size() ? &d->moves[v - d->firstMove] : nullptr;
+}
+
+bool applyMovedPreset(std::string_view id, std::string_view name, std::vector<std::pair<std::string, double>>& params) {
+    const LayoutDevice* d = layoutDevice(id);
+    if (!d) return false;
+    for (size_t k = 0; k < d->moves.size(); ++k) {
+        const LayoutMove& m = d->moves[k];
+        const std::vector<BuiltinPreset>* list = mergedPresets(m.to);
+        if (!list) continue;
+        for (const BuiltinPreset& p : *list) {
+            if (p.name != name) continue;
+            double variant = 0.0;
+            for (const auto& [key, v] : p.values)
+                if (key == kVariantParam) variant = v;
+            if (static_cast<uint32_t>(variant + 0.5) != m.variant) continue;
+            Values out;
+            for (const auto& [key, v] : p.values)
+                if (key != kVariantParam) out.emplace_back(std::string(key), v);
+            out.emplace_back(std::string(kVariantParam), static_cast<double>(d->firstMove + k));  // its 1.0.9 index
+            for (const auto& [key, v] : params) set(out, key, v);
+            params = std::move(out);
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string migrateComponentJson(std::string_view entryJson) {
@@ -372,6 +479,15 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
         // Then the presets of variants with new DSP, as they are (each names its `variant`).
         for (const MergedDevice* d : mergedDevices())
             for (const BuiltinPreset& p : newVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
+        for (const MergedDevice* d : mergedDevices())  // the EQ's and Filter's 1.1.0 modes (builtin_fx_eq_plume.cpp)
+            for (const BuiltinPreset& p : newEqFilterVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
+        // A device with a layout marker: every preset carries it (so applying one never reads as an older entry).
+        for (const LayoutDevice& d : layoutDevices())
+            for (BuiltinPreset& p : m[std::string(d.id)]) {
+                bool has = false;
+                for (const auto& [k, v] : p.values) has = has || k == d.marker;
+                if (!has) p.values.emplace_back(d.marker, d.current);
+            }
         return m;
     }();
     const auto it = all.find(id);

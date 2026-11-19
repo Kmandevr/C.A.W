@@ -32,6 +32,9 @@ using namespace caw;
 using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
+int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
+int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
+
 namespace {
 
 constexpr int kRate = 48000;
@@ -170,12 +173,15 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
     return best;
 }
 
-void effectsCost(double seconds) {
+// False when a case with a ceiling (microseconds per second, the x86 figure: the phone budget / 2.5, an
+// assumption) went over it, so CI fails a regression.
+bool effectsCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     struct Case {
         const char* name;
         const char* id;
         Values values;
+        double ceiling = 0;  // 0: none
     };
     const Case cases[] = {
         {"eq (default: 6 bands at 0 dB)", "org.caw.eq", {}},
@@ -184,10 +190,10 @@ void effectsCost(double seconds) {
           {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}},
         {"compressor (default: peak, linked)", "org.caw.compressor", {}},
         {"compressor, RMS, unlinked, sidechain HPF", "org.caw.compressor", {{"detect", 1}, {"link", 0}, {"sc_hpf", 120}}},
-        // 1.0.8: the Compressor's Duck variant (its own input, no key: a leveller) in each detection mode.
-        {"Compressor: Duck (default: RMS)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}}},
-        {"Compressor: Duck, Peak", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
-        {"Compressor: Duck, ISP (4x true peak)", "org.caw.compressor", {{"variant", 4}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
+        // 1.0.8's Duck (1.1.0: Ducker's variant 0; its own input, no key: a leveller) in each detection mode.
+        {"Ducker: Duck (default: RMS)", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}}},
+        {"Ducker: Duck, Peak", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}, {"detection", 1}}},
+        {"Ducker: Duck, ISP (4x true peak)", "org.caw.duck", {{"variant", 0}, {"amount", 1}, {"threshold", -30}, {"detection", 2}}},
         {"limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}},
         {"limiter, sample peak", "org.caw.limiter", {{"gain", 12}, {"true_peak", 0}}},
         {"reverb (default: modulated)", "org.caw.reverb.pro", {}},
@@ -229,9 +235,80 @@ void effectsCost(double seconds) {
         {"Pitch/Shift: Pitch, a fifth up", "org.caw.shift", {{"variant", 0}, {"semitones", 7}}},
         {"frequency shifter (old id), 100 Hz", "org.caw.freqshift", {{"shift", 100}}},
         {"Pitch/Shift: Frequency, 100 Hz", "org.caw.shift", {{"variant", 1}, {"shift", 100}}},
+        // 1.1.0: the EQ's and Filter's new modes, each with a ceiling (light 2,000, medium 8,000, heavy 24,000).
+        {"EQ: Bands, 4 dynamic bands", "org.caw.eq",
+         {{"b2_dyn", 1}, {"b3_dyn", 1}, {"b3_gain", 3}, {"b5_dyn", 1}, {"b6_dyn", 1}, {"b2_thresh", -40}, {"b3_thresh", -40},
+          {"b5_thresh", -40}, {"b6_thresh", -40}}, 8000},
+        {"EQ: Bands, 8 dynamic bands, 2 cuts", "org.caw.eq",
+         {{"b1_on", 1}, {"b8_on", 1}, {"b1_dyn", 1}, {"b2_dyn", 1}, {"b3_dyn", 1}, {"b4_dyn", 1}, {"b5_dyn", 1}, {"b6_dyn", 1},
+          {"b7_dyn", 1}, {"b8_dyn", 1}}, 24000},  // heavy: its static bands alone cost about 5,800
+        {"EQ: Linear, Eco (2,048 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 0}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, Normal (4,096 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 1}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, High (8,192 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 2}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, Normal, learning Match", "org.caw.eq", {{"variant", 4}, {"match", 1}, {"match_learn", 3}}, 8000},
+        {"EQ: Match (curve playing)", "org.caw.eq", {{"variant", 5}}, 8000},
+        {"EQ: Match, learning both", "org.caw.eq", {{"variant", 5}, {"match_learn", 3}}, 8000},
+        {"Filter: Wah, envelope", "org.caw.filter", {{"variant", 3}}, 2000},
+        {"Filter: Wah, pedal", "org.caw.filter", {{"variant", 3}, {"mode", 1}}, 2000},
     };
     std::printf("effects: microseconds of CPU per second of stereo audio, 64-frame blocks (10000 = 1%% of a core)\n");
-    for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));
+    bool ok = true;
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool over = c.ceiling > 0 && us > c.ceiling;
+        ok = ok && !over;
+        if (c.ceiling > 0) std::printf("  %-44s %8.0f   ceiling %6.0f%s\n", c.name, us, c.ceiling, over ? "  OVER" : "");
+        else std::printf("  %-44s %8.0f\n", c.name, us);
+    }
+    return ok;
+}
+
+// 1.1.0's new effect modes (`caw_bench SECONDS 300`, after the suite): each with a ceiling, so a regression fails
+// the run (exit 1). A ceiling is the mode's plan budget on one phone core (light 0.5 %, medium 2 %, heavy 6 %)
+// divided by 2.5, **[Assumption]** the Galaxy S22+ being 2-3x slower than an x86 box: light 2000, medium 8000,
+// heavy 24000 µs per second of audio here.
+bool modesCostOver(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    constexpr double kLight = 2000, kMedium = 8000;  // heavy 24000 when a mode of that class comes
+    struct Case {
+        const char* name;
+        const char* id;
+        Values values;
+        double ceiling;
+    };
+    const Case cases[] = {
+        {"Delay: Tape (default)", "org.caw.delay", {{"variant", 2}}, kMedium},
+        {"Delay: Tape, worn (wow, flutter, wear 1)", "org.caw.delay", {{"variant", 2}, {"wow", 1}, {"flutter", 1}, {"wear", 1}}, kMedium},
+        {"Delay: Reverse (default)", "org.caw.delay", {{"variant", 3}}, kMedium},
+        {"Delay: Multi-tap (default, unpitched)", "org.caw.delay", {{"variant", 4}}, kMedium},
+        {"Delay: Multi-tap, 4 pitched taps", "org.caw.delay", {{"variant", 4}, {"t1_pitch", 7}, {"t2_pitch", 12}, {"t3_pitch", -5}, {"t4_pitch", -12}, {"t4_level", 0.5}}, kMedium},
+        {"Reverb: Room (default)", "org.caw.reverb", {{"variant", 2}}, kMedium},
+        {"Reverb: Plate (default)", "org.caw.reverb", {{"variant", 3}}, kMedium},
+        {"Reverb: Spring (default)", "org.caw.reverb", {{"variant", 4}}, kMedium},
+        {"Reverb: Gated (default)", "org.caw.reverb", {{"variant", 5}}, kMedium},
+        {"Reverb: Reverse (default)", "org.caw.reverb", {{"variant", 6}}, kMedium},
+        {"Drive: Amp (default: Crunch, 1x)", "org.caw.drive", {{"variant", 4}}, kMedium},
+        {"Drive: Amp, High gain (Auto: 2x)", "org.caw.drive", {{"variant", 4}, {"voicing", 3}}, kMedium},
+        {"Drive: Pedal (default: Overdrive, 1x)", "org.caw.drive", {{"variant", 5}}, kMedium},
+        {"Drive: Pedal, Fuzz (Auto: 2x)", "org.caw.drive", {{"variant", 5}, {"type", 2}}, kMedium},
+        {"Drive: Bands (default: 3 bands)", "org.caw.drive", {{"variant", 6}}, kMedium},
+        {"Drive: Bands, 4 bands", "org.caw.drive", {{"variant", 6}, {"bands", 3}}, kMedium},
+        {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
+        {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
+        {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
+        {"Convolver: Cab (default: 4x12)", "org.caw.convolver", {{"variant", 1}}, kMedium},
+        {"Convolver: Cab, far mic", "org.caw.convolver", {{"variant", 1}, {"distance", 1}}, kMedium},
+        // modes-bench end
+    };
+    std::printf("1.1.0 modes: microseconds of CPU per second of stereo audio, 64-frame blocks, and each one's ceiling\n");
+    bool over = false;
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool bad = us > c.ceiling || us <= 0.0;
+        over = over || bad;
+        std::printf("  %-44s %8.0f  (ceiling %5.0f)%s\n", c.name, us, c.ceiling, bad ? "  OVER" : "");
+    }
+    return over;
 }
 
 void flagshipVoiceCost(double seconds) {
@@ -869,6 +946,7 @@ int main(int argc, char** argv) {
     // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
+    if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
     if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
@@ -903,9 +981,13 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
-    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
-        effectsCost(secs);
-        return 0;
+    if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
+    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
+        const bool suiteOver = !effectsCost(secs);  // the suite's ceilings, the EQ's and Filter's 1.1.0 modes among them
+        const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
+        const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
+        const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
