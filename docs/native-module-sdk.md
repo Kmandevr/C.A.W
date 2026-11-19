@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-18
+updated: 2026-11-19
 covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/modulator.hpp, examples/cpp/modulator/, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/plugin/vst3/, engine/cmake/CAWVst3.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/profile.hpp, engine/src/component_bench.*, engine/src/component_profile.*, engine/include/caw/instrument.hpp, engine/src/scan/declarations.*, engine/tests/fixtures/declared/, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
@@ -206,7 +206,7 @@ A modulator (#161) is a component whose outputs are modulation ports (one float 
 - `comb.hpp`: `CombFilter`, a tuned feedback comb (resonates at a frequency and its multiples; negative feedback at the odd multiples of half of it), damping in the loop, output scaled to keep noise at the same power; `prepare(rate, lowestHz)` allocates.
 - `formant.hpp`: `FormantFilter` (three band-passes at a vowel's first three formants, `vowel` 0..1 morphing A, E, I, O, U, `shift` and `q`) and `kVowelFormantsHz` ([Assumption] rounded textbook formants, near the Peterson and Barney averages, not re-checked).
 - `eq.hpp`: `EqBand` (a low shelf, bell or high shelf from one trapezoidal SVF: exact gain where it should be, no bump) and `ThreeBandEq` (low shelf at 250 Hz, a bell, high shelf at 4 kHz; gains in dB).
-- `envelope.hpp`: `AdEnvelope` (as the .caw `ad`), `Adsr` (as `env.adsr`), `Glide` (portamento), `decayCoefficient` and `attackStep`.
+- `envelope.hpp`: `AdEnvelope` (as the .caw `ad`), `Adsr` (as `env.adsr`; `run(out, n)` fills n `next()` levels at once), `Glide` (portamento), `decayCoefficient` and `attackStep`.
 - `drums.hpp`: `KickVoice`, `SnareVoice`, `ClapVoice` and `HatVoice` with their settings structs: `set()`, `trigger(velocity)`, `next()`, `choke()`.
 - `modal.hpp` (2026-11-11): `ModalBank`, up to 32 modes of a struck object (Membrane: Bessel-zero ratios; Plate; Bar; Tube; Bell; Cymbal) with `ModalSettings` (`frequency`, `decay`, `damping`, `brightness`, `inharmonicity`, `position`, `modes`): `set()` at a strike or a pitch change, `process(strike, drive)` per sample (a strike rings each mode at its loudness; a driven input is scaled by 1 − r so it can't run away), `ringing()`. org.caw.drums' resonator.
 - `smoothing.hpp`: `OnePoleSmoother` (99 % of a step in its time, then lands exactly) and `LinearSmoother` (a ramp that ends in exactly its time); `setTime()` pays once, `setTarget()` is free. Smooth every knob that scales audio.

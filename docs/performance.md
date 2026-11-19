@@ -126,6 +126,34 @@ The legacy `light_mode` setting is still read for migration: true maps to Lightw
 
 No phone frame-time, battery or thermal measurements have been made for these profiles yet. Verify them on physical Android hardware before claiming a quantified performance improvement.
 
+## DSP pass for 1.0.8-alpha.2 (2026-11-19)
+
+The owner's S22+ Benchmark (1.0.8-alpha.1, song8): Flagship 30.7 % of the devices' time (6 instances), host 12.7 %, EQ 9.4 % (8), Compressor 7.9 % (4). Goal: cheaper without changing the sound. Every change below renders **the same bits** as before: song8, song16, every_effect, every_instrument, flagship_heavy16, song8_extras, three_tracks and first_loop, 4 s each, compared sample for sample against the code before the pass, built with GCC 13 and with Clang 18 on x86-64 (a scratch harness that plays the Benchmark's scenarios in 256-frame callbacks and writes the output). Every reference render and golden hash passes unchanged.
+
+- **EQ:** a control whose 49 knobs are what they were at the last one, with no band fading, returns at once (`EffectBase::knobsUnchanged`: a block of constant knobs is compared once, at its first control); the output gain at rest is a plain multiply. The control had cost about 1,500 instructions (eight bands' parameters, coefficient checks and clears of idle bands' state) every 16 frames.
+- **Compressor:** each 16-frame period runs in passes: the rings and detector reads, each side's level, the static curve two samples at a time (`fastLogNormalPair`, `engine/src/stereo_pair.h`: `lib::fastLog`'s steps lane by lane, checked bit for bit against it under GCC and Clang, x86-64 and aarch64; a NaN or a level outside the normal range takes the scalar path), no log at all for a period below the knee, then the envelope and gains sample by sample.
+- **Every suite effect (`EffectBase::process`):** the output peak and silence scan is written with masks, so it vectorizes (it had a carried select).
+- **Flagship:** envelope 1 is filled for a period at once (`lib::Adsr::run`, the same steps as `next()`, a fill while it holds its sustain), so the level product vectorizes.
+- **Host:** the latency-compensation delay swaps runs of frames with its ring instead of testing the wrap every frame.
+- **Looked at and left:** Flagship's ladders, oscillator stacks and fold are already two-wide or vectorized and per-sample by nature; its per-voice filter coefficients follow a moving envelope every period. The compressor's exp and envelope are serial. Other effects' controls (delay, chorus, saturator) advance LFOs or ramps every period, so they can't be skipped. The loudness meter's true peak can't be skipped exactly (its bound exceeds the sample peak). Each further cut there would change bits.
+
+**[Fact] Instructions** (callgrind 3.22, GCC 13 Release x86-64, inside `Engine::process`; `valgrind --tool=callgrind --toggle-collect='caw::Engine::process(float*, float*, int)'`), before → after:
+
+| Scenario | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| song8, `caw_bench 2 400 1` (2 s, 192-frame callbacks) | 2,078.8 M | 1,973.5 M | −5.1 % |
+| song8, harness 1 s (256-frame callbacks) | 956.1 M | 913.7 M | −4.4 % |
+| song16, harness 1 s | 1,703.0 M | 1,632.2 M | −4.2 % |
+| every_effect, harness 1 s | 1,808.8 M | 1,791.4 M | −1.0 % |
+| every_instrument, harness 1 s | 563.9 M | 562.3 M | −0.3 % |
+| flagship_heavy16, harness 1 s | 1,359.0 M | 1,345.4 M | −1.0 % |
+
+(the harness rows are from before the delay-line change, which took about another 15 M from song8's 2 s). Within song8 (`caw_bench 2 400 1`, inclusive): the EQ's run and control 153.6 M → about 83 M (−46 %), the compressor's run 64.4 M → 59.1 M (−8 %), every suite effect's `process` 985.8 M → 900.1 M (−8.7 %), Flagship's render 580.7 M → 576.7 M (−0.7 %).
+
+**[Fact] Per device** (`caw_bench 1 300`, µs of CPU per second of audio, the better of two interleaved runs of each build, same VM): EQ default 552 → 166 (−70 %), EQ with 8 bands 4,952 → 4,641 (−6 %), Compressor default 2,088 → 1,173 (−44 %), Compressor RMS, unlinked, sidechain high-pass 3,639 → 2,216 (−39 %); the sum of all rows 73,639 → 67,880 (−7.8 %).
+
+**Times** (`caw_bench 8 500 --only song8,song16,flagship_heavy16 --runs 3`, two interleaved rounds of each build): mean and p99 moved by ±10–20 % between identical rounds of either build on this shared VM, more than the 4–5 % the counts show, so they give no before/after; the counts and the per-device table are the numbers to go by. **[Assumption]** Arm64 gains about as x86-64 does (the same vectorized loops, NEON); the S22+ Benchmark will show it.
+
 ## Song scenarios (2026-11-11)
 
 The owner's measure (2026-11-11): a project "without crazy effects" at 50–60 % CPU on the S22+, then a screenshot of one at 49 % with three tracks playing (90 BPM: Drums 4 bars, Bass 4 bars, "Track 3" 1 bar). The project itself isn't here, so `caw_bench` builds representative ones (`engine/bench/caw_bench.cpp`):
@@ -233,10 +261,10 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 
 | Effect | Cost |
 | --- | --- |
-| EQ, default (bands at 0 dB are skipped) | 780–840 |
-| EQ, 8 bands with gain, two 48 dB cuts | 8,000–9,200 |
-| Compressor, default (peak, linked) | 2,300–3,100 |
-| Compressor, RMS, unlinked, sidechain high-pass | 3,500–4,600 |
+| EQ, default (bands at 0 dB are skipped) | 166–167 (2026-11-19, [DSP pass](#dsp-pass-for-108-alpha2-2026-11-19); 552–556 before it) |
+| EQ, 8 bands with gain, two 48 dB cuts | 4,641 (2026-11-19; 4,952–4,973 before) |
+| Compressor, default (peak, linked) | 1,173–1,180 (2026-11-19; 2,088–2,101 before) |
+| Compressor, RMS, unlinked, sidechain high-pass | 2,216–2,217 (2026-11-19; 3,639–3,670 before) |
 | Limiter, true peak / sample peak | 2,800–3,000 / 1,600–2,300 |
 | Reverb, default (modulated) / no modulation | 6,700–8,300 / 5,450–5,600 |
 | Delay, default / ping-pong with ducking | 3,700–4,500 / 4,900–6,300 |
@@ -252,7 +280,6 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 - So a full mastering chain (EQ, compressor, saturator, limiter) costs about 2 % of one server core; [Assumption] the phone scales like these numbers (not measured on a device).
 - The EQ's display spectrum (one 2048-point FFT per publish, about 60 a second) runs only while a UI reads (`DisplayBuffer::watched`), so it costs nothing in an export or with the editor closed.
 - Found while timing: the gate cost 18,000 because its dB envelope settled on a steady target through subnormal numbers; the followers now land on a steady target (1,800).
-- Next, if it matters: the EQ runs its bands sample by sample with a branch per band; a block loop per band (or stereo pairs interleaved, as the flagship's ladder) would cut the many-band case.
 
 ## One synth (2026-11-10)
 
