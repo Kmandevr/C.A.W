@@ -8,7 +8,7 @@ import '../effects/filters/filters_display.dart' show filtersFamily;
 // fx-filters end
 
 /// The families devices are coloured by (owner, 2026-11-10: "in the theme of the app, but more colorful").
-enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums, creative /* fx-creative */ }
+enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums, creative /* fx-creative */, pack /* the AutoStacc pack */ }
 
 /// A family's look: [primary] for its controls and curves, [secondary] for the second voice of a visual (the right
 /// channel, the output, a gradient's far end), and its [icon].
@@ -43,6 +43,7 @@ DeviceStyle deviceStyle(DeviceFamily family) => switch (family) {
       DeviceFamily.synth => DeviceStyle(family, Neon.green, Neon.blue, Icons.piano, 'SYNTH'),
       DeviceFamily.drums => DeviceStyle(family, _orange, Neon.pink, Icons.grid_view_rounded, 'DRUMS'),
       DeviceFamily.creative => DeviceStyle(family, Neon.yellow, Neon.pink, Icons.auto_awesome, 'CREATIVE'),  // fx-creative
+      DeviceFamily.pack => DeviceStyle(family, Neon.pink, _mint, Icons.toys_outlined, 'AUTOSTACC'),
     };
 
 /// The family of built-in component [id], or null for anything else (a project's own C++ keeps the track colour).
@@ -65,6 +66,7 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
       // fx-creative: the Creative and Pitch & Time effects
       'org.caw.tapestop' || 'org.caw.reverser' || 'org.caw.stutter' || 'org.caw.pitchshift' || 'org.caw.freqshift' ||
           'org.caw.trancegate' || 'org.caw.bitcrush' || 'org.caw.ringmod' => DeviceFamily.creative,
+      _ when id.startsWith('org.caw.pack.') => DeviceFamily.pack,
       _ when id.startsWith('org.caw.synth.') || id == 'org.caw.bass' => DeviceFamily.synth,
       _ when fxSpaceFamilies.containsKey(id) => fxSpaceFamilies[id], // fx-space
       _ => null,
@@ -72,3 +74,27 @@ DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */
 
 /// Colours for a set of things that sit side by side (EQ bands, drum pads): the neon accents and extra hues in turn.
 List<Color> spectrumColors() => [Neon.pink, _orange, Neon.yellow, Neon.green, _mint, Neon.blue, Neon.violet, _red];
+
+/// The AutoStacc badge: a small toy-like pill in the pack's two colours, on a pack device's header and its row in
+/// the effect browser.
+class AutoStaccBadge extends StatelessWidget {
+  const AutoStaccBadge({super.key, this.small = false});
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = deviceStyle(DeviceFamily.pack);
+    return Tooltip(message: 'AutoStacc beta pack', child: Container(
+      key: const ValueKey('autostacc-badge'),
+      padding: EdgeInsets.symmetric(horizontal: small ? 5 : 7, vertical: small ? 1 : 2),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: s.gradient,
+          boxShadow: [BoxShadow(color: s.primary.withValues(alpha: 0.35), blurRadius: 6)]),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(s.icon, size: small ? 9 : 11, color: Neon.bg),
+        const SizedBox(width: 3),
+        Text('AutoStacc', style: TextStyle(fontSize: small ? 8 : 9, fontWeight: FontWeight.w900, color: Neon.bg,
+            letterSpacing: 0.4)),
+      ]),
+    ));
+  }
+}

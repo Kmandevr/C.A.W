@@ -141,6 +141,7 @@ class NativeComponentInfo {
     this.cpuClass = 'unspecified',
     this.variants = const [],
     this.variantIndex = 0,
+    this.pack = '',
   });
 
   final String id, name;
@@ -156,6 +157,12 @@ class NativeComponentInfo {
 
   /// Part of the engine (the Library's stereo tools): always there, no trust choice, can't be unloaded.
   final bool builtin;
+
+  /// The pack a built-in belongs to (`"autostacc-beta"`: the AutoStacc beta pack, 1.1.0), or '' for none.
+  final String pack;
+
+  /// One of the AutoStacc beta pack's devices (Murmur, Peck, Bend, Iris): the AutoStacc badge marks it.
+  bool get isAutoStacc => pack.startsWith('autostacc');
 
   /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.
   final List<ComponentPresetInfo> presets;
@@ -228,6 +235,7 @@ class NativeComponentInfo {
           for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
         ],
         builtin: j['builtin'] == true,
+        pack: j['pack'] as String? ?? '',
         presets: [
           for (final p in (j['presets'] as List? ?? const [])) ComponentPresetInfo.fromJson(p as Map<String, dynamic>)
         ],

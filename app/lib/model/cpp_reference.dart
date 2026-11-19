@@ -483,6 +483,22 @@ const cppBuiltins = <CppBuiltin>[
       'A channel vocoder keyed by a track: its built-in carrier plays the key\'s notes (or a drone), or the key\'s '
       'audio is the carrier; 12 to 32 bands, no latency.',
       ['carrier', 'wave', 'note', 'bands', 'formant', 'sibilance', 'width', 'freeze', 'mix', 'output']),
+  // The AutoStacc beta pack (1.1.0).
+  CppBuiltin('org.caw.pack.granular', 'Murmur', false,
+      'Granular texture from the last 0.5 to 4 s: grains sprayed around a position, pitched, reversed and panned; '
+      'freeze holds the recording and scan moves through it.',
+      ['buffer', 'position', 'spray', 'size', 'density', 'sync', 'jitter', 'pitch', 'spread', 'scale', 'reverse', 'window',
+        'pan', 'glide', 'width', 'feedback', 'freeze', 'scan', 'seed', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.glitch', 'Peck', false,
+      'Glitch on the song\'s grid: per slice, by seeded chance, a repeat, stutter, reverse, gate or pitch jump; hold repeats.',
+      ['grid', 'chaos', 'repeat', 'stutter', 'stutters', 'reverse', 'gate', 'pitch', 'range', 'seed', 'hold', 'smooth', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.warp', 'Bend', false,
+      'Warp: a curve of 4, 8 or 16 points (p0..p15) bends the delay (Time) or the speed (Speed) through each cycle.',
+      ['mode', 'cycle', 'depth', 'range', 'points', 'shape', 'smooth', 'resync', 'mix', 'output']),
+  CppBuiltin('org.caw.pack.spectral', 'Iris', false,
+      'Spectral effects on an STFT: freeze (a captured spectrum, painted through its state), blur, shift and gate; '
+      'a window of latency.',
+      ['quality', 'freeze', 'fade', 'drift', 'paint', 'blur', 'shift', 'gate', 'gate_range', 'mix', 'output']),
   CppBuiltin('org.caw.clean', 'Preen', false,
       'Variants (`variant`): Denoise (learned or adaptive), De-hum (50/60 Hz and harmonics), De-reverb; the spectral '
       'ones have one window of latency by `quality`.',
