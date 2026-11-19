@@ -545,6 +545,7 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 # x86-64, Arm64 (where the fast flags fuse multiply-adds) and with clang-cl; their complex exponentials come from the
 # engine's deterministic sine, not libm.
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
+set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)
