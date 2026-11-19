@@ -120,7 +120,7 @@ class MergedDevices {
   /// 1.1.0's new modes, which have no page of their own yet: each opens the fallback page (the generic knobs, the
   /// shell's Variant pill), never its family's page, which does not know it.
   static const pagesToCome = {
-    'org.caw.bits.bitwise', 'org.caw.eq.linear',
+    'org.caw.eq.linear',
     'org.caw.eq.match', 'org.caw.filter.wah', 'org.caw.delay.tape', 'org.caw.delay.reverse', 'org.caw.delay.multitap',
     'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
     'org.caw.reverb.reverse', 'org.caw.convolver.cab',

@@ -19,7 +19,7 @@ final Map<String, DeviceEditorEntry> dynDriveEditors = {
   'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterDevice()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientDevice()),
   'org.caw.drive': _cards('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DriveDevice()),
-  'org.caw.bits': singlePage('bits', 'BITS', Icons.grain, DeviceFamily.drive, () => const BitsDevice()),
+  'org.caw.bits': _cards('bits', 'BITS', Icons.grain, DeviceFamily.drive, () => const BitsDevice()),
 };
 
 /// A page that shows its variants as cards ([DeviceEditorEntry.ownsVariant]: the shell's Variant pill stays away).

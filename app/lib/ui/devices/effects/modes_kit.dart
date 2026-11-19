@@ -66,13 +66,12 @@ class LitPill extends StatelessWidget {
         height: height,
         constraints: BoxConstraints(minWidth: height),
         padding: const EdgeInsets.symmetric(horizontal: 9),
-        alignment: Alignment.center,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(height / 2),
           color: on ? c.withValues(alpha: 0.24) : Neon.ink.withValues(alpha: 0.03),
           border: Border.all(color: on ? c : Neon.line),
           boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 8)] : null),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
+        child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
           if (icon != null) ...[Icon(icon, size: 14, color: on ? c : Neon.dim), const SizedBox(width: 4)],
           Text(label.toUpperCase(), style: TextStyle(fontSize: 9.5, letterSpacing: 0.8, fontWeight: FontWeight.w800,
               color: on ? Neon.text : Neon.dim)),

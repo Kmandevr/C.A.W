@@ -10,6 +10,7 @@ import 'package:caw/model/device_target.dart';
 import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/variant_edit.dart';
 import 'package:caw/ui/devices/device_registry.dart';
+import 'package:caw/ui/devices/effects/dyn_drive/bitwise_device.dart';
 import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.drive', 4, {}, 'drive_amp'),
   ('org.caw.drive', 5, {}, 'drive_pedal'),
   ('org.caw.drive', 6, {}, 'drive_bands'),
+  ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
 /// A playing frame for [pageId] (the variant's page id, as the display decodes it) at [tick]: every float of its
@@ -44,6 +46,11 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
         raw[6 + k * 5] = level - 4 * k;
         raw[7 + k * 5] = level - 2 - 3 * k;
         raw[10 + k * 5] = 1;
+      }
+    case 'org.caw.bits.bitwise':
+      for (var i = 0; i < 16; i++) {
+        raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
+        raw[22 + i] = i >= 8 && (i * 7 + tick) % 3 == 0 ? 1 : 0;
       }
   }
   final f = List<double>.of(raw);
@@ -183,6 +190,29 @@ void main() {
     await drag(tester, const ValueKey('drive-hero'), const Offset(0, -60));
     expect(t.value('b2_drive'), greaterThan(d), reason: 'the curve shows the selected band');
     await close(tester);
+  });
+
+  testWidgets('Bitwise: the word drags bits and shift, a lane flips its XOR bit', (tester) async {
+    final (_, t) = await open(tester, 'org.caw.bits', 1);
+    final bits = t.value('bits');
+    await drag(tester, const ValueKey('bitwise-hero'), const Offset(60, 60));
+    expect(t.value('bits'), lessThan(bits));
+    expect(t.value('shift'), greaterThan(0));
+    await tester.tap(find.byKey(const ValueKey('bit-lane-15')));
+    await tester.pumpAndSettle();
+    expect(t.value('xor').round(), 1 << 15);
+    await tester.tap(find.byKey(const ValueKey('bitwise-op-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bit-lane-15')));
+    await tester.pumpAndSettle();
+    expect(t.value('and').round(), 65535 ^ (1 << 15));
+    await close(tester);
+  });
+
+  test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {
+    expect(bitwiseSample(0, bits: 12, shift: 0, xor: 0xffff, and: 0xffff), 0);
+    expect(bitwiseSample(0.5, bits: 12, shift: 0, xor: 0, and: 0xffff), closeTo(0.5, 1e-3));
+    expect(bitwiseSample(0.5, bits: 4, shift: 0, xor: 0, and: 0xffff), closeTo(4 / 7, 1e-9));
   });
 
   if (_dir != null) {
