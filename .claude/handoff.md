@@ -18,13 +18,24 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 ## Open
 - Owner: rerun the S22+ Benchmark after 1.0.9 and approve the 1.1.0 logo designs and instrument pages as they land.
 
-## In progress (local worktrees under `.claude/worktrees/`, unpushed; merge each into the session branch and push as soon as it reports)
-- **perf-live:** platform core speed (stabilizer), spikes, Benchmark fairness.
-- **perf-dsp:** Flagship, EQ, Compressor optimisation; the sound must not change.
-- **dsp-drive:** 1.1.0 Delay, Reverb, Drive, Bits and Cab modes.
-- **dsp-tools:** 1.1.0 MIDI effects, Meters, Lo-fi, Phase align.
+## In progress
+- **fix-109** (local worktree): the 1.0.9 audio-review fixes:
+  - (high) an EQ band never returns after a Type or Channel change;
+  - the stabilizer's epoch drift;
+  - early-callback spin stacking;
+  - spinning only under real load;
+  - arm64 pair-log bits.
+- **The 1.0.9 release itself:** the session branch has 1.0.9 merged, the version bumped and CHANGELOG written, the full app suite passing (2572) and `ctest` 11/11. Merge fix-109, then PR, CI, merge, release, and the owner reruns the Benchmark.
+- **1.1.0 parts done and backed up (owner allowed backup branches):**
+  - `caw-1.1.0-dsp-drive`: Delay, Reverb, Drive, Bits and Cab modes;
+  - `caw-1.1.0-dsp-tools`: MIDI effects (C API 40), Meters, Lo-fi, Phase align.
 
-If a worktree is gone after a container restart, its agent's work is lost: re-run that part from the plan.
+  Merge them after 1.0.9 ships. The app fixture needs a fresh dump, and both may touch the same shared files.
+- **The owner's minor questions, decided by Claude** (record them in the private plan):
+  - Cab plays C.A.W's own cabinets only, with user IRs in Convolver variant 0;
+  - the 2 MiB Reverse delay is fine;
+  - Bitwise maps silence to silence;
+  - CI should run caw_bench mode 300 for the cost ceilings, added with 1.1.0.
 
 ## Next
 - Merge each finished part; run `ctest` and the full `CAW_LIB=… flutter test` (roll_preview flakes under load; rerun it alone).
