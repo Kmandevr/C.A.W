@@ -12,6 +12,7 @@ import '../../arrange/knob.dart' show Taper;
 import '../../arrange/long_press_menu.dart';
 import '../../panel_motion.dart';
 import '../../theme.dart';
+import '../device_registry.dart';
 import 'feel.dart';
 import 'presets.dart';
 
@@ -58,14 +59,17 @@ class DeviceClipboard {
 double randomizeAmount = 0.3;
 
 /// Moves every sound parameter of [t] up to [amount] of its travel from where it is (a choice changes with that
-/// chance), as one undo step. A merged device's variant and view-only parameters stay.
+/// chance), as one undo step. A merged device's variant, view-only parameters and what the device's editor keeps
+/// ([DeviceEditorEntry.randomKeeps]: Flagship's matrix, power switches and volume) stay.
 void randomizeDevice(DeviceTarget t, double amount, {math.Random? random}) {
-  final info = t.info;
-  if (info == null) return;
+  final info = t.info, id = t.componentId;
+  if (info == null || id == null) return;
+  final keeps = DeviceEditors.of(id, info).randomKeeps;
   final r = random ?? math.Random();
   final next = <String, double>{};
   for (final p in info.parameters) {
     if (p.id == variantParam || DevicePresets.viewOnly.contains(p.id) || p.id.endsWith('.$variantParam')) continue;
+    if (keeps != null && keeps(p.id)) continue;
     if (!p.automatable && !p.modulatable) continue;
     final now = t.value(p.id);
     if (p.isChoice || p.step > 0) {
@@ -81,6 +85,17 @@ void randomizeDevice(DeviceTarget t, double amount, {math.Random? random}) {
   }
   t.state.endUndoStep();
   t.setAll(next);
+  t.state.endUndoStep();
+}
+
+/// The header's ⋯ › Reset: the device's own when its editor has one (Flagship: Init), else every knob to its
+/// default; one undo step.
+void resetDevice(DeviceTarget t) {
+  final id = t.componentId;
+  final own = id == null ? null : DeviceEditors.of(id, t.info).reset;
+  if (own != null) return own(t);
+  t.state.endUndoStep();
+  t.resetAll();
   t.state.endUndoStep();
 }
 
@@ -116,9 +131,7 @@ Future<void> showDeviceMenu(BuildContext context, DeviceTarget t, Color color) a
     case 'gain':
       DeviceSlotAudio.toggleAutoGain(t);
     case 'reset':
-      t.state.endUndoStep();
-      t.resetAll();
-      t.state.endUndoStep();
+      resetDevice(t);
   }
 }
 
@@ -162,6 +175,7 @@ Future<void> showRandomize(BuildContext context, DeviceTarget t, Color color) =>
 /// This device's steps in the project's undo history, newest first; a tap brings the device back to how it was
 /// before that step (one new undo step; the rest of the project stays as it is).
 Future<void> showDeviceHistory(BuildContext context, DeviceTarget t, Color color) {
+  t.state.endUndoStep();  // an edit still settling is the last change, its own step
   final steps = deviceHistory(t);
   final info = t.info;
   String names(List<String> ids) {

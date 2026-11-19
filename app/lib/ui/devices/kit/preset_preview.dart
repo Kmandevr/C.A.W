@@ -1,4 +1,4 @@
-// The preset browser's live Preview: loops the song over the loop, the time selection or the clip under the device's track while each tapped preset plays; Cancel puts everything back, OK keeps the preset as one undo step.
+// The preset browser's live Preview: loops the song over the loop, the time selection or the clip under the device's track while each tapped preset plays; Cancel puts everything back, OK keeps the preset as one undo step (both put the playhead and the transport back).
 import 'dart:math' as math;
 
 import '../../../model/device_target.dart';
@@ -8,7 +8,7 @@ import 'presets.dart';
 /// tapped presets change ends as one undo step on [keep], and as none on [cancel].
 class PresetPreview {
   PresetPreview._(this.target, this._values, this._params, this._state, this._stateVersion, this._preset, this._remembered,
-      this._loop, this._startedPlaying);
+      this._loop, this._startedPlaying, this._position, this._moved);
 
   final DeviceTarget target;
   final Map<String, double> _values;
@@ -19,6 +19,8 @@ class PresetPreview {
   final (String, String)? _remembered;
   final (bool, int, int)? _loop; // the loop range before, when the preview set one
   final bool _startedPlaying;
+  final double? _position; // where the playhead was (playing: where it was heard; stopped at the start: null)
+  final bool _moved; // the preview moved the playhead (a seek to its range, or a play it started)
   bool _done = false;
 
   bool get running => !_done;
@@ -48,6 +50,7 @@ class PresetPreview {
     final info = t.info;
     final use = t.use;
     s.holdHistory(true);
+    final position = s.transportOn ? s.playheadStep : s.pausedStep;
     final values = {
       if (info != null) for (final p in info.parameters) p.id: t.value(p.id),
     };
@@ -66,7 +69,7 @@ class PresetPreview {
     final play = !s.transportOn && s.engine != null;
     if (play) s.togglePlay();
     return PresetPreview._(t, values, Map.of(use?.params ?? const {}), use?.state, use?.stateVersion ?? 1, use?.preset, DevicePresets.remembered(t),
-        loop, play);
+        loop, play, position, range != null || play);
   }
 
   /// Loads [preset] live (no undo step of its own while the preview runs).
@@ -110,6 +113,11 @@ class PresetPreview {
         p.loopStartSteps = loop.$2;
         p.loopEndSteps = loop.$3;
       });
+    }
+    // The playhead back where it was: playing, playback goes on from there; stopped, the next play starts there.
+    if (_moved) {
+      final at = _position;
+      at == null && !s.transportOn ? s.stopPlayback() : s.seekTo(at ?? 0);
     }
     s.holdHistory(false);
   }

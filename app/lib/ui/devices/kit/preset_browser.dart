@@ -2,6 +2,7 @@
 // and Factory with search, favourites and tags; rename, duplicate, export and delete on long-press; track presets.
 import 'package:flutter/material.dart';
 import '../../panel_motion.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'param_watch.dart';
@@ -69,7 +70,7 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
   @override
   // Its own watch (param_watch.dart): the name compares every value with the presets, so a knob step rebuilds the
   // name and its save icon, not the editor around it; the arrows and the star rebuild only when a preset loads or
-  // the library changes (_PresetChanges), not on a knob step.
+  // the library changes (PresetChanges), not on a knob step.
   Widget build(BuildContext context) {
     final color = widget.color;
     final id = t.componentId ?? '';
@@ -119,7 +120,7 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
         DevicePresets.step(t, by);
       },
       icon: Icon(by < 0 ? Icons.chevron_left : Icons.chevron_right)));
-    final star = _PresetChanges(target: t, builder: (context) {
+    final star = PresetChanges(target: t, builder: (context) {
       final current = DevicePresets.current(t);
       final fav = current != null && t.state.userPresets.isFavourite(current.favouriteKey(id));
       return SizedBox(width: 30, height: 34, child: IconButton(
@@ -146,17 +147,20 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
 
 /// Rebuilds [builder] when the device's preset may have changed (a preset loaded, undo, the library edited), but not
 /// on a single knob step ([DeviceTarget.moving] names the one value it moved).
-class _PresetChanges extends StatefulWidget {
-  const _PresetChanges({required this.target, required this.builder});
+class PresetChanges extends StatefulWidget {
+  const PresetChanges({super.key, required this.target, required this.builder, this.also});
   final DeviceTarget target;
   final WidgetBuilder builder;
 
+  /// Something else it shows (the A/B switch's side).
+  final Listenable? also;
+
   @override
-  State<_PresetChanges> createState() => _PresetChangesState();
+  State<PresetChanges> createState() => PresetChangesState();
 }
 
-class _PresetChangesState extends State<_PresetChanges> {
-  late final Listenable _on = Listenable.merge([widget.target.tick, widget.target.state.userPresets]);
+class PresetChangesState extends State<PresetChanges> {
+  late final Listenable _on = Listenable.merge([widget.target.tick, widget.target.state.userPresets, ?widget.also]);
 
   @override
   void initState() {
@@ -263,9 +267,19 @@ class _PresetBrowserState extends State<PresetBrowser> {
 
   @override
   void dispose() {
-    // Closed with Preview still on (Back, a swipe, a tap outside): as Cancel.
-    _preview?.cancel();
+    // Taken away with Preview still on but never popped (its route removed): as Cancel, after this frame, since
+    // Cancel edits the project and the tree is locked while it unmounts.
+    final p = _preview;
+    _preview = null;
+    if (p != null && p.running) SchedulerBinding.instance.addPostFrameCallback((_) => p.cancel());
     super.dispose();
+  }
+
+  /// Closed with Preview still on (Back, a swipe, a tap outside): as Cancel, as the sheet starts to go.
+  void _popped(bool didPop, Object? _) {
+    if (!didPop) return;
+    _preview?.cancel();
+    _preview = null;
   }
 
   void _setPreview(bool on) {
@@ -290,10 +304,12 @@ class _PresetBrowserState extends State<PresetBrowser> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([store, t.tick]),
-    builder: (context, _) => _build(context),
-  );
+  Widget build(BuildContext context) => PopScope<Object?>(
+    onPopInvokedWithResult: _popped,
+    child: ListenableBuilder(
+      listenable: Listenable.merge([store, t.tick]),
+      builder: (context, _) => _build(context),
+    ));
 
   bool _passes(DevicePreset p, String componentId) {
     final q = _query.trim().toLowerCase();

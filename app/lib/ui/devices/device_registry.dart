@@ -10,6 +10,7 @@ import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
 import 'flagship/flagship_inline.dart';
 import 'flagship/flagship_presets.dart';
+import 'flagship/flagship_tools.dart' show flagshipRandomKeeps, initFlagship;
 import 'generic_device_page.dart';
 import 'kit/device_style.dart';
 import 'kit/presets.dart';
@@ -33,8 +34,17 @@ class DeviceSection {
 /// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both
 /// null: the track's colour).
 class DeviceEditorEntry {
-  const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const [], this.inline});
+  const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const [], this.inline, this.randomKeeps,
+    this.reset});
   final List<DeviceSection> Function(DeviceTarget target) sections;
+
+  /// The parameters the header's ⋯ › Randomize leaves alone besides the usual ones (the device's own random patch
+  /// keeps them too); null: none.
+  final bool Function(String paramId)? randomKeeps;
+
+  /// What the header's ⋯ › Reset does when the device has its own (Flagship: its Init); null: every knob to its
+  /// default.
+  final void Function(DeviceTarget target)? reset;
 
   /// What the FX stack shows of the device inline ([DeviceInline]); null: its first section, laid out compact.
   final WidgetBuilder? inline;
@@ -50,7 +60,7 @@ class DeviceEditors {
 
   static final Map<String, DeviceEditorEntry> _byId = {
     flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth, presets: flagshipStarterPresets,
-        inline: flagshipInline),
+        inline: flagshipInline, randomKeeps: flagshipRandomKeeps, reset: initFlagship),
     ...drumEditors,
     ...samplerEditors,
   };

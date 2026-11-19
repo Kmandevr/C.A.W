@@ -183,15 +183,25 @@ class _FxStackState extends State<FxStack> {
   bool _open((String, int) slot) => s.settings.fxRowOpen(s.project.id, _rowKey(slot));
 
   void _setOpen((String, int) slot, bool open) {
-    if (!s.settings.setFxRowOpen(s.project.id, _rowKey(slot), open)) return;
+    final pruned = _prune();
+    if (!s.settings.setFxRowOpen(s.project.id, _rowKey(slot), open) && !pruned) return;
     setState(() {});
     unawaited(s.settings.save());
+  }
+
+  /// Drops the keys of this track's rows that are gone (a removed device, a shorter chain) and of tracks the project
+  /// no longer has, so the saved keys keep to rows that exist.
+  bool _prune() {
+    final rows = {for (final slot in _slots) _rowKey(slot)};
+    final others = {for (final l in s.project.layers) if (l.id != layer.id) '${l.id}/', '$masterLayerId/'};
+    return s.settings.pruneFxRows(s.project.id, (k) => k.startsWith('${layer.id}/')
+        ? rows.contains(k) : others.any(k.startsWith));
   }
 
   /// Collapse all (any row open) or open all (every row collapsed): the toolbar's button.
   void _foldAll() {
     final open = !_slots.any(_open);
-    var changed = false;
+    var changed = _prune();
     for (final slot in _slots) {
       changed = s.settings.setFxRowOpen(s.project.id, _rowKey(slot), open) || changed;
     }

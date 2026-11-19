@@ -528,23 +528,37 @@ class Settings extends ChangeNotifier {
   final Map<String, ArrangeView> projectViews = {};
   static const maxProjectViews = 64;
 
-  /// The FX chain rows the user collapsed (device shell), per project id: `layer/slot/component` keys. UI state, never
-  /// in the project file and no undo step; the most recent [maxProjectViews] projects are kept.
+  /// The FX chain rows the user collapsed (device shell), per project id: `layer/slot/component` keys (the project
+  /// keeps no id per device, so a row's state stays with its place). UI state, never in the project file and no undo
+  /// step; the most recent [maxProjectViews] projects are kept, and per project the newest [maxFxCollapsed] keys.
   final Map<String, Set<String>> fxCollapsed = {};
   static const maxFxCollapsed = 512;
 
   /// Whether the FX chain row [slot] of project [projectId] is open (rows are open until collapsed).
   bool fxRowOpen(String projectId, String slot) => !(fxCollapsed[projectId]?.contains(slot) ?? false);
 
-  /// Opens or collapses an FX chain row; false when nothing changed.
+  /// Opens or collapses an FX chain row; false when nothing changed. Past [maxFxCollapsed] the oldest key goes.
   bool setFxRowOpen(String projectId, String slot, bool open) {
     final set = fxCollapsed.remove(projectId) ?? <String>{};
-    final changed = open ? set.remove(slot) : (set.length < maxFxCollapsed && set.add(slot));
+    final changed = open ? set.remove(slot) : set.add(slot);
+    while (set.length > maxFxCollapsed) {
+      set.remove(set.first);  // insertion order: the oldest first
+    }
     if (set.isNotEmpty) fxCollapsed[projectId] = set;  // newest last
     while (fxCollapsed.length > maxProjectViews) {
       fxCollapsed.remove(fxCollapsed.keys.first);
     }
     return changed;
+  }
+
+  /// Drops project [projectId]'s collapsed-row keys that [keep] refuses (rows whose device is gone); true when any went.
+  bool pruneFxRows(String projectId, bool Function(String key) keep) {
+    final set = fxCollapsed[projectId];
+    if (set == null) return false;
+    final n = set.length;
+    set.removeWhere((k) => !keep(k));
+    if (set.isEmpty) fxCollapsed.remove(projectId);
+    return set.length != n;
   }
 
   /// Keeps [view] as project [id]'s, newest last, dropping the oldest past [maxProjectViews].

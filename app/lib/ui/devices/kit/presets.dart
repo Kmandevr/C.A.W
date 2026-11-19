@@ -1,4 +1,6 @@
 // Device presets (Init, the engine's list when it offers one, starter lists in Dart, the user's own) and the header's A/B compare snapshots.
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import '../../../engine/component_info.dart';
 import '../../../model/merged_devices.dart';
 import '../../../model/device_target.dart';
@@ -190,6 +192,9 @@ class DeviceAB {
   DeviceAB._();
   static final Map<String, (bool, Map<String, double>?)> _state = {};
 
+  /// Fires when a device switches side or copies A to B, so every view of it shows the side it is on.
+  static final ValueNotifier<int> changes = ValueNotifier(0);
+
   static String _key(DeviceTarget t) => '${t.layerId}\u0000${t.slot}\u0000${t.componentId}';
 
   /// True while side B is loaded.
@@ -202,6 +207,7 @@ class DeviceAB {
     final other = _state[_key(t)]?.$2;
     _state[_key(t)] = (b, now);
     if (other != null) t.setAll(other);
+    changes.value++;
   }
 
   /// A hold on the switch: B becomes a copy of A. On A, B's snapshot is A's values now; on B, A's values load into B
@@ -212,9 +218,9 @@ class DeviceAB {
     final now = {for (final p in info.parameters) p.id: t.value(p.id)};
     if (!isB(t)) {
       _state[_key(t)] = (false, now);
-      return;
+    } else if (_state[_key(t)]?.$2 case final a?) {
+      t.setAll(a);
     }
-    final a = _state[_key(t)]?.$2;
-    if (a != null) t.setAll(a);
+    changes.value++;
   }
 }
