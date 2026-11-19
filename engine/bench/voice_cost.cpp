@@ -125,6 +125,11 @@ int voiceCost(double seconds) {
         // Auto on noise runs Mono and Poly together (its fade never settles): the medium budget.
         {"Soar: Octaver, Auto (both paths on noise)", "org.caw.shift", {{"variant", 3}, {"up", 0.5}}, fx::octaverBytes(kRate), 8000},
         {"Soar: Octaver, Poly", "org.caw.shift", {{"variant", 3}, {"tracking", 2}, {"up", 0.5}}, fx::octaverBytes(kRate), 2000},
+        // Mimic: 20 bands is Normal (the bench's quality), medium; 32 is High, heavy.
+        {"Mimic: built-in saw drone, 20 bands", "org.caw.vocoder", {}, fx::vocoderBytes(), 8000},
+        {"Mimic: built-in, 3 unison, 12 bands", "org.caw.vocoder", {{"bands", 1}, {"unison", 3}}, fx::vocoderBytes(), 8000},
+        {"Mimic: sidechain carrier, 20 bands", "org.caw.vocoder", {{"carrier", 1}}, fx::vocoderBytes(), 8000},
+        {"Mimic: sidechain carrier, 32 bands", "org.caw.vocoder", {{"carrier", 1}, {"bands", 3}}, fx::vocoderBytes(), 24000},
     };
     int over = 0;
     std::printf("1.1.0 voice devices (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");

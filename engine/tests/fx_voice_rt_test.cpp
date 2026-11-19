@@ -15,6 +15,10 @@ TEST(the_voice_devices_never_allocate_on_the_audio_thread) {
     const std::vector<std::pair<std::string, std::vector<std::pair<std::string, double>>>> devices = {
         {"org.caw.exciter", {{"variant", 0}}},
         {"org.caw.exciter", {{"variant", 1}, {"density", 1}}},
+        {"org.caw.shift", {{"variant", 2}, {"voices", 4}}},
+        {"org.caw.shift", {{"variant", 3}, {"up", 0.5}}},
+        {"org.caw.vocoder", {{"unison", 3}, {"bands", 3}}},
+        {"org.caw.vocoder", {{"carrier", 1}}},
     };
     ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalLayer("t", cawtest::Shape::Saw, {{"freq", 110}})});
     for (const auto& [id, params] : devices) {
@@ -31,7 +35,10 @@ TEST(the_voice_devices_never_allocate_on_the_audio_thread) {
     std::size_t operations = 0;
     float shown[256];
     for (int round = 0; round < 6; ++round) {
-        for (uint32_t slot = 0; slot < devices.size(); ++slot) e.setComponentParam("t", slot, "amount", 0.2 + 0.1 * round);
+        for (uint32_t slot = 0; slot < devices.size(); ++slot) {
+            const char* knob = slot < 2 ? "amount" : (slot < 4 ? "output" : "formant");
+            e.setComponentParam("t", slot, knob, 0.2 + 0.1 * round);
+        }
         cawtest::AllocationScope scope;
         for (int k = 0; k < 60; ++k) {
             e.process(left.data(), right.data(), 192);

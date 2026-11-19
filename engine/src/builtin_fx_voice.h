@@ -16,6 +16,7 @@ namespace fx {
 std::span<const MergedDevice> mergedVoiceDevices();
 // Registers Mimic, org.caw.vocoder (builtin_fx_vocoder.cpp; registerBuiltinEffects calls it, before the merged devices).
 void registerVoice(ModuleRegistry& registry);
+void registerVocoder(ModuleRegistry& registry);  // builtin_fx_vocoder.cpp
 // Glint's and Mimic's presets (each Glint preset names its `variant`); null for another id.
 const std::vector<BuiltinPreset>* voicePresets(std::string_view id);
 const std::vector<BuiltinPreset>& exciterPresets();  // builtin_fx_exciter.cpp

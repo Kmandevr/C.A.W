@@ -551,8 +551,8 @@ TEST(the_components_json_lists_every_variants_descriptor_and_the_presets) {
     CHECK(shift != nullptr);
     if (!shift) return;
     const Json* variants = shift->get("variants");
-    CHECK(variants && variants->arr.size() == 2u);
-    if (variants && variants->arr.size() == 2u) {
+    CHECK(variants && variants->arr.size() == 4u);  // Pitch, Frequency, then 1.1.0's Harmonizer and Octaver
+    if (variants && variants->arr.size() == 4u) {
         CHECK(variants->arr[1].string("id") == kShift);
         bool hasShift = false;
         for (const Json& p : variants->arr[1].get("parameters")->arr) hasShift = hasShift || p.string("id") == "shift";

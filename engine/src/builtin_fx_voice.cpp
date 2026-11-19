@@ -5,12 +5,15 @@
 
 namespace caw::fx {
 
-void registerVoice(ModuleRegistry&) { warmShiftVoices(); }
+void registerVoice(ModuleRegistry& registry) {
+    warmShiftVoices();
+    registerVocoder(registry);
+}
 
 const std::vector<BuiltinPreset>* voicePresets(std::string_view id) {
     if (id == "org.caw.exciter") return &exciterPresets();
+    if (id == "org.caw.vocoder") return &vocoderPresets();
     return nullptr;
 }
-
 
 }  // namespace caw::fx
