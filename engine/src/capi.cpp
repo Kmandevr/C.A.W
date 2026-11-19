@@ -244,25 +244,26 @@ void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume,
 }
 
 // Previews keep a small id-to-layer map on the control side; out of memory drops the preview, never throws.
-void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity) try {
-    if (e && layer_id) e->engine->noteOn(layer_id, id, pitch, velocity);
+int32_t caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity) try {
+    return e && layer_id ? e->engine->noteOn(layer_id, id, pitch, velocity) : 0;
 } catch (const std::bad_alloc&) {
+    return 0;
 }
 
-void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch) {
-    if (e) e->engine->notePitch(id, pitch);
+int32_t caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch) {
+    return e ? e->engine->notePitch(id, pitch) : 0;
 }
 
-void caw_engine_note_off(CawEngine* e, int32_t id) {
-    if (e) e->engine->noteOff(id);
+int32_t caw_engine_note_off(CawEngine* e, int32_t id) {
+    return e ? e->engine->noteOff(id) : 0;
 }
 
-void caw_engine_notes_off(CawEngine* e) {
-    if (e) e->engine->notesOff();
+int32_t caw_engine_notes_off(CawEngine* e) {
+    return e ? e->engine->notesOff() : 0;
 }
 
-void caw_engine_set_master(CawEngine* e, double volume) {
-    if (e) e->engine->setMaster(volume);
+int32_t caw_engine_set_master(CawEngine* e, double volume) {
+    return e && e->engine->setMaster(volume) ? 1 : 0;
 }
 
 int32_t caw_engine_play(CawEngine* e) {
@@ -281,8 +282,8 @@ int32_t caw_engine_play_count_in_bars(CawEngine* e, double step, int32_t bars) {
     return e && e->engine->playCountIn(step, bars, true) ? 1 : 0;
 }
 
-void caw_engine_set_metronome(CawEngine* e, int32_t on) {
-    if (e) e->engine->setMetronome(on != 0);
+int32_t caw_engine_set_metronome(CawEngine* e, int32_t on) {
+    return e && e->engine->setMetronome(on != 0) ? 1 : 0;
 }
 
 static_assert(CAW_OUTPUT_LIMITER == caw::OutputSafety::kLimiter && CAW_OUTPUT_MONO == caw::OutputSafety::kMono);
@@ -303,16 +304,16 @@ void caw_engine_test_tone(CawEngine* e, double seconds) {
 
 int32_t caw_engine_test_tone_sounding(CawEngine* e) { return e && e->engine->testToneSounding() ? 1 : 0; }
 
-void caw_engine_release_touches(CawEngine* e) {
-    if (e) e->engine->releaseTouches();
+int32_t caw_engine_release_touches(CawEngine* e) {
+    return e && e->engine->releaseTouches() ? 1 : 0;
 }
 
 int32_t caw_engine_stop(CawEngine* e) {
     return e && e->engine->stop() ? 1 : 0;
 }
 
-void caw_engine_clear_overload(CawEngine* e) {
-    if (e) e->engine->clearOverload();
+int32_t caw_engine_clear_overload(CawEngine* e) {
+    return e && e->engine->clearOverload() ? 1 : 0;
 }
 
 void caw_engine_meters(CawEngine* e, CawMeters* out) {

@@ -2469,3 +2469,35 @@ TEST(play_and_stop_report_whether_they_reached_the_audio_thread) {
     e.process(l.data(), r.data(), 128);  // the audio thread empties the queue
     CHECK(e.stop());
 }
+
+TEST(every_live_control_reports_a_full_command_queue) {
+    // Engine::send gives up on a queue that stays full; every caller says so (API 40) instead of losing it silently.
+    CHECK_EQ(caw_engine_note_on(nullptr, "a", 1, 60, 1), 0);
+    CHECK_EQ(caw_engine_set_master(nullptr, 1), 0);
+    Engine e(48000);
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalLayer("a", cawtest::Shape::Dc, {{"level", 0.1}})});
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    std::vector<float> l(128), r(128);
+    e.process(l.data(), r.data(), 128);
+    CHECK_EQ(e.noteOn("a", 1, 60, 1), 1);
+    CHECK_EQ(e.noteOn("missing", 2, 60, 1), -1);  // nothing to send
+    CHECK_EQ(e.notePitch(9, 62), -1);
+    e.setCommandRetriesForTest(2);  // a full queue gives up at once
+    while (e.setMaster(1.0)) {}
+    CHECK_EQ(e.noteOn("a", 3, 60, 1), 0);
+    CHECK_EQ(e.notePitch(1, 62), 0);
+    CHECK_EQ(e.noteOff(1), 0);
+    CHECK_EQ(e.notesOff(), 0);
+    CHECK(!e.setMetronome(true));
+    CHECK(!e.releaseTouches());
+    CHECK(!e.clearOverload());
+    CHECK(!e.play());
+    CHECK(!e.stop());
+    e.process(l.data(), r.data(), 128);
+    CHECK_EQ(e.noteOff(1), 1);  // the entry was kept, so the off still reaches the note
+    CHECK_EQ(e.notesOff(), 1);
+    CHECK(e.setMetronome(false));
+    CHECK(e.releaseTouches());
+    CHECK(e.clearOverload());
+    CHECK(e.setMaster(1.0));
+}

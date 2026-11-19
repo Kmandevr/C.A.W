@@ -304,23 +304,23 @@ class Bindings {
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>)>('caw_engine_component_meter'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
-        setMaster = lib.lookupFunction<Void Function(Pointer<Void>, Double),
-            void Function(Pointer<Void>, double)>('caw_engine_set_master'),
-        noteOn = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Int32, Double, Double),
-            void Function(Pointer<Void>, Pointer<Utf8>, int, double, double)>('caw_engine_note_on'),
-        notePitch = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Double),
-            void Function(Pointer<Void>, int, double)>('caw_engine_note_pitch'),
-        noteOff = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+        setMaster = lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
+            int Function(Pointer<Void>, double)>('caw_engine_set_master'),
+        noteOn = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32, Double, Double),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, double, double)>('caw_engine_note_on'),
+        notePitch = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32, Double),
+            int Function(Pointer<Void>, int, double)>('caw_engine_note_pitch'),
+        noteOff = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_engine_note_off'),
-        notesOff = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_notes_off'),
+        notesOff = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_notes_off'),
         play = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_play'),
         playAt = lib.lookupFunction<Int32 Function(Pointer<Void>, Double), int Function(Pointer<Void>, double)>(
             'caw_engine_play_at'),
         playCountIn = lib.lookupFunction<Int32 Function(Pointer<Void>, Double, Int32), int Function(Pointer<Void>, double, int)>(
             'caw_engine_play_count_in'),
-        setMetronome = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+        setMetronome = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_engine_set_metronome'),
-        releaseTouches = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+        releaseTouches = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_release_touches'),
         migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_migrate_instrument'),
@@ -342,7 +342,7 @@ class Bindings {
         audioTuneBuffer = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_audio_tune_buffer'),
         stop = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_stop'),
-        clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+        clearOverload = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
         meters = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<CawMetersStruct>),
             void Function(Pointer<Void>, Pointer<CawMetersStruct>)>('caw_engine_meters'),
@@ -551,15 +551,15 @@ class Bindings {
   /// caw_engine_component_meter (API 39): a slot's output peaks and clip flag, read and reset; 1, 0 busy, -1 none.
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotMeterStruct>) componentMeter;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
-  final void Function(Pointer<Void>, double) setMaster;
-  final void Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn;
-  final void Function(Pointer<Void>, int, double) notePitch;
-  final void Function(Pointer<Void>, int) noteOff;
-  final void Function(Pointer<Void>) notesOff;
+  final int Function(Pointer<Void>, double) setMaster; // API 40: 1 queued, 0 the queue was full
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn; // also -1: nothing to send
+  final int Function(Pointer<Void>, int, double) notePitch;
+  final int Function(Pointer<Void>, int) noteOff;
+  final int Function(Pointer<Void>) notesOff;
   final int Function(Pointer<Void>) play; // API 40: 1 reached the audio thread, 0 its queue was full
   final int Function(Pointer<Void>, double) playAt;
   final int Function(Pointer<Void>, double, int) playCountIn;
-  final void Function(Pointer<Void>, int) setMetronome;
+  final int Function(Pointer<Void>, int) setMetronome;
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
   /// caw_migrate_component (API 38): an effect entry in its merged form (FX consolidation).
   final Pointer<Utf8> Function(Pointer<Utf8>) migrateComponent;
@@ -571,9 +571,9 @@ class Bindings {
   final int Function(Pointer<Void>) audioBufferFrames;
   final int Function(Pointer<Void>, int) audioSetBackground;
   final int Function(Pointer<Void>, int) audioTuneBuffer;
-  final void Function(Pointer<Void>) releaseTouches;
+  final int Function(Pointer<Void>) releaseTouches;
   final int Function(Pointer<Void>) stop;
-  final void Function(Pointer<Void>) clearOverload;
+  final int Function(Pointer<Void>) clearOverload;
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>) layerMeter;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>) layerMeterStereo;

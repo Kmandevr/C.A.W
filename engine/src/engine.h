@@ -153,10 +153,12 @@ public:
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only tracks (layers with an
     // instrument) can preview.
-    void noteOn(const std::string& layerId, int32_t id, double pitch, double velocity);
-    void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
-    void noteOff(int32_t id);
-    void notesOff();
+    // The preview calls return 1 when the command reached the audio thread's queue, 0 when it stayed full (API 40;
+    // an off keeps its entry, so a later off still ends the note), -1 when there was nothing to send.
+    int noteOn(const std::string& layerId, int32_t id, double pitch, double velocity);
+    int notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
+    int noteOff(int32_t id);
+    int notesOff();
     // MIDI from devices (caw.h, API 15): messages for [layerId]'s instrument, queued for the audio thread, which
     // plays each at its frame from its time on the MIDI clock (midiClockNs; 0 means now). UMP words (MIDI 1.0
     // Channel Voice ones upscaled to MIDI 2.0) or MIDI 1.0 bytes. Returns the messages queued; a full queue drops
@@ -172,8 +174,9 @@ public:
     // on the MIDI clock, from the last callback's start; -1 while not playing or before a callback.
     int64_t positionAt(int64_t timeNs) const noexcept;
     // Tests only: the MIDI clock the audio thread reads (-1: the real one).
+    void setCommandRetriesForTest(int retries) noexcept { sendRetries_ = retries; }  // control thread
     void setMidiClockForTest(int64_t ns) noexcept { midiClockTest_.store(ns, std::memory_order_relaxed); }
-    void setMaster(double volume);
+    bool setMaster(double volume);  // false: the command queue stayed full (API 40), as for the controls below
     // play, playCountIn and stop return whether the command reached the audio thread's queue (false: it stayed
     // full, as when audio stalled; nothing changed).
     bool play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
@@ -186,7 +189,7 @@ public:
     uint64_t playsSent() const noexcept { return playCount_; }
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
-    void setMetronome(bool on);
+    bool setMetronome(bool on);
     // The click's volume (0..1) and sound (caw.h CAW_CLICK_*), read by the audio thread at each click.
     void setMetronomeSound(double volume, int sound) noexcept;
     // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS, playing or not, added after the master's gain
@@ -213,9 +216,9 @@ public:
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
     // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
-    void releaseTouches();
+    bool releaseTouches();
     bool stop();
-    void clearOverload();
+    bool clearOverload();
     // Any thread, never blocks (a device opening, the app going to the background): every shed layer comes back and
     // the load history is forgotten at the next callback, so a throttled stretch doesn't thin the song for good.
     void requestSheddingReset() noexcept { sheddingReset_.store(true, std::memory_order_release); }
@@ -646,6 +649,7 @@ private:
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
+    int sendRetries_ = 2000;  // send() retries a full queue about this many ms, then drops the command
     std::unique_ptr<Spsc<Retired, 1024>> retired_;
     std::atomic<float> cpu_{0}, peakL_{0}, peakR_{0};
     std::atomic<ChainProfile*> profile_{nullptr};  // setProfile

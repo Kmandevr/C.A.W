@@ -169,6 +169,12 @@ extern "C" {
    40 (2026-11-19, 1.0.9): Play and Stop report their status. caw_engine_play, caw_engine_play_at,
    caw_engine_play_count_in, caw_engine_play_count_in_bars and caw_engine_stop return int32_t: 1 when the command
    reached the audio thread, 0 when its queue stayed full (it was dropped; nothing changed). Callers may ignore it.
+   So do the other live controls that queue a command: caw_engine_set_master, caw_engine_set_metronome,
+   caw_engine_release_touches and caw_engine_clear_overload (1 or 0), and the previews caw_engine_note_on,
+   _note_pitch, _note_off and _notes_off (1, 0, or -1 when there was nothing to send: no such layer or held note; a
+   note off refused keeps the note, so a later one still ends it). A project update names a refused command in its
+   warnings, as before; a send level it could not queue now too. Routes per track and modulation are sized from the
+   project, with a CPU warning past the old budgets and a 4,096 safety bound (no API change).
    Device MIDI keeps its last queue slots for note offs and merges controller moves under pressure (no API change).
    Nothing else changes. */
 #define CAW_API_VERSION 40
@@ -411,18 +417,19 @@ CAW_API int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, Caw
 /* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
-CAW_API void caw_engine_set_master(CawEngine* e, double volume);
+CAW_API int32_t caw_engine_set_master(CawEngine* e, double volume);
 /* Note previews: a held note on a layer's instrument, heard through the layer's effects and mix (mute and solo
    apply), while playing or stopped; stopped, the transport stays where it is. `id` is the caller's handle: a second
    note on with the same id ends the first. Pitch is a MIDI note number (fractions allowed), velocity 0..1. Only a
    layer that plays a pattern, or has a native instrument, can preview; a native instrument gets them as note
    events with their own note ids (a MIDI keyboard plays through these too). note_pitch glides a held preview to a new pitch without a new attack. */
-CAW_API void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity);
-CAW_API void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
-CAW_API void caw_engine_note_off(CawEngine* e, int32_t id);
-CAW_API void caw_engine_notes_off(CawEngine* e);
-/* API 40: caw_engine_play, _play_at, _play_count_in, _play_count_in_bars and caw_engine_stop return 1 when the command
-   reached the audio thread's queue, 0 when it stayed full (audio stalled; nothing changed) or for a null engine. */
+CAW_API int32_t caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity);
+CAW_API int32_t caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
+CAW_API int32_t caw_engine_note_off(CawEngine* e, int32_t id);
+CAW_API int32_t caw_engine_notes_off(CawEngine* e);
+/* API 40: caw_engine_play, _play_at, _play_count_in, _play_count_in_bars and caw_engine_stop (and the other live
+   controls that queue a command: the version history) return 1 when the command reached the audio thread's queue, 0
+   when it stayed full (audio stalled; nothing changed) or for a null engine. */
 CAW_API int32_t caw_engine_play(CawEngine* e);
 /* Plays from `step` sixteenth steps into the project loop (fractions allowed), so a pause resumes where it stopped,
    on the same beat even if the tempo changed meanwhile; outside the loop (or not finite) it starts at 0. It fades in
@@ -448,10 +455,10 @@ CAW_API int32_t caw_engine_output_safety(CawEngine* e);
 /* The metronome (on != 0): a short click on every beat (API 31: each tick of the time signatures, a 1/den note, on the
    tempo map) while playing, accented on the bar, mixed before the safety
    limiter. Off by default; offline renders never click. */
-CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
+CAW_API int32_t caw_engine_set_metronome(CawEngine* e, int32_t on);
 /* Ends every knob touch (a parameter set while playing overrides its lane until the next play), so the lanes rule
    again at once: the host's automation Touch mode calls it when a written control is let go. */
-CAW_API void caw_engine_release_touches(CawEngine* e);
+CAW_API int32_t caw_engine_release_touches(CawEngine* e);
 CAW_API int32_t caw_engine_stop(CawEngine* e);
 /* The tempo map and time signatures (API version 31). Positions are in beats (quarter notes) from the song start;
    tempo is BPM in quarter notes per minute. A point with ramp != 0 makes the tempo go linearly in BPM over beats from
@@ -490,7 +497,7 @@ typedef struct CawPosition {
     int32_t den;
 } CawPosition;
 CAW_API int32_t caw_engine_position(CawEngine* e, CawPosition* out);
-CAW_API void caw_engine_clear_overload(CawEngine* e);
+CAW_API int32_t caw_engine_clear_overload(CawEngine* e);
 /* Layers shed since the engine was made (the telemetry's dropouts), how many came back on their own, and how many
    are shed now (as CawMeters.overloaded). Any thread; never blocks. API version 26. */
 typedef struct CawSheddingStats {

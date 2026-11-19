@@ -1042,7 +1042,7 @@ bool Engine::send(const Cmd& c) {
     for (int tries = 0; !cmds_->push(c); ++tries) {
         drainRetired();
         if (offlineControl_) applyCommands();
-        if (tries > 2000) {
+        if (tries > sendRetries_) {
             delete c.pattern;  // audio stalled; drop rather than hang the app
             delete c.automation;
             delete c.orderList;
@@ -2311,6 +2311,10 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
             c.flag = r.pre;
             c.sendMute = r.mute;
             if (send(c)) was = r;
+            else {
+                ok = false;
+                warnings["project"].push_back("layer '" + *n.id + "': audio command queue rejected a send level");
+            }
         }
     }
     if (capped)
@@ -2515,11 +2519,11 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     writeMix(ls.slot, ls.volume, ls.pan, mute, solo);
 }
 
-void Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
+int Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
     std::lock_guard<std::mutex> lock(ctl_);
-    if (!layerId.empty() && layerId[0] == '\x01') return;  // the audition's internal layer: its slot moves on a grow
+    if (!layerId.empty() && layerId[0] == '\x01') return -1;  // the audition's internal layer: its slot moves on a grow
     auto it = layers_.find(layerId);
-    if (it == layers_.end() || it->second.slot < 0) return;
+    if (it == layers_.end() || it->second.slot < 0) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 0;
@@ -2533,42 +2537,48 @@ void Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double
         Cmd off = c;
         off.previewOp = 2;
         off.slot = old->second;
-        if (!send(off)) return;  // the queue is full: keep the old note's entry, so its off can still reach it
+        if (!send(off)) return 0;  // the queue is full: keep the old note's entry, so its off can still reach it
     }
-    if (send(c)) previewSlots_[id] = c.slot;
+    if (!send(c)) return 0;
+    previewSlots_[id] = c.slot;
+    return 1;
 }
 
-void Engine::notePitch(int32_t id, double pitch) {
+int Engine::notePitch(int32_t id, double pitch) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = previewSlots_.find(id);
-    if (it == previewSlots_.end() || !std::isfinite(pitch)) return;
+    if (it == previewSlots_.end() || !std::isfinite(pitch)) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 1;
     c.slot = it->second;
     c.previewId = id;
     c.pitch = std::clamp(pitch, 0.0, 127.0);
-    send(c);
+    return send(c) ? 1 : 0;
 }
 
-void Engine::noteOff(int32_t id) {
+int Engine::noteOff(int32_t id) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = previewSlots_.find(id);
-    if (it == previewSlots_.end()) return;
+    if (it == previewSlots_.end()) return -1;
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 2;
     c.slot = it->second;
     c.previewId = id;
-    if (send(c)) previewSlots_.erase(it);  // a full queue keeps the entry, so a later off still ends the note
+    if (!send(c)) return 0;  // a full queue keeps the entry, so a later off still ends the note
+    previewSlots_.erase(it);
+    return 1;
 }
 
-void Engine::notesOff() {
+int Engine::notesOff() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Preview;
     c.previewOp = 3;
-    if (send(c)) previewSlots_.clear();
+    if (!send(c)) return 0;
+    previewSlots_.clear();
+    return 1;
 }
 
 // ---- Device MIDI (API 15) ----
@@ -2686,12 +2696,12 @@ int64_t Engine::positionAt(int64_t timeNs) const noexcept {
     return pos + static_cast<int64_t>(std::floor(static_cast<double>(timeNs - at) * sr_ / 1e9));
 }
 
-void Engine::setMaster(double volume) {
+bool Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::SetMaster;
     c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
-    send(c);
+    return send(c);
 }
 
 bool Engine::play(double fromStep) {
@@ -2724,12 +2734,12 @@ bool Engine::playCountIn(double fromStep, int beats, bool bars) {
     return true;
 }
 
-void Engine::setMetronome(bool on) {
+bool Engine::setMetronome(bool on) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Metronome;
     c.flag = on;
-    send(c);
+    return send(c);
 }
 
 void Engine::setMetronomeSound(double volume, int sound) noexcept {
@@ -2839,15 +2849,16 @@ void Engine::mixToneOnly(float* left, float* right, int frames, bool previewTake
     }
 }
 
-void Engine::releaseTouches() {
+bool Engine::releaseTouches() {
     // The same bookkeeping as a Play, without moving the transport: chains drop their touches at their next chunk.
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::ReleaseTouches;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
-    if (!send(c)) return;
+    if (!send(c)) return false;
     playCount_ = c.playCount;
+    return true;
 }
 
 bool Engine::stop() {
@@ -2950,11 +2961,11 @@ double Engine::nextClick() noexcept {
     return v;
 }
 
-void Engine::clearOverload() {
+bool Engine::clearOverload() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::ClearOverload;
-    send(c);
+    return send(c);
 }
 
 int64_t Engine::loopLength() {
