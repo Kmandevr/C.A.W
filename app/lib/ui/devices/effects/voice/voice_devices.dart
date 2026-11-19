@@ -7,6 +7,7 @@ import '../../../theme.dart';
 import '../../device_controls.dart';
 import '../../device_registry.dart';
 import '../../device_scope.dart';
+import '../../sidechain_bar.dart' show KeyFilterControls;
 import '../../kit/controls.dart';
 import '../../kit/device_style.dart';
 import '../../kit/feel.dart';
@@ -273,7 +274,7 @@ class MimicPage extends StatelessWidget {
         FittedBox(fit: BoxFit.scaleDown, child: ChoiceChips('carrier', title: 'CARRIER')),
         if (builtIn) FittedBox(fit: BoxFit.scaleDown, child: ChoiceChips('wave', title: 'WAVE')),
         const DeviceToggle('freeze', label: 'Freeze'),
-      ])],
+      ]), if (!builtIn && !DeviceScope.isInline(context)) const KeyFilterControls()],
       knobs: knobWrap([
         DeviceKnob('formant', size: 64, label: 'Formant', color: scope.accent),
         const DeviceKnob('sibilance', size: 46, label: 'Sibilance'),

@@ -1,5 +1,5 @@
 // Per-device auto gain and slot meters in the app: the project's `auto_gain` (save, load, undo, new devices) and, with
-// CAW_LIB, EngineSlotAudio over the real engine (a meter reading, the ear's trim on a +6 dB effect).
+// CAW_LIB, EngineSlotAudio over the real engine (a meter reading, the ear's trim on a +6 dB effect, the header's cost).
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
@@ -106,15 +106,22 @@ void main() {
     final b = Bindings.instance;
     final h = Pointer<Void>.fromAddress(e.nativeAddress!);
     final left = calloc<Float>(256), right = calloc<Float>(256);
+    // The header's cost: unmeasured at the first read, which starts the timing; read on as the header would.
+    expect(EngineSlotAudio.instance.cost(fx)!.cpuShare, isNull);
     try {
       e.play();
       for (var k = 0; k < 48000 * 8 ~/ 256; k++) {
         b.process(h, left, right, 256);
+        if (k % 40 == 0) EngineSlotAudio.instance.cost(fx);
       }
     } finally {
       calloc.free(left);
       calloc.free(right);
     }
+    final cost = EngineSlotAudio.instance.cost(fx)!;
+    expect(cost.cpuShare, inInclusiveRange(0, 1));
+    expect(cost.latencyMs, 0);
+    expect(cost.armed, isFalse);
     final peak = EngineSlotAudio.instance.outputPeak(fx);
     expect(peak, isNotNull);
     expect(peak!, greaterThan(0.05));

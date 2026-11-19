@@ -12,6 +12,7 @@ import '../../kit/hero.dart';
 import '../../kit/param_watch.dart';
 import '../effect_page.dart';
 import '../modes_kit.dart';
+import '../../sidechain_bar.dart' show KeyFilterControls;
 import 'common.dart';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -40,7 +41,7 @@ class PedalGatePage extends StatelessWidget {
       const KnobRow(['threshold', 'release'], size: 64, labels: {'release': 'Decay'}),
       const KnobRow(['hysteresis', 'attack', 'hold', 'range', 'tracking'], size: 42, labels: {'tracking': 'Tracking'}),
       chipWrap([const ChoiceChips('sidechain', title: 'KEY', labels: ['Self', 'Key'])]),
-      const DeviceFold(child: ParamGrid(only: ['sc_hpf'])),
+      const KeyFilterControls(),
     ]);
   }
 }
@@ -392,6 +393,7 @@ class CarvePage extends StatelessWidget {
         const DeviceToggle('listen', label: 'Listen', icon: Icons.hearing),
       ]),
       const DeviceFold(child: KnobRow(['low', 'high'], size: 42, labels: {'low': 'Low edge', 'high': 'High edge'})),
+      const KeyFilterControls(),
     ]);
   }
 }

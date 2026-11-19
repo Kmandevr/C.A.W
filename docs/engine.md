@@ -465,7 +465,7 @@ Owner-approved device UI plan, built 2026-11-19 in `ComponentChain` (host level:
 
 ### Around the effects (API 44, 1.1.0)
 
-Built 2026-11-19 from the private sound plan's "Around the effects" (the engine side; no UI yet).
+Built 2026-11-19 from the private sound plan's "Around the effects" (the engine side; the app's headers, key filter, loudness area and smart freeze are in [app](app.md)).
 
 - **The armed signal:** an audio track whose `"input"` is `armed` with `monitor` `on` or `auto` plays its inserts' near-zero-delay versions; playback of other tracks and every export (`setProjectOffline`) play the full ones. One generic path, engine-internal (`component_chain.h`): a built-in implements `ArmedVersion` (`setArmed`, and `armedDiffers` for the badge; most keep an `ArmedFlag`, one relaxed load at their control step); the Engine sets it on the track's chain in each project update (`ComponentChain::setArmed`, on the control thread, before `updateCompensation`), and each effect's `VariableLatency::latencyFor` reports its armed latency, so the chain compensates. A rack passes it to its children. **[Decision, this session]** armed means armed with monitoring not `off` (whether stopped, playing or recording), so the latency changes only when the project does, never with the transport. The versions:
   - Linear EQ (variant 4): the same bands as minimum-phase filters (`lib::EqFilter`, mid and side lanes as the FIR's; Left and Right bands act as Stereo), latency 0; Match's curve is left out (it is a FIR). Switching starts the other path from silence (a short gap at arm time). Its display shows latency 0 and taps 0 while armed.
