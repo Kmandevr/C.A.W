@@ -7,6 +7,7 @@
 #include "presets.h"
 #include "quality.h"
 #include "builtin_components.h"
+#include "builtin_pack.h"
 #include "graph.h"
 #include "meters.h"
 #include "load_stabilizer.h"
@@ -1239,6 +1240,8 @@ std::string Engine::nativeComponentsJson() {
         std::string one = moduleDescriptorJson(*d);
         std::string head = first ? "{\"builtin\":true," : ",{\"builtin\":true,";
         if (!builtinPresets(d->id).empty()) head += "\"presets\":" + builtinPresetsJson(d->id) + ",";
+        if (const std::string_view pack = fx::packOf(d->id); !pack.empty())  // a pack device (builtin_pack.h)
+            head += "\"pack\":\"" + std::string(pack) + "\",";
         if (const fx::MergedDevice* m = fx::findMergedDevice(d->id)) {  // every variant's own descriptor
             head += "\"variants\":[";
             for (size_t v = 0; v < m->variants.size(); ++v)

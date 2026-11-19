@@ -33,6 +33,7 @@ using namespace caw;
 using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
+int packCost(double seconds);  // bench/pack_cost.cpp: the AutoStacc beta pack against its ceilings
 int cleanCost(double seconds);  // bench/clean_cost.cpp: Preen and Hush against their ceilings
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
@@ -956,6 +957,7 @@ int main(int argc, char** argv) {
         std::printf("reference workload: %.0f µs/s now in a long run (1640 on the calibration box); the costs below "
                     "are relative to it, in that box's µs/s\n", ref);
     }
+    if (only == 307) return packCost(secs) ? 1 : 0;  // `caw_bench SECONDS 307`: only the AutoStacc beta pack (a CI test)
     if (only == 310) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
     if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
@@ -1001,7 +1003,8 @@ int main(int argc, char** argv) {
         const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
         const bool voiceOver = voiceCost(secs) != 0;  // and the voice devices (bench/voice_cost.cpp)
         const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver) ? 1 : 0;
+        const bool packOver = packCost(secs) != 0;  // and the AutoStacc beta pack (bench/pack_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
