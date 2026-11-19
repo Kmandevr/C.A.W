@@ -366,7 +366,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         const bool bypass = spec.bypass;
         e->bypass.store(bypass, std::memory_order_relaxed);
         e->mix = bypass ? 0.0 : 1.0;
-        e->autoGain.store(spec.autoGain, std::memory_order_relaxed);
+        // Auto gain is a track's or the master's effect chain's: an instrument, per-note FX and modulators ignore it.
+        e->autoGain.store(spec.autoGain && kind == Kind::Effects, std::memory_order_relaxed);
         e->matcher.prepare(sampleRate);
         // Prepared here, on the control thread: the audio thread only processes.
         if (!e->processor->activate(sampleRate, kMaxFrames)) {
@@ -447,7 +448,7 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
         }
         e.generation.fetch_add(1, std::memory_order_release);  // after the values
         e.bypass.store(specs[i].bypass, std::memory_order_relaxed);
-        e.autoGain.store(specs[i].autoGain, std::memory_order_relaxed);
+        e.autoGain.store(specs[i].autoGain && effectChain(), std::memory_order_relaxed);
     }
 }
 
@@ -473,7 +474,7 @@ bool ComponentChain::setBypass(std::size_t index, bool bypass) noexcept {
 }
 
 bool ComponentChain::setAutoGain(std::size_t index, bool on) noexcept {
-    if (index >= entries_.size()) return false;
+    if (index >= entries_.size() || !effectChain()) return false;
     entries_[index]->autoGain.store(on, std::memory_order_relaxed);
     return true;
 }
@@ -817,13 +818,19 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             const PartScope automation(parts, Part::Automation);
             resolveEntry(e, index, m, time, playing, newPlay);
         }
-        // Auto gain: turned on, or a new Play, starts its matcher from 0 dB (a render from Play repeats).
+        // Auto gain: turned on, or a new Play, starts its matcher's analysis from 0 dB (a render from Play repeats);
+        // turned off, its trim ramps to unity. Either way the gain heard fades over 10 ms (AutoGainMatcher), and the
+        // matcher runs while it does.
         const bool autoGain = e.autoGain.load(std::memory_order_relaxed);
         if (autoGain && (!e.autoGainWas || newPlay)) {
-            e.matcher.reset();
+            e.matcher.restart();
+            e.autoGainDb.store(0.0f, std::memory_order_relaxed);
+        } else if (!autoGain && e.autoGainWas) {
+            e.matcher.release();
             e.autoGainDb.store(0.0f, std::memory_order_relaxed);
         }
         e.autoGainWas = autoGain;
+        const bool matching = !notes_ && e.matcher.active();
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) {  // bypassed: not run, input passes on untouched
             meterSlot(e, left, right, m);
@@ -837,7 +844,18 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         // A keyed effect hears its key only in the chunk the sources wrote it (else silence and no notes).
         const KeyInput* key = e.key && time && time->chunk >= 0 && e.key->chunk == time->chunk ? e.key.get() : nullptr;
         const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0) || (e.noteEvents && noteEventCount_ > 0);
-        if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
+        // A key that sounds wakes it too (a ducker keeps following its key through a gap in its input).
+        const bool keyHeard = key && (peakAbs(key->l, m) != 0.0f || peakAbs(key->r, m) != 0.0f);
+        if (e.asleep && on && !events && !keyHeard &&
+            (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) {
+            // Its matcher hears these frames' silence as if the effect had run, so the trim doesn't depend on the
+            // host's block size.
+            if (matching) {
+                e.matcher.advanceSilence(m);
+                if (autoGain) e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
+            }
+            continue;
+        }
         e.asleep = false;
         scope.ran = true;
         std::copy_n(left, m, stageL_.data());
@@ -916,9 +934,9 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
         sanitize(left, m);
         sanitize(right, m);
-        if (autoGain && !notes_) {  // after the effect, before its bypass crossfade
+        if (matching) {  // after the effect, before its bypass crossfade
             e.matcher.process(stageL_.data(), stageR_.data(), left, right, m);
-            e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
+            if (autoGain) e.autoGainDb.store(static_cast<float>(e.matcher.trimDb()), std::memory_order_relaxed);
         }
         // Only a component that says so sleeps: one put to sleep by its declared tail alone would fall asleep on a
         // block boundary with its timed state (an LFO, a control grid) frozen there, and wake differently for

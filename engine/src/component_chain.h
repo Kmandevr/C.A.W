@@ -222,7 +222,9 @@ public:
     bool setBypass(std::size_t index, bool bypass) noexcept;
     // Per-slot auto gain (1.0.8, auto_gain.h): a trim after component `index` matching its output's short-term
     // loudness to its input's, applied before its bypass crossfade (so a bypassed slot plays its input untrimmed).
-    // Off by default; the project's "auto_gain" sets it at build and on every update. Control thread: false for an
+    // Off by default; the project's "auto_gain" sets it at build and on every update. Only an effect chain (build())
+    // has it: an instrument's, per-note FX's and modulators' chains ignore "auto_gain" and refuse setAutoGain.
+    // Turned off while playing, the trim ramps to unity over 10 ms first (no click). Control thread: false for an
     // index the chain does not have. Any thread: the trim now in dB (0 while off), or false for no such index.
     bool setAutoGain(std::size_t index, bool on) noexcept;
     bool autoGainDb(std::size_t index, float& db) const noexcept;
@@ -313,7 +315,7 @@ private:
         // Auto gain (setAutoGain): the flag, the trim now (audio thread writes), and the matcher (audio thread).
         std::atomic<bool> autoGain{false};
         std::atomic<float> autoGainDb{0.0f};
-        bool autoGainWas = false;  // audio thread: on at the last block (turning on starts it from 0 dB)
+        bool autoGainWas = false;  // audio thread: on at the last block (turning on restarts it, off releases it)
         AutoGainMatcher matcher;
         // The slot's output meter (readSlotMeter): peaks since the last read, raised by the audio thread.
         mutable std::atomic<float> peakL{0.0f}, peakR{0.0f};
@@ -329,6 +331,7 @@ private:
     const ParameterValue* modulated(const Entry& e, std::size_t index, uint32_t m, const ChainTime* time) noexcept;
 
     enum class Kind : uint8_t { Effects, Instrument, Modulators, NoteEffects };
+    bool effectChain() const noexcept { return !notes_ && !modulators_ && !noteFx_; }
     static std::unique_ptr<ComponentChain> make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
                                                 double sampleRate, Kind kind, std::string& error);
 
