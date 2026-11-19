@@ -114,6 +114,8 @@ public:
         mix_ = clamp(s.mix, 0.0, 1.0);
     }
     const ReverbSettings& settings() const noexcept { return settings_; }
+    // Bytes prepare() allocated (its delay memory).
+    size_t bytes() const noexcept { return memory_.size() * sizeof(float); }
 
     // Silence the tail (at Play, after a mute) without reallocating.
     // Light (for a device's Eco quality): two input all-passes per side instead of four and no line modulation,

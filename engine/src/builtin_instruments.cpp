@@ -2,6 +2,7 @@
 #include "builtin_instruments.h"
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
+#include "builtin_timber.h"
 #include "audio_clips.h"
 #include "builtin_sampler.h"
 
@@ -12,6 +13,7 @@ namespace caw {
 void registerBuiltinInstruments(ModuleRegistry& registry) {
     registerDrums(registry);          // org.caw.drums
     registerFlagshipSynth(registry);  // org.caw.synth.flagship
+    timber::registerTimber(registry);  // org.caw.timber (builtin_timber.cpp, 1.1.0)
     registerSampler(registry);        // org.caw.sampler (builtin_sampler.cpp)
     registerAudioTrack(registry);     // org.caw.audio-track: audio clips and input (audio_clips.cpp)
 }

@@ -39,6 +39,7 @@ int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against t
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
 int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices against their ceilings
 int larkCost(double seconds);  // bench/lark_cost.cpp: Lark (org.caw.pitchfix) against its ceilings
+int timberCost(double seconds);  // bench/timber_cost.cpp: Timber (org.caw.timber) against its ceilings
 
 namespace {
 
@@ -958,6 +959,7 @@ int main(int argc, char** argv) {
         std::printf("reference workload: %.0f µs/s now in a long run (1640 on the calibration box); the costs below "
                     "are relative to it, in that box's µs/s\n", ref);
     }
+    if (only == 308) return timberCost(secs) ? 1 : 0;  // `caw_bench SECONDS 308`: only Timber (a CI test)
     if (only == 307) return packCost(secs) ? 1 : 0;  // `caw_bench SECONDS 307`: only the AutoStacc beta pack (a CI test)
     if (only == 310) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
     if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
@@ -1007,7 +1009,9 @@ int main(int argc, char** argv) {
         const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
         const bool packOver = packCost(secs) != 0;  // and the AutoStacc beta pack (bench/pack_cost.cpp)
         const bool larkOver = larkCost(secs) != 0;  // and Lark (bench/lark_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver) ? 1 : 0;
+        const bool timberOver = timberCost(secs) != 0;  // and Timber (bench/timber_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver ||
+                timberOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
