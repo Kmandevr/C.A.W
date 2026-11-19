@@ -8,6 +8,16 @@
 #include <cstdint>
 
 namespace caw {
+
+// Reads one byte of a mapped page. Exempt from AddressSanitizer: a sanitized library's globals sit between poisoned
+// redzones on the same pages, and touching them is a valid read of mapped memory that ASan can't tell apart.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((no_sanitize_address, noinline))
+#endif
+static unsigned char touchPage(uintptr_t at) noexcept {
+    return *reinterpret_cast<const volatile unsigned char*>(at);
+}
+
 namespace {
 
 struct Region {
@@ -71,7 +81,7 @@ LibraryWarmStats warmLibrary(const void* address, std::size_t cap) noexcept {
         ++stats.regions;
         for (uintptr_t a = r.start & ~(page - 1); a < r.end && stats.bytes < cap; a += page) {
             const uintptr_t at = std::max(a, r.start);  // the first page may begin before the segment
-            sink = sink + *reinterpret_cast<const volatile unsigned char*>(at);
+            sink = sink + touchPage(at);
             ++stats.pages;
             stats.bytes += page;
         }
