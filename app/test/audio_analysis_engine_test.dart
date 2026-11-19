@@ -52,7 +52,7 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('caw-analysis'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  test('the bindings carry API 42', () => expect(cawApiVersion, 42));
+  test('the bindings carry API 43', () => expect(cawApiVersion, 43));
 
   test('a click track at 128 BPM is detected, and its clicks are the slices', () async {
     final e = Engine.create();

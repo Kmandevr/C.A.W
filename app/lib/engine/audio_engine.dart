@@ -180,6 +180,10 @@ abstract class AudioIo {
   Future<SfzImportResult> sfzImport(String path);
   Future<SfzExportResult> sfzExport(String stateJson, String path, {bool copySamples = false});
 
+  /// The sampler's tools (C API 43): [tool] `map`, `slice` (the request's `path` is the file, the rest its options)
+  /// or `take`, on a worker isolate. The engine's JSON answer; `{"ok": false, "error"}` without an engine.
+  Future<Map<String, dynamic>> samplerTool(String tool, Map<String, dynamic> request);
+
   /// The device's `caw_audio_status` "input" object (empty when none).
   Map<String, dynamic> inputStatus();
 }
@@ -322,6 +326,27 @@ class EngineAudioIo implements AudioIo {
           calloc.free(p);
         }
       })));
+
+  @override
+  Future<Map<String, dynamic>> samplerTool(String tool, Map<String, dynamic> request) async =>
+      await _off((a) => Isolate.run(() {
+            final b = AudioBindings.instance;
+            final opts = {...request}..remove('path');
+            final path = '${request['path'] ?? ''}'.toNativeUtf8();
+            final req = jsonEncode(tool == 'slice' ? opts : request).toNativeUtf8();
+            final e = Pointer<Void>.fromAddress(a);
+            try {
+              return _map(b.take(switch (tool) {
+                'map' => b.samplerMap(e, req),
+                'slice' => b.samplerSlice(e, path, req),
+                _ => b.samplerTake(e, req),
+              }));
+            } finally {
+              calloc.free(path);
+              calloc.free(req);
+            }
+          })) ??
+      const {'ok': false, 'error': 'no engine'};
 
   @override
   Map<String, dynamic> inputStatus() {
