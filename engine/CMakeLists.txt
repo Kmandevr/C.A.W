@@ -431,6 +431,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
+  target_sources(caw_rt_tests PRIVATE tests/flagship_raven_rt_test.cpp)  # Flagship's 1.1.0 synthesis (Raven)
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_rt_test.cpp)  # FX consolidation: a variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_drive_rt_test.cpp)  # part B: a Drive variant change while playing

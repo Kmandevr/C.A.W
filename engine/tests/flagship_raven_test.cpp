@@ -206,6 +206,14 @@ const std::vector<NewCase>& newCases() {
                                                {"mod4_dst", 3.0}, {"mod4_amt", 0.4}, {"macro1", 0.7}, {"mod5_src", 16},
                                                {"mod5_dst", 12.0}, {"mod5_amt", 0.6}, {"osc1_warp", 1}, {"macro8", 0.5},
                                                {"mod6_src", 23}, {"mod6_via", 8}, {"mod6_dst", 4.0}, {"mod6_amt", -0.3}})});
+        // The filter models (9..13), driven, resonant, their cutoff swept by the slot's LFO; both filters in parallel.
+        const char* filters[] = {"diode lp", "sallen-key lp", "phaser", "comb negative", "vowel"};
+        for (int f = 0; f < 5; ++f)
+            c.push_back({std::string("filter ") + filters[f],
+                         with({{"flt1_on", 1}, {"flt1_type", 9.0 + f}, {"flt1_resonance", f == 3 ? 0.8 : 1.0},
+                               {"flt1_drive", 3.0}, {"flt1_morph", 0.6}, {"flt1_cutoff", 900}, {"mod3_src", 4},
+                               {"mod3_dst", 60.0 /* flt1_cutoff + 1 */}, {"mod3_amt", 0.3}, {"flt2_on", 1}, {"flt2_type", 13.0 - f},
+                               {"flt_routing", 1}, {"osc2_dest", 1}})});
         c.push_back({"harmonic table stretched", with({{"osc1_table", 3}, {"osc1_warp", 11}, {"osc1_warp_amt", 1.0}})});
         return c;
     }();
@@ -447,4 +455,36 @@ TEST(flagship_lfo_4_and_the_macros_are_mod_sources) {
         lo = std::min(lo, sum), hi = std::max(hi, sum);
     }
     CHECK(hi > 3.0 * lo);
+}
+
+TEST(flagship_new_filter_models_shape_a_saw_as_their_kinds) {
+    Engine e(48000);
+    const size_t n = 16384;
+    const auto render = [&](Values v) {
+        std::unique_ptr<ModuleProcessor> p = make(e);
+        Values x = plainPatch({{"osc1_frame", 1.0 / 3.0}, {"flt1_on", 1}});
+        x.insert(x.end(), v.begin(), v.end());
+        const Stereo out = play(*p, held(33), 24000 + n, x);  // a 55 Hz saw
+        return spectrum(out.l, 24000, n);
+    };
+    const std::vector<double> dry = render({{"flt1_on", 0}});
+    for (double type : {9.0, 10.0}) {  // the diode and Sallen-Key low-passes: the top cut, a peak at the cutoff
+        const std::vector<double> soft = render({{"flt1_type", type}, {"flt1_cutoff", 1000}, {"flt1_resonance", 0.0}});
+        CHECK(bandDb(soft, 8000, 16000, n) - bandDb(soft, 100, 400, n) < bandDb(dry, 8000, 16000, n) - bandDb(dry, 100, 400, n) - 30.0);
+        const std::vector<double> ringing = render({{"flt1_type", type}, {"flt1_cutoff", 1000}, {"flt1_resonance", 0.9}});
+        CHECK(bandDb(ringing, 850, 1150, n) - bandDb(ringing, 100, 400, n) > bandDb(soft, 850, 1150, n) - bandDb(soft, 100, 400, n) + 6.0);
+    }
+    // The phaser notches: at its deepest bin near the cutoff it is far below the dry saw's spectrum there.
+    const std::vector<double> phased = render({{"flt1_type", 11}, {"flt1_cutoff", 1200}, {"flt1_resonance", 0.5}});
+    double deepest = 0;
+    for (double hz = 300; hz < 6000; hz += 55) deepest = std::min(deepest, peakDb(phased, hz, 3, n) - peakDb(dry, hz, 3, n));
+    CHECK(deepest < -15.0);
+    // The negative comb at 880 Hz rings odd multiples of 440 Hz, and dips at 880.
+    const std::vector<double> comb = render({{"flt1_type", 12}, {"flt1_cutoff", 880}, {"flt1_resonance", 1.0}, {"flt1_morph", 0}});
+    CHECK(peakDb(comb, 440, 4, n) - peakDb(dry, 440, 4, n) > peakDb(comb, 880, 4, n) - peakDb(dry, 880, 4, n) + 10.0);
+    CHECK(peakDb(comb, 1320, 4, n) - peakDb(dry, 1320, 4, n) > peakDb(comb, 1760, 4, n) - peakDb(dry, 1760, 4, n) + 10.0);
+    // The vowel keeps the body (the fundamental within 10 dB) and raises its A's first formant (730 Hz) over 1.5 kHz.
+    const std::vector<double> vowel = render({{"flt1_type", 13}, {"flt1_cutoff", 1000}, {"flt1_resonance", 0.5}, {"flt1_morph", 0}});
+    CHECK(std::fabs(peakDb(vowel, 55, 3, n) - peakDb(dry, 55, 3, n)) < 10.0);
+    CHECK(peakDb(vowel, 715, 4, n) - peakDb(dry, 715, 4, n) > peakDb(vowel, 1540, 4, n) - peakDb(dry, 1540, 4, n) + 6.0);
 }

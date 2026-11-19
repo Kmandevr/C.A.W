@@ -163,7 +163,11 @@ enum Source : int {
     kSourceCount = kSrcMacro1 + kMacros
 };
 constexpr int lfoSource(uint32_t l) { return l < kLayoutLfos ? kSrcLfo1 + static_cast<int>(l) : kSrcLfo4; }
-enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
+enum FilterType : int {
+    kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant,
+    kDiodeLp, kSallenKeyLp, kPhaser, kCombNeg, kVowel,  // 1.1.0, appended (flagship_filters.h)
+    kFilterTypeCount
+};
 enum Warp : int {
     kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpFmOsc,
     // 1.1.0, appended: another oscillator (or noise) multiplying this one (ring and amplitude modulation) or
@@ -195,7 +199,9 @@ constexpr std::string_view kFoldModes[] = {"Per copy", "Whole stack"};
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
 constexpr std::string_view kFilterTypes[] = {"Ladder LP", "Ladder HP", "Ladder BP", "SVF LP", "SVF HP",
-                                             "SVF BP",    "SVF notch", "Comb",     "Formant"};
+                                             "SVF BP",    "SVF notch", "Comb",     "Formant",
+                                             "Diode LP",  "Sallen-Key LP", "Phaser", "Comb (negative)", "Vowel"};
+static_assert(sizeof(kFilterTypes) / sizeof(kFilterTypes[0]) == kFilterTypeCount);
 constexpr std::string_view kRoutings[] = {"Series", "Parallel"};
 constexpr std::string_view kLfoShapes[] = {"Sine", "Triangle", "Saw up", "Saw down", "Square", "Sample & hold", "Smooth random"};
 constexpr std::string_view kLfoSyncs[] = {"Off", "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars", "8 bars"};
@@ -1628,6 +1634,9 @@ struct VoiceFilter {
     lib::MultiLadder ladder[2];
     lib::Svf svf[2];
     lib::FormantFilter formant[2];
+    flagship::DiodeLp diode[2];
+    flagship::SallenKey sallen[2];
+    flagship::Phaser phaser[2];
     lib::CombFilter* comb[2] = {nullptr, nullptr};  // the instrument's, one pair per voice (they hold memory)
     lib::Saturator saturator;
     double qFor = -1.0, q = 0.70710678118654752;  // the SVF's q, for the resonance it was worked out from
@@ -1643,7 +1652,8 @@ struct VoiceFilter {
                 ladder[c].clear();
                 svf[c].clear();
                 formant[c].clear();
-                if (comb[c] && t == kComb) comb[c]->clear();
+                diode[c].clear(), sallen[c].clear(), phaser[c].clear();
+                if (comb[c] && (t == kComb || t == kCombNeg)) comb[c]->clear();
             }
             type = t;
         }
@@ -1662,6 +1672,15 @@ struct VoiceFilter {
                     if (comb[c]) comb[c]->set(cutoff, 0.4 + 0.595 * resonance, morph);
                     break;
                 case kFormant: formant[c].set(morph, cutoff / 1000.0, 4.0 + 16.0 * resonance, sampleRate); break;
+                // 1.1.0's models. The comb's negative feedback rings odd harmonics an octave below its frequency; the
+                // vowel is the formant filter's peaks over the dry signal (the body kept), the morph choosing the vowel.
+                case kDiodeLp: diode[c].set(cutoff, resonance, sampleRate); break;
+                case kSallenKeyLp: sallen[c].set(cutoff, resonance, sampleRate); break;
+                case kPhaser: phaser[c].set(cutoff, resonance, morph, sampleRate); break;
+                case kCombNeg:
+                    if (comb[c]) comb[c]->set(cutoff, -(0.4 + 0.595 * resonance), morph);
+                    break;
+                case kVowel: formant[c].set(morph, cutoff / 1000.0, 4.0 + 16.0 * resonance, sampleRate); break;
                 default:
                     if (resonance != qFor) qFor = resonance, q = lib::resonanceQ(resonance);  // a pow: only on a change
                     if (c == 0) svf[0].setApprox(cutoff, q, sampleRate);
@@ -1701,7 +1720,8 @@ struct VoiceFilter {
                resonanceSet == f.resonanceSet;
     }
     void clear() noexcept {
-        for (int c = 0; c < 2; ++c) ladder[c].clear(), svf[c].clear(), formant[c].clear();
+        for (int c = 0; c < 2; ++c)
+            ladder[c].clear(), svf[c].clear(), formant[c].clear(), diode[c].clear(), sallen[c].clear(), phaser[c].clear();
         monoUsed = false;
     }
 
@@ -1725,6 +1745,13 @@ struct VoiceFilter {
                     if (comb[c]) each(x, n, [&](double v) noexcept { return comb[c]->process(v); });
                     break;
                 case kFormant: each(x, n, [&](double v) noexcept { return formant[c].process(v); }); break;
+                case kDiodeLp: each(x, n, [&](double v) noexcept { return diode[c].process(v); }); break;
+                case kSallenKeyLp: each(x, n, [&](double v) noexcept { return sallen[c].process(v); }); break;
+                case kPhaser: each(x, n, [&](double v) noexcept { return phaser[c].process(v); }); break;
+                case kCombNeg:
+                    if (comb[c]) each(x, n, [&](double v) noexcept { return comb[c]->process(v); });
+                    break;
+                case kVowel: each(x, n, [&](double v) noexcept { return 0.4 * v + 1.2 * formant[c].process(v); }); break;
                 default: break;
             }
         }
