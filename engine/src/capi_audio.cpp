@@ -14,6 +14,7 @@
 #include "capi_internal.h"
 #include "json.h"
 #include "sample_preview.h"
+#include "sampler_tools.h"
 
 namespace {
 char* dup(const std::string& s) {
@@ -180,6 +181,27 @@ void caw_asset_store_purge(void) { caw::AssetStore::global().purge(); }
 char* caw_sfz_import(const char* sfz_path) try {
     if (!sfz_path) return dup(fail("no path"));
     return dup(caw::sfzImportJson(sfz_path));
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+char* caw_sampler_map(CawEngine* e, const char* request_json) try {
+    if (!e) return dup(fail("no engine"));
+    return dup(caw::samplerMapJson(request_json, e->engine->sampleRate()));
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+char* caw_sampler_slice(CawEngine* e, const char* path, const char* options_json) try {
+    if (!e) return dup(fail("no engine"));
+    return dup(caw::samplerSliceJson(path, options_json, e->engine->sampleRate()));
+} catch (...) {
+    return dup(fail("out of memory"));
+}
+
+char* caw_sampler_take(CawEngine* e, const char* request_json) try {
+    if (!e) return dup(fail("no engine"));
+    return dup(caw::samplerTakeJson(request_json, e->engine->sampleRate()));
 } catch (...) {
     return dup(fail("out of memory"));
 }

@@ -185,8 +185,11 @@ extern "C" {
    org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md).
    42 (2026-11-19, 1.1.0): the clip pitch editor's engine (Lark, one voice): caw_pitch_clip_analyse,
    caw_pitch_clip_curve, caw_pitch_clip_render and caw_pitch_clip_free (below). New device org.caw.pitchfix (live
-   pitch correction). Nothing else changes. */
-#define CAW_API_VERSION 42
+   pitch correction). Nothing else changes.
+   43 (2026-11-19, 1.1.0): the sampler's tools (docs/engine.md "Sampler tools"): caw_sampler_map (drop and play:
+   roots detected, zones over the whole keyboard), caw_sampler_slice (a loop sliced to keys) and caw_sampler_take
+   (a recorded take cut into zones); sampler zones gain "stretch" and "stretch_bpm". Nothing else changes. */
+#define CAW_API_VERSION 43
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -899,6 +902,23 @@ CAW_API void caw_asset_store_purge(void);
    sample into a "samples" folder beside it first. {"ok", "error", "files": [paths]}. Free with caw_free. */
 CAW_API char* caw_sfz_import(const char* sfz_path);
 CAW_API char* caw_sfz_export(const char* state_json, const char* sfz_path, int32_t copy_samples);
+/* API 43, the sampler's tools (docs/engine.md "Sampler tools"). Each loads files as caw_asset_load does (a worker
+   isolate), takes a JSON request of at most 64 KiB (a value out of range fails with an error naming it) and answers
+   {"ok", "error", ..., "state": the sampler's state JSON ({"zones": [...]})}. Free with caw_free.
+   caw_sampler_map: {"samples": [{"path", "root" (0..127; absent: detected)}] (1..128), "mode": "auto" (default:
+   one sample over the whole keyboard; several by root when every root is known, else spread), "root", "spread"
+   (equal ranges over the keyboard) or "keys" (one key each from "start_key", 36), "detect" (true)}. Answers "mode"
+   (the one used) and "samples": [{"path", "sure", "root", "midi", "cents"}] (root and midi null when unsure).
+   caw_sampler_slice: options {"by": "transients" (default) or "grid", "divisions" 1..128 (16, grid), "sensitivity"
+   0..1 (0.5), "min_gap_seconds" 0.005..2 (0.05), "max_slices" 1..128 (64), "start_key" (36)}. Answers "frames"
+   (the file's own), "seconds" and "slices": [{"start", "end" (file frames, [start, end)), "key"}]; the zones play
+   each slice one shot on its key.
+   caw_sampler_take: {"path" (the take), "notes": [{"key", "start_seconds", "end_seconds" (where it was asked for in
+   the take), "lovel", "hivel"}] (1..128)}. Answers "notes": [{"key", "found", "midi" (the pitch heard, null when
+   unsure), "in_tune" (within half a semitone of key), "start", "end"}]; the zones span the keys by root. */
+CAW_API char* caw_sampler_map(CawEngine* e, const char* request_json);
+CAW_API char* caw_sampler_slice(CawEngine* e, const char* path, const char* options_json);
+CAW_API char* caw_sampler_take(CawEngine* e, const char* request_json);
 /* Audio input. The capture devices, as caw_audio_devices lists playback ones, plus "channels" (the most the
    device offers; 0 unknown). On Android the app needs the RECORD_AUDIO permission before input opens. */
 CAW_API char* caw_audio_input_devices(void);
