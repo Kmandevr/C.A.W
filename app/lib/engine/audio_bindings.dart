@@ -25,6 +25,10 @@ class AudioBindings {
             'caw_asset_slices'),
         sfzImport = lib.lookupFunction<CStr Function(CStr), CStr Function(CStr)>('caw_sfz_import'),
         sfzExport = lib.lookupFunction<CStr Function(CStr, CStr, Int32), CStr Function(CStr, CStr, int)>('caw_sfz_export'),
+        samplerMap = lib.lookupFunction<CStr Function(CEngine, CStr), CStr Function(CEngine, CStr)>('caw_sampler_map'),
+        samplerSlice = lib.lookupFunction<CStr Function(CEngine, CStr, CStr), CStr Function(CEngine, CStr, CStr)>(
+            'caw_sampler_slice'),
+        samplerTake = lib.lookupFunction<CStr Function(CEngine, CStr), CStr Function(CEngine, CStr)>('caw_sampler_take'),
         inputDevices = lib.lookupFunction<CStr Function(), CStr Function()>('caw_audio_input_devices'),
         configureInput = lib.lookupFunction<Int32 Function(CEngine, Int32, CStr, CStr, Int32),
             int Function(CEngine, int, CStr, CStr, int)>('caw_audio_configure_input'),
@@ -56,6 +60,9 @@ class AudioBindings {
   final CStr Function(CEngine, CStr, CStr) assetSlices;
   final CStr Function(CStr) sfzImport;
   final CStr Function(CStr, CStr, int) sfzExport;
+  final CStr Function(CEngine, CStr) samplerMap;
+  final CStr Function(CEngine, CStr, CStr) samplerSlice;
+  final CStr Function(CEngine, CStr) samplerTake;
   final CStr Function() inputDevices;
   final int Function(CEngine, int, CStr, CStr, int) configureInput;
   final int Function(CEngine, Pointer<Float>, int) inputPeaks;

@@ -509,6 +509,9 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.vocalclean', 'Hush', false,
       'Variants (`variant`): De-click, De-plosive, Breath, for voices; a few ms of latency each.',
       ['variant', 'sensitivity', 'length', 'mode', 'amount', 'range', 'fade', 'keep', 'listen']),
+  CppBuiltin('org.caw.pitchfix', 'Lark', false,
+      'Pitch correction to a key and scale (or the key track\'s notes), with Keep vibrato and formant keep; 25 ms of latency, 10 ms with `monitor`.',
+      ['key', 'scale', 'target', 'speed', 'humanize', 'keep_vibrato', 'formant_keep', 'formant', 'mix', 'output', 'monitor']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
   CppBuiltin('org.caw.rack.fx', 'FX rack', false,
       'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '

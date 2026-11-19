@@ -35,6 +35,16 @@ class FakeAudioIo implements AudioIo {
   ];
 
   SfzImportResult? sfz;
+
+  /// The sampler's tools: answers by tool (`map`, `slice`, `take`); none: as without an engine.
+  Map<String, dynamic> Function(String tool, Map<String, dynamic> request)? samplerTools;
+  final List<(String, Map<String, dynamic>)> samplerRequests = [];
+
+  @override
+  Future<Map<String, dynamic>> samplerTool(String tool, Map<String, dynamic> request) async {
+    samplerRequests.add((tool, request));
+    return samplerTools?.call(tool, request) ?? const {'ok': false, 'error': 'no engine'};
+  }
   final List<(String, String, bool)> sfzExports = [];
 
   @override

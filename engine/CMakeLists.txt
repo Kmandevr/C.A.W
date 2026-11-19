@@ -239,7 +239,7 @@ target_sources(caw_core PRIVATE src/scan/analyze.cpp src/scan/parse_elf.cpp src/
 # fx-dynamics begin: the Dynamics and Drive effects
 # Audio assets, clips, the sampler and audio input (WP-J); miniaudio's decoders compiled privately (static).
 target_sources(caw_core PRIVATE src/asset_store.cpp src/time_stretch.cpp src/audio_clips.cpp src/audio_input.cpp
-  src/builtin_sampler.cpp src/builtin_sampler_sfz.cpp platform/decode_miniaudio.c)
+  src/builtin_sampler.cpp src/builtin_sampler_sfz.cpp src/sampler_tools.cpp platform/decode_miniaudio.c)
 set_source_files_properties(platform/decode_miniaudio.c PROPERTIES COMPILE_OPTIONS "-w"
   INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio")
 # Clip stretching (1.0.4, #208): Signalsmith Stretch and Signalsmith Linear, header-only, MIT (third_party/, decisions.md);
@@ -339,6 +339,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/graph_layout_test.cpp)  # #120 layout rules: mono to stereo, downmix, dual mono
   target_sources(caw_tests PRIVATE tests/voice_bus_test.cpp)  # #127 the voice bus; #120 built-in declarations, C 3.0/3.1
   target_sources(caw_tests PRIVATE tests/audio_assets_test.cpp)  # assets, audio clips, the sampler, SFZ, input (WP-J)
+  target_sources(caw_tests PRIVATE tests/sampler_tools_test.cpp)  # 1.1.0: drop and play, slicing, takes, stretched zones
   target_sources(caw_tests PRIVATE tests/audio_stretch_test.cpp)  # 1.0.4: stretch, pitch, clip fields, tempo, slices
   target_sources(caw_tests PRIVATE tests/input_bridge_test.cpp)  # the input bridge: output unchanged when the input dies
   target_sources(caw_tests PRIVATE tests/device_drift_test.cpp)  # #241: tracks in time through the device path with the input on
@@ -488,6 +489,7 @@ target_include_directories(caw_cli PRIVATE src)
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp bench/pack_cost.cpp bench/raven_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
+  target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -508,6 +510,7 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_pack_cost COMMAND caw_bench 0.5 307)  # 1.1.0: the AutoStacc beta pack
     add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
     add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
+    add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
   endif()
 endif()
 
