@@ -37,6 +37,36 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
   - Bitwise maps silence to silence;
   - CI should run caw_bench mode 300 for the cost ceilings, added with 1.1.0.
 
+## The owner's standing instructions (2026-11-19, the owner is hands-off)
+- **Finish without the owner** everything that can reasonably be done. Research and plan what needs it; question your own choices and check facts against primary sources and the current code, not old notes. Queue real owner decisions as one short question each.
+- **Order of work:**
+  1. **1.0.9, the performance release:**
+     - the stabilizer and spike fixes, the fair Benchmark, and the DSP pass (all merged);
+     - the audio-review fixes (fix-109);
+     - the external-review fixes (review-109): the MIDI ring with reserved note-off slots, warming native libraries, Play/Stop status returning a value (C API 40), project-sized route and modulation caps, every `send` failure reported, ratchets up to 64 (app mirrors included).
+
+     Then the version, PR, CI, merge and release. Afterwards the owner reruns the S22+ Benchmark.
+  2. **1.1.0, the suite,** per the Hub's sound-plan note:
+     - **Merge the finished parts:** `caw-1.1.0-dsp-drive` and `caw-1.1.0-dsp-tools`. Renumber the MIDI-effects C API above 1.0.9's 40.
+     - **Write designs first** into the private plan: Timber (the piano kept clear of Pianoteq's patent), Lark (live correction plus a one-voice editor), Preen, the grain engine Murmur and Flock share, and Raven's synthesis.
+     - **Then the engine work:**
+       - the Talon/Hatch/Duck split with migration;
+       - Plume's dynamic EQ, M/S, band solo, Match and Linear-phase;
+       - Wah, Harmonizer, Octaver, Glint, Mimic, Preen and Hush;
+       - the pack;
+       - the instruments.
+     - **Then the pages:**
+       - effect pages by the approved device UI plan, instruments in Raven's layout;
+       - names and search tags;
+       - the subtle crow theme, the personality touches and the Easter eggs (all listed privately).
+     - **Waits for the owner:** each logo design needs the owner's yes, and the pitch editor's look needs options shown to the owner.
+- **Efficient and safe:**
+  - the most work per token: 2–3 well-briefed agents, short output, no re-reading; a steady pace;
+  - after every commit, push the session branch or a `caw-backup-*` branch, so a sudden stop loses nothing;
+  - try genuinely different fixes before blocking anything, and never repeat an attempt;
+  - every device is built efficiently from the start, with CPU and RAM ceilings in CI.
+- **Brand:** the code stays Apache 2.0, and the brand is reserved (TRADEMARKS.md, which goes public with the 1.0.9 PR). Device names and presets avoid artists' names.
+
 ## Rules for continuing (owner, 2026-11-19; the owner is hands-off)
 - **No lost work:** every branch is pushed after each commit, either the session branch or a `caw-backup-*` / `caw-1.1.0-*` backup branch.
 - **Loop guard:**
