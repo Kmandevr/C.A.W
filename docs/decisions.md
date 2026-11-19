@@ -6,6 +6,12 @@ updated: 2026-11-19
 
 # Decisions
 
+## 2026-11-19: Flock's mips read at most at rate 1; its sample is read in place (Claude, within the sound plan)
+
+**Context:** the sound design (grain engine, Flock) asks for half-band mip copies for reads more than an octave up (+50 % RAM) and a sample read from the sample store, read-only and shared.
+- **Decision (Claude):** a grain over rate 2 reads the copy that brings its rate to at most 1 (not 2), so no content folds over; reaching 48 st takes four copies, about 94 % more RAM than the sample, and a sample over 120 s gets none. The sample is read in place from the asset store (no copy), its first frame kept for the cubic read. The filter defaults to Off (presets that want it turn it on), which keeps the design point inside the medium budget.
+- **[Fact]** No new dependency.
+
 ## 2026-11-19: Timber's piano excitation is synthesised; Timber is one merged instrument (Claude, within the owner's Timber decisions)
 
 **Context:** the owner settled (2026-11-19) the commuted-waveguide piano designed around Modartt's US7915515B2 claims, and allowed a soundboard excitation derived from a CC-BY recording to ship built in, with credit.
