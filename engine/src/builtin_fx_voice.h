@@ -29,6 +29,7 @@ const ModuleDescriptor& harmonizerDescriptor(std::span<const std::string_view> l
 const ModuleDescriptor& octaverDescriptor(std::span<const std::string_view> labels, uint32_t index);
 ModuleProcessor* makeHarmonizerAs(const ModuleDescriptor& variant) noexcept;
 ModuleProcessor* makeOctaverAs(const ModuleDescriptor& variant) noexcept;
+void warmShiftVoices() noexcept;  // builds the Harmonizer's shared window table (registerVoice calls it)
 
 // Bytes per instance (the classes' sizes plus what they allocate at 48 kHz), for caw_bench.
 size_t exciterBytes() noexcept;

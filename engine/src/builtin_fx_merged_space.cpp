@@ -1,10 +1,12 @@
 // Merged devices, part E: Delay, Reverb and Pitch/Shift, each variant an old class unchanged (Pitch/Shift was the template).
 #include "builtin_fx_creative.h"
+#include "builtin_fx_voice.h"
 #include "fx_merged.h"
 
 // The ids this part replaces (retired: no longer registered, migrated to these):
 // Pitch/Shift ("org.caw.shift", built): org.caw.pitchshift (variant 0 "Pitch", builtin_fx_creative_pitchshift.cpp)
-//   and org.caw.freqshift (variant 1 "Frequency", builtin_fx_creative_freqshift.cpp).
+//   and org.caw.freqshift (variant 1 "Frequency", builtin_fx_creative_freqshift.cpp). 1.1.0 appends new DSP: 2
+//   "Harmonizer" and 3 "Octaver" (builtin_fx_shift_voices.cpp).
 // Delay ("org.caw.delay", built): org.caw.delay.pro (variant 0 "Digital", builtin_effects_space.cpp) and
 //   org.caw.delay.pingpong (variant 1 "Ping-pong", builtin_components.cpp). 1.1.0 appends new DSP: 2 "Tape", 3 "Reverse"
 //   and 4 "Multi-tap" (builtin_fx_delay_modes.cpp).
@@ -58,7 +60,7 @@ namespace {
 
 constexpr std::string_view kShiftId = "org.caw.shift";
 constexpr std::string_view kShiftName = "Pitch/Shift";
-constexpr std::string_view kShiftVariants[] = {"Pitch", "Frequency"};
+constexpr std::string_view kShiftVariants[] = {"Pitch", "Frequency", "Harmonizer", "Octaver"};  // 1.1.0: 2, 3 appended
 
 // Each variant is the old class unchanged under its own descriptor: the old parameters (so its indices hold), its
 // own latency (Pitch: half a grain, reported per instance; Frequency: none) and tail, and `variant` last.
@@ -73,7 +75,15 @@ const ModuleDescriptor& frequencyVariant() {
 ModuleProcessor* makePitch() noexcept { return makePitchShiftAs(pitchVariant()); }
 ModuleProcessor* makeFrequency() noexcept { return makeFreqShiftAs(frequencyVariant()); }
 
-const Variant kShift[] = {{kShiftVariants[0], &pitchVariant, &makePitch}, {kShiftVariants[1], &frequencyVariant, &makeFrequency}};
+const ModuleDescriptor& harmonizerVariant() { return harmonizerDescriptor(kShiftVariants, 2); }
+const ModuleDescriptor& octaverVariant() { return octaverDescriptor(kShiftVariants, 3); }
+ModuleProcessor* makeHarmonizer() noexcept { return makeHarmonizerAs(harmonizerVariant()); }
+ModuleProcessor* makeOctaver() noexcept { return makeOctaverAs(octaverVariant()); }
+
+const Variant kShift[] = {{kShiftVariants[0], &pitchVariant, &makePitch},
+                          {kShiftVariants[1], &frequencyVariant, &makeFrequency},
+                          {kShiftVariants[2], &harmonizerVariant, &makeHarmonizer},
+                          {kShiftVariants[3], &octaverVariant, &makeOctaver}};
 
 // Delay: the old classes unchanged, as Pitch/Shift's (both with an infinite tail and no latency).
 constexpr std::string_view kDelayId = "org.caw.delay";

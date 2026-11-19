@@ -118,6 +118,13 @@ int voiceCost(double seconds) {
         {"Glint: Exciter (2x oversampled)", "org.caw.exciter", {{"variant", 0}}, fx::exciterBytes(), 8000},
         {"Glint: Exciter, tone 8 kHz", "org.caw.exciter", {{"variant", 0}, {"tone", 8000}}, fx::exciterBytes(), 8000},
         {"Glint: Bass", "org.caw.exciter", {{"variant", 1}, {"density", 1}}, fx::exciterBytes(), 2000},
+        {"Soar: Harmonizer, 2 voices (default)", "org.caw.shift", {{"variant", 2}}, fx::harmonizerBytes(kRate), 8000},
+        {"Soar: Harmonizer, 4 voices, formant 0.5", "org.caw.shift", {{"variant", 2}, {"voices", 4}, {"formant", 0.5}},
+         fx::harmonizerBytes(kRate), 24000},
+        {"Soar: Octaver, Mono", "org.caw.shift", {{"variant", 3}, {"tracking", 1}, {"up", 0.5}}, fx::octaverBytes(kRate), 2000},
+        // Auto on noise runs Mono and Poly together (its fade never settles): the medium budget.
+        {"Soar: Octaver, Auto (both paths on noise)", "org.caw.shift", {{"variant", 3}, {"up", 0.5}}, fx::octaverBytes(kRate), 8000},
+        {"Soar: Octaver, Poly", "org.caw.shift", {{"variant", 3}, {"tracking", 2}, {"up", 0.5}}, fx::octaverBytes(kRate), 2000},
     };
     int over = 0;
     std::printf("1.1.0 voice devices (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");
