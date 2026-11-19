@@ -112,6 +112,11 @@ int timberCost(double seconds) {
         {"Timber plucked: 32 voices (harp, ringing on)", 3, {{"instrument", 2}}, 32, 24000},  // Normal's cap: heavy
         {"Timber bowed: 8 voices (violin)", 4, {}, 8, 8000},
         {"Timber bowed: 8 voices (cello, vibrato 1)", 4, {{"section", 2}, {"vibrato", 1}}, 8, 8000},
+        {"Timber mallets: 16 voices (marimba, 4 modes)", 5, {}, 16, 8000},
+        {"Timber mallets: 32 voices (bell, 8 modes)", 5, {{"instrument", 5}}, 32, 24000},  // Normal's cap: heavy
+        {"Timber winds: 8 voices (clarinet)", 6, {}, 8, 8000},
+        {"Timber winds: 8 voices (flute, noise, growl)", 6, {{"instrument", 1}, {"noise", 0.5}, {"growl", 0.5}}, 8, 8000},
+        {"Timber winds: 8 voices (brass)", 6, {{"instrument", 3}}, 8, 8000},
     };
     int over = 0;
     std::printf("Timber (µs of CPU per second of audio; per voice; bytes per instance; ceiling µs/s):\n");

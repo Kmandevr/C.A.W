@@ -32,7 +32,7 @@ struct EPiano {
     struct Voice : VoiceBase {
         Mode mode[4];  // set() works out each; render() runs the four as one SIMD complex one-pole
         float amp = 1;
-        double hz = 0, t60 = 1;
+        double hz = 0, t60 = 1, tunedPitch = -1;
         bool damped = false;
     };
 
@@ -84,6 +84,7 @@ struct EPiano {
     }
     void start(Voice& v, const Shared&) noexcept {
         v.hz = noteHz(clampd(v.pitch, 0, 127));
+        v.tunedPitch = v.pitch;
         v.damped = false;
         v.t60 = keyT60(v.pitch);
         for (Mode& m : v.mode) m.clear();
@@ -104,8 +105,11 @@ struct EPiano {
         setModes(v, std::min(v.t60, s.release));
     }
     void voiceControl(Voice& v, const Shared& s) noexcept {
-        const double hz = noteHz(clampd(v.pitch, 0, 127));
-        if (std::fabs(hz - v.hz) > 1e-6 * hz) v.hz = hz, setModes(v, v.damped ? std::min(v.t60, s.release) : v.t60);
+        if (v.pitch != v.tunedPitch) {  // a bend or a glide
+            v.tunedPitch = v.pitch;
+            v.hz = noteHz(clampd(v.pitch, 0, 127));
+            setModes(v, v.damped ? std::min(v.t60, s.release) : v.t60);
+        }
         for (Mode& m : v.mode) m.flush();
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {

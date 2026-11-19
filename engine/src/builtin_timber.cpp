@@ -11,6 +11,7 @@
 #include "presets.h"
 #include "timber_core.h"
 #include "timber_keys.h"
+#include "timber_mallet_wind.h"
 #include "timber_piano.h"
 #include "timber_strings.h"
 
@@ -18,7 +19,7 @@ namespace caw::timber {
 namespace {
 
 constexpr std::string_view kName = "Timber";
-constexpr std::string_view kModels[] = {"Piano", "Electric piano", "Organ", "Plucked", "Bowed"};
+constexpr std::string_view kModels[] = {"Piano", "Electric piano", "Organ", "Plucked", "Bowed", "Mallets", "Winds"};
 constexpr uint32_t kModelCount = sizeof(kModels) / sizeof(kModels[0]);
 
 constexpr PortDescriptor kPorts[] = {
@@ -166,6 +167,41 @@ const ModuleDescriptor& bowedDescriptor() {
 }
 static_assert(Bowed::kModelParams == 7);
 
+// ---------- Mallets ----------
+constexpr std::string_view kMallets[] = {"Marimba", "Vibraphone", "Xylophone", "Glockenspiel", "Chimes", "Bell"};
+void malletParams(fx::ParamTable& t) {
+    t.pick("instrument", "Instrument", 0.0, kMallets).group = "mallets";
+    t.num("hardness", "Mallet hardness", 0.5, 0.0, 1.0).group = "mallets";
+    t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "mallets";
+    t.num("position", "Strike position", 0.3, 0.0, 1.0).group = "mallets";
+    t.num("damping", "High damping", 0.4, 0.0, 1.0).group = "mallets";
+    t.num("dampen", "Key-up damper", 0.0, 0.0, 1.0).group = "mallets";
+    t.num("motor", "Motor", 0.0, 0.0, 10.0, "Hz").group = "mallets";
+}
+const ModuleDescriptor& malletDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<Mallet>(5, 0.3, 0.5, 0.15, CpuClass::Medium, &malletParams);
+    return d;
+}
+static_assert(Mallet::kModelParams == 7);
+
+// ---------- Winds ----------
+constexpr std::string_view kWinds[] = {"Clarinet", "Flute", "Sax", "Brass"};
+void windParams(fx::ParamTable& t) {
+    t.pick("instrument", "Instrument", 0.0, kWinds).group = "winds";
+    t.num("breath", "Breath", 0.6, 0.0, 1.0).group = "winds";
+    t.num("noise", "Breath noise", 0.15, 0.0, 1.0).group = "winds";
+    t.num("reed", "Reed / jet / lips", 0.5, 0.0, 1.0).group = "winds";
+    t.num("vibrato", "Vibrato", 0.2, 0.0, 1.0).group = "winds";
+    t.expo("vib_rate", "Vibrato rate", 5.0, 2.0, 9.0, "Hz").group = "winds";
+    t.num("growl", "Growl", 0.0, 0.0, 1.0).group = "winds";
+    t.expo("attack", "Attack", 0.04, 0.005, 2.0, "s").group = "winds";
+}
+const ModuleDescriptor& windDescriptor() {
+    static const ModuleDescriptor& d = modelDescriptor<Wind>(6, 0.08, 0.5, 0.15, CpuClass::Medium, &windParams);
+    return d;
+}
+static_assert(Wind::kModelParams == 8);
+
 template <class M, const ModuleDescriptor& (*D)(), int Index>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) Instrument<M>(D(), Index);
@@ -177,6 +213,8 @@ const fx::Variant kVariants[] = {
     {kModels[2], &organDescriptor, &make<Organ, &organDescriptor, 2>},
     {kModels[3], &pluckDescriptor, &make<Pluck, &pluckDescriptor, 3>},
     {kModels[4], &bowedDescriptor, &make<Bowed, &bowedDescriptor, 4>},
+    {kModels[5], &malletDescriptor, &make<Mallet, &malletDescriptor, 5>},
+    {kModels[6], &windDescriptor, &make<Wind, &windDescriptor, 6>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kModelCount);
 const fx::MergedDevice kDevices[] = {{kTimberId, kName, kVariants}};
@@ -200,6 +238,8 @@ size_t timberBytes(uint32_t variant, double sampleRate) noexcept {
         case 2: return static_cast<Instrument<Organ>&>(*p).bytes();
         case 3: return static_cast<Instrument<Pluck>&>(*p).bytes();
         case 4: return static_cast<Instrument<Bowed>&>(*p).bytes();
+        case 5: return static_cast<Instrument<Mallet>&>(*p).bytes();
+        case 6: return static_cast<Instrument<Wind>&>(*p).bytes();
         default: return 0;
     }
 }

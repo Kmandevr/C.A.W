@@ -54,6 +54,20 @@ const std::vector<BuiltinPreset>& list() {
         {"Bass pizz-like bow", "Bowed: a short, heavy double bass bow for low lines", with(4, {{"section", 3}, {"attack", 0.03}, {"release", 0.1}, {"pressure", 0.7}})},
         {"Sul ponticello", "Bowed: bowed near the bridge, glassy and thin, for tension cues", with(4, {{"position", 0.04}, {"pressure", 0.3}, {"vibrato", 0.0}})},
         {"Slow swell", "Bowed: long attacks and no vibrato, for string pads", with(4, {{"attack", 1.0}, {"release", 0.8}, {"vibrato", 0.1}, {"space", 0.4}})},
+        // Mallets (5)
+        {"Concert marimba", "Mallets: a warm rosewood marimba with yarn mallets", with(5, {{"hardness", 0.35}})},
+        {"Jazz vibes", "Mallets: a vibraphone with its motor and damper pedal, for jazz", with(5, {{"instrument", 1}, {"motor", 5.0}, {"dampen", 0.8}, {"space", 0.2}})},
+        {"Bright xylophone", "Mallets: a hard-mallet xylophone for quick figures", with(5, {{"instrument", 2}, {"hardness", 0.85}})},
+        {"Glockenspiel", "Mallets: a bright steel glockenspiel for sparkling lines", with(5, {{"instrument", 3}, {"hardness", 0.8}, {"space", 0.25}})},
+        {"Tubular chimes", "Mallets: orchestral chimes for big moments", with(5, {{"instrument", 4}, {"hardness", 0.6}, {"space", 0.35}, {"decay", 1.5}})},
+        {"Church bell", "Mallets: a large bronze bell, its hum ringing long", with(5, {{"instrument", 5}, {"hardness", 0.7}, {"space", 0.45}, {"decay", 2.0}})},
+        // Winds (6)
+        {"Clarinet solo", "Winds: a woody clarinet with a gentle vibrato", with(6, {{"vibrato", 0.25}, {"space", 0.2}})},
+        {"Breathy flute", "Winds: a soft flute with plenty of breath", with(6, {{"instrument", 1}, {"noise", 0.45}, {"vibrato", 0.35}, {"space", 0.25}})},
+        {"Tenor sax", "Winds: a full, reedy sax for melodies", with(6, {{"instrument", 2}, {"reed", 0.6}, {"vibrato", 0.3}})},
+        {"Growl sax", "Winds: a growled, gritty sax for rock and funk solos", with(6, {{"instrument", 2}, {"growl", 0.6}, {"breath", 0.85}})},
+        {"Muted brass", "Winds: a soft, round brass line", with(6, {{"instrument", 3}, {"breath", 0.45}, {"reed", 0.4}})},
+        {"Brass stab", "Winds: a bright brass hit with a fast attack, for horn sections", with(6, {{"instrument", 3}, {"breath", 0.9}, {"attack", 0.01}, {"release", 0.05}})},
     };
     return p;
 }

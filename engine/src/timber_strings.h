@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 
+#include "caw/library/fastmath.hpp"
 #include "timber_core.h"
 
 namespace caw::timber {
@@ -236,7 +237,7 @@ struct Bowed {
         float dn = 2, db = 2;
         float lp = 0, dc = 0;
         float bow = 0, bowStep = 0, vibAmount = 0;
-        double vib = 0;
+        double vib = 0, tunedPitch = -1, baseHz = 440;
         uint32_t age = 0;
     };
 
@@ -304,10 +305,12 @@ struct Bowed {
         v.vib = 0;
         v.vibAmount = 0;
         v.age = 0;
+        v.tunedPitch = -1;
         tune(v, 0.0);
     }
     void tune(Voice& v, double cents) noexcept {
-        const double f0 = noteHz(clampd(v.pitch, 24.0, 108.0) + cents / 100.0);
+        if (v.pitch != v.tunedPitch) v.tunedPitch = v.pitch, v.baseHz = noteHz(clampd(v.pitch, 24.0, 108.0));
+        const double f0 = v.baseHz * lib::fastExp(cents * 5.776226504666211e-4);  // ln 2 / 1200
         const double period = sr / f0 - 1.2;  // less the bridge filter's and the reads' own delay
         v.db = static_cast<float>(std::max(2.0, period * position));
         v.dn = static_cast<float>(std::max(2.0, period - v.db));

@@ -411,3 +411,61 @@ TEST(timber_bowed_string_sustains_in_tune_while_bowed_and_stops_after) {
     }
 }
 
+
+// ---------- Mallets ----------
+
+TEST(timber_mallets_ring_at_their_modes_and_hard_mallets_are_brighter) {
+    // A marimba bar's first overtone sits two octaves up (its tuning), a glockenspiel's at 2.76; each in tune.
+    struct M {
+        int instrument;
+        double ratio;
+    };
+    for (const M m : {M{0, 4.0}, M{3, 2.756}, M{2, 3.0}}) {
+        const Values v = withModel(5, {{"instrument", m.instrument}, {"space", 0}, {"hardness", 1}});
+        auto p = make(v);
+        const std::vector<float> x = play(*p, v, {{0.0, -1, 64, 1.0}}, 0.6).mono();
+        const double f = hzOf(64);
+        CHECK(std::fabs(cents(peakHz(x, f, 20, 2400, 12000, 48000), f)) < 1);
+        CHECK(std::fabs(cents(peakHz(x, f * m.ratio, 20, 2400, 12000, 48000), f * m.ratio)) < 1);
+    }
+    double soft = 0, hard = 0;
+    for (double h : {0.1, 1.0}) {
+        const Values v = withModel(5, {{"space", 0}, {"hardness", h}});
+        auto p = make(v);
+        const std::vector<float> x = play(*p, v, {{0.0, -1, 60, 0.9}}, 0.3).mono();
+        (h < 0.5 ? soft : hard) = highShareDb(x, 0, 4800, 48000, 1000);
+    }
+    if (verbose()) std::printf("mallet high share: soft %.1f, hard %.1f dB\n", soft, hard);
+    CHECK(hard > soft + 10);
+    // The vibraphone's damper stops a released bar; a marimba's (no damper) rings on.
+    auto after = [](const Values& v) {
+        auto p = make(v);
+        const std::vector<float> x = play(*p, v, {{0.0, 0.2, 67, 0.8}}, 1.0).mono();
+        return rmsDb(x, 33600, 4800) - rmsDb(x, 2400, 4800);
+    };
+    const double vibes = after(withModel(5, {{"instrument", 1}, {"dampen", 1}, {"release", 0.05}, {"space", 0}}));
+    const double ringing = after(withModel(5, {{"instrument", 1}, {"dampen", 0}, {"space", 0}}));
+    CHECK(vibes < ringing - 30);
+}
+
+// ---------- Winds ----------
+
+TEST(timber_winds_speak_and_hold_their_pitch) {
+    for (int instrument = 0; instrument < 4; ++instrument) {
+        for (double key : {45.0, 50.0, 62.0, 74.0, 81.0}) {
+            if (instrument == 3 && key < 48) continue;  // [Assumption] the brass model speaks from about C3 up
+            const Values v = withModel(6, {{"instrument", instrument}, {"space", 0}, {"vibrato", 0}, {"noise", 0}});
+            auto p = make(v);
+            const std::vector<float> x = play(*p, v, {{0.0, 1.0, key, 0.8}}, 1.6).mono();
+            const double f = hzOf(key);
+            const double a = rmsDb(x, 24000, 9600), b = rmsDb(x, 38400, 9600), after = rmsDb(x, 67200, 4800);
+            const double got = peakHz(x, f, 100, 19200, 24000, 48000);
+            const double err = cents(got, f);
+            if (verbose()) std::printf("wind %d key %.0f: %.1f / %.1f dB, after %.1f, %+.1f ct\n", instrument, key, a, b, after, err);
+            CHECK(a > -45);
+            CHECK(std::fabs(a - b) < 4);
+            CHECK(after < b - 30);
+            CHECK(std::fabs(err) < 12);
+        }
+    }
+}
