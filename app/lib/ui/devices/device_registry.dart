@@ -8,6 +8,7 @@ import '../../model/merged_devices.dart';
 import 'drums/drums_editor.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
+import 'flock/flock_editor.dart';
 import 'flagship/flagship_inline.dart';
 import 'flagship/flagship_presets.dart';
 import 'flagship/flagship_tools.dart' show flagshipRandomKeeps, initFlagship;
@@ -69,6 +70,7 @@ class DeviceEditors {
     ...drumEditors,
     ...samplerEditors,
     ...timberEditors,
+    ...flockEditors,
   };
 
   /// Editors chosen by a built-in effect's parameters (an EQ by its `bandN_` knobs, and so on), so the stock
