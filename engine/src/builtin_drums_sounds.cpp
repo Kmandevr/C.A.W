@@ -283,6 +283,63 @@ std::vector<Sound> makeSounds() {
     add("Noise Riser", "Noise swept up through a resonant band", kTypeFx,
         {{kNoiseOn, 1}, {kNoiseFilter, kFilterBp}, {kNoiseFreq, 300}, {kNoiseRes, 0.6}, {kNoiseSweep, 5},
          {kNoiseAttack, 0.4}, {kNoiseDecay, 1.0}, {kNoiseLevel, 4}});
+    // ---- 1.1.0: the FM, physical and texture layers, the pad effects ----
+    add("FM Kick", "A two-operator kick: a deep carrier with a quick, bright modulation at the hit", kTypeKick,
+        {{kPoly, 1}, {kFmOn, 1}, {kFmFreq, 50}, {kFmRatio, 1}, {kFmIndex, 4}, {kFmIDecay, 0.02}, {kFmPitch, 36},
+         {kFmPTime, 0.04}, {kFmDecay, 0.6}, {kFmDCurve, -0.1}, {kClickOn, 1}, {kClickType, kClickImpulse},
+         {kClickLevel, 0.3}, {kClickTone, 2500}, {kClickLength, 0.003}});
+    add("FM Tom", "A round FM tom: the modulation fades as the pitch settles", kTypeTom,
+        {{kPoly, 2}, {kFmOn, 1}, {kFmFreq, 120}, {kFmRatio, 1.5}, {kFmIndex, 4}, {kFmIDecay, 0.05}, {kFmPitch, 7},
+         {kFmPTime, 0.06}, {kFmDecay, 0.45}});
+    add("FM Clank", "Metal on metal: an inharmonic FM ratio with feedback, ring-modulated", kTypePerc,
+        {{kPoly, 2}, {kFmOn, 1}, {kFmFreq, 380}, {kFmRatio, 3.53}, {kFmIndex, 9}, {kFmIDecay, 0.12}, {kFmFeedback, 0.3},
+         {kFmDecay, 0.35}, {kFmDCurve, 0.3}, {kRingMix, 0.3}, {kRingFreq, 790}});
+    add("FM Bell", "A struck bell: a ratio of 3.5 and a long, slowly fading brightness", kTypePerc,
+        {{kPoly, 3}, {kFmOn, 1}, {kFmFreq, 660}, {kFmRatio, 3.5}, {kFmIndex, 5}, {kFmIDecay, 0.6}, {kFmDecay, 1.6}});
+    add("Log Drum", "A wooden slit drum: a short FM tone with a small drop and a pop", kTypePerc,
+        {{kPoly, 2}, {kFmOn, 1}, {kFmFreq, 130}, {kFmRatio, 2}, {kFmIndex, 2.5}, {kFmIDecay, 0.03}, {kFmPitch, 5},
+         {kFmPTime, 0.02}, {kFmDecay, 0.35}, {kFmDCurve, 0.3}, {kClickOn, 1}, {kClickType, kClickPop},
+         {kClickTone, 1800}, {kClickLevel, 0.3}});
+    add("Plucked Tom", "A tom played as a string: a plucked waveguide over a short body", kTypeTom,
+        {{kPoly, 2}, {kPhysOn, 1}, {kPhysFreq, 98}, {kPhysDecay, 0.6}, {kPhysDamp, 0.6}, {kPhysPick, 0.3},
+         {kBodyOn, 1}, {kBodyFreq, 98}, {kBodyPitch, 5}, {kBodyDecay, 0.15}, {kBodyLevel, -8}});
+    add("Kalimba", "A thumb piano's tine: a stiff, plucked string with a soft tick", kTypePerc,
+        {{kPoly, 3}, {kPhysOn, 1}, {kPhysModel, kPhysStiff}, {kPhysFreq, 523}, {kPhysDecay, 1.2}, {kPhysDamp, 0.3},
+         {kPhysPick, 0.15}, {kClickOn, 1}, {kClickType, kClickTick}, {kClickTone, 3000}, {kClickLevel, 0.1},
+         {kClickLength, 0.001}});
+    add("Pipe Knock", "A struck pipe: a blown tube's odd harmonics, hit with a noise burst", kTypePerc,
+        {{kPoly, 2}, {kPhysOn, 1}, {kPhysModel, kPhysPipe}, {kPhysFreq, 220}, {kPhysDecay, 0.4}, {kPhysDamp, 0.5},
+         {kPhysExciter, kPhysNoise}});
+    add("Brush Snare", "A brush on a snare: a crackle of grains and a soft head", kTypeSnare,
+        {{kPoly, 2}, {kTexOn, 1}, {kTexMode, kTexCrackle}, {kTexFreq, 3000}, {kTexDensity, 3000}, {kTexRes, 0.15},
+         {kTexAttack, 0.03}, {kTexDecay, 0.35}, {kTexDCurve, -0.3}, {kBodyOn, 1}, {kBodyFreq, 200}, {kBodyPitch, 3},
+         {kBodyDecay, 0.08}, {kBodyLevel, -12}, {kRndTone, 0.2}, {kRndDecay, 0.2}});
+    add("Brush Swirl", "A brush swept round the head: a slow swell of two noise bands", kTypeShaker,
+        {{kPoly, 2}, {kTexOn, 1}, {kTexFreq, 2000}, {kTexSpread, 2}, {kTexRes, 0.1}, {kTexAttack, 0.25},
+         {kTexDecay, 0.6}, {kTexDCurve, -0.4}, {kRndTone, 0.3}});
+    add("Rain Shaker", "Seeds in a gourd: sparse, bright grains", kTypeShaker,
+        {{kPoly, 2}, {kTexOn, 1}, {kTexMode, kTexDust}, {kTexFreq, 5000}, {kTexDensity, 900}, {kTexRes, 0.4},
+         {kTexAttack, 0.01}, {kTexDecay, 0.25}, {kRndDecay, 0.3}, {kRndLevel, 0.2}});
+    add("Vinyl Crackle", "A record's surface: a few pops and crackles, held long", kTypeFx,
+        {{kPoly, 1}, {kTexOn, 1}, {kTexMode, kTexCrackle}, {kTexFreq, 1800}, {kTexDensity, 40}, {kTexRes, 0.2},
+         {kTexAttack, 0.05}, {kTexDecay, 2.5}, {kTexDCurve, -0.8}});
+    add("Gravel Step", "A footstep on gravel: a dull thump and a crunch of grains", kTypePerc,
+        {{kPoly, 2}, {kTexOn, 1}, {kTexMode, kTexDust}, {kTexFreq, 1200}, {kTexDensity, 3000}, {kTexRes, 0.2},
+         {kTexAttack, 0.005}, {kTexDecay, 0.12}, {kBodyOn, 1}, {kBodyFreq, 90}, {kBodyPitch, 6}, {kBodyDecay, 0.06},
+         {kBodyLevel, -6}, {kRndTone, 0.3}, {kRndDecay, 0.3}});
+    add("Industrial Hit", "A factory hit: ring-modulated metal and noise, driven hard", kTypePerc,
+        {{kPoly, 2}, {kMetalOn, 1}, {kMetalMode, kMetalRing}, {kMetalSet, kSetGong}, {kMetalFreq, 300},
+         {kMetalNoise, 0.3}, {kMetalTone, 600}, {kMetalDecay, 0.3}, {kNoiseOn, 1}, {kNoiseFilter, kFilterBp},
+         {kNoiseFreq, 1500}, {kNoiseDecay, 0.15}, {kRingMix, 0.6}, {kRingFreq, 170}, {kDriveType, kDriveHard},
+         {kDrive, 4}});
+    add("Dub Rim", "A rimshot thrown into the echo", kTypeRim,
+        {{kPoly, 2}, {kClickOn, 1}, {kClickType, kClickTick}, {kClickTone, 1700}, {kClickLevel, 0.8},
+         {kClickLength, 0.002}, {kResOn, 1}, {kResModel, 2}, {kResFreq, 1500}, {kResDecay, 0.05}, {kFlt, kVfHp},
+         {kCutoff, 400}, {kEchoSend, 0.7}});
+    add("Flam Snare", "A snare played as a flam: a soft grace note just before it", kTypeSnare,
+        {{kPoly, 3}, {kBodyOn, 1}, {kBodyFreq, 200}, {kBodyPitch, 7}, {kBodyPTime, 0.02}, {kBodyDecay, 0.12},
+         {kNoiseOn, 1}, {kNoiseMode, kNoiseSnappy}, {kNoiseFilter, kFilterHp}, {kNoiseFreq, 1800}, {kNoiseDecay, 0.22},
+         {kClickOn, 1}, {kClickLevel, 0.4}, {kFlam, 0.5}, {kFlamTime, 0.022}});
     // Level trims (dB on the pad's level), measured on these renders so a full-velocity hit peaks near -1 dBFS (hats,
     // shakers and cymbals lower, as they sit in a mix): the presets test checks the result.
     const std::pair<std::string_view, double> trims[] = {
@@ -340,9 +397,18 @@ std::vector<Sound> makeSounds() {
         {"Zap", -1.0},
         {"Laser", -6.1},
         {"Noise Riser", -14.6}};
-    for (Sound& x : s)
+    // 1.1.0's, measured the same way (CAW_PRINT_DRUMS=1).
+    const std::pair<std::string_view, double> trims110[] = {
+        {"FM Kick", -0.9},      {"FM Tom", -0.9},      {"FM Clank", -0.4},     {"FM Bell", -1.0},
+        {"Log Drum", -1.1},     {"Plucked Tom", -2.1}, {"Kalimba", 0.4},       {"Pipe Knock", 4.4},
+        {"Brush Snare", 2.0},   {"Brush Swirl", -6.6}, {"Rain Shaker", -6.4},  {"Vinyl Crackle", -15.1},
+        {"Gravel Step", 3.8},   {"Industrial Hit", -4.1}, {"Dub Rim", 1.5},    {"Flam Snare", -5.9}};
+    for (Sound& x : s) {
         for (const auto& [name, db] : trims)
             if (x.name == name) x.voice[kLevel] = x.voice[kLevel] + db;
+        for (const auto& [name, db] : trims110)
+            if (x.name == name) x.voice[kLevel] = x.voice[kLevel] + db;
+    }
     return s;
 }
 
@@ -351,6 +417,7 @@ struct KitPad {
     uint32_t pad;
     std::string_view sound;
     double tune = 0, level = 0;
+    std::vector<P> extra = {};  // the kit's own settings for the pad (its groove, its sends)
 };
 struct KitDef {
     std::string_view name, description;
@@ -392,6 +459,80 @@ std::vector<KitDef> makeKits() {
                  row("Sub Kick", "Rim", "Fat Snare", "Snap", "Clap Snare", "Acoustic Tom", "Acoustic Hat", "Pedal Hat",
                      "808 Open Hat", "Splash", "Ride"),
                  {{kKitDriveType, 4}, {kKitDrive, 5}, {kKitDriveMix, 0.6}, {kGlue, 0.5}, {kRoom, 0.15}}});
+    // ---- 1.1.0 kits, named for the job; their grooves, echo and new layers in place ----
+    auto with = [](std::vector<KitPad> pads, std::initializer_list<uint32_t> which, std::vector<P> extra) {
+        for (KitPad& p : pads)
+            for (uint32_t w : which)
+                if (p.pad == w) p.extra.insert(p.extra.end(), extra.begin(), extra.end());
+        return pads;
+    };
+    const std::vector<P> swing16 = {{kSwing, 0.4}, {kHumanize, 0.25}}, swing8 = {{kSwing, 0.6}, {kSwingGrid, kGrid8}, {kHumanize, 0.3}};
+    const std::initializer_list<uint32_t> hats = {6, 8, 10};
+    k.push_back({"Boom bap", "Dusty, swung hip-hop: a thick kick and snare, lazy hats, a little tape",
+                 with(row("Punchy Kick", "Rim", "Fat Snare", "Clap", "Brush Snare", "Acoustic Tom", "Acoustic Hat",
+                          "Pedal Hat", "808 Open Hat", "Crash", "Ride"), hats, swing16),
+                 {{kGlue, 0.4}, {kKitDriveType, 2}, {kKitDrive, 2}, {kKitDriveMix, 0.5}, {kRoom, 0.1}}});
+    k.push_back({"House", "Four to the floor: a round kick, claps, shuffled open hats",
+                 with(row("House Kick", "Rim", "909 Snare", "Clap", "Clap Snare", "Mid Tom", "909 Closed Hat", "Pedal Hat",
+                          "909 Open Hat", "Crash", "Ride"), hats, {{kSwing, 0.25}}),
+                 {{kGlue, 0.4}, {kRoom, 0.1}}});
+    k.push_back({"Drum and bass", "Fast breaks: a tight kick, a cracking snare, busy hats, glued hard",
+                 row("Punchy Kick", "Rim", "Tight Snare", "Clap", "Trap Snare", "High Tom", "Acoustic Hat", "Pedal Hat",
+                     "808 Open Hat", "Splash", "Ride", 2),
+                 {{kGlue, 0.5}, {kGlueThreshold, -18}, {kGlueMakeup, 4}, {kRoom, 0.1}}});
+    k.push_back({"Dub", "Space and echo: a soft sub kick, a rim and snare thrown into dotted echoes",
+                 with(row("Sub Kick", "Dub Rim", "Fat Snare", "Snap", "Clap Snare", "Low Tom", "Acoustic Hat", "Pedal Hat",
+                          "808 Open Hat", "Splash", "Ride"), {2, 3}, {{kEchoSend, 0.5}}),
+                 {{kEcho, 0.5}, {kEchoSync, kEcho8Dotted}, {kEchoFeedback, 0.5}, {kEchoTone, 2500}, {kRoom, 0.2}}});
+    k.push_back({"Afro percussion", "Hand drums, log drum, shakers and bells, in a galloping groove",
+                 with(row("Log Drum", "Clave", "Conga", "Snap", "Bongo", "Conga", "Shaker", "Rain Shaker", "Tambourine",
+                          "FM Bell", "Cowbell"), {6, 8, 10, 2, 4}, {{kGroove, kGrooveGallop}, {kHumanize, 0.3}}),
+                 {{kGlue, 0.3}, {kRoom, 0.15}}});
+    k.push_back({"Industrial", "Clanging metal, distorted hits and a big, hard room",
+                 row("Distorted Kick", "Industrial Hit", "Dubstep Snare", "Clap", "FM Clank", "FM Tom", "Trashy Hat",
+                     "Pedal Hat", "909 Open Hat", "China", "Ride Bell"),
+                 {{kKitDriveType, 3}, {kKitDrive, 3}, {kKitDriveMix, 0.6}, {kRoom, 0.25}, {kRoomSize, 0.7}, {kGlue, 0.5}}});
+    k.push_back({"FM", "Every drum from two operators: FM kick, toms, clank and bell over 808 hats",
+                 row("FM Kick", "Rim", "808 Snare", "Clap", "FM Clank", "FM Tom", "808 Closed Hat", "Pedal Hat",
+                     "808 Open Hat", "FM Bell", "Cowbell"),
+                 {{kGlue, 0.3}}});
+    k.push_back({"Jazz brushes", "Brushes and a swung ride: a soft kick, a brush snare and swirl, a warm room",
+                 with(row("Acoustic Kick", "Rim Snare", "Brush Snare", "Snap", "Brush Swirl", "Acoustic Tom", "Acoustic Hat",
+                          "Pedal Hat", "808 Open Hat", "Splash", "Ride"), {6, 8, 10, 15, 2}, swing8),
+                 {{kRoom, 0.3}, {kRoomSize, 0.55}, {kRoomDecay, 1.4}}});
+    k.push_back({"Lo-fi tape", "Warm and wobbly: soft drums through tape, a crackle on the crash pad, loose timing",
+                 with(row("Sub Kick", "Rim", "Fat Snare", "Snap", "Brush Snare", "Acoustic Tom", "Acoustic Hat", "Pedal Hat",
+                          "808 Open Hat", "Vinyl Crackle", "Ride"), {2, 3, 6, 8, 10}, {{kHumanize, 0.45}, {kSwing, 0.3}}),
+                 {{kKitDriveType, 2}, {kKitDrive, 3}, {kKitDriveMix, 0.7}, {kKitHigh, -4}, {kGlue, 0.4}}});
+    k.push_back({"Electro", "Machine funk: a short 808 kick, zaps, lasers and cowbell",
+                 row("808 Kick Short", "Rim", "808 Snare", "Clap", "Zap", "808 Tom", "808 Closed Hat", "Pedal Hat",
+                     "808 Open Hat", "Laser", "Cowbell"),
+                 {{kGlue, 0.3}, {kEcho, 0.2}, {kEchoSync, kEcho16}}});
+    k.push_back({"Reggaeton", "A boomy kick, a tight snare and claps, accented on the beat",
+                 with(row("808 Kick", "Rim", "Tight Snare", "Clap", "Clap Snare", "808 Tom", "909 Closed Hat", "Pedal Hat",
+                          "909 Open Hat", "Crash", "Tambourine"), {0, 2, 3}, {{kAccent, 0.4}}),
+                 {{kGlue, 0.4}}});
+    k.push_back({"Cinematic", "Big and far: a deep kick, struck pipes and plucked toms in a hall",
+                 row("Acoustic Kick", "Pipe Knock", "Fat Snare", "Clap", "Flam Snare", "Plucked Tom", "Acoustic Hat",
+                     "Pedal Hat", "808 Open Hat", "Crash", "FM Bell", -3),
+                 {{kRoom, 0.45}, {kRoomSize, 0.9}, {kRoomDecay, 3.0}, {kRoomPredelay, 20}, {kGlue, 0.3}}});
+    k.push_back({"Hand percussion", "A table of hand drums, shakers and wood, each hit a little different",
+                 with(row("Conga", "Clave", "Bongo", "Snap", "Woodblock", "Conga", "Shaker", "Rain Shaker", "Tambourine",
+                          "Triangle", "Cowbell"), {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, {{kHumanize, 0.4}}),
+                 {{kRoom, 0.2}}});
+    k.push_back({"Garage", "Two-step shuffle: a punchy kick, a rim on the shuffle, swung hats",
+                 with(with(row("909 Kick", "Rim", "Tight Snare", "Clap", "Clap Snare", "Mid Tom", "909 Closed Hat",
+                               "Pedal Hat", "909 Open Hat", "Splash", "Ride"), hats, {{kSwing, 0.55}}),
+                      {1}, {{kGroove, kGrooveShuffle}}),
+                 {{kGlue, 0.4}}});
+    k.push_back({"Synthwave", "Gated and wide: a big snare in a long room, a round kick, 80s toms",
+                 with(row("909 Kick", "Rim", "Fat Snare", "Clap", "Clap Snare", "808 Tom", "808 Closed Hat", "Pedal Hat",
+                          "808 Open Hat", "Crash", "Ride"), {2, 4}, {{kRoomSend, 1}, {kWidth, 0.5}}),
+                 {{kRoom, 0.35}, {kRoomSize, 0.8}, {kRoomDecay, 2.5}, {kGlue, 0.4}}});
+    k.push_back({"Thumb piano", "Tuned kalimba tines over a log drum and soft shakers",
+                 row("Log Drum", "Clave", "Pipe Knock", "Snap", "Kalimba", "Kalimba", "Shaker", "Rain Shaker", "Tambourine",
+                     "FM Bell", "Kalimba", 0),
+                 {{kRoom, 0.25}, {kRoomSize, 0.6}}});
     return k;
 }
 
@@ -405,6 +546,7 @@ Voice kitVoice(const KitPad& p) {
     Voice v = s ? s->voice : neutralVoice();
     v[kTune] = constrainPad(kTune, v[kTune] + p.tune);
     v[kLevel] = constrainPad(kLevel, v[kLevel] + p.level);
+    for (const P& e : p.extra) v[e.first] = constrainPad(e.first, e.second);
     return v;
 }
 
@@ -455,7 +597,8 @@ std::vector<std::pair<std::string_view, double>> presetValues(const std::vector<
         const Voice& def = defaultVoice(pad);
         const Voice* want = pads[pad];
         if (!want) {  // unused: a default sound there stops answering its note
-            if (def[kBodyOn] + def[kSubOn] + def[kClickOn] + def[kNoiseOn] + def[kMetalOn] + def[kResOn] + def[kSmpOn] > 0.0)
+            if (def[kBodyOn] + def[kSubOn] + def[kClickOn] + def[kNoiseOn] + def[kMetalOn] + def[kResOn] + def[kSmpOn] +
+                    def[kFmOn] + def[kPhysOn] + def[kTexOn] > 0.0)
                 out.emplace_back(t[padParam(pad, kNote)].id, kNoteOff);
             continue;
         }
@@ -687,7 +830,8 @@ constexpr const char* kLayerNames[][2] = {
     {"pad", "Pad"},       {"press", "Pressure"}, {"body", "Body"},     {"penv", "Pitch shape"}, {"sub", "Sub"},
     {"click", "Click"},   {"noise", "Noise"},    {"metal", "Metal"},   {"res", "Resonator"},    {"smp", "Sample"},
     {"drive", "Drive"},   {"filter", "Filter"},  {"eq", "EQ"},         {"dyn", "Dynamics"},     {"space", "Space"},
-    {"macro", "Character"}, {"var", "Variation"}};
+    {"macro", "Character"}, {"var", "Variation"}, {"fm", "FM"}, {"phys", "Physical"}, {"tex", "Texture"},
+    {"fx", "Pad FX"},     {"groove", "Groove"}};
 // The General MIDI percussion names of keys 35..81 (GM 1 Sound Set; docs/engine.md "Drums", MIDI map).
 constexpr const char* kGmNames[] = {
     "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare", "Low Floor Tom",
@@ -721,7 +865,27 @@ std::string drumsInfoJson() {
         j += "]}";
         firstLayer = false;
     }
-    j += "],\"types\":[";
+    // When each setting is heard (the app dims it otherwise): {suffix or global id: [{"param", "kit", "in"}]}, "in"
+    // absent meaning non-zero.
+    j += "],\"needs\":{";
+    bool firstNeed = true;
+    for (const NeedRule& r : needs()) {
+        j += std::string(firstNeed ? "\"" : ",\"") + std::string(r.global ? t[r.param].id : padParamSuffix(r.param)) + "\":[";
+        for (size_t i = 0; i < r.all.size(); ++i) {
+            const Need& n = r.all[i];
+            j += std::string(i ? "," : "") + "{\"param\":\"" + std::string(n.global ? t[n.param].id : padParamSuffix(n.param)) +
+                 "\",\"kit\":" + (n.global ? "true" : "false");
+            if (!n.in.empty()) {
+                j += ",\"in\":[";
+                for (size_t k = 0; k < n.in.size(); ++k) j += (k ? "," : "") + std::to_string(n.in[k]);
+                j += "]";
+            }
+            j += "}";
+        }
+        j += "]";
+        firstNeed = false;
+    }
+    j += "},\"types\":[";
     for (int k = 0; k < kTypeCount; ++k) j += (k ? ",\"" : "\"") + std::string(typeName(k)) + "\"";
     j += "],\"sounds\":[";
     for (size_t i = 0; i < sounds().size(); ++i) {
@@ -805,7 +969,7 @@ std::string drumsExplodeJson(std::string_view entryJson) {
     for (uint32_t pad = 0; pad < (mode == kModeSingle ? 1u : kPads); ++pad) {
         const Voice v = voiceFrom(params, pad, defaultVoice(pad));
         const int note = static_cast<int>(v[kNote]);
-        const bool used = v[kBodyOn] + v[kSubOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] > 0.0 &&
+        const bool used = v[kBodyOn] + v[kSubOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] + v[kFmOn] + v[kPhysOn] + v[kTexOn] > 0.0 &&
                           v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff);
         if (!used) continue;
         Voice single = v;

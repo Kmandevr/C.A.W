@@ -42,6 +42,7 @@ int larkCost(double seconds);  // bench/lark_cost.cpp: Lark (org.caw.pitchfix) a
 int ravenCost(double seconds);  // bench/raven_cost.cpp: Flagship's 1.1.0 synthesis (Raven) against its ceilings
 int samplerCost(double seconds);  // bench/sampler_cost.cpp: the sampler's plain and stretched zones against their ceilings
 int timberCost(double seconds);  // bench/timber_cost.cpp: Timber (org.caw.timber) against its ceilings
+int rookCost(double seconds);  // bench/rook_cost.cpp: the drums' 1.1.0 additions (Rook) against their ceilings
 
 namespace {
 
@@ -1002,6 +1003,7 @@ int main(int argc, char** argv) {
     }
     if (only == 306) return larkCost(secs) ? 1 : 0;  // `caw_bench SECONDS 306`: only Lark (a CI test)
     if (only == 320) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
+    if (only == 323) return rookCost(secs) ? 1 : 0;  // `caw_bench SECONDS 323`: only the drums' 1.1.0 additions (a CI test)
     if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
@@ -1016,7 +1018,8 @@ int main(int argc, char** argv) {
         const bool ravenOver = ravenCost(secs) != 0;  // and Flagship's 1.1.0 modes (bench/raven_cost.cpp)
         const bool samplerOver = samplerCost(secs) != 0;  // and the sampler's zones (bench/sampler_cost.cpp)
         const bool timberOver = timberCost(secs) != 0;  // and Timber (bench/timber_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver) ? 1 : 0;
+        const bool rookOver = rookCost(secs) != 0;  // and the drums' 1.1.0 additions (bench/rook_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver || rookOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

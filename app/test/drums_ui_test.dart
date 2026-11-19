@@ -1,4 +1,4 @@
-// The Drums editor (org.caw.drums): pads and banks, a picked pad's layers, each card's ids, note learn, randomize and mutate, explode in one undo step, the sample picker, the Points editor, the inline view, goldens, and (with CAW_LIB) the real engine.
+// The Drums editor (org.caw.drums): pads and banks, the one-screen layout's three panels, a picked pad's cards and their ids, settings dimmed by their needs, note learn, randomize and mutate, explode in one undo step, the sample picker, the Points editor, the inline view, goldens, and (with CAW_LIB) the real engine.
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,6 +13,9 @@ import 'package:caw/engine/component_info.dart';
 import 'package:caw/ui/devices/device_controls.dart';
 import 'package:caw/ui/devices/device_inline.dart';
 import 'package:caw/ui/devices/device_registry.dart';
+import 'package:caw/model/drums_needs.dart';
+import 'package:caw/ui/devices/drums/drums_cards.dart';
+import 'package:caw/ui/devices/drums/drums_editor.dart';
 import 'package:caw/ui/devices/drums/drums_hero.dart';
 import 'package:caw/ui/devices/drums/drums_pads.dart';
 import 'package:caw/ui/devices/drums/drums_samples.dart';
@@ -110,8 +113,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Scrolls [page]'s list from the top until [f] is built, then onto the screen.
-  Future<void> scrollTo(WidgetTester tester, Finder f, {String page = 'drums-pads'}) async {
+  const panelKeys = ['drums-panel-sound', 'drums-panel-shape', 'drums-panel-groove'];
+
+  /// Shows panel [panel] (a phone's: its dot), then scrolls its list from the top until [f] is built and on screen.
+  Future<void> scrollTo(WidgetTester tester, Finder f, {int panel = 0}) async {
+    final dot = find.byKey(ValueKey('flagship-dot-$panel'));
+    if (dot.evaluate().isNotEmpty) {
+      await tester.tap(dot);
+      await tester.pumpAndSettle();
+    }
+    final page = panelKeys[panel];
     final pos = tester.state<ScrollableState>(find.descendant(of: find.byKey(ValueKey(page)),
       matching: find.byType(Scrollable)).first).position;
     pos.jumpTo(0);
@@ -124,12 +135,29 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the registry gives org.caw.drums its own editor with PADS and KIT', (tester) async {
+  testWidgets('the registry gives org.caw.drums its own one-screen editor: pads on top, three panels, the strip', (tester) async {
     expect(DeviceEditors.custom(id, builtinInfo(id)), isNotNull);
     await open(tester);
-    expect(find.byKey(const ValueKey('device-tab-pads')), findsOneWidget);
-    expect(find.byKey(const ValueKey('device-tab-kit')), findsOneWidget);
+    expect(find.byKey(const ValueKey('device-tab-pads')), findsNothing);
     expect(find.byKey(const ValueKey('drum-grid')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drums-strip')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drums-panel-sound')), findsOneWidget);
+    // A source chip in the strip opens its panel; the dots swipe.
+    await tester.tap(find.byKey(const ValueKey('drum-source-groove')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drums-panel-groove')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drum-card-groove')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('flagship-dot-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drum-card-drive')), findsOneWidget);
+    await close(tester);
+    // Wide: the three panels side by side, the hero beside the pads.
+    await open(tester, size: const Size(1280, 800));
+    expect(find.byKey(const ValueKey('drums-wide')), findsOneWidget);
+    for (final k in panelKeys) {
+      expect(find.byKey(ValueKey(k)), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
     await close(tester);
   });
 
@@ -178,9 +206,8 @@ void main() {
     expect(find.descendant(of: find.byKey(const ValueKey('drum-voice-pad')), matching: find.text('A3')), findsNothing);
     expect((tester.widget(find.byKey(const ValueKey('drum-voice-pad'))) as Text).data, 'A3');
     expect(find.byKey(const ValueKey('drum-character')), findsOneWidget);
-    for (final card in ['pad', 'body', 'penv', 'sub', 'click', 'noise', 'metal', 'res', 'smp', 'drive', 'filter', 'eq',
-      'dyn', 'space', 'press', 'var']) {
-      await scrollTo(tester, find.byKey(ValueKey('drum-card-$card')));
+    for (final card in drumCardOrder) {
+      await scrollTo(tester, find.byKey(ValueKey('drum-card-$card')), panel: drumsPanelOf(card));
       expect(find.byKey(ValueKey('drum-card-$card')), findsOneWidget, reason: card);
     }
     await close(tester);
@@ -193,20 +220,34 @@ void main() {
     final layout = DrumsLayout.of(t.info!);
     for (final layer in [for (final c in drumCardOrder) layout.byId[c]!]) {
       final card = find.byKey(ValueKey('drum-card-${layer.id}'));
-      await scrollTo(tester, card);
-      final head = find.descendant(of: card, matching: find.byKey(ValueKey('expand-drums-layer-${layer.id}')));
-      if (find.descendant(of: card, matching: find.byType(DeviceKnob)).evaluate().isEmpty) {
-        await tester.ensureVisible(head);
+      await scrollTo(tester, card, panel: drumsPanelOf(layer.id));
+      final more = find.descendant(of: card, matching: find.byKey(ValueKey('drum-more-${layer.id}')));
+      if (more.evaluate().isNotEmpty) {
+        await tester.ensureVisible(more);
         await tester.pumpAndSettle();
-        await tester.tap(head);
+        await tester.tap(more);
         await tester.pumpAndSettle();
       }
       final knobs = find.descendant(of: card, matching: find.byType(DeviceKnob));
       expect(knobs, findsWidgets, reason: layer.id);
+      final own = [...layer.suffixes, if (layer.id == 'body') ...layout.byId['penv']!.suffixes];
+      final shown = <String>{};
       for (final e in knobs.evaluate()) {
         final pid = (e.widget as DeviceKnob).paramId;
         expect(pid.startsWith('a5_'), isTrue, reason: '${layer.id}: $pid');
-        expect(layer.suffixes, contains(pid.substring(3)), reason: '${layer.id}: $pid');
+        expect(own, contains(pid.substring(3)), reason: '${layer.id}: $pid');
+        shown.add(pid.substring(3));
+      }
+      for (final e in find.descendant(of: card, matching: find.byType(DeviceChoice)).evaluate()) {
+        shown.add((e.widget as DeviceChoice).paramId.substring(3));
+      }
+      // Every ability stays reachable: each of the layer's settings is on the card (its power in the title).
+      for (final x in own) {
+        if (x == layer.power || x == 'note' || x.endsWith('_on') || x == 'smp_reverse' || x == 'track' || x == 'mono' ||
+            x == 'press_choke') {
+          continue;
+        }
+        expect(shown, contains(x), reason: '${layer.id} card lacks $x');
       }
       // Turning the card's first knob moves that id on A5 alone.
       final first = (knobs.evaluate().first.widget as DeviceKnob).paramId;
@@ -217,10 +258,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value(first), isNot(before), reason: first);
       expect(t.value('a1_${first.substring(3)}'), other, reason: first);
-      await tester.ensureVisible(head);
-      await tester.pumpAndSettle();
-      await tester.tap(head);
-      await tester.pumpAndSettle();
     }
     await close(tester);
   });
@@ -228,7 +265,7 @@ void main() {
   testWidgets('a layer\'s power turns it on and off; drive and filter come back to their last type', (tester) async {
     final s = await open(tester);
     final t = target(s);
-    await scrollTo(tester, find.byKey(const ValueKey('dpower-a1_drive_type')));
+    await scrollTo(tester, find.byKey(const ValueKey('dpower-a1_drive_type')), panel: 1);
     expect(t.value('a1_drive_type'), 1);
     t.set('a1_drive_type', 4);
     await tester.pumpAndSettle();
@@ -248,10 +285,7 @@ void main() {
   testWidgets('note learn writes 3 + key into the pad\'s note when the next note arrives', (tester) async {
     final s = await open(tester);
     await tapPad(tester, 2);
-    await scrollTo(tester, find.byKey(const ValueKey('expand-drums-layer-pad')));
-    await tester.tap(find.byKey(const ValueKey('expand-drums-layer-pad')));
-    await tester.pumpAndSettle();
-    await scrollTo(tester, find.byKey(const ValueKey('drum-learn-2')));
+    await scrollTo(tester, find.byKey(const ValueKey('drum-learn-2')), panel: 1);
     await tester.tap(find.byKey(const ValueKey('drum-learn-2')));
     await tester.pumpAndSettle();
     expect(DrumsSelection.of(target(s)).learning.value, 2);
@@ -330,9 +364,7 @@ void main() {
     final s = await open(tester);
     final t = target(s);
     await tapPad(tester, 2);
-    await scrollTo(tester, find.byKey(const ValueKey('drum-card-smp')));
-    await tester.tap(find.byKey(const ValueKey('expand-drums-layer-smp')));
-    await tester.pumpAndSettle();
+    await scrollTo(tester, find.byKey(const ValueKey('drum-sample-load')));
     await tester.tap(find.byKey(const ValueKey('drum-sample-load')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('drum-sample-picker')), findsOneWidget);
@@ -413,9 +445,7 @@ void main() {
     };
     final layers = s.project.layers.length;
     await open(tester, state: s);
-    await tester.tap(find.byKey(const ValueKey('device-tab-kit')));
-    await tester.pumpAndSettle();
-    await scrollTo(tester, find.byKey(const ValueKey('drum-explode')), page: 'drums-kit');
+    await scrollTo(tester, find.byKey(const ValueKey('drum-explode')), panel: 2);
     await tester.tap(find.byKey(const ValueKey('drum-explode')));
     await tester.pumpAndSettle();
     expect(fake.exploded.single['id'], id);
@@ -461,8 +491,10 @@ void main() {
         await tester.pump();
         expect(tester.takeException(), isNull);
         await expectLater(goldenScreen, matchesGoldenFile('goldens/drums/pads_${e.key}.png'));
-        await tester.tap(find.byKey(const ValueKey('device-tab-kit')));
-        await tester.pumpAndSettle();
+        if (find.byKey(const ValueKey('flagship-dot-2')).evaluate().isNotEmpty) {
+          await tester.tap(find.byKey(const ValueKey('flagship-dot-2')));
+          await tester.pumpAndSettle();
+        }
         expect(tester.takeException(), isNull);
         await expectLater(goldenScreen, matchesGoldenFile('goldens/drums/kit_${e.key}.png'));
         await close(tester);
@@ -491,10 +523,17 @@ void main() {
       expect([for (final g in layout.kitGroups.values) ...g], info['globals']);
       expect(info['display']['floats'], DrumsDisplayFrame.floats);
       expect(info['display']['version'], DrumsDisplayFrame.version);
-      expect(drums.parameters.length, 10392);
+      // The needs table is the engine's.
+      final needs = info['needs'] as Map<String, dynamic>;
+      expect(needs.keys.toSet(), drumNeeds.keys.toSet());
+      for (final e in needs.entries) {
+        expect([for (final n in e.value as List) '${n['param']}|${n['kit']}|${(n['in'] as List?)?.join(',')}'],
+          [for (final n in drumNeeds[e.key]!) '${n.param}|${n.kit}|${n.only?.join(',')}'], reason: e.key);
+      }
+      expect(drums.parameters.length, 13662);
       // Randomize and explode through the real engine.
       final r = const EngineDrumsApi().randomize(0, 3, 1, 5, null)!;
-      expect(r.keys.where((k) => k.startsWith('a6_')).length, 162);
+      expect(r.keys.where((k) => k.startsWith('a6_')).length, 213);
       final x = const EngineDrumsApi().explode({'id': id, 'params': <String, double>{}})!;
       expect((x['tracks'] as List).length, greaterThan(1));
       expect(const EngineDrumsApi().builtinSamples(), contains('808 Kick'));
@@ -515,7 +554,7 @@ void main() {
       expect(s.project.resolveInstruments(Engine.resolveInstrument), isTrue);
       expect(s.project.layers.first.instrument!.id, id);
       await open(tester, state: s);
-      expect(find.byKey(const ValueKey('drums-pads')), findsOneWidget);
+      expect(find.byKey(const ValueKey('drums-page')), findsOneWidget);
       expect(find.byKey(const ValueKey('device-fallback')), findsNothing);
       // Kit mode with the old kit's keys: A1 on C2.
       expect((tester.widget(find.byKey(const ValueKey('drum-voice-pad'))) as Text).data, 'A1');
@@ -536,6 +575,28 @@ void main() {
     expect(drumKnobLabel(t.param('a1_level')!), 'Level');
     expect(noteName(36), 'C2');
     expect(noteValueFor(40), 43);
+  });
+
+  testWidgets('a setting not heard now is dimmed with what it needs, and lights when it is met', (tester) async {
+    final s = await open(tester);
+    final t = target(s);
+    t.setAll({'a1_noise_on': 1, 'a1_noise_mode': 0});
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.byKey(const ValueKey('drum-more-noise')));
+    await tester.tap(find.byKey(const ValueKey('drum-more-noise')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drum-needs-noise_bursts')), findsOneWidget);
+    expect((tester.widget(find.byKey(const ValueKey('drum-needs-noise_bursts'))) as Text).data, 'Noise mode: Clap');
+    t.set('a1_noise_mode', 2);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drum-needs-noise_bursts')), findsNothing);
+    // The kit's room: a pad's room send needs it.
+    final layout = DrumsLayout.of(t.info!);
+    t.set('room', 0);
+    expect(drumNeedText(t, layout, 0, drumUnmetNeed(t, layout, 0, 'room_send')!), 'Turn up the kit\'s Room');
+    t.set('room', 0.5);
+    expect(drumUnmetNeed(t, layout, 0, 'room_send'), isNull);
+    await close(tester);
   });
 
   test('the pitch shape follows the engine\'s formulas', () {

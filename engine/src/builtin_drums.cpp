@@ -32,7 +32,7 @@
 // How it runs:
 // - A voice belongs to a pad; a pool of 64 voices serves all 64 pads (each pad up to its own polyphony, 1..4).
 //   Only sounding voices are visited, and in a voice only the layers that are on.
-// - Once per control period (16 frames) each pad with a sounding voice reads its 119 knobs and works out its
+// - Once per control period (16 frames) each pad with a sounding voice reads its knobs and works out its
 //   settings (macros included); each of its voices then works out its coefficients (with its own velocity,
 //   variation, glide and pressure). A pad that isn't sounding reads nothing: unused pads cost nothing.
 // - The grid runs on from block to block (it never restarts), and a hit reads its pad's knobs at its own frame,
@@ -297,6 +297,22 @@ struct PadSettings {
     // variation
     double velLevel = 1, velPitch = 0, velDecay = 0, velTone = 0.3, velClick = 0.5, velPunch = 0, rndPitch = 0,
            rndDecay = 0, rndTone = 0, rndPan = 0, rndLevel = 0, rndPos = 0;
+    // fm, phys, tex (1.1.0)
+    bool fmOn = false, physOn = false, texOn = false;
+    double fmFreq = 200, fmRatio = 1.41, fmIndex = 3, fmIDecay = 0.08, fmFb = 0, fmPitch = 0, fmPTime = 0.03,
+           fmAttack = 0.0005, fmDecay = 0.3, fmCurve = 0, fmLevel = 1;
+    int physModel = 0, physExciter = 0, texMode = 0;
+    double physFreq = 110, physDecay = 1, physDamp = 0.4, physPick = 0.2, physInput = 0.3, physLevel = 1;
+    double texFreq = 3000, texSpread = 1.5, texQ = 1, texTilt = 0, texDensity = 1500, texAttack = 0.001, texDecay = 0.25,
+           texCurve = 0, texLevel = 1;
+    // the sample's pitch drop, hold, curve and start (1.1.0)
+    double smpPitch = 0, smpPTime = 0.05, smpHold = 0, smpCurve = 0, smpVelStart = 0, smpRndStart = 0;
+    // pad effects and sends (1.1.0)
+    double ringMix = 0, ringFreq = 440, echoSend = 0, busSend = 1;
+    // groove (1.1.0)
+    double swing = 0, humanize = 0, accent = 0, flam = 0, flamTime = 0.02, grooveAmt = 1;
+    int swingGrid = 0, accentOn = 0, groove = 0;
+    bool groovy = false;  // any of them on: a hit may move, repeat or be accented
     bool used = false;  // any layer on and the pad not silent
     double raw[kPadParams] = {};  // the knobs these were worked out from
     bool valid = false;
@@ -516,7 +532,68 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
     s.rndTone = clampd(v(kRndTone), 0, 1);
     s.rndPan = clampd(v(kRndPan), 0, 1);
     s.rndLevel = clampd(v(kRndLevel), 0, 1);
-    s.used = (s.bodyOn || s.subOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn) && s.gain > 0.0;
+    s.fmOn = on(kFmOn);
+    if (s.fmOn) {
+        s.fmFreq = clampd(v(kFmFreq), 20, 4000);
+        s.fmRatio = clampd(v(kFmRatio), 0.25, 16);
+        s.fmIndex = clampd(v(kFmIndex) * exp2d(0.5 * tone), 0, 30);
+        s.fmIDecay = clampd(v(kFmIDecay) * lengthMul, 0.002, 8);
+        s.fmFb = clampd(v(kFmFeedback), 0, 1);
+        s.fmPitch = clampd(v(kFmPitch) + 12.0 * punch, 0, 60);
+        s.fmPTime = clampd(v(kFmPTime) * exp2d(-0.7 * punch), 0.001, 1);
+        s.fmAttack = clampd(v(kFmAttack), 0.0001, 0.5);
+        s.fmDecay = clampd(v(kFmDecay) * lengthMul, 0.005, 40);
+        s.fmCurve = clampd(v(kFmDCurve), -1, 1);
+        s.fmLevel = dbGain(v(kFmLevel));
+    }
+    s.physOn = on(kPhysOn);
+    if (s.physOn) {
+        s.physModel = clampi(v(kPhysModel), 0, kPhysStiff);
+        s.physFreq = clampd(v(kPhysFreq), 30, 2000);
+        s.physDecay = clampd(v(kPhysDecay) * lengthMul, 0.02, 40);
+        s.physDamp = clampd(v(kPhysDamp) - 0.35 * tone, 0, 1);
+        s.physPick = clampd(v(kPhysPick), 0, 1);
+        s.physExciter = clampi(v(kPhysExciter), 0, kPhysLayers);
+        s.physInput = clampd(v(kPhysInput), 0, 1);
+        s.physLevel = dbGain(v(kPhysLevel));
+    }
+    s.texOn = on(kTexOn);
+    if (s.texOn) {
+        s.texMode = clampi(v(kTexMode), 0, kTexCrackle);
+        s.texFreq = clampd(v(kTexFreq) * exp2d(1.5 * tone), 40, 16000);
+        s.texSpread = clampd(v(kTexSpread), 0, 4);
+        s.texQ = lib::resonanceQ(clampd(v(kTexRes), 0, 1));
+        s.texTilt = clampd(v(kTexTilt), -1, 1);
+        s.texDensity = clampd(v(kTexDensity), 10, 20000);
+        s.texAttack = clampd(v(kTexAttack), 0.0001, 1);
+        s.texDecay = clampd(v(kTexDecay) * lengthMul, 0.005, 40);
+        s.texCurve = clampd(v(kTexDCurve), -1, 1);
+        s.texLevel = dbGain(v(kTexLevel)) * exp2d(0.8 * snap);
+    }
+    if (s.smpOn) {
+        s.smpPitch = clampd(v(kSmpPitch) + (v(kSmpPitch) > 0.0 ? 12.0 * punch : 0.0), 0, 60);
+        s.smpPTime = clampd(v(kSmpPTime) * exp2d(-0.7 * punch), 0.001, 1);
+        s.smpHold = clampd(v(kSmpHold) * exp2d(length), 0, 2);
+        s.smpCurve = clampd(v(kSmpDCurve), -1, 1);
+        s.smpVelStart = clampd(v(kSmpVelStart), 0, 1);
+        s.smpRndStart = clampd(v(kSmpRndStart), 0, 1);
+    }
+    s.ringMix = clampd(v(kRingMix), 0, 1);
+    s.ringFreq = clampd(v(kRingFreq), 20, 8000);
+    s.echoSend = clampd(v(kEchoSend), 0, 1);
+    s.busSend = clampd(v(kBusSend), 0, 1);
+    s.swing = clampd(v(kSwing), 0, 1);
+    s.swingGrid = clampi(v(kSwingGrid), 0, kGrid8);
+    s.humanize = clampd(v(kHumanize), 0, 1);
+    s.accent = clampd(v(kAccent), 0, 1);
+    s.accentOn = clampi(v(kAccentOn), 0, kAccentLoud);
+    s.flam = clampd(v(kFlam), 0, 1);
+    s.flamTime = clampd(v(kFlamTime), 0.005, 0.06);
+    s.groove = clampi(v(kGroove), 0, kGrooveCount - 1);
+    s.grooveAmt = clampd(v(kGrooveAmt), 0, 1);
+    s.groovy = s.swing > 0.0 || s.humanize > 0.0 || s.accent > 0.0 || s.flam > 0.0 || (s.groove != kGrooveOff && s.grooveAmt > 0.0);
+    s.used = (s.bodyOn || s.subOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn || s.fmOn || s.physOn ||
+              s.texOn) && s.gain > 0.0;
 }
 
 // ---------- A voice ----------
@@ -568,6 +645,7 @@ struct DrumVoice {
     lib::Noise rng{1};
     lib::Svf noiseSvf;
     double pink[3] = {0, 0, 0}, pinkK[3] = {0, 0, 0}, brown = 0, brownK = 0, crushHeld = 0, wire = 0, wireK = 0;
+    double shellPhase = 0, shellDt = 0, shellLevel = 1, shellCoef = 1;  // Snappy's own shell, with the body off
     uint32_t crushEvery = 1, crushLeft = 0, clapCount = 0, clapPeriod = 480, clapBursts = 3;
     double burst = 0, burstCoef = 0, noiseLevel = 1, sweep = 0, noiseFreq = 2000, noiseQ = 0.707;
     int noiseMode = 0, color = 0, noiseFilter = kFilterHp;
@@ -589,6 +667,34 @@ struct DrumVoice {
     double smpPos = 0, smpStep = 1, smpFirst = 0, smpLast = 0, smpLevel = 1;
     bool reverse = false, smpPlaying = false;
     DrumEnv smpEnv;
+    // fm (1.1.0)
+    bool fm = false;
+    DrumEnv fmEnv, fmIEnv, fmPEnv;
+    double fmPhaseC = 0, fmPhaseM = 0, fmPrev = 0, fmF = 200, fmStartMul = 1, fmRatio = 1.41, fmDepth = 0, fmFb = 0,
+           fmLevel = 1;
+    // phys (1.1.0): the waveguide's line lives in the processor's pool (one stretch per voice)
+    bool phys = false;
+    float* physLine = nullptr;
+    uint32_t physMax = 0, physW = 0, physExciteLeft = 0, physExciteLength = 1;
+    double physDelay = 100, physPickDelay = 0, physGain = 0.99, physSign = 1, physLp = 0, physLpK = 0.5, physAp = 0,
+           physApIn = 0, physApK = 0, physInput = 0, physLevel = 1, physPeak = 0;
+    int physModel = 0, physExciter = 0;
+    // tex (1.1.0)
+    bool tex = false;
+    int texMode = 0;
+    DrumEnv texEnv;
+    lib::Svf texLo, texHi;
+    double texLoGain = 1, texHiGain = 1, texChance = 0, texGrain = 0, texGrainK = 0, texGrainAmp = 0, texScale = 1,
+           texLevel = 1;
+    // the sample's pitch drop (1.1.0)
+    DrumEnv smpPEnv;
+    double smpDrop = 0;
+    // ring modulator (1.1.0)
+    double ringMix = 0, ringPhase = 0, ringDt = 0;
+    // sends (1.1.0)
+    double echoSend = 0, busSend = 1;
+    // accent (1.1.0): this hit's
+    double accent = 0;
     // effects
     Drive drive, clipper;
     bool drivePost = false, driveLoOn = false, driveHiOn = false;
@@ -617,7 +723,8 @@ struct DrumVoice {
 
     bool sounding() const noexcept {
         return bodyEnv.active() || subEnv.active() || clickEnv.active() || noiseEnv.active() || tailEnv.active() ||
-               clapCount < clapEnd() || metalEnv.active() || ringing || smpPlaying;
+               clapCount < clapEnd() || metalEnv.active() || ringing || smpPlaying || fmEnv.active() ||
+               (phys && (physExciteLeft > 0 || physPeak > 2e-5)) || texEnv.active();
     }
     uint32_t clapEnd() const noexcept { return noiseMode == kNoiseClap && noise ? clapBursts * clapPeriod : 0; }
 };
@@ -636,6 +743,12 @@ public:
         quality_ = buildingQuality();
         try {
             room_.prepare(sr_, 64, 0.1);
+            // 1.1.0: the waveguides' lines (a period at 30 Hz per voice) and the echo's 2 s.
+            physMax_ = static_cast<uint32_t>(sr_ / 30.0) + 8;
+            physPool_.assign(static_cast<size_t>(physMax_) * kVoices, 0.0f);
+            const size_t echo = static_cast<size_t>(2.0 * sr_) + 8;
+            echoL_.assign(echo, 0.0f);
+            echoR_.assign(echo, 0.0f);
         } catch (...) {
             return false;
         }
@@ -670,6 +783,8 @@ public:
         kitLowDb_ = kitHighDb_ = 1e9;
         room_.clear();
         roomQuiet_ = 0;
+        clearEcho();
+        pending_ = 0;
         lastKey_ = -1;
         lastChannel_ = 0;
         lastVelocity_ = 0;
@@ -681,7 +796,7 @@ public:
         lastPad_ = -1;
     }
 
-    bool quiet() const noexcept override { return settled_ && !lanes_.any(); }
+    bool quiet() const noexcept override { return settled_ && !lanes_.any() && pending_ == 0; }
 
     uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return display_.read(out, max); }
 
@@ -741,11 +856,13 @@ protected:
 
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         for (uint32_t i = 0; i < frames;) {
+            uint32_t until = frames - i;
+            if (pending_) until = firePending(offset + i, until);
             if (left_ == 0) {
                 control(b, offset + i);
                 left_ = kControlFrames;
             }
-            const uint32_t n = std::min(left_, frames - i);
+            const uint32_t n = std::min(left_, until);
             renderChunk(left + i, right + i, n, offset + i);
             i += n;
             left_ -= n;
@@ -781,7 +898,7 @@ private:
         lastVelocity_ = static_cast<float>(clampd(m.velocity, 0, 1));
         ++notesSeen_;
         if (mode_ == kModeSingle) {
-            if (channel_ == 0 || channel_ == m.channel + 1) hit(0, m, at);
+            if (channel_ == 0 || channel_ == m.channel + 1) trigger(0, m, at);
             return;
         }
         bool any = false;
@@ -795,18 +912,20 @@ private:
             const bool track = parameterAt(b, padParam(p, kTrack), at, def[kTrack]) >= 0.5;
             const bool chromatic = track && chan >= 2;
             const int key = note == kNoteAuto ? autoNote(p, base_) : note - kNoteFirst;
-            if (chromatic || (note != kNoteAny && key == m.key)) any = hit(p, m, at) || any;
+            if (chromatic || (note != kNoteAny && key == m.key)) any = trigger(p, m, at) || any;
         }
         if (any) return;
         for (uint32_t p = 0; p < kPads; ++p) {
             const Voice& def = defaultVoice(p);
             if (clampi(parameterAt(b, padParam(p, kNote), at, def[kNote]), 0, kNoteFirst + 127) != kNoteAny) continue;
             if (!channelMatches(clampi(parameterAt(b, padParam(p, kChan), at, def[kChan]), 0, 17), m.channel)) continue;
-            hit(p, m, at);
+            trigger(p, m, at);
         }
     }
 
     void noteOff(const NoteMessage& m, uint32_t at) noexcept {
+        for (uint32_t i = 0; i < pending_; ++i)  // a held-back hit of this note: it ends as soon as it starts
+            if (pendingHits_[i].m.noteId == m.noteId) pendingHits_[i].released = true;
         for (uint32_t i = 0; i < live_; ++i) {
             DrumVoice& v = voices_[list_[i]];
             if (!v.active || v.noteId != m.noteId) continue;
@@ -852,15 +971,138 @@ private:
         return static_cast<double>(x) * (2.0 / 4294967295.0) - 1.0;
     }
 
+    // ---------- Groove (1.1.0; docs/engine.md, "Drums", Groove) ----------
+
+    // Each groove's 16 steps (a bar of 16ths): how late a hit on the step comes (in 16ths) and its velocity's scale.
+    struct GrooveStep {
+        double late, vel;
+    };
+    static const GrooveStep* grooveSteps(int g) noexcept {
+        static constexpr GrooveStep kSteps[kGrooveCount][16] = {
+            {},
+            // Shuffle: every off 16th a third late and softer.
+            {{0, 1}, {0.33, 0.78}, {0, 0.92}, {0.33, 0.78}, {0, 1}, {0.33, 0.78}, {0, 0.92}, {0.33, 0.78},
+             {0, 1}, {0.33, 0.78}, {0, 0.92}, {0.33, 0.78}, {0, 1}, {0.33, 0.78}, {0, 0.92}, {0.33, 0.78}},
+            // Laid back: the backbeats (steps 5 and 13) a quarter late, the off 16ths a little.
+            {{0, 1}, {0.08, 0.85}, {0.04, 0.9}, {0.08, 0.85}, {0.25, 1}, {0.08, 0.85}, {0.04, 0.9}, {0.08, 0.85},
+             {0, 1}, {0.08, 0.85}, {0.04, 0.9}, {0.08, 0.85}, {0.25, 1}, {0.08, 0.85}, {0.04, 0.9}, {0.08, 0.85}},
+            // Gallop: each beat's second and third 16ths pulled toward its end, the beat strong.
+            {{0, 1}, {0.33, 0.7}, {0.15, 0.85}, {0, 0.75}, {0, 1}, {0.33, 0.7}, {0.15, 0.85}, {0, 0.75},
+             {0, 1}, {0.33, 0.7}, {0.15, 0.85}, {0, 0.75}, {0, 1}, {0.33, 0.7}, {0.15, 0.85}, {0, 0.75}},
+            // Broken: an uneven bar, its timing and weight off the grid in places.
+            {{0, 1}, {0.1, 0.7}, {0, 0.9}, {0.3, 0.8}, {0, 0.95}, {0.05, 0.65}, {0.2, 0.85}, {0, 0.7},
+             {0, 1}, {0.25, 0.75}, {0, 0.85}, {0.1, 0.7}, {0, 0.95}, {0, 0.6}, {0.3, 0.9}, {0.1, 0.7}},
+            // Half-time: beat 3 the strong one, beats 2 and 4 soft, the 16ths lighter.
+            {{0, 1}, {0.05, 0.7}, {0, 0.8}, {0.05, 0.7}, {0, 0.75}, {0.05, 0.7}, {0, 0.8}, {0.05, 0.7},
+             {0, 1.15}, {0.05, 0.7}, {0, 0.8}, {0.05, 0.7}, {0, 0.75}, {0.05, 0.7}, {0, 0.8}, {0.05, 0.7}},
+        };
+        return kSteps[g < 0 || g >= kGrooveCount ? 0 : g];
+    }
+
+    // A note for `pad`: played now, or (its pad's groove moving it) held back and played later, with a flam's grace
+    // hit before it. False when the pad is unused. Without groove settings it is the plain hit.
+    bool trigger(uint32_t pad, const NoteMessage& m, uint32_t at) noexcept {
+        PadSettings& s = settings_[pad];
+        readPad(*block_, pad, at, s, blockCount_);
+        if (!s.used) return false;
+        if (!s.groovy) return hit(pad, m, at);
+        NoteMessage n = m;
+        double late = 0.0, accent = 0.0;  // late: seconds
+        // Where the note sits: in 16ths of the song, when a transport plays (preview notes have none).
+        const Transport* tr = block_->transport;
+        const bool grid = tr && tr->playing && tr->tempo > 0.0;
+        double sixteenth = 0.125;
+        long step = -1;
+        if (grid) {
+            sixteenth = 15.0 / tr->tempo;
+            const double pos = (tr->beat + at / sr_ * tr->tempo / 60.0) * 4.0;
+            const double nearest = std::floor(pos + 0.5);
+            if (std::fabs(pos - nearest) < 0.15) step = static_cast<long>(nearest);
+        }
+        if (step >= 0) {
+            const long inBar = step % (4L * static_cast<long>(tr->beatsPerBar ? tr->beatsPerBar : 4));
+            // Swing: the off 16ths (or 8ths) late, up to half their length (75 % swing).
+            if (s.swing > 0.0) {
+                if (s.swingGrid == kGrid16 && (step & 1)) late += s.swing * 0.5 * sixteenth;
+                if (s.swingGrid == kGrid8 && (step & 3) == 2) late += s.swing * sixteenth;
+            }
+            if (s.groove != kGrooveOff && s.grooveAmt > 0.0) {
+                const GrooveStep& g = grooveSteps(s.groove)[step & 15];
+                late += s.grooveAmt * g.late * sixteenth;
+                n.velocity = clampd(n.velocity * (1.0 + s.grooveAmt * (g.vel - 1.0)), 0.0, 1.0);
+            }
+            if (s.accent > 0.0) {
+                const bool on = (s.accentOn == kAccentBeats && (step & 3) == 0) || (s.accentOn == kAccentBars && inBar == 0) ||
+                                (s.accentOn == kAccentOffbeats && (step & 3) == 2);
+                if (on) accent = s.accent;
+            }
+        }
+        if (s.accent > 0.0 && s.accentOn == kAccentLoud && m.velocity >= 0.85) accent = s.accent;
+        // Humanize: up to 12 ms late and ±15 % of the velocity, from the variation seed and the pad's hit count.
+        if (s.humanize > 0.0) {
+            late += s.humanize * 0.012 * 0.5 * (1.0 + random(pad, 8));
+            n.velocity = clampd(n.velocity * (1.0 + 0.15 * s.humanize * random(pad, 9)), 0.0, 1.0);
+        }
+        const uint64_t now = clock_;  // render() has played up to this note's frame
+        const uint64_t due = now + static_cast<uint64_t>(late * sr_);
+        if (s.flam > 0.0) {  // the grace hit first (softer), the hit itself flam_time later
+            NoteMessage g = n;
+            g.velocity = clampd(n.velocity * (0.25 + 0.5 * s.flam), 0.0, 1.0);
+            schedule(pad, g, due, 0.0, true, at);
+            schedule(pad, n, due + static_cast<uint64_t>(s.flamTime * sr_), accent, false, at);
+            return true;
+        }
+        schedule(pad, n, due, accent, false, at);
+        return true;
+    }
+
+    void schedule(uint32_t pad, const NoteMessage& m, uint64_t due, double accent, bool grace, uint32_t at) noexcept {
+        if (due <= clock_ || pending_ >= kPendingMax) {  // now (or no room left: now rather than never)
+            hit(pad, m, at, accent, grace);
+            return;
+        }
+        Pending& p = pendingHits_[pending_++];
+        p.due = due;
+        p.pad = pad;
+        p.m = m;
+        p.accent = accent;
+        p.grace = grace;
+        p.released = false;
+    }
+
+    // Plays the held-back hits due by now (frame `at` of the block); the frames until the next one (or `most`).
+    uint32_t firePending(uint32_t at, uint32_t most) noexcept {
+        uint32_t keep = 0;
+        uint64_t next = ~0ull;
+        for (uint32_t i = 0; i < pending_; ++i) {
+            Pending p = pendingHits_[i];
+            if (p.due <= clock_) {
+                p.m.frame = at;
+                hit(p.pad, p.m, at, p.accent, p.grace);
+                if (p.released) {
+                    NoteMessage off = p.m;
+                    off.type = NoteMessageType::Off;
+                    noteOff(off, at);
+                }
+            } else {
+                next = std::min(next, p.due);
+                pendingHits_[keep++] = p;
+            }
+        }
+        pending_ = keep;
+        if (next == ~0ull) return most;
+        return static_cast<uint32_t>(std::min<uint64_t>(most, next - clock_));
+    }
+
     // A hit on `pad`; false (nothing happens) when the pad is unused.
-    bool hit(uint32_t pad, const NoteMessage& m, uint32_t at) noexcept {
+    bool hit(uint32_t pad, const NoteMessage& m, uint32_t at, double accent = 0.0, bool grace = false) noexcept {
         PadSettings& s = settings_[pad];
         readPad(*block_, pad, at, s, blockCount_);
         if (!s.used) return false;
         const double note = m.pitch;
-        if (s.track) addHeld(pad, m.noteId, note);
+        if (s.track && !grace) addHeld(pad, m.noteId, note);
         // Mono with pitch tracking: an overlapping note glides the sounding voice there (an 808 slide).
-        if (s.mono && s.track && heldCount_[pad] > 1) {
+        if (s.mono && s.track && !grace && heldCount_[pad] > 1) {
             for (uint32_t i = 0; i < live_; ++i) {
                 DrumVoice& v = voices_[list_[i]];
                 if (v.active && v.pad == static_cast<int>(pad) && v.held && !v.fading) {
@@ -921,9 +1163,22 @@ private:
         v.var.pan = clampd(s.pan + s.rndPan * random(pad, 4), -1, 1);
         v.var.punch = 1.0 + s.velPunch * x;  // a softer hit drops less far
         v.var.pos = s.rndPos * 0.3 * random(pad, 6);
+        v.accent = accent;
+        if (accent > 0.0) {  // an accented hit: up to 6 dB louder, brighter, with more click
+            v.var.gain *= 1.0 + accent;
+            v.var.toneOct += 0.7 * accent;
+            v.var.click *= 1.0 + accent;
+        }
+        double smpOffset = 0.0;  // the sample's start, moved by velocity and per hit (frames)
+        if (s.smpOn && (s.smpVelStart > 0.0 || s.smpRndStart > 0.0))
+            smpOffset = (s.smpVelStart * (1.0 - v.velocity) * 0.05 + s.smpRndStart * 0.03 * std::fabs(random(pad, 7))) * sr_;
         ++hits_[pad];
         v.glideSt = v.glideTarget = s.track ? note - s.root : 0.0;
-        start(v, s);
+        if (s.physOn && !physPool_.empty()) {
+            v.physMax = physMax_;
+            v.physLine = physPool_.data() + static_cast<size_t>(index) * physMax_;
+        }
+        start(v, s, smpOffset);
         list_[live_++] = static_cast<uint16_t>(index);
         // Display: this pad's picture starts over with this hit, while a UI reads the display (the audio doesn't
         // depend on it; unwatched, the per-sample capture is skipped).
@@ -966,7 +1221,7 @@ private:
 
     // ---------- Starting and updating a voice ----------
 
-    void start(DrumVoice& v, const PadSettings& s) noexcept {
+    void start(DrumVoice& v, const PadSettings& s, double smpOffset = 0.0) noexcept {
         v.invSr = 1.0 / sr_;
         coefficients(v, s, true);
         if (v.body) {
@@ -1015,9 +1270,37 @@ private:
             v.smpLast = z;
             v.reverse = s.reverse;
             v.smpPos = s.reverse ? z : a;
+            if (smpOffset > 0.0) v.smpPos = s.reverse ? std::max(a, z - smpOffset) : std::min(z, a + smpOffset);
             v.smpPlaying = z > a;
             v.smpEnv.set(s.smpAttack, 0.0, s.smpDecay, 0.0, sr_);
+            if (s.smpHold > 0.0 || s.smpCurve != 0.0) v.smpEnv.set(s.smpAttack, s.smpHold, s.smpDecay, s.smpCurve, sr_);
             v.smpEnv.trigger();
+            if (s.smpPitch > 0.0) {
+                v.smpPEnv.set(0.0, 0.0, s.smpPTime, 0.0, sr_);
+                v.smpPEnv.start();
+            }
+        }
+        if (v.fm) {
+            v.fmEnv.trigger();
+            v.fmIEnv.start();
+            v.fmPEnv.start();
+            v.fmPhaseC = v.fmPhaseM = v.fmPrev = 0.0;
+        }
+        if (v.phys && v.physLine) {
+            const uint32_t clear = std::min<uint32_t>(v.physMax, static_cast<uint32_t>(v.physDelay) + 4);
+            for (uint32_t i = 0; i < clear; ++i) v.physLine[i] = 0.0f;
+            v.physW = 0;
+            v.physLp = v.physAp = v.physApIn = 0.0;
+            v.physExciteLength = s.physExciter == kPhysNoise ? static_cast<uint32_t>(0.01 * sr_)
+                                                            : std::max<uint32_t>(2, static_cast<uint32_t>(v.physDelay));
+            v.physExciteLeft = v.physExciteLength;
+            v.physPeak = 1.0;
+        } else {
+            v.phys = false;
+        }
+        if (v.tex) {
+            v.texEnv.trigger();
+            v.texGrain = 0.0;
         }
         v.fltEnvLevel = 1.0;
     }
@@ -1046,6 +1329,9 @@ private:
             v.metal = s.metalOn;
             v.res = s.resOn;
             v.smp = s.smpOn;
+            v.fm = s.fmOn;
+            v.phys = s.physOn;
+            v.tex = s.texOn;
         }
         if (v.body) {
             v.wave = s.wave;
@@ -1110,6 +1396,8 @@ private:
                 for (int k = 0; k < 3; ++k) v.pinkK[k] = 1.0 - lib::fastExp(-kTwoPi * corners[k] / sr);
                 v.brownK = 1.0 - lib::fastExp(-kTwoPi * 40.0 / sr);
                 v.wireK = 1.0 - lib::fastExp(-1.0 / (0.004 * sr));
+                v.shellDt = 190.0 / sr;
+                v.shellCoef = fall(0.35, sr);
             }
             v.crushEvery = std::max<uint32_t>(1, static_cast<uint32_t>(sr / f));
         }
@@ -1154,9 +1442,63 @@ private:
         if (v.smp) {
             v.smpStep = exp2d((s.smpTune + st) / 12.0);
             v.smpLevel = s.smpLevel;
-            v.smpEnv.coef = fall(s.smpDecay * decayMul, sr);
-            v.smpEnv.coefFast = v.smpEnv.coef;
+            if (s.smpHold > 0.0 || s.smpCurve != 0.0) {
+                v.smpEnv.set(s.smpAttack, s.smpHold, s.smpDecay * decayMul, s.smpCurve, sr);
+            } else {
+                v.smpEnv.coef = fall(s.smpDecay * decayMul, sr);
+                v.smpEnv.coefFast = v.smpEnv.coef;
+            }
+            v.smpDrop = s.smpPitch;
+            if (s.smpPitch > 0.0) v.smpPEnv.set(0.0, 0.0, s.smpPTime, 0.0, sr);
         }
+        if (v.fm) {
+            v.fmF = s.fmFreq * mul;
+            v.fmStartMul = exp2d(s.fmPitch * v.var.punch / 12.0);
+            v.fmRatio = s.fmRatio;
+            // Velocity to tone deepens the modulation: a harder hit is brighter.
+            v.fmDepth = s.fmIndex * exp2d(0.5 * toneOct) / kTwoPi;
+            v.fmFb = 0.3 * s.fmFb;
+            v.fmLevel = s.fmLevel;
+            v.fmEnv.set(s.fmAttack, 0.0, s.fmDecay * decayMul, s.fmCurve, sr);
+            v.fmIEnv.set(0.0, 0.0, s.fmIDecay * decayMul, 0.0, sr);
+            v.fmPEnv.set(0.0, 0.0, s.fmPTime, 0.0, sr);
+        }
+        if (v.phys) {
+            // The loop: a delay of one period (half of one, inverted, for a pipe: odd harmonics), a one-pole loss
+            // filter, the stiff string's all-pass; its gain falls 60 dB over the decay.
+            const double f = clampd(s.physFreq * mul, 20.0, 0.25 * sr);
+            const double period = sr / f * (s.physModel == kPhysPipe ? 0.5 : 1.0);
+            v.physDelay = clampd(period - (s.physModel == kPhysStiff ? 1.5 : 0.5), 2.0, static_cast<double>(v.physMax) - 3.0);
+            v.physSign = s.physModel == kPhysPipe ? -1.0 : 1.0;
+            const double damp = clampd(s.physDamp - 0.25 * toneOct, 0, 1);
+            v.physLpK = 1.0 - 0.95 * damp;  // the share of each new sample (1: no loss)
+            v.physApK = s.physModel == kPhysStiff ? -0.6 : 0.0;
+            v.physGain = lib::fastExp(-kSixtyDb * period / (s.physDecay * decayMul * sr));
+            v.physPickDelay = clampd(s.physPick * 0.5 * period, 0.0, v.physDelay);
+            v.physModel = s.physModel;
+            v.physExciter = s.physExciter;
+            v.physInput = s.physExciter == kPhysLayers ? s.physInput : 0.0;
+            v.physLevel = s.physLevel;
+        }
+        if (v.tex) {
+            v.texMode = s.texMode;
+            const double f = clampd(s.texFreq * exp2d(toneOct), 40, 0.45 * sr);
+            v.texLo.set(f, s.texQ, sr);
+            v.texHi.set(clampd(f * exp2d(s.texSpread), 40, 0.45 * sr), s.texQ, sr);
+            // Bands: the tilt shares the level between the two bands (an SVF's band peaks at q: unity at the centre).
+            v.texLoGain = (s.texMode == kTexBands ? 1.0 - 0.5 * (1.0 + s.texTilt) : 1.0) * 2.0 / s.texQ;
+            v.texHiGain = 0.5 * (1.0 + s.texTilt) * 2.0 / s.texQ;
+            v.texChance = clampd(s.texDensity / sr, 0, 1);
+            v.texGrainK = fall(0.002, sr);
+            // Sparse grains carry as much energy as dense ones: louder the sparser.
+            v.texScale = s.texMode == kTexBands ? 1.0 : std::min(8.0, std::sqrt(1.0 / std::max(v.texChance, 1e-6)) * 0.35);
+            v.texEnv.set(s.texAttack, 0.0, s.texDecay * decayMul, s.texCurve, sr);
+            v.texLevel = s.texLevel;
+        }
+        v.ringMix = s.ringMix;
+        if (s.ringMix > 0.0) v.ringDt = clampd(s.ringFreq * mul, 20, 0.45 * sr) / sr;
+        v.echoSend = s.echoSend;
+        v.busSend = s.busSend;
         // Effects.
         v.drive.set(s.driveType, s.driveType != kDriveOff && s.pressDrive > 0.0 ? s.drive * exp2d(3.0 * s.pressDrive * p)
                                                                                  : s.drive);
@@ -1348,9 +1690,17 @@ private:
             }
         } else {
             env = v.noiseEnv.next();
-            if (v.noiseMode == kNoiseSnappy && v.body) {
-                // The snares: the wires buzz while the shell moves them.
-                const double a = bodyRaw < 0.0 ? -bodyRaw : bodyRaw;
+            if (v.noiseMode == kNoiseSnappy) {
+                // The snares: the wires buzz while the shell moves them. With the body off, a shell of their own
+                // (190 Hz, falling 60 dB in 0.35 s) moves them, so Snappy is heard on a noise-only pad too.
+                double shell = bodyRaw;
+                if (!v.body) {
+                    shell = lib::fastSinCycles(v.shellPhase) * v.shellLevel;
+                    v.shellPhase += v.shellDt;
+                    v.shellPhase -= std::floor(v.shellPhase);
+                    v.shellLevel *= v.shellCoef;
+                }
+                const double a = shell < 0.0 ? -shell : shell;
                 v.wire += (a - v.wire) * v.wireK;
                 const double w = v.wire * 3.0;
                 env *= 0.35 + 0.65 * (w > 1.0 ? 1.0 : w);
@@ -1421,15 +1771,99 @@ private:
         const size_t last = v.sample->data.size() - 1;
         const double a = d[i], b = d[i < last ? i + 1 : last];
         const double y = (a + (b - a) * f) * v.smpEnv.next();
+        // The pitch drop (1.1.0): the step starts `smp_pitch` semitones higher and falls back over its time.
+        const double step = v.smpDrop > 0.0 ? v.smpStep * exp2d(v.smpDrop * v.smpPEnv.next() * (1.0 / 12.0)) : v.smpStep;
         if (v.reverse) {
-            v.smpPos -= v.smpStep;
+            v.smpPos -= step;
             if (v.smpPos <= v.smpFirst) v.smpPlaying = false;
         } else {
-            v.smpPos += v.smpStep;
+            v.smpPos += step;
             if (v.smpPos >= v.smpLast) v.smpPlaying = false;
         }
         if (!v.smpEnv.active()) v.smpPlaying = false;
         return y * v.smpLevel;
+    }
+
+    // FM (1.1.0): a sine carrier phase-modulated by a sine at `ratio` (with feedback), its depth falling on its own
+    // envelope, its pitch dropping from `fm_pitch` above as the body's does.
+    static double fmSample(DrumVoice& v) noexcept {
+        const double env = v.fmEnv.next();
+        if (env == 0.0) return 0.0;
+        const double f = v.fmF * (1.0 + (v.fmStartMul - 1.0) * v.fmPEnv.next());
+        const double dt = f * v.invSr;
+        const double m = lib::fastSinCycles(v.fmPhaseM + v.fmFb * v.fmPrev);
+        v.fmPrev = m;
+        const double y = lib::fastSinCycles(v.fmPhaseC + v.fmDepth * v.fmIEnv.next() * m);
+        v.fmPhaseC += dt;
+        v.fmPhaseC -= std::floor(v.fmPhaseC);
+        v.fmPhaseM += dt * v.fmRatio;
+        v.fmPhaseM -= std::floor(v.fmPhaseM);
+        return y * env * v.fmLevel;
+    }
+
+    // Physical (1.1.0): a Karplus-Strong waveguide. The exciter (a pluck: a falling noise burst one period long; a
+    // noise burst of 10 ms; or the other layers) is fed into a delay line of one period whose output, through a
+    // one-pole loss filter (and an all-pass for the stiff string), goes back in at the decay's gain. The output is
+    // read at the pick position too and the two subtracted (a comb: where it is plucked).
+    static double physSample(DrumVoice& v, double layers) noexcept {
+        double e = 0.0;
+        if (v.physExciteLeft) {
+            const double k = static_cast<double>(v.physExciteLeft--) / static_cast<double>(v.physExciteLength);
+            if (v.physExciter == kPhysPluck) e = v.rng.next() * k;
+            else if (v.physExciter == kPhysNoise) e = v.rng.next() * 0.5 * k;
+        }
+        e += v.physInput * layers;
+        const uint32_t mask = v.physMax;  // the line wraps at physMax
+        auto tap = [&](double d) noexcept {
+            double r = static_cast<double>(v.physW) - d;
+            while (r < 0.0) r += mask;
+            const uint32_t i = static_cast<uint32_t>(r);
+            const double f = r - i;
+            const uint32_t j = i + 1 < mask ? i + 1 : 0;
+            return v.physLine[i] + (v.physLine[j] - v.physLine[i]) * f;
+        };
+        const double y = tap(v.physDelay);
+        v.physLp += (y - v.physLp) * v.physLpK;
+        double fb = v.physLp;
+        if (v.physApK != 0.0) {  // a first-order all-pass: the stiff string's dispersion
+            const double out = v.physApK * fb + v.physApIn - v.physApK * v.physAp;
+            v.physApIn = fb;
+            v.physAp = out;
+            fb = out;
+        }
+        v.physLine[v.physW] = static_cast<float>(e + v.physSign * v.physGain * fb);
+        if (++v.physW >= mask) v.physW = 0;
+        const double out = v.physPickDelay > 0.5 ? y - tap(v.physPickDelay) * 0.5 : y;
+        const double a = out < 0.0 ? -out : out;
+        if (a > v.physPeak) v.physPeak = a;
+        return out * v.physLevel;
+    }
+
+    // Texture (1.1.0): shaped noise. Bands: white noise through two resonant band-passes `spread` octaves apart,
+    // the tilt sharing the level. Dust: sparse impulses (`density` a second) through the lower band. Crackle: sparse
+    // 2 ms grains of noise of random loudness through it.
+    static double texSample(DrumVoice& v) noexcept {
+        const double env = v.texEnv.next();
+        if (env == 0.0) return 0.0;
+        const double w = v.rng.next();
+        double y;
+        switch (v.texMode) {
+            case kTexDust: {
+                const double u = 0.5 * (v.rng.next() + 1.0);
+                const double x = u < v.texChance ? (w < 0.0 ? -1.0 : 1.0) : 0.0;
+                y = v.texLo.bandpass(x) * v.texLoGain * v.texScale;
+                break;
+            }
+            case kTexCrackle: {
+                const double u = 0.5 * (v.rng.next() + 1.0);
+                if (u < v.texChance) v.texGrain = 1.0, v.texGrainAmp = w * w;
+                v.texGrain *= v.texGrainK;
+                y = v.texLo.bandpass(v.rng.next() * v.texGrain * v.texGrainAmp) * v.texLoGain * v.texScale;
+                break;
+            }
+            default: y = v.texLo.bandpass(w) * v.texLoGain + v.texHi.bandpass(w) * v.texHiGain; break;
+        }
+        return y * env * v.texLevel;
     }
 
     CAW_DRUMS_INLINE double voiceSample(DrumVoice& v) noexcept {
@@ -1442,6 +1876,8 @@ private:
         if (v.noise) layers += noiseSample(v, bodyRaw);
         if (v.metal) layers += metalSample(v);
         if (v.smp) layers += sampleSample(v);
+        if (v.fm) layers += fmSample(v);
+        if (v.tex) layers += texSample(v);
         double subY = 0.0;
         if (v.sub) {
             subY = subSample(v);
@@ -1461,6 +1897,7 @@ private:
             }
             y += v.modal.process(excite, v.resInput * layers) * v.resLevel;
         }
+        if (v.phys) y += physSample(v, layers);
         // Effects.
         const int os = v.quality == kQualityEco ? 1 : (v.quality == kQualityHigh ? 4 : 2);
         if (!v.drivePost) y = driveStage(v, y, os);
@@ -1472,6 +1909,11 @@ private:
             default: break;
         }
         if (v.drivePost) y = driveStage(v, y, os);
+        if (v.ringMix > 0.0) {  // the ring modulator (1.1.0)
+            y += (y * lib::fastSinCycles(v.ringPhase) - y) * v.ringMix;
+            v.ringPhase += v.ringDt;
+            v.ringPhase -= std::floor(v.ringPhase);
+        }
         if (v.eq) y = v.eqHigh.process(v.eqMid.process(v.eqLow.process(y)));
         if (v.shaper) {
             const double a = y < 0.0 ? -y : y;
@@ -1514,6 +1956,35 @@ private:
         return y;
     }
 
+    // ---------- The echo (1.1.0) ----------
+
+    void clearEcho() noexcept {
+        std::fill(echoL_.begin(), echoL_.end(), 0.0f);
+        std::fill(echoR_.begin(), echoR_.end(), 0.0f);
+        echoLpL_ = echoLpR_ = 0.0;
+        echoW_ = 0;
+        echoQuiet_ = 0;
+        echoOn_ = false;
+    }
+    void echo(double in, double& outL, double& outR) noexcept {
+        const uint32_t size = static_cast<uint32_t>(echoL_.size());
+        echoDelay_ += clampd(echoTarget_ - echoDelay_, -0.5, 0.5);  // a time change glides (a tape's pitch bend)
+        double r = static_cast<double>(echoW_) - echoDelay_;
+        if (r < 0.0) r += size;
+        const uint32_t i = static_cast<uint32_t>(r);
+        const double f = r - i;
+        const uint32_t j = i + 1 < size ? i + 1 : 0;
+        const double dl = echoL_[i] + (echoL_[j] - echoL_[i]) * f, dr = echoR_[i] + (echoR_[j] - echoR_[i]) * f;
+        echoLpL_ += (dl - echoLpL_) * echoK_;
+        echoLpR_ += (dr - echoLpR_) * echoK_;
+        const double s = echoSpread_, keep = 1.0 - s;
+        echoL_[echoW_] = static_cast<float>(in + echoFb_ * (keep * echoLpL_ + s * echoLpR_));
+        echoR_[echoW_] = static_cast<float>(in * keep + echoFb_ * (keep * echoLpR_ + s * echoLpL_));
+        if (++echoW_ >= size) echoW_ = 0;
+        outL = echoLpL_;  // every repeat through the tone, the first too
+        outR = echoLpR_;
+    }
+
     // The clippers' last word: the oversampled curve's ripple (a few per cent) never passes full scale.
     static double ceiling(double x) noexcept { return x > 1.0 ? 1.0 : (x < -1.0 ? -1.0 : x); }
 
@@ -1546,6 +2017,7 @@ private:
                 v.active = false;
                 continue;
             }
+            v.physPeak = 0.0;  // the waveguide's loudest since this control: it ends once that is below -94 dB
             coefficients(v, settings_[pad], false);
         }
         prune();
@@ -1586,13 +2058,34 @@ private:
             roomOn_ = false;
         }
         roomMix_ = room;
+        // The echo (1.1.0): a send bus as the room is; its time free or a note value at the transport's tempo.
+        const double echo = clampd(parameterAt(b, kEcho, at, 0), 0, 1);
+        if (echo > 0.0 && !echoL_.empty()) {
+            const int sync = clampi(parameterAt(b, kEchoSync, at, kEcho8Dotted), 0, kEcho8Triplet);
+            static constexpr double kBeats[] = {0.0, 0.25, 0.5, 0.75, 1.0, 1.0 / 3.0};
+            const double tempo = b.transport && b.transport->tempo > 0.0 ? clampd(b.transport->tempo, 20, 999) : 120.0;
+            const double seconds = sync == kEchoFree ? clampd(parameterAt(b, kEchoTime, at, 0.375), 0.01, 2)
+                                                     : kBeats[sync] * 60.0 / tempo;
+            echoTarget_ = clampd(seconds * sr_, 1.0, static_cast<double>(echoL_.size()) - 4.0);
+            if (!echoOn_) echoDelay_ = echoTarget_;
+            echoFb_ = clampd(parameterAt(b, kEchoFeedback, at, 0.35), 0, 0.95);
+            echoSpread_ = clampd(parameterAt(b, kEchoSpread, at, 0.6), 0, 1);
+            const double tone = clampd(parameterAt(b, kEchoTone, at, 5000), 500, std::min(16000.0, 0.45 * sr_));
+            echoK_ = 1.0 - lib::fastExp(-kTwoPi * tone / sr_);
+            echoOn_ = true;
+        } else if (echoOn_) {
+            clearEcho();  // turned off: its tail stops
+        }
+        echoMix_ = echo;
         // Nothing sounding and the room's tail below -100 dB for half a second: every state goes to exact zero and
         // the instrument says it is quiet (the host may skip it until the next note).
-        if (live_ == 0 && !settled_ && (!roomOn_ || roomQuiet_ >= static_cast<uint32_t>(sr_ * 0.5))) {
+        if (live_ == 0 && !settled_ && (!roomOn_ || roomQuiet_ >= static_cast<uint32_t>(sr_ * 0.5)) &&
+            (!echoOn_ || echoQuiet_ >= static_cast<uint32_t>(sr_ * 0.5)) && pending_ == 0) {
             glue_.clear();
             kitDriveL_.clear();
             kitDriveR_.clear();
             if (roomOn_) room_.clear();
+            if (echoOn_) clearEcho(), echoOn_ = true;
             settled_ = true;
         }
         volume_ = dbGain(parameterAt(b, kVolume, at, 0));
@@ -1619,8 +2112,11 @@ private:
     void renderChunk(float* left, float* right, uint32_t n, uint32_t at) noexcept {
         double busL[kOutputs][kControlFrames], busR[kOutputs][kControlFrames], send[kControlFrames];
         double laneL[kControlFrames], laneR[kControlFrames];  // a hit with a voice-bus lane (#127), before the lane
+        // 1.1.0: the echo's send, and what skips the kit bus (glue and kit drive: each pad's 1 - bus_send)
+        double echoIn[kControlFrames], skipL[kControlFrames], skipR[kControlFrames];
+        bool skipping = false;
         uint32_t used = 1;  // buses 0..used-1 written
-        for (uint32_t i = 0; i < n; ++i) busL[0][i] = busR[0][i] = send[i] = 0.0;
+        for (uint32_t i = 0; i < n; ++i) busL[0][i] = busR[0][i] = send[i] = echoIn[i] = skipL[i] = skipR[i] = 0.0;
         if (lanes_.any()) lanes_.begin(at, n);
         for (uint32_t i = 0; i < live_; ++i) {
             DrumVoice& v = voices_[list_[i]];
@@ -1644,7 +2140,9 @@ private:
             }
             float peak = padLevel_[pad];
             const bool toRoom = roomOn_ && v.roomSend > 0.0;
-            if (!toRoom && !v.sub && !v.wide) {  // the plain voice: mono, panned, no send
+            const bool toEcho = echoOn_ && v.echoSend > 0.0;
+            const bool skip = v.busSend < 1.0 && out == 0 && !lane;
+            if (!toRoom && !v.sub && !v.wide && !toEcho && !skip) {  // the plain voice: mono, panned, no send
                 for (uint32_t k = 0; k < n; ++k) {
                     const double y = voiceSample(v);
                     dl[k] += y * v.gainL;
@@ -1657,13 +2155,26 @@ private:
                 if (lane) toLane(*lane, laneL, laneR, at, n);
                 continue;
             }
+            double* sl = skip ? skipL : dl;  // the share that skips the kit bus
+            double* sr = skip ? skipR : dr;
+            const double through = skip ? v.busSend : 1.0, past = 1.0 - v.busSend;
+            skipping = skipping || skip;
             for (uint32_t k = 0; k < n; ++k) {
                 const double y = voiceSample(v);
                 // Pan the voice; a clean sub goes to both sides whole (mono), the side signal opposite ways.
                 const double c = v.subOut * v.gainMid, w = v.wide ? v.side : 0.0;
-                dl[k] += y * v.gainL + c + w;
-                dr[k] += y * v.gainR + c - w;
+                const double l = y * v.gainL + c + w, r = y * v.gainR + c - w;
+                if (skip) {
+                    dl[k] += l * through;
+                    dr[k] += r * through;
+                    sl[k] += l * past;
+                    sr[k] += r * past;
+                } else {
+                    dl[k] += l;
+                    dr[k] += r;
+                }
                 if (toRoom) send[k] += y * v.gainMid * v.roomSend;  // the room hears the voice, not its sub
+                if (toEcho) echoIn[k] += y * v.gainMid * v.echoSend;
                 const double all = y + v.subOut;
                 const float a = static_cast<float>(all < 0.0 ? -all : all);
                 if (a > peak) peak = a;
@@ -1705,6 +2216,7 @@ private:
                 l += (kitDriveL_.process(l, os) - l) * kitDriveMix_;
                 r += (kitDriveR_.process(r, os) - r) * kitDriveMix_;
             }
+            if (skipping) l += skipL[k], r += skipR[k];
             if (kitEq_) {
                 l = kitHighL_.process(kitLowL_.process(l));
                 r = kitHighR_.process(kitLowR_.process(r));
@@ -1715,6 +2227,13 @@ private:
                 l += wl * roomMix_;
                 r += wr * roomMix_;
                 if (live_ == 0) roomQuiet_ = std::fabs(wl) + std::fabs(wr) < 1e-5f ? roomQuiet_ + 1 : 0;
+            }
+            if (echoOn_) {  // the echo: a stereo delay, its feedback low-passed and crossed by `spread` (ping-pong)
+                double el, er;
+                echo(echoIn[k], el, er);
+                l += el * echoMix_;
+                r += er * echoMix_;
+                if (live_ == 0) echoQuiet_ = std::fabs(el) + std::fabs(er) < 1e-5 ? echoQuiet_ + 1 : 0;
             }
             if (kitClip_ != 0) {
                 const int q = qualityNow(quality_);
@@ -1912,6 +2431,24 @@ private:
     uint32_t notesSeen_ = 0;
     lib::Reverb room_;
     bool roomOn_ = false, settled_ = true;
+    // 1.1.0: the waveguides' lines, the echo, and the hits groove holds back (swing, humanize, flam)
+    std::vector<float> physPool_;
+    uint32_t physMax_ = 0;
+    std::vector<float> echoL_, echoR_;
+    uint32_t echoW_ = 0, echoQuiet_ = 0;
+    double echoDelay_ = 1, echoTarget_ = 1, echoFb_ = 0.35, echoSpread_ = 0.6, echoK_ = 0.5, echoLpL_ = 0, echoLpR_ = 0,
+           echoMix_ = 0;
+    bool echoOn_ = false;
+    struct Pending {
+        uint64_t due = 0;
+        uint32_t pad = 0;
+        NoteMessage m;
+        double accent = 0;
+        bool grace = false, released = false;
+    };
+    static constexpr uint32_t kPendingMax = 128;
+    Pending pendingHits_[kPendingMax];
+    uint32_t pending_ = 0;
     VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
     struct LaneOut {
         uint32_t noteId = 0;
@@ -1984,6 +2521,8 @@ bool drums::renderVoice(const Voice& voice, double sampleRate, double seconds, s
     values[padParam(0, kSmpOn)].value = 0.0;
     values[padParam(0, kPan)].value = 0.0;
     values[padParam(0, kRndPan)].value = 0.0;
+    values[padParam(0, kFlam)].value = 0.0;  // a one-shot of the sound itself: no grace hit, no lateness
+    values[padParam(0, kHumanize)].value = 0.0;
     const uint32_t most = static_cast<uint32_t>(seconds * sampleRate);
     out.clear();
     out.reserve(most);
