@@ -40,10 +40,13 @@ class DeviceFooter extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(10, 2, 6, 2),
       decoration: BoxDecoration(border: Border(top: BorderSide(color: scope.accent.withValues(alpha: 0.18)))),
       child: Row(children: [
-        // The meter takes the room left, up to 320 dp (a wide screen's footer would stretch it across).
-        if (DeviceSlotAudio.meterFor(t)) Flexible(flex: 4, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 320),
-          child: SlotMeter(target: t, color: scope.accent))),
-        const Spacer(),
+        // The meter takes the room left, up to 320 dp at the left (a wide screen's footer would stretch it across);
+        // Mix and Output stay at the right.
+        Expanded(child: DeviceSlotAudio.meterFor(t)
+            ? Align(alignment: Alignment.centerLeft, child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: SlotMeter(target: t, color: scope.accent)))
+            : const SizedBox.shrink()),
         if (mix != null) FooterKnob(param: mix, label: 'MIX'),
         if (out != null) FooterKnob(param: out, label: 'OUT'),
       ]),
