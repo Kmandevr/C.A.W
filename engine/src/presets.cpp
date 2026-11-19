@@ -2,6 +2,7 @@
 #include "presets.h"
 #include "builtin_fx_tools.h"
 #include "builtin_fx_voice.h"
+#include "builtin_pack.h"
 #include "midi_fx.h"
 
 #include <cmath>
@@ -277,6 +278,7 @@ const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId
     if (const auto* p = midifx::presets(componentId)) return *p;  // MIDI effects (1.1.0)
     if (const auto* p = fx::toolsPresets(componentId)) return *p;  // Meters, Lo-fi, Phase align (1.1.0)
     if (const auto* p = fx::voicePresets(componentId)) return *p;  // Glint, Mimic (1.1.0)
+    if (const auto* p = fx::packPresets(componentId)) return *p;  // the AutoStacc beta pack (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
     if (componentId == kDrumsId) return drumsPresets();
