@@ -7,6 +7,9 @@
 #include "builtin_fx_voice.h"
 #include "component_chain.h"
 #include "caw/instrument.hpp"
+#include "engine.h"
+#include "project.h"
+#include "test_signal.h"
 #include "fx_modes_harness.h"
 #include "tolerance.h"
 
@@ -291,6 +294,32 @@ TEST(mimic_plays_the_key_tracks_notes_and_can_take_its_audio) {
         CHECK(peak(quiet.l) < 1e-6);
         CHECK(p->quiet());
     }
+}
+
+// Through the engine: the key track's pattern reaches Mimic as note-ons and note-offs (Engine::keyNotes), so the
+// built-in carrier plays the key's note while it is held and falls back to its drone (`note`, C3) after its end,
+// not holding it until the next note-on.
+TEST(mimic_lets_the_key_tracks_note_go_at_its_end) {
+    ProjectSpec p = cawtest::testSignalProject({}, 120, 1);  // a 2 s loop
+    p.modules.push_back({"k", "---\nkind: pattern\nlength: 16\n---\n0 A3 4 1\n"});  // A3 for 0.5 s
+    LayerSpec key = cawtest::testSignalNotesLayer("key", cawtest::Shape::Sine, "k");
+    key.volume = 0.0;  // only its notes matter
+    ComponentSpec mimic;
+    mimic.id = "org.caw.vocoder";
+    mimic.params = {{"sibilance", 0.0}};
+    mimic.hasKey = true;
+    mimic.key.layer = "key";
+    p.layers = {key, cawtest::testSignalLayer("voice", cawtest::Shape::Noise, {{"level", 0.3}}, {mimic})};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(96000), r(96000);
+    for (size_t i = 0; i < l.size(); i += 64) e.process(l.data() + i, r.data() + i, 64);
+    // Held (0.1-0.45 s): A3 (220 Hz), not the drone.
+    CHECK(near(l, 220, 4800, 21600) > 3 * near(l, 130.8, 4800, 21600));
+    // After its end (0.9-1.9 s): the drone again.
+    CHECK(near(l, 130.8, 43200, 91200) > 3 * near(l, 220, 43200, 91200));
 }
 
 TEST(mimic_block_sizes_and_bad_input) {
