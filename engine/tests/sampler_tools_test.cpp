@@ -11,6 +11,7 @@
 #include "caw.h"
 #include "engine.h"
 #include "json.h"
+#include "presets.h"
 #include "sampler_tools.h"
 #include "test.h"
 #include "utf8_path.h"
@@ -343,5 +344,37 @@ TEST(sampler_stretched_zone_is_block_size_independent_and_finite) {
             worst = std::max(worst, static_cast<double>(std::fabs(x[i] - ref[i])));
         }
         CHECK(worst < 1e-4);
+    }
+}
+
+TEST(sampler_presets_set_playback_envelope_and_filter_and_play) {
+    // 1.1.0: 8 job-named presets (no sample paths: they set only knobs); each plays a zone finite and audible.
+    const std::string dir = tempDir("presets");
+    const std::string a3 = tone(dir + "/a3.wav", 220.0, 1.0);
+    const std::string state = "{\"zones\":[{\"path\":\"" + a3 + "\",\"pitch_keycenter\":57}]}";
+    const auto& presets = builtinPresets("org.caw.sampler");
+    CHECK(presets.size() >= 8u);
+    for (const BuiltinPreset& p : presets) {
+        CHECK(!p.description.empty());
+        std::string params;
+        for (const auto& [k, v] : p.values) {
+            CHECK(k.find("path") == std::string_view::npos);
+            params += (params.empty() ? "\"" : ",\"") + std::string(k) + "\":" + std::to_string(v);
+        }
+        const std::string pattern = "---\\nkind: pattern\\nlength: 64\\n---\\n0 57 4 1\\n";
+        const std::string json = "{\"caw_project\":1,\"bpm\":120,\"loop_bars\":4,\"master\":1,\"modules\":[{\"id\":\"p\",\"source\":\"" +
+            pattern + "\"}],\"layers\":[{\"id\":\"s\",\"name\":\"S\",\"volume\":1,\"pattern\":\"p\",\"instrument\":{\"id\":\"org.caw.sampler\","
+            "\"params\":{" + params + "},\"state\":\"" + b64(state) + "\"}}]}";
+        Engine e(48000);
+        e.setMasterBypass(true);
+        CHECK(e.setProjectJson(json).find("\"ok\":true") != std::string::npos);
+        e.play(0);
+        std::vector<float> l(48000), r(48000);
+        for (size_t i = 0; i < l.size(); i += 512) e.process(l.data() + i, r.data() + i, static_cast<int>(std::min<size_t>(512, l.size() - i)));
+        double sum = 0;
+        bool finite = true;
+        for (float x : l) finite &= std::isfinite(x) && std::fabs(x) < 4.0f, sum += double(x) * x;
+        const double level = std::sqrt(sum / l.size());
+        if (!finite || !(level > 1e-3)) cawtest::fail(__FILE__, __LINE__, std::string(p.name) + ": level " + std::to_string(level));
     }
 }

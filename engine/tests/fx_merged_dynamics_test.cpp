@@ -404,8 +404,16 @@ TEST(merged_dynamics_resolves_the_old_presets_under_its_id_with_equal_values) {
         CHECK(marked);
     }
     CHECK(fresh >= 16u);
-    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor] + fresh);
-    CHECK(builtinPresets(kLimiter).empty() && builtinPresets(kTransient).empty());
+    // ... and last 1.1.0's appended ones (Down's; the Limiter's and Transient's, which had none), as they are.
+    const size_t downs = fx::appendedVariantPresets(kCompressor).size();
+    CHECK(downs >= 8u);
+    CHECK_EQ(builtinPresets(kCompressor).size(), total[kCompressor] + fresh + downs);
+    for (size_t k = 0; k < downs; ++k)
+        CHECK(builtinPresets(kCompressor)[total[kCompressor] + fresh + k].name == fx::appendedVariantPresets(kCompressor)[k].name);
+    for (const char* id : {kLimiter, kTransient}) {
+        CHECK(builtinPresets(id).size() == fx::appendedVariantPresets(id).size() && builtinPresets(id).size() >= 8u);
+        for (const BuiltinPreset& p : builtinPresets(id)) CHECK_EQ(valueOf(Values(p.values.begin(), p.values.end()), "variant"), 0.0);
+    }
 }
 
 TEST(a_saved_project_with_the_old_dynamics_ids_lanes_and_a_rack_plays_the_merged_devices_the_same) {

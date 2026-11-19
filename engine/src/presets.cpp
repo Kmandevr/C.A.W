@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <map>
+#include <span>
 
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
@@ -284,7 +286,33 @@ const std::vector<BuiltinPreset>* fxDynamicsPresets(std::string_view id);  // bu
 const std::vector<BuiltinPreset>* creativeBuiltinPresets(std::string_view id);
 // fx-creative end
 
+// 1.1.0's presets appended to the devices that had fewer than 8 (builtin_more_presets.cpp).
+const std::vector<BuiltinPreset>* appendedPresets(std::string_view id);
+std::span<const std::string_view> appendedPresetIds();
+
+namespace {
+const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId);
+}  // namespace
+
 const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId) {
+    // A device with appended presets: its table's list, then the new ones (built once, on first use).
+    static const std::map<std::string, std::vector<BuiltinPreset>, std::less<>> joined = [] {
+        std::map<std::string, std::vector<BuiltinPreset>, std::less<>> m;
+        for (std::string_view id : appendedPresetIds()) {
+            std::vector<BuiltinPreset> v = tablePresets(id);
+            const auto* more = appendedPresets(id);
+            if (more) v.insert(v.end(), more->begin(), more->end());
+            m.emplace(std::string(id), std::move(v));
+        }
+        return m;
+    }();
+    if (const auto it = joined.find(componentId); it != joined.end()) return it->second;
+    return tablePresets(componentId);
+}
+
+namespace {
+
+const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId) {
     if (const auto* p = fxDynamicsPresets(componentId)) return *p;  // fx-dynamics
     if (const auto* p = midifx::presets(componentId)) return *p;  // MIDI effects (1.1.0)
     if (const auto* p = fx::toolsPresets(componentId)) return *p;  // Meters, Lo-fi, Phase align (1.1.0)
@@ -308,6 +336,8 @@ const std::vector<BuiltinPreset>& ownBuiltinPresets(std::string_view componentId
     // fx-racks end
     return kNone;
 }
+
+}  // namespace
 
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     // A merged device (fx_merged.h): its own presets (an id it reuses) and its old effects', migrated.

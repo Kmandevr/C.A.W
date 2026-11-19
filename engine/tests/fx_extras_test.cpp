@@ -200,6 +200,50 @@ TEST(armed_preen_and_pitch_fix_use_their_monitoring_windows) {
     }
 }
 
+TEST(armed_talon_up_drops_its_look_ahead_and_its_latency_follows) {
+    // Up (org.caw.compressor variant 2) at 5 ms of look-ahead: 240 frames at 48 kHz, none while armed, as Duck's Level.
+    const Values values = {{"variant", 2}, {"lookahead", 5}};
+    for (bool arm : {false, true}) {
+        auto p = make("org.caw.compressor", values);
+        auto* a = p ? dynamic_cast<ArmedVersion*>(p.get()) : nullptr;
+        auto* v = p ? dynamic_cast<VariableLatency*>(p.get()) : nullptr;
+        CHECK(a && v);
+        if (!a || !v) continue;
+        std::vector<double> held(p->descriptor().parameterCount);
+        for (uint32_t k = 0; k < held.size(); ++k) held[k] = p->descriptor().parameters[k].defaultValue;
+        for (const auto& [pid, x] : values) held[static_cast<size_t>(paramIndex(p->descriptor(), pid.c_str()))] = x;
+        a->setArmed(arm);
+        CHECK_EQ(v->latencyFor(held.data(), static_cast<uint32_t>(held.size())), arm ? 0u : 240u);
+        CHECK(a->armedDiffers(held.data(), static_cast<uint32_t>(held.size())));
+        held[static_cast<size_t>(paramIndex(p->descriptor(), "lookahead"))] = 0;
+        CHECK(!a->armedDiffers(held.data(), static_cast<uint32_t>(held.size())));  // no look-ahead: no badge
+        // A click comes out where the reported latency says, at every block size.
+        for (uint32_t block : {1u, 37u, 64u, 512u}) {
+            p->reset();
+            const Stereo out = run(*p, click(4800, 1000), values, block);
+            CHECK(finite(out));
+            size_t at = 0;
+            for (size_t i = 0; i < out.l.size(); ++i)
+                if (std::fabs(out.l[i]) > std::fabs(out.l[at])) at = i;
+            CHECK_EQ(at, arm ? size_t{1000} : size_t{1240});
+        }
+    }
+    // Through the Engine: the chain compensates for it, and the badge shows.
+    Engine e(48000);
+    const std::string c = "{\"id\":\"org.caw.compressor\",\"params\":{\"variant\":2,\"lookahead\":5,\"talon_layout\":1}}";
+    const std::string loaded = e.setProjectJson(project(false, c));
+    if (loaded.find("\"ok\":true") == std::string::npos) cawtest::fail(__FILE__, __LINE__, loaded);
+    CHECK_EQ(e.layerLatency("t"), 240);
+    CHECK(e.setProjectJson(project(true, c)).find("\"ok\":true") != std::string::npos);
+    CHECK_EQ(e.layerLatency("t"), 0);
+    double share = 0;
+    uint32_t latency = 9;
+    bool armed = false;
+    CHECK_EQ(e.componentCost("t", 0, share, latency, armed), 1);
+    CHECK_EQ(latency, 0u);
+    CHECK(armed);
+}
+
 // ---------------------------------------------------------------- the sidechain filter
 
 namespace {

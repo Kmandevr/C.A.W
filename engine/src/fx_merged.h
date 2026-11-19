@@ -49,6 +49,9 @@ std::span<const MergedDevice> mergedSpaceDevices();     // builtin_fx_merged_spa
 // Presets of a merged device's variants that are new DSP (no old effect to migrate them from), appended after its
 // old effects' (fx::mergedPresets): the Compressor's Duck (builtin_fx_duck.cpp). Each names its `variant`.
 std::span<const BuiltinPreset> newVariantPresets(std::string_view id);
+// 1.1.0's presets for variants that had fewer than 8 (the Compressor's Down, the Limiter, Transient, Phaser;
+// builtin_more_presets.cpp), appended last. Each names its `variant`.
+std::span<const BuiltinPreset> appendedVariantPresets(std::string_view id);
 // The same for the EQ's and the Filter's 1.1.0 modes (Bands' dynamics, Linear, Match; Wah): builtin_fx_eq_plume.cpp.
 std::span<const BuiltinPreset> newEqFilterVariantPresets(std::string_view id);
 
