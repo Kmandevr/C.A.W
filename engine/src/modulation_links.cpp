@@ -72,6 +72,26 @@ std::vector<size_t> modulatorOrder(const ProjectSpec& p) {
 // ---------------------------------------------------------------------------------------------------------------
 // Project JSON
 
+std::vector<std::string> modulationCostWarnings(const ProjectSpec& p) {
+    std::vector<std::string> out;
+    if (p.modulators.size() > static_cast<size_t>(kCpuModulators))
+        out.push_back(std::to_string(p.modulators.size()) + " modulators (more than " + std::to_string(kCpuModulators) +
+                      ") cost much CPU");
+    if (p.modulation.size() > static_cast<size_t>(kCpuModLinks))
+        out.push_back(std::to_string(p.modulation.size()) + " modulation links (more than " + std::to_string(kCpuModLinks) +
+                      ") cost much CPU");
+    std::map<std::string, int> perTarget;
+    int most = 0;
+    for (const ModLinkSpec& l : p.modulation) {
+        const std::string key = l.target.type + "\x1f" + l.target.layer + "\x1f" + std::to_string(l.target.index) + "\x1f" + l.target.param;
+        most = std::max(most, ++perTarget[key]);
+    }
+    if (most > kCpuLinksPerTarget)
+        out.push_back("a target takes " + std::to_string(most) + " links (more than " + std::to_string(kCpuLinksPerTarget) +
+                      "), which cost much CPU");
+    return out;
+}
+
 bool parseModulation(const Json& root, const ComponentEntryParser& entry, ProjectSpec& out, std::string& error) {
     out.modulators.clear();
     out.modulation.clear();
@@ -81,7 +101,7 @@ bool parseModulation(const Json& root, const ComponentEntryParser& entry, Projec
             return false;
         }
         if (mods->arr.size() > static_cast<size_t>(kMaxModulators)) {
-            error = "a project holds at most " + std::to_string(kMaxModulators) + " modulators";
+            error = "a project holds at most " + std::to_string(kMaxModulators) + " modulators (a safety bound against untrusted files)";
             return false;
         }
         std::set<std::string> ids;
@@ -127,7 +147,7 @@ bool parseModulation(const Json& root, const ComponentEntryParser& entry, Projec
             return false;
         }
         if (links->arr.size() > static_cast<size_t>(kMaxModLinks)) {
-            error = "a project holds at most " + std::to_string(kMaxModLinks) + " modulation links";
+            error = "a project holds at most " + std::to_string(kMaxModLinks) + " modulation links (a safety bound against untrusted files)";
             return false;
         }
         std::set<uint32_t> ids;
@@ -217,7 +237,7 @@ bool parseModulation(const Json& root, const ComponentEntryParser& entry, Projec
             l.curve = std::isfinite(curve) ? std::clamp(curve, -1.0, 1.0) : 0.0;
             const std::string key = type + "\x1f" + l.target.layer + "\x1f" + std::to_string(l.target.index) + "\x1f" + l.target.param;
             if (++perTarget[key] > kMaxLinksPerTarget) {
-                error = who + ": a target takes at most " + std::to_string(kMaxLinksPerTarget) + " links";
+                error = who + ": a target takes at most " + std::to_string(kMaxLinksPerTarget) + " links (a safety bound against untrusted files)";
                 return false;
             }
             out.modulation.push_back(std::move(l));
@@ -356,8 +376,10 @@ std::vector<NoteLink> noteLinksFor(const ProjectSpec& p, const std::string& laye
         return a.id < b.id;
     });
     if (out.size() > static_cast<size_t>(kMaxNoteLinks)) {
-        warnings.push_back("'" + layer + "': per-note FX take at most " + std::to_string(kMaxNoteLinks) + " note-source links");
+        warnings.push_back("'" + layer + "': per-note FX take at most " + std::to_string(kMaxNoteLinks) + " note-source links (a safety bound)");
         out.resize(static_cast<size_t>(kMaxNoteLinks));
+    } else if (out.size() > static_cast<size_t>(kCpuNoteLinks)) {
+        warnings.push_back("'" + layer + "': " + std::to_string(out.size()) + " note-source links run for every voice and cost much CPU");
     }
     return out;
 }

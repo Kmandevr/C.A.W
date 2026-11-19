@@ -92,22 +92,36 @@ public:
                     stage_ = 2;
                 }
                 break;
-            case 2:
-                level_ = sustain_ + (level_ - sustain_) * decayCoef_;
-                // Within 1e-9 of the sustain level it is there: a held note at sustain 0 doesn't decay into
-                // denormal numbers (slow on many CPUs).
-                if (level_ - sustain_ < 1e-9 && sustain_ - level_ < 1e-9) level_ = sustain_;
-                break;
-            case 3:
-                level_ *= releaseCoef_;
-                if (level_ < 1e-6) {
-                    level_ = 0.0;
-                    stage_ = 0;
-                }
-                break;
+            case 2: decayStep(); break;
+            case 3: releaseStep(); break;
             default: break;
         }
         return level_;
+    }
+    // n next() calls' levels into out: the same values, with the stage worked out once per stretch instead of
+    // per sample (a held note at its sustain level is a fill).
+    void run(double* out, uint32_t n) noexcept {
+        uint32_t i = 0;
+        while (i < n) {
+            switch (stage_) {
+                case 1:  // attack: next() until it reaches 1 (then the decay goes on from the next sample)
+                    while (i < n && stage_ == 1) out[i++] = next();
+                    break;
+                case 2:
+                    if (level_ == sustain_) {  // there: next() gives sustain_ every sample (sustain_ + 0 * coef)
+                        for (; i < n; ++i) out[i] = level_;
+                        break;
+                    }
+                    for (; i < n && level_ != sustain_; ++i) decayStep(), out[i] = level_;
+                    break;
+                case 3:
+                    for (; i < n && stage_ == 3; ++i) releaseStep(), out[i] = level_;
+                    break;
+                default:  // idle: next() leaves the level as it is
+                    for (; i < n; ++i) out[i] = level_;
+                    break;
+            }
+        }
     }
     // Moves the envelope on n samples at once and returns the level it ends at: what n next() calls give,
     // within rounding, for a few multiplies (for a renderer that steps the level linearly over a short
@@ -151,6 +165,20 @@ public:
     }
 
 private:
+    // One sample of the decay (toward the sustain level) and of the release: next()'s and run()'s, one copy.
+    void decayStep() noexcept {
+        level_ = sustain_ + (level_ - sustain_) * decayCoef_;
+        // Within 1e-9 of the sustain level it is there: a held note at sustain 0 doesn't decay into
+        // denormal numbers (slow on many CPUs).
+        if (level_ - sustain_ < 1e-9 && sustain_ - level_ < 1e-9) level_ = sustain_;
+    }
+    void releaseStep() noexcept {
+        level_ *= releaseCoef_;
+        if (level_ < 1e-6) {
+            level_ = 0.0;
+            stage_ = 0;
+        }
+    }
     static double power(double c, uint32_t n) noexcept {  // c^n by squaring
         double r = 1.0;
         for (; n > 0; n >>= 1, c *= c)

@@ -24,7 +24,7 @@ const int kPatternMaxBars = 2147483647 ~/ 64;
 const String kPatternMaxStepsText = '2.14748e+09', kPatternMaxBarsText = '3.35544e+07';
 // One generate step (random notes, arpeggiate) refuses to make more notes than this rather than freezing the app.
 const int kPatternMaxGenerated = 1 << 20;
-const int kPatternMaxRatchet = 8;
+const int kPatternMaxRatchet = 64; // engine/src/pattern.h kMaxRatchet (owner, 2026-11-19)
 
 /// The shortest note an edit makes: 1/32 of a step (1/512 bar in 4/4).
 final Steps kMinNoteLength = Steps(1, 32);
@@ -428,7 +428,7 @@ class PatternNote {
   final Steps at, len; // 16th steps
   final double pitch; // MIDI number, fractions are microtones
   final double vel, prob; // 0..1
-  final int ratchet; // 1..8
+  final int ratchet; // 1..kPatternMaxRatchet
   final bool slide;
   final NoteExpression expr; // its own bend, vibrato, pressure and timbre
   final String? trailingComment; // the text after `//` on the note's line, trimmed; only on a line's first note
@@ -800,7 +800,7 @@ class PatternDoc {
           if (x.text == 'prob') {
             prob = _needNumber(w[k++], lineNo, 'prob', 0, 1, '0 to 1');
           } else {
-            final rv = _needNumber(w[k], lineNo, 'ratchet', 1, kPatternMaxRatchet.toDouble(), '1 to 8');
+            final rv = _needNumber(w[k], lineNo, 'ratchet', 1, kPatternMaxRatchet.toDouble(), '1 to $kPatternMaxRatchet');
             if (rv != rv.floorToDouble()) throw _PatternError(lineNo, w[k].col, 'ratchet must be a whole number');
             ratchet = rv.toInt();
             k++;
@@ -1572,7 +1572,7 @@ class PatternDoc {
   }
 
   PatternDoc setProb(Set<int> sel, double prob) => _map(sel, (n) => n.copyWith(prob: _round3(prob.clamp(0, 1).toDouble())));
-  PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, 8)));
+  PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, kPatternMaxRatchet)));
   PatternDoc setSlide(Set<int> sel, bool slide) => _map(sel, (n) => n.copyWith(slide: slide));
 
   /// Vibrato on the selected notes (the roll's Vibrato tool): [depth] semitones (0..12), [rate] Hz (0.1..30) and

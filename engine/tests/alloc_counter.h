@@ -20,6 +20,12 @@ public:
     std::size_t deallocations() const noexcept;
 };
 
+// Lazy initialisation on the calling thread: a function-local static with a dynamic initialiser runs it the first
+// time it is reached, through the C++ ABI's __cxa_guard_acquire (a lock, and whatever the initialiser costs), which
+// must never happen on the audio thread. Counts the calls to it on this thread since the thread started, or -1
+// where the counter can't see them (the counter interposes the shared C++ runtime's symbol: Linux only).
+long long threadLazyInits() noexcept;
+
 // Every global operator new and delete on the calling thread since it started, scope or not (the plug-in
 // benchmark's allocation counter, caw::bench::setAllocationCounter).
 unsigned long long threadAllocationsAndFrees() noexcept;

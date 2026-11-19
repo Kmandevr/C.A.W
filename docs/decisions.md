@@ -1,10 +1,29 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Decisions
+
+## 2026-11-19: The brand is protected; the code stays Apache 2.0 (owner)
+
+**Decision (owner):** the code, engine and SDK stay open under Apache 2.0. The brand belongs to Kmandevr, doing business as AutoStacc, and is not licensed with the code ([brand and trademark policy](../TRADEMARKS.md)).
+- **The brand covers:** the names, logos and logo designs, the bird product names, and the mascot and theme art. The code's internal ids stay plain and free to use for compatibility.
+- **Forks:** forking is welcome. A non-commercial fork may keep the brand if it says clearly that it is unofficial. Selling or monetising anything under the brand needs AutoStacc's permission, so a commercial fork must rebrand.
+- **No unbranded build:** C.A.W won't provide one, so a rebranded clone isn't made easy (owner).
+- **Hosted content:** what AutoStacc hosts (packs, presets, kits) is AutoStacc's commercial content, outside this repository and outside Apache.
+
+**[Fact]** Apache-2.0 §6 grants no trademark rights, and released code and content keep their Apache licence. **Owner's own check (2026-11-19):**
+- the owner found no business in the field trading as "CAW";
+- C.A.W is the acronym of the full name "Code Auditioning Workspace", for which the owner found no trademark;
+- the owner considers Raven unclaimed in this field.
+
+**[Assumption]** The policy states AutoStacc's claim; registering the marks is what makes them enforceable. That is the owner's call.
+
+## 2026-11-19: The audio callback keeps its core busy where Android gives no performance hint (Claude, owner-approved performance work)
+
+**Decision:** on Android, while something plays, the app is in front, the buffer mode is not Battery and no ADPF hint session is open, the device callback spins after its work until 0.8 of its period from its ideal start (`engine/src/load_stabilizer.h`, `stabilize` in `engine/platform/audio_miniaudio.cpp`). The S22+'s Benchmark (2026-11-19) had the hint `unsupported` and the callback's big core at 634 MHz of 2.5 GHz, its live p99 79–139 %. The arithmetic is Oboe's `StabilizedCallback` (Apache-2.0, google/oboe `src/common/StabilizedCallback.cpp`, read 2026-11-19), **reimplemented**, not copied and not a dependency: Oboe is not linked (miniaudio opens the stream), and a wrapper class of 60 lines is not worth vendoring a library for. The share is Oboe's 0.8, not the 50–70 % first suggested: under schedutil's documented `f = 1.25 u f_max` (docs.kernel.org, read 2026-11-19) a lower share lets the clock fall back ([performance](performance.md#live-callback-clock-and-a-fair-benchmark-2026-11-19)). No setting: Battery is the off switch, and the cost (one big core about 80 % busy while playing) is described in [performance](performance.md). Measured only on the phone; on Linux the rules are unit-tested and nothing else changes.
 
 ## 2026-11-18: Merged effects open old projects; files that use them are version 7 (Claude, owner's FX plan)
 
@@ -14,9 +33,9 @@ updated: 2026-11-18
 - **Changing a variant** keeps only knobs the new variant declares identically; the rest reset to defaults, and their automation lanes, modulation links and MIDI mappings are dropped with them, because their meaning changed. One undo step.
 - **Until the device UI kit,** a plain "Variant" pill opens a menu of variants on today's device pages (an assumption the approved device UI plan replaces).
 
-## 2026-11-18: The Hub goes into use with 1.1.0; APKs are installed by hand until then (owner)
+## 2026-11-18: The Hub goes into use with 1.2.0; APKs are installed by hand until then (owner)
 
-**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.1.0. Until then the owner installs APKs by hand.
+**Decision (owner):** 1.0.7 lays the Hub's groundwork only: C.A.W's side of the link, the Hub's first build and its update channels and notifications, all inert while no Hub certificate is pinned. Using the Hub (signing it, pinning each app's certificate, installing updates through it) comes with 1.2.0 (renumbered 2026-11-19; it was 1.1.0). Until then the owner installs APKs by hand.
 
 ## 2026-11-18: Declared capabilities: strict default, embedded in the binary, older components warned until rebuilt (owner, architect)
 

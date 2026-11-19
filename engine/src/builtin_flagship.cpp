@@ -2684,7 +2684,9 @@ private:
     // The level ramp times envelope 1 over the piece.
     static void levelOf(Voice& v, float* amp, uint32_t n, uint32_t first) noexcept {
         const double step = (v.gain1 - v.gain0) / kControlFrames;
-        for (uint32_t i = 0; i < n; ++i) amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+        double level[kControlFrames];
+        v.env[0].run(level, n);  // its next() n times; then the product vectorizes
+        for (uint32_t i = 0; i < n; ++i) amp[i] = static_cast<float>(level[i] * (v.gain0 + step * static_cast<double>(first + i)));
     }
 
     // The queued voices' filters, then each voice's output in the order they were queued (so the sums are added

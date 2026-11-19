@@ -794,19 +794,23 @@ class Engine implements TempoEngine {
     calloc.free(id);
   }
 
-  void setMaster(double volume) => _b.setMaster(_handle, volume);
+  /// The live controls below return false when the engine's command queue stayed full and the command was dropped
+  /// (API 40); callers may ignore it.
+  bool setMaster(double volume) => _b.setMaster(_handle, volume) == 1;
 
   /// Note previews: a held note on a layer's instrument, through its effects and mix, playing or stopped. A second
   /// [noteOn] with the same [id] ends the first; [notePitch] glides a held one without a new attack.
-  void noteOn(String layerId, int id, double pitch, double velocity) {
+  /// Each returns false only when the command queue stayed full (no such layer or held note is not a failure).
+  bool noteOn(String layerId, int id, double pitch, double velocity) {
     final l = layerId.toNativeUtf8();
-    _b.noteOn(_handle, l, id, pitch, velocity);
+    final r = _b.noteOn(_handle, l, id, pitch, velocity);
     calloc.free(l);
+    return r != 0;
   }
 
-  void notePitch(int id, double pitch) => _b.notePitch(_handle, id, pitch);
-  void noteOff(int id) => _b.noteOff(_handle, id);
-  void notesOff() => _b.notesOff(_handle);
+  bool notePitch(int id, double pitch) => _b.notePitch(_handle, id, pitch) != 0;
+  bool noteOff(int id) => _b.noteOff(_handle, id) != 0;
+  bool notesOff() => _b.notesOff(_handle) != 0;
 
   /// MIDI from a device (caw.h, API 15): MIDI 1.0 [bytes] for [layerId]'s instrument, played at [timeNs] on
   /// [midiClockNs] (0: now), so the engine places each message at the frame it was played. Returns the messages
@@ -908,20 +912,22 @@ class Engine implements TempoEngine {
     }
   }
 
-  void play() => _b.play(_handle);
+  /// play, playAt, playCountIn, playCountInBars and stop return whether the command reached the audio thread (API
+  /// 40; false: its queue stayed full and nothing changed). Callers may ignore it.
+  bool play() => _b.play(_handle) == 1;
 
   /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
-  void playAt(double step) => _b.playAt(_handle, step);
+  bool playAt(double step) => _b.playAt(_handle, step) == 1;
 
   /// Clicks [beats] beats at the tempo, then plays from [step] (the recording count-in); a stop cancels it.
-  void playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats);
+  bool playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats) == 1;
 
   /// Clicks [bars] (0..16) whole bars of the time signature where [step] is (its ticks, 1/den notes, at the tempo
   /// there; API 31), so the count-in starts on an accent, then plays from [step].
-  void playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars);
+  bool playCountInBars(double step, int bars) => _b.playCountInBars(_handle, step, bars) == 1;
 
   /// The engine's built-in metronome click on every beat while playing.
-  void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
+  bool setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0) == 1;
 
   /// The live output's last stage (API 35, #244), in the device callback only (renders and exports never run it):
   /// [limiter], a gentle safety limiter that keeps what plays under -1 dBFS, and [mono], both sides as their mean.
@@ -1013,7 +1019,7 @@ class Engine implements TempoEngine {
   }
 
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
-  void releaseTouches() => _b.releaseTouches(_handle);
+  bool releaseTouches() => _b.releaseTouches(_handle) == 1;
 
   /// Runs [frames] of audio with no device and returns the left channel: for tests, which play the transport without
   /// a sound card. Never call it while the device is on.
@@ -1030,8 +1036,8 @@ class Engine implements TempoEngine {
       calloc.free(r);
     }
   }
-  void stop() => _b.stop(_handle);
-  void clearOverload() => _b.clearOverload(_handle);
+  bool stop() => _b.stop(_handle) == 1;
+  bool clearOverload() => _b.clearOverload(_handle) == 1;
 
   EngineMeters meters() {
     _b.meters(_handle, _meters);

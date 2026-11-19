@@ -16,7 +16,7 @@
 //   - 3 repeat, just before a ratchet repeat's note-on: that note is a repeat, not a note of its own;
 //   - 0 gap: a filler that only carries time past the 28-bit delta limit.
 //   A note record is a flags number, then the fields its flags name, in this order: 1 start and 2 length (exact
-//   rational steps), 4 pitch, 8 velocity, 16 chance, 32 ratchet (a byte 1..8), 64 slide (no field), 128 expression
+//   rational steps), 4 pitch, 8 velocity, 16 chance, 32 ratchet (a byte 1..64, kPatternMaxRatchet), 64 slide (no field), 128 expression
 //   (a byte of 1 bend, 2 pressure, 4 timbre, 8 vibrato; each curve a count and its points' time, value and shape; the
 //   vibrato's depth, rate and fade-in), 256 a trailing comment. A note without a record, or a field its record
 //   leaves out, reads from its MIDI as an imported file's note does ([patternNoteOfMidi]; a ratchet note's length is
@@ -373,7 +373,7 @@ PatternNote _note1(MidiNote m, Uint8List? rec, int id) {
   var ratchet = 1;
   if (flags & _fRatchet != 0) {
     ratchet = r.byte();
-    if (ratchet < 1 || ratchet > kPatternMaxRatchet) throw const ClipMidiException('a ratchet must be 1 to 8');
+    if (ratchet < 1 || ratchet > kPatternMaxRatchet) throw const ClipMidiException('a ratchet must be 1 to $kPatternMaxRatchet');
   }
   len ??= read.len * Steps(ratchet);
   var expr = read.expr;

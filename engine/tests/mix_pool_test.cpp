@@ -18,6 +18,7 @@
 
 #include "engine.h"
 #include "graph.h"
+#include "load_stabilizer.h"
 #include "mix_pool.h"
 #include "native_component_test_path.h"
 #include "project.h"
@@ -986,8 +987,38 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
     const std::string j = e.audioThreadsJson();
     for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":", "\"hint_state\":",
                             "\"mmcss\":", "\"worker_tuning\":", "\"workers\":2", "\"active_workers\":2", "\"wait_share\":",
-                            "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":"})
+                            "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":",
+                            "\"stabilizer\":\"off\"", "\"stabilizer_share\":", "\"stabilizer_work\":"})
         CHECK(j.find(key) != std::string::npos);
+    // The platform's stabilizer reports itself through the engine (load_stabilizer.h).
+    // Its "stabilizer_work" is the smoothed work share that decides on or idle (LoadStabilizer::wanted).
+    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::On), 0.5f, 0.25f);
+    CHECK(e.audioThreadsJson().find("\"stabilizer\":\"on\",\"stabilizer_share\":0.5") != std::string::npos);
+    CHECK(e.audioThreadsJson().find("\"stabilizer_work\":0.25") != std::string::npos);
+    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::Idle), 0.0f, 0.05f);
+    CHECK(e.audioThreadsJson().find("\"stabilizer\":\"idle\"") != std::string::npos);
+    CHECK(e.audioThreadsJson().find("\"stabilizer_work\":0.05") != std::string::npos);
+}
+
+// The engine tells the device callback when its clock matters (the stabilizer runs only then): playing, not stopped.
+TEST(engine_is_audible_while_playing_only) {
+    Engine e(48000);
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"beats", "---\nkind: pattern\n---\n0 C4 1\n"});
+    p.layers.push_back(cawtest::testSignalNotesLayer("t", Shape::Sine, "beats", {{"level", 0.2}}));
+    CHECK(ok(e.setProject(p)));
+    float l[256], r[256];
+    e.process(l, r, 256);
+    CHECK(!e.audible());
+    CHECK(!e.hintOn());  // no live pool, no hint
+    e.play();
+    e.process(l, r, 256);
+    CHECK(e.audible());
+    e.stop();
+    for (int k = 0; k < 100; ++k) e.process(l, r, 256);  // the stop's fade
+    CHECK(!e.audible());
 }
 
 TEST(mix_pool_engine_stopped_parks_the_pool_and_play_wakes_it) {

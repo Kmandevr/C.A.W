@@ -374,3 +374,39 @@ TEST(a_muted_track_stays_silent_whatever_moves_its_volume) {
     const std::vector<float> out = run(e, 9600);
     CHECK_EQ(last(out), 0.0f);
 }
+
+TEST(modulation_is_project_sized_with_a_cpu_warning_and_a_safety_bound) {
+    // Owner, 2026-11-19: more than the old budgets (64 modulators, 256 links, 32 per target) plays, with a CPU warning;
+    // only past the safety bound (kModSafetyLimit) is a file refused.
+    std::vector<ModulatorSpec> mods;
+    std::vector<ModLinkSpec> links;
+    for (int i = 0; i < 100; ++i) mods.push_back(modulator("m" + std::to_string(i), "org.caw.mod.macros", {{"macro1", 0.0}}));
+    for (int i = 0; i < 300; ++i) links.push_back(link(static_cast<uint32_t>(i + 1), "m" + std::to_string(i % 100), "volume", "dc", -0.001));
+    ProjectSpec p = dcProject(mods, links);
+    std::string body = "\"modulators\":[";
+    for (int i = 0; i < 100; ++i) body += std::string(i ? "," : "") + "{\"id\":\"m" + std::to_string(i) + "\",\"component\":\"org.caw.mod.macros\"}";
+    body += "],\"modulation\":[";
+    for (int i = 0; i < 300; ++i)
+        body += std::string(i ? "," : "") + "{\"id\":" + std::to_string(i + 1) + ",\"source\":\"m" + std::to_string(i % 100) +
+                "\",\"target\":{\"type\":\"volume\",\"layer\":\"a\"},\"amount\":0.1}";
+    body += "]";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json(body), parsed, error));
+    CHECK_EQ(error, std::string());
+    CHECK_EQ(parsed.modulators.size(), 100u);
+    CHECK_EQ(parsed.modulation.size(), 300u);
+    Engine e(48000.0);
+    e.setMasterBypass(true);
+    const std::string result = e.setProjectOffline(p);
+    CHECK(ok(result));
+    CHECK(result.find("CPU") != std::string::npos);  // a warning, not a refusal
+    e.play();
+    run(e, 960);
+    // Past the safety bound: refused with a clear error.
+    std::string many = "\"modulators\":[";
+    for (int i = 0; i <= kModSafetyLimit; ++i) many += std::string(i ? "," : "") + "{\"id\":\"m" + std::to_string(i) + "\",\"component\":\"org.caw.mod.macros\"}";
+    many += "]";
+    CHECK(!parseProject(json(many), parsed, error));
+    CHECK(error.find(std::to_string(kModSafetyLimit)) != std::string::npos);
+}

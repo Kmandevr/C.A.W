@@ -92,6 +92,7 @@ struct RunResult {
     int64_t khzStart = -1, khzEnd = -1, maxKHz = -1;
     uint32_t mixWorkers = 0, mixActive = 0;  // the mix pool's workers, and those Auto had taking tasks at the end
     int64_t callbacks = 0, overBudget = 0;   // DSP: over budget is what would have been a dropout
+    int64_t spikes = 0;      // timed callbacks over twice the p99 (SuiteStats::spikes): one-off stalls apart from the load
     int32_t limit = -1;      // ramps: the last count that held (0: not even the first)
     int32_t firstFailed = -1;  // ramps: the smallest count seen over budget (-1: none, the cap held)
     int32_t steps = 0;

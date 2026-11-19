@@ -38,4 +38,4 @@ Bug reports are GitHub Issues; features and plans are tracked privately. Securit
 
 ## Licence
 
-[Apache License 2.0](LICENSE). Third-party libraries keep their own licences, listed in [architecture](docs/architecture.md).
+C.A.W is distributed by AutoStacc. Its source code is released under the [Apache License 2.0](LICENSE) for open inspection and extension. The C.A.W and AutoStacc names, logos, bird motifs and official brand assets remain AutoStacc's protected identity: see the [brand and trademark policy](TRADEMARKS.md). Third-party libraries keep their own licences, listed in [architecture](docs/architecture.md).

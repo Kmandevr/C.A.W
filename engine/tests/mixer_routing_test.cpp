@@ -556,3 +556,27 @@ TEST(a_send_turned_into_a_feedback_send_fades_in_instead_of_jumping) {
     CHECK(step < 0.01f);
     CHECK_NEAR(out[4700], 2 * 0.5 * kCentre, 1e-4);  // back at full gain
 }
+
+TEST(a_track_keys_as_many_components_as_the_project_names) {
+    // Routes per track are sized from the project (owner, 2026-11-19): a key track feeding 40 compressors (more than
+    // the 24 routes a slot held before) keys every one, with no warning.
+    auto build = [](int keyed) {
+        std::vector<LayerSpec> layers{track("k", 0.5)};
+        for (int i = 0; i < 40; ++i) {
+            LayerSpec t = track("t" + std::to_string(i), 0.01);
+            t.components = {keyedCompressor("k", true)};
+            t.components[0].hasKey = i < keyed;
+            layers.push_back(t);
+        }
+        return project(layers);
+    };
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(build(40));
+    CHECK(ok(result));
+    CHECK(result.find("hear no key") == std::string::npos);
+    const std::vector<float> all = render(build(40), 8192, 64);
+    const std::vector<float> some = render(build(16), 8192, 64);
+    // Every keyed track ducks: 40 keyed is quieter than 16 keyed (the other 24 unducked).
+    CHECK(std::fabs(all[8000]) + 0.05 < std::fabs(some[8000]));
+}

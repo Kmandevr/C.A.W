@@ -37,6 +37,7 @@ const _target = ComponentBenchTarget(name: 'Lead', componentId: 'com.me.lead', l
 const _effect = ComponentBenchTarget(name: 'Fuzz', componentId: 'com.me.fuzz', libraryPath: '/b/fuzz.so', instrument: false);
 
 void main() {
+  setUpAll(() => StressRunner.cooldownScale = 0); // the Benchmark's pauses after hot steps: none in tests
   late MotionLevel motion;
   setUp(() {
     motion = Motion.setting;

@@ -96,8 +96,19 @@ protected:
     }
 
     void control(uint32_t at) noexcept override {
+        // Every knob as at the last control and no band fading: the bands, their coefficients and the output gain
+        // would all be worked out as they are (each band's state is where the last control left it), so nothing
+        // to do. Most controls are these: a steady EQ compares its knobs once a block, not eight bands each control.
+        // A band waiting to switch type or channel is not steady: its switch happens in a later control.
+        const bool same = knobsUnchanged(knobs_, kParamCount, at);
+        if (same && !first_ && !pending_) {
+            bool fading = false;
+            for (uint32_t a = 0; a < active_; ++a) fading |= bands_[order_[a]].w != bands_[order_[a]].target;
+            if (!fading) return;
+        }
         const double sr = rate();
         active_ = 0;
+        pending_ = false;
         for (uint32_t b = 0; b < kBands; ++b) {
             Band& band = bands_[b];
             const bool wantOn = on(bandParam(b, kOn), at);
@@ -121,6 +132,11 @@ protected:
             }
             band.target = wantOn && !(type != band.type || channel != band.channel) ? 1.0 : 0.0;
             band.filter.set(static_cast<lib::EqType>(band.type), band.freq, band.gain, band.q, sr);
+            if (type != band.type || channel != band.channel) {
+                pending_ = true;
+                // An identity band is not run, so it never fades: it passes its input either way, so it is out now.
+                if (band.filter.identity()) band.w = 0.0;
+            }
             if (band.filter.identity() && band.w == 0.0 && band.target == 0.0) band.clear();
             if (band.w == 0.0 && band.target == 0.0) continue;  // off: not run
             if (band.filter.identity()) {  // no gain: the band passes its input; keep it clean for later
@@ -182,15 +198,24 @@ protected:
                     break;
             }
         }
-        for (uint32_t i = 0; i < n; ++i) {
-            out_ += (outTarget_ - out_) * outCoef_;
-            if (out_ - outTarget_ < 1e-12 && outTarget_ - out_ < 1e-12) out_ = outTarget_;
-            const double l = L[i] * out_, r = R[i] * out_;
-            outL[i] = static_cast<float>(l);
-            outR[i] = static_cast<float>(r);
-            // The display's spectrum: only while a UI reads it (the audio doesn't depend on it).
-            if (watching_) analyzer_.push(static_cast<float>(0.5 * (static_cast<double>(inL[i]) + inR[i])), static_cast<float>(0.5 * (l + r)));
+        if (out_ == outTarget_) {  // the output gain at rest (the glide below would leave it as it is): vectorized
+            const double g = out_;
+            for (uint32_t i = 0; i < n; ++i) L[i] *= g, R[i] *= g;
+        } else {
+            for (uint32_t i = 0; i < n; ++i) {
+                out_ += (outTarget_ - out_) * outCoef_;
+                if (out_ - outTarget_ < 1e-12 && outTarget_ - out_ < 1e-12) out_ = outTarget_;
+                L[i] *= out_, R[i] *= out_;
+            }
         }
+        for (uint32_t i = 0; i < n; ++i) {
+            outL[i] = static_cast<float>(L[i]);
+            outR[i] = static_cast<float>(R[i]);
+        }
+        // The display's spectrum: only while a UI reads it (the audio doesn't depend on it).
+        if (watching_)
+            for (uint32_t i = 0; i < n; ++i)
+                analyzer_.push(static_cast<float>(0.5 * (static_cast<double>(inL[i]) + inR[i])), static_cast<float>(0.5 * (L[i] + R[i])));
     }
 
     // y = f.process(state, x) for each sample of the run, stage by stage (each sample through the stages in order).
@@ -283,11 +308,14 @@ private:
             for (auto& s : right) s.clear();
         }
     };
+    static constexpr uint32_t kParamCount = kOutput + 1;
     Band bands_[kBands];
+    double knobs_[kParamCount] = {};  // control: every knob as it last read them (first_ ignores them)
     uint8_t order_[kBands] = {};
     uint32_t active_ = 0;
     double out_ = 1.0, outTarget_ = 1.0, outCoef_ = 0.0, fadeStep_ = 0.0;
     bool first_ = true;
+    bool pending_ = false;  // a band waits to switch type or channel (control: not a steady state)
     bool watching_ = false;  // a UI read the display lately: the analyzer hears the audio
     lib::SpectrumAnalyzer analyzer_;
     double tan_[kSpectrumBins] = {};

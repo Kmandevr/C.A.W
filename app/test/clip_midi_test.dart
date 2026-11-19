@@ -112,6 +112,13 @@ void main() {
     expect(wide.tracks.last.notes.single.bend.map((p) => p.value.round()), [0, 96, -96]);
   });
 
+  test('a ratchet of 64 round-trips (the byte holds 1..64)', () {
+    final old = _doc('---\nkind: pattern\nname: P\n---\n0 C4 4 1 ratchet 64\n4 D4 1 1 ratchet 12\n');
+    final back = clipMidiToDoc(clipMidiFromDoc(old));
+    _sameNotes(old, back);
+    expect(back.notes.map((n) => n.ratchet), [64, 12]);
+  });
+
   test('plain notes need no C.A.W events of their own', () {
     final midi = clipMidiFromText('---\nkind: pattern\nname: P\n---\n0 C4 1 1\n1 D4 1 1\n2 E4 2 1\n')!;
     final f = readMidiFile(midi);
