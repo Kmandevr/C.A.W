@@ -11,6 +11,7 @@ import '../../kit/controls.dart';
 import '../../kit/feel.dart';
 import '../../kit/grab_gesture.dart';
 import '../../kit/hero.dart';
+import '../../kit/param_watch.dart';
 import '../../visuals/fx_visuals.dart' show CompressorGraph;
 import '../dynamics/fx_math.dart';
 import '../dynamics_editors.dart' show duckRatio;
@@ -126,7 +127,7 @@ class CompressorDevice extends StatelessWidget {
       cards,
       hero,
       Padding(padding: const EdgeInsets.only(bottom: 6), child: ModeTiles('mode', icon: duckModeIcon, height: 46)),
-      const DuckShapeChips(),
+      watchDevice(context, (_) => const DuckShapeChips()), // its own watch (param_watch.dart)
       const KnobRow(knobs, size: 48, labels: {'tension': 'Curve'}),
       switch (mode) {
         0 => ControlGroup(title: 'KEY · AUDIO', color: scope.secondary, child: Column(children: [
