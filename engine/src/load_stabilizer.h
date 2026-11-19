@@ -1,6 +1,7 @@
 // The audio callback's synthetic load: keeps its core busy for a share of each period so the CPU governor holds its clock (after Oboe's StabilizedCallback).
 #pragma once
 
+#include <climits>
 #include <cstdint>
 
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
@@ -40,34 +41,56 @@ public:
     // playing instead of letting it sag between bursts. [Assumption] the S22+'s vendor governor behaves alike.
     static constexpr double kShare = 0.8;
 
+    // Callbacks in a row that may spin nothing (each later than its share of the ideal period) before the next
+    // starts a new epoch: the device's clock drifts from the steady clock (about 50 ppm moves the ideal starts a
+    // whole 21 ms period in 7 minutes), or a stall shifted the stream, and lateness that stays is not lateness.
+    static constexpr int kNoSpinResync = 8;
+    static constexpr int kDriftWindow = 64;  // callbacks (about 1.4 s of 1024 frames at 48 kHz, 0.1 s of 96)
+
     // The callback that started at `startNs` (steady clock) with `frames` at `rate`: the steady-clock time until
     // which to keep the core busy (at or before startNs: not at all). Callbacks are counted from an epoch, so
-    // the ideal start of each is known; an early one (the last epoch was a late callback) starts a new epoch.
+    // the ideal start of each is known; an early one starts a new epoch, and so does a late one that stays late.
     int64_t deadline(int64_t startNs, int frames, int rate, double share = kShare) noexcept {
         if (frames <= 0 || rate <= 0 || !(share > 0.0)) {
             reset();
             return startNs;
         }
-        // A new epoch: the first callback, an early one, one an hour of frames on (the products stay in range), or
-        // one more than a second late (a stalled or rerouted stream: start over rather than spin nothing for long).
-        if (frames_ == 0 || frames_ > int64_t{rate} * 3600) {
+        const int64_t period = int64_t{frames} * 1'000'000'000 / rate;
+        // A new epoch: the first callback, an early one, one an hour of frames on (the products stay in range), one
+        // more than a period late (a stalled or rerouted stream, or drift: start over rather than spin nothing for
+        // long), or one after kNoSpinResync callbacks in a row that spun nothing.
+        if (frames_ == 0 || frames_ > int64_t{rate} * 3600 || noSpin_ >= kNoSpinResync) {
             epochNs_ = startNs;
             frames_ = 0;
         }
         const int64_t ideal = frames_ * 1'000'000'000 / rate;
         int64_t late = startNs - epochNs_ - ideal;
-        if (late < 0 || late > 1'000'000'000) {
+        if (late < 0 || late > period) {
             epochNs_ = startNs;
             frames_ = 0;
             late = 0;
         }
+        // Drift: the earliest callback of each kDriftWindow is where the device's clock has the schedule now, so the
+        // epoch follows it (one-off lateness leaves the earliest on time; lateness that every callback shares moves it).
+        if (late < minLate_) minLate_ = late;
+        if (++window_ >= kDriftWindow) {
+            epochNs_ += minLate_;
+            window_ = 0;
+            minLate_ = INT64_MAX;
+        }
         frames_ += frames;
-        const int64_t period = int64_t{frames} * 1'000'000'000 / rate;
-        return startNs + static_cast<int64_t>(static_cast<double>(period) * (share > 1.0 ? 1.0 : share)) - late;
+        const int64_t d = startNs + static_cast<int64_t>(static_cast<double>(period) * (share > 1.0 ? 1.0 : share)) - late;
+        noSpin_ = d > startNs ? 0 : noSpin_ + 1;
+        return d;
     }
 
     // Not stabilizing (stopped, behind the app, a hint session took over): the next callback starts an epoch.
-    void reset() noexcept { frames_ = 0; }
+    void reset() noexcept {
+        frames_ = 0;
+        noSpin_ = 0;
+        window_ = 0;
+        minLate_ = INT64_MAX;
+    }
 
     // Keeps the calling thread busy until now() reaches deadlineNs; returns the nanoseconds it spun. `now` is the
     // callback's steady clock (a function object, so tests can drive it).
@@ -85,6 +108,9 @@ public:
 private:
     int64_t epochNs_ = 0;
     int64_t frames_ = 0;  // frames since the epoch
+    int noSpin_ = 0;      // callbacks in a row with no spin
+    int window_ = 0;      // callbacks into this drift window
+    int64_t minLate_ = INT64_MAX;  // the earliest lateness in it
 };
 
 // What the stabilizer did in the callback last seen, for caw_audio_threads' "stabilizer": Off (not used here: not

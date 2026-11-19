@@ -73,3 +73,37 @@ TEST(load_stabilizer_spin_stops_at_the_deadline) {
     LoadStabilizer::spinUntil(from + 2'000'000, real);
     CHECK(real() - from >= 2'000'000);
 }
+
+// Drift: a device clock 50 ppm slow of the steady clock makes every callback a little later than its epoch says;
+// once that passes the share, the stabilizer would spin nothing for the rest of the session. It starts a new
+// epoch instead (after a few callbacks in a row with no spin, or once one is a whole period late).
+TEST(load_stabilizer_follows_a_drifting_device_clock) {
+    LoadStabilizer s;
+    const double slow = kPeriod * (1.0 + 50e-6);
+    int64_t spun = 0, worstRun = 0, run = 0;
+    const int callbacks = 60000;  // about 21 minutes of 1024-frame callbacks
+    for (int c = 0; c < callbacks; ++c) {
+        const int64_t start = 1'000'000 + static_cast<int64_t>(c * slow);
+        const int64_t d = s.deadline(start, 1024, kRate);
+        spun += d > start ? d - start : 0;
+        run = d > start ? 0 : run + 1;
+        worstRun = run > worstRun ? run : worstRun;
+    }
+    CHECK(worstRun <= 10);
+    CHECK(static_cast<double>(spun) > 0.75 * kPeriod * callbacks);
+}
+
+// A one-off stall that shifts the stream (a second's fraction, or just over the share of a period): the
+// callbacks after it keep their new schedule, and the stabilizer spins for them again.
+TEST(load_stabilizer_resyncs_after_a_stall_that_shifts_the_stream) {
+    for (const int64_t stall : {int64_t{500'000'000}, kPeriod * 9 / 10}) {
+        LoadStabilizer s;
+        int64_t t = 0;
+        for (int c = 0; c < 10; ++c, t += kPeriod) s.deadline(t, 1024, kRate);
+        t += stall;
+        int idle = 0;
+        for (int c = 0; c < 20; ++c, t += kPeriod) idle += s.deadline(t, 1024, kRate) <= t;
+        CHECK(idle <= 10);
+        CHECK_EQ(s.deadline(t, 1024, kRate), t + static_cast<int64_t>(kPeriod * 0.8));
+    }
+}
