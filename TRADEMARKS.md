@@ -1,3 +1,9 @@
+---
+title: Brand and trademark policy
+summary: The C.A.W brand policy: the code is Apache 2.0, while the names, logos, product names and brand art belong to AutoStacc; what forks may do.
+updated: 2026-11-19
+---
+
 # C.A.W brand and trademark policy
 
 C.A.W's source code is open under the [Apache License 2.0](LICENSE). The licence covers the code only. As its section 6 says, it grants no permission to use the licensor's trade names, trademarks, service marks or product names. This page says how the brand may be used.
