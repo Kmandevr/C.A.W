@@ -1735,7 +1735,11 @@ struct VoiceFilter {
             else ladder[0].processPair<lib::LadderMode::BandPass>(ladder[1], L, R, n);
         }
         if (type == kSvfLp) svf[0].lowpassPair(svf[1], L, R, n);  // both sides in one loop, as a two-wide vector
-        for (int c = 0; c < 2 && type > kSvfLp; ++c) {
+        // 1.1.0's serial models: both sides in one loop (flagship::processPair).
+        if (type == kDiodeLp) flagship::processPair(diode[0], diode[1], L, R, n);
+        else if (type == kSallenKeyLp) flagship::processPair(sallen[0], sallen[1], L, R, n);
+        else if (type == kPhaser) flagship::processPair(phaser[0], phaser[1], L, R, n);
+        for (int c = 0; c < 2 && type > kSvfLp && type != kDiodeLp && type != kSallenKeyLp && type != kPhaser; ++c) {
             float* x = c ? R : L;
             switch (type) {
                 case kSvfHp: each(x, n, [&](double v) noexcept { return svf[c].process(v).high; }); break;
@@ -1745,9 +1749,6 @@ struct VoiceFilter {
                     if (comb[c]) each(x, n, [&](double v) noexcept { return comb[c]->process(v); });
                     break;
                 case kFormant: each(x, n, [&](double v) noexcept { return formant[c].process(v); }); break;
-                case kDiodeLp: each(x, n, [&](double v) noexcept { return diode[c].process(v); }); break;
-                case kSallenKeyLp: each(x, n, [&](double v) noexcept { return sallen[c].process(v); }); break;
-                case kPhaser: each(x, n, [&](double v) noexcept { return phaser[c].process(v); }); break;
                 case kCombNeg:
                     if (comb[c]) each(x, n, [&](double v) noexcept { return comb[c]->process(v); });
                     break;

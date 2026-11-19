@@ -37,6 +37,7 @@ int cleanCost(double seconds);  // bench/clean_cost.cpp: Preen and Hush against 
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
 int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices against their ceilings
+int ravenCost(double seconds);  // bench/raven_cost.cpp: Flagship's 1.1.0 synthesis (Raven) against its ceilings
 
 namespace {
 
@@ -992,6 +993,7 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
+    if (only == 320) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
     if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
@@ -1001,7 +1003,8 @@ int main(int argc, char** argv) {
         const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
         const bool voiceOver = voiceCost(secs) != 0;  // and the voice devices (bench/voice_cost.cpp)
         const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver) ? 1 : 0;
+        const bool ravenOver = ravenCost(secs) != 0;  // and Flagship's 1.1.0 modes (bench/raven_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || ravenOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
