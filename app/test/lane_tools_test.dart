@@ -485,8 +485,8 @@ void main() {
       unawaited(openDeviceEditor(context, s, a, 0));
       await tester.pumpAndSettle();
       expect(find.byType(DeviceEditor), findsOneWidget);
-      // A hold on the device's Mix knob: its dialog, with Automate.
-      final knob = find.byKey(const ValueKey('dknob-mix'));
+      // A hold on the device's Mix knob (the footer's: the Chorus page shows Mix there only): its dialog, with Automate.
+      final knob = find.byKey(const ValueKey('footer-knob-mix'));
       expect(knob, findsOneWidget);
       await tester.longPress(knob);
       await tester.pumpAndSettle();
@@ -507,7 +507,7 @@ void main() {
       final context = tester.element(find.byType(ArrangerScreen));
       unawaited(openDeviceEditor(context, s, keys(), 0));
       await tester.pumpAndSettle();
-      final knob = find.byKey(const ValueKey('dknob-mix'));
+      final knob = find.byKey(const ValueKey('footer-knob-mix'));
       await tester.longPress(knob);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('automate-param')));

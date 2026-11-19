@@ -93,7 +93,7 @@ class _SpectrumHeroState extends State<_SpectrumHero> {
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth, h = box.maxHeight;
       return DeviceDisplay(builder: (context, f) => GrabGesture(
-        key: const ValueKey('shift-pitch-hero'),
+        key: const ValueKey('pitchshift-hero'),
         onStart: (_, _) {
           _at = t.value('semitones') + t.value('cents') / 100;
           setState(() => _active = true);

@@ -44,7 +44,7 @@ final Map<String, DeviceEditorEntry> _pages = {
 /// is what [DeviceEditors.custom] turns a merged device's id into (the EQ & Filter pages are registered the same way).
 final Map<String, DeviceEditorEntry> fxSpaceMergedEditors = {
   for (final v in MergedDevices.variants)
-    if (_pages[v.id] case final e?) v.oldId: e,
+    if (_pages.containsKey(v.id)) v.oldId: _pages[v.id]!,
 };
 
 /// A device page: [cards] (the variant cards), the [hero], [rows] (chips and switches), the [knobs] and, under MORE,
@@ -59,9 +59,9 @@ Widget mergedPage(BuildContext context, String id, {Widget? cards, required Widg
     if (more != null && !inline) DeviceFold(child: more),
   ];
   if (inline) return effectPage(id, [?cards, hero, ...controls]);
-  return LayoutBuilder(key: ValueKey('fx-page-$id'), builder: (context, box) {
+  return LayoutBuilder(builder: (context, box) {
     if (box.maxWidth < 900) return effectPage(id, [?cards, hero, ...controls]);
-    return ListView(padding: const EdgeInsets.fromLTRB(14, 12, 14, 28), children: [
+    return ListView(key: ValueKey('fx-page-$id'), padding: const EdgeInsets.fromLTRB(14, 12, 14, 28), children: [
       ?cards,
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(flex: 11, child: hero),

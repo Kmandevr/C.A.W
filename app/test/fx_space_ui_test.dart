@@ -111,7 +111,7 @@ void main() {
 
     for (final (id, x, y) in [
       ('org.caw.convolver', 'decay', 'size'),
-      ('org.caw.shimmer', 'decay', 'amount'),
+      ('org.caw.shimmer', 'decay', 'size'),
       ('org.caw.haas', 'delay', 'level'),
       ('org.caw.ensemble', 'spread', 'detune'),
       ('org.caw.doubler', 'width', 'detune'),
@@ -123,7 +123,13 @@ void main() {
         final s = await open(tester, id);
         final t = targetOf(s, id);
         final before = (t.value(x), t.value(y));
-        final pad = tester.getRect(find.byType(XYPad).first);
+        // The merged Reverb's decay picture and Utility's goniometer (1.0.8), else the pad.
+        final hero = switch (id) {
+          'org.caw.shimmer' => find.byKey(const ValueKey('reverb-hero')),
+          'org.caw.haas' => find.byKey(const ValueKey('utility-hero')),
+          _ => find.byType(XYPad),
+        };
+        final pad = tester.getRect(hero.first);
         await tester.dragFrom(pad.center + const Offset(-60, 40), const Offset(80, -60));
         await tester.pumpAndSettle();
         expect(t.value(x), greaterThan(before.$1), reason: x);

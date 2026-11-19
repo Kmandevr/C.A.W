@@ -140,7 +140,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(t.value('shift'), greaterThan(100));
     expect(t.value('feedback'), greaterThan(0.1));
-    await tester.tap(find.byKey(const ValueKey('mode-direction-2')));
+    await tester.ensureVisible(find.byKey(const ValueKey('dchoice-direction-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('dchoice-direction-2')));
     await tester.pumpAndSettle();
     expect(t.value('direction'), 2);
     await close(tester);

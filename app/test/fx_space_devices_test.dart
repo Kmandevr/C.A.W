@@ -241,7 +241,7 @@ void main() {
 
     testWidgets('Pitch: sideways for whole semitones', (tester) async {
       final s = await open(tester, 'org.caw.pitchshift');
-      await tester.dragFrom((await heroOf(tester, 'shift-pitch-hero')).center, const Offset(60, 0));
+      await tester.dragFrom((await heroOf(tester, 'pitchshift-hero')).center, const Offset(60, 0));
       await tester.pumpAndSettle();
       final st = target(s).value('semitones');
       expect(st, greaterThan(0));
