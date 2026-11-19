@@ -34,11 +34,11 @@ Color get _red => Neon.layers[7];
 /// The style of [family]. Colours come from theme slots, so a user theme recolours every device consistently.
 DeviceStyle deviceStyle(DeviceFamily family) => switch (family) {
       DeviceFamily.eq => DeviceStyle(family, Neon.blue, _mint, Icons.graphic_eq, 'EQ'),
-      DeviceFamily.dynamics => DeviceStyle(family, _orange, Neon.yellow, Icons.compress, 'DYNAMICS'),
+      DeviceFamily.dynamics => DeviceStyle(family, Neon.yellow, _orange, Icons.compress, 'DYNAMICS'),
       DeviceFamily.space => DeviceStyle(family, Neon.violet, Neon.blue, Icons.blur_on, 'SPACE'),
-      DeviceFamily.drive => DeviceStyle(family, _red, Neon.pink, Icons.whatshot_outlined, 'DRIVE'),
+      DeviceFamily.drive => DeviceStyle(family, _orange, _red, Icons.whatshot_outlined, 'DRIVE'),
       DeviceFamily.filter => DeviceStyle(family, _mint, Neon.green, Icons.filter_alt_outlined, 'FILTER'),
-      DeviceFamily.modulation => DeviceStyle(family, Neon.pink, Neon.violet, Icons.waves, 'MOD'),
+      DeviceFamily.modulation => DeviceStyle(family, Neon.blue, Neon.violet, Icons.waves, 'MOD'),
       DeviceFamily.utility => DeviceStyle(family, Neon.yellow, Neon.green, Icons.tune, 'UTILITY'),
       DeviceFamily.synth => DeviceStyle(family, Neon.green, Neon.blue, Icons.piano, 'SYNTH'),
       DeviceFamily.drums => DeviceStyle(family, _orange, Neon.pink, Icons.grid_view_rounded, 'DRUMS'),
