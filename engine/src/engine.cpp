@@ -722,10 +722,12 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
     j += ",\"wait_share\":" + std::to_string(waitShare_.load(std::memory_order_relaxed));
     // The callback's synthetic load (load_stabilizer.h; Android, no hint session): "off", "idle" or "on", and the
-    // smoothed share of each period it kept the core busy beyond the callback's own work.
+    // smoothed share of each period it kept the core busy beyond the callback's own work, and the smoothed share
+    // that work took (it idles while that is too small for the clock to matter).
     j += ",\"stabilizer\":\"" +
          std::string(stabilizerStateName(static_cast<StabilizerState>(stabilizerState_.load(std::memory_order_relaxed)))) +
-         "\",\"stabilizer_share\":" + std::to_string(stabilizerShare_.load(std::memory_order_relaxed));
+         "\",\"stabilizer_share\":" + std::to_string(stabilizerShare_.load(std::memory_order_relaxed)) +
+         ",\"stabilizer_work\":" + std::to_string(stabilizerWork_.load(std::memory_order_relaxed));
     j += ",\"cores\":" + std::to_string(t.cores) + ",\"fast_cores\":" + std::to_string(t.fast);
     j += ",\"hybrid\":" + std::string(t.hybrid ? "true" : "false") + ",\"core_source\":\"" + t.source + "\"}";
     return j;

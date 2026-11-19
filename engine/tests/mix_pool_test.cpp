@@ -988,13 +988,16 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
     for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":", "\"hint_state\":",
                             "\"mmcss\":", "\"worker_tuning\":", "\"workers\":2", "\"active_workers\":2", "\"wait_share\":",
                             "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":",
-                            "\"stabilizer\":\"off\"", "\"stabilizer_share\":"})
+                            "\"stabilizer\":\"off\"", "\"stabilizer_share\":", "\"stabilizer_work\":"})
         CHECK(j.find(key) != std::string::npos);
     // The platform's stabilizer reports itself through the engine (load_stabilizer.h).
-    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::On), 0.5f);
+    // Its "stabilizer_work" is the smoothed work share that decides on or idle (LoadStabilizer::wanted).
+    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::On), 0.5f, 0.25f);
     CHECK(e.audioThreadsJson().find("\"stabilizer\":\"on\",\"stabilizer_share\":0.5") != std::string::npos);
-    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::Idle), 0.0f);
+    CHECK(e.audioThreadsJson().find("\"stabilizer_work\":0.25") != std::string::npos);
+    e.noteStabilizer(static_cast<uint8_t>(StabilizerState::Idle), 0.0f, 0.05f);
     CHECK(e.audioThreadsJson().find("\"stabilizer\":\"idle\"") != std::string::npos);
+    CHECK(e.audioThreadsJson().find("\"stabilizer_work\":0.05") != std::string::npos);
 }
 
 // The engine tells the device callback when its clock matters (the stabilizer runs only then): playing, not stopped.

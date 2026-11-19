@@ -99,14 +99,16 @@ protected:
         // Every knob as at the last control and no band fading: the bands, their coefficients and the output gain
         // would all be worked out as they are (each band's state is where the last control left it), so nothing
         // to do. Most controls are these: a steady EQ compares its knobs once a block, not eight bands each control.
+        // A band waiting to switch type or channel is not steady: its switch happens in a later control.
         const bool same = knobsUnchanged(knobs_, kParamCount, at);
-        if (same && !first_) {
+        if (same && !first_ && !pending_) {
             bool fading = false;
             for (uint32_t a = 0; a < active_; ++a) fading |= bands_[order_[a]].w != bands_[order_[a]].target;
             if (!fading) return;
         }
         const double sr = rate();
         active_ = 0;
+        pending_ = false;
         for (uint32_t b = 0; b < kBands; ++b) {
             Band& band = bands_[b];
             const bool wantOn = on(bandParam(b, kOn), at);
@@ -130,6 +132,11 @@ protected:
             }
             band.target = wantOn && !(type != band.type || channel != band.channel) ? 1.0 : 0.0;
             band.filter.set(static_cast<lib::EqType>(band.type), band.freq, band.gain, band.q, sr);
+            if (type != band.type || channel != band.channel) {
+                pending_ = true;
+                // An identity band is not run, so it never fades: it passes its input either way, so it is out now.
+                if (band.filter.identity()) band.w = 0.0;
+            }
             if (band.filter.identity() && band.w == 0.0 && band.target == 0.0) band.clear();
             if (band.w == 0.0 && band.target == 0.0) continue;  // off: not run
             if (band.filter.identity()) {  // no gain: the band passes its input; keep it clean for later
@@ -308,6 +315,7 @@ private:
     uint32_t active_ = 0;
     double out_ = 1.0, outTarget_ = 1.0, outCoef_ = 0.0, fadeStep_ = 0.0;
     bool first_ = true;
+    bool pending_ = false;  // a band waits to switch type or channel (control: not a steady state)
     bool watching_ = false;  // a UI read the display lately: the analyzer hears the audio
     lib::SpectrumAnalyzer analyzer_;
     double tan_[kSpectrumBins] = {};
