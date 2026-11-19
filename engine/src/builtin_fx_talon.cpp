@@ -14,7 +14,8 @@
 // Up: below the threshold the gain rises (thr - level)(1 - 1/ratio) dB, the compressor's soft knee mirrored about
 //   the threshold, capped by Range; below Floor the lift falls away 1 dB per dB, so silence and noise are not raised.
 //   Loud parts pass at unity, so there is nothing to make up. Look-ahead 0-10 ms (its delay reported per instance).
-// Bus: a feedback compressor (the detector hears the output, as classic bus glue does), ratios 1.5/2/4/10, attack
+// Bus: a feedback compressor (the detector hears the output, as classic bus glue does; its curve's slope is
+//   1 - ratio, so the settled input-to-output ratio is the one chosen), ratios 1.5/2/4/10, attack
 //   0.1-30 ms, release 0.1/0.3/0.6/1.2 s or Auto: two followers, a fast one (the attack, 100 ms back) and a slow one
 //   (300 ms in, 1.2 s back), the deeper of the two applied, so a transient recovers fast and a held level slowly.
 //   With an external key it is fed forward from the key (a key cannot hear this output).
@@ -290,6 +291,9 @@ protected:
         knee_ = std::max(0.0, param(kBKnee, at));
         const double a = param(kBAttack, at) * 0.001;
         if (a != attackFor_ || sr != rateFor_) attackFor_ = a, attack_ = lib::timeCoefficient(a, sr);
+        // The feedback loop's gain per sample is (1 - attack) (ratio - 1): held at 0.9 or less, so it settles
+        // without ringing (10:1 at the fastest attack: about 0.2 ms).
+        loopAttack_ = ratio_ > 1.9 ? std::max(attack_, 1.0 - 0.9 / (ratio_ - 1.0)) : attack_;
         const int rel = std::clamp(choice(kBRelease, at), 0, 4);
         auto_ = rel == 4;
         if (!auto_ && (rel != releaseFor_ || sr != rateFor_)) releaseFor_ = rel, release_ = lib::timeCoefficient(kBusReleaseValues[rel], sr);
@@ -305,6 +309,8 @@ protected:
         external_ = choice(kBSidechain, at) == 1;
         warm_ = choice(kBCharacter, at) == 1;
         mix_.set(std::clamp(param(kBMix, at), 0.0, 1.0), kControlFrames);
+        track_[0].resync();  // at each grid point (the same frames at any block size)
+        track_[1].resync();
         const double o = param(kBOutput, at);
         if (o != outDb_) outDb_ = o, outGain_ = lib::dbToGain(o);
         out_.set(outGain_, kControlFrames);
@@ -320,10 +326,23 @@ protected:
         }
     }
 
+    // The gain change for the output's level (feedback): the slope 1 - ratio (with the same quadratic knee), which
+    // holds the input-to-output ratio at `ratio` once settled (y - thr = (x - thr) / ratio), as the feed-forward
+    // curve does from the input.
+    double feedbackGainDb(double heard) const noexcept {
+        const double over = heard - thr_, slope = 1.0 - ratio_;
+        if (2.0 * over <= -knee_) return 0.0;
+        if (2.0 * over < knee_) {
+            const double t = over + 0.5 * knee_;
+            return slope * t * t / (2.0 * knee_);
+        }
+        return slope * over;
+    }
+
     // One side's reduction toward target t (dB, 0 or less).
     double follow(int c, double t) noexcept {
         double& f = fast_[c];
-        f = t + (f - t) * (t < f ? attack_ : (auto_ ? relFast_ : release_));
+        f = t + (f - t) * (t < f ? (external_ ? attack_ : loopAttack_) : (auto_ ? relFast_ : release_));
         if (f - t < 1e-9 && t - f < 1e-9) f = t;
         if (f > -1e-9) f = 0.0;
         if (!auto_) return f;
@@ -359,7 +378,9 @@ protected:
             double prev = prevDb_[c];
             for (uint32_t i = 0; i < n; ++i) {
                 const double heard = external_ ? db[i] : prev + gain_[c];  // the key now, or the last output
-                const double t = heard <= kneeLow_ ? 0.0 : lib::compressorGainDb(heard, thr_, ratio_, knee_);
+                const double t = heard <= kneeLow_ ? 0.0
+                                 : external_ ? lib::compressorGainDb(heard, thr_, ratio_, knee_)
+                                             : feedbackGainDb(heard);
                 gain_[c] = follow(c, t);
                 gr[c][i] = gain_[c];
                 prev = db[i];
@@ -370,8 +391,6 @@ protected:
             gain_[1] = gain_[0], fast_[1] = fast_[0], slow_[1] = slow_[0], prevDb_[1] = prevDb_[0];
             for (uint32_t i = 0; i < n; ++i) gr[1][i] = gr[0][i];
         }
-        track_[0].resync();
-        track_[1].resync();
         for (uint32_t i = 0; i < n; ++i) {
             const double rl = gr[0][i], rr = gr[1][i];
             const double g = rl < rr ? rl : rr;
@@ -415,7 +434,7 @@ private:
     dyn::Detector det_;
     double fast_[2] = {}, slow_[2] = {}, gain_[2] = {}, prevDb_[2] = {-200.0, -200.0};
     double thr_ = -12, ratio_ = 2, knee_ = 6, quietBelow_ = 0, kneeLow_ = -15;
-    double attack_ = 0, release_ = 0, relFast_ = 0, attSlow_ = 0, relSlow_ = 0;
+    double attack_ = 0, loopAttack_ = 0, release_ = 0, relFast_ = 0, attSlow_ = 0, relSlow_ = 0;
     double attackFor_ = -1, rateFor_ = -1;
     int releaseFor_ = -1;
     double makeupDb_ = 1e300, makeupGain_ = 1, outDb_ = 1e300, outGain_ = 1, link_ = 1;

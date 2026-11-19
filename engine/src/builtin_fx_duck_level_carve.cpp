@@ -62,6 +62,10 @@ struct Biquad {
         return y;
     }
     void clear() noexcept { z1 = z2 = 0; }
+    void flush() noexcept {  // no subnormal state
+        if (z1 < 1e-30 && z1 > -1e-30) z1 = 0;
+        if (z2 < 1e-30 && z2 > -1e-30) z2 = 0;
+    }
 };
 
 }  // namespace
@@ -99,6 +103,8 @@ public:
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
         return count > kLLookahead ? levelLookahead(values[kLLookahead], rate()) : 0;
     }
+    // Asleep only once the look-ahead line has emptied too.
+    uint64_t idleFrames() const noexcept override { return look_ + static_cast<uint64_t>(0.05 * rate()); }
 
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
@@ -157,7 +163,7 @@ protected:
         float* dr = delay_[1].data();
         double acc = 0.0;
         for (uint32_t i = 0, w = pos_; i < n; ++i, w = w + 1 == size ? 0 : w + 1) {
-            const double l = hp_[0].run(shelf_[0].run(inL[i])), r = hp_[1].run(shelf_[1].run(inR[i]));
+            const double l = hp_[0].run(shelf_[0].run(caw::finiteOr0(inL[i]))), r = hp_[1].run(shelf_[1].run(caw::finiteOr0(inR[i])));
             acc += l * l + r * r;
             dl[w] = inL[i];
             dr[w] = inR[i];
@@ -169,6 +175,7 @@ protected:
             outR[i] = static_cast<float>(dr[a] * g);
         }
         pos_ = (pos_ + n) % size;
+        for (Biquad* f : {&shelf_[0], &shelf_[1], &hp_[0], &hp_[1]}) f->flush();
         acc_ += acc;
         accFrames_ += n;
         if (accFrames_ >= kControlFrames) {  // a whole grid step: into the 400 ms window
@@ -215,7 +222,7 @@ constexpr std::string_view kBandCounts[] = {"16", "24 (High)"};
 constexpr std::string_view kStereoModes[] = {"Linked", "Stereo", "Mid/Side"};
 constexpr uint32_t kMaxBands = 24;
 constexpr double kLowest = 40.0, kHighest = 16000.0;
-constexpr double kAnalysisQ = 2.0, kBellQ = 1.6;
+constexpr double kAnalysisQ = 3.0, kBellQ = 2.5;
 
 const ParamTable& carveParams() {
     static const ParamTable t = [] {
@@ -306,7 +313,7 @@ protected:
         const float* kr = keyRight();
         // The key's bands (no key: silence, so nothing dips).
         for (uint32_t i = 0; i < n; ++i) {
-            const float l = kl ? kl[i] : 0.0f, r = kr ? kr[i] : 0.0f;
+            const float l = kl ? static_cast<float>(caw::finiteOr0(kl[i])) : 0.0f, r = kr ? static_cast<float>(caw::finiteOr0(kr[i])) : 0.0f;  // a NaN never sticks
             const float m = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
             keyMax_ = m > keyMax_ ? m : keyMax_;
             if (mode_ == 0) an_.side(0, 0.5f * (l + r));
@@ -315,8 +322,9 @@ protected:
         }
         float a[kControlFrames], b[kControlFrames];
         for (uint32_t i = 0; i < n; ++i) {
-            if (mode_ == 2) a[i] = 0.5f * (inL[i] + inR[i]), b[i] = 0.5f * (inL[i] - inR[i]);
-            else a[i] = inL[i], b[i] = inR[i];
+            const float l = static_cast<float>(caw::finiteOr0(inL[i])), r = static_cast<float>(caw::finiteOr0(inR[i]));
+            if (mode_ == 2) a[i] = 0.5f * (l + r), b[i] = 0.5f * (l - r);
+            else a[i] = l, b[i] = r;
         }
         bells_.run(a, b, n);
         for (uint32_t i = 0; i < n; ++i) {

@@ -78,7 +78,7 @@ struct Detector {
         if constexpr (Det == kRms) {
             double m = ms[c];
             for (uint32_t i = 0; i < n; ++i) {
-                const double sq = x[i] * x[i];
+                const double sq = caw::finiteOr0(x[i]) * caw::finiteOr0(x[i]);  // a NaN never sticks
                 m = sq + (m - sq) * rmsCoef;
                 if (m < 1e-30) m = 0.0;
                 level[i] = std::sqrt(m);
@@ -116,7 +116,7 @@ inline void toDb(const double* lv, double* db, uint32_t n, double quiet) noexcep
 // A gain that follows a dB value sample by sample without an exp each time: step() multiplies by e^d (d the dB
 // change in nepers) as its cubic series when |d| is small (a follower moves a fraction of a dB a sample; the
 // series' error is under 1e-9 there), else works it out exactly; resync() (each run) starts again from the exact
-// value, so no error builds up.
+// value (call it at grid points, so the bits don't depend on how blocks split), so no error builds up.
 struct GainTracker {
     double db = 0.0, gain = 1.0;
     void resync() noexcept { gain = lib::dbToGain(db); }

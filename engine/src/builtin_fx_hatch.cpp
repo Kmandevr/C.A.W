@@ -216,7 +216,7 @@ protected:
         hold_ = static_cast<uint32_t>(std::max(0.0, param(kPHold, at)) * 0.001 * sr);
         // The release: the knob's time, blended toward the time the measured decay takes to fall 20 dB.
         const double knob = param(kPRelease, at) * 0.001;
-        const double perSecond = -slope_ * sr;  // dB per second the level is falling (0 when it isn't)
+        const double perSecond = -slope_ * sr;  // dB per second the level is falling (negative: rising)
         const double tracked = perSecond > 1.0 ? std::clamp(20.0 / perSecond, 0.002, 2.0) : knob;
         const double tr = std::clamp(param(kPTracking, at), 0.0, 1.0);
         release_ = lib::timeCoefficient(knob + (tracked - knob) * tr, sr);
@@ -231,8 +231,8 @@ protected:
         const float* kr = external_ ? keyRight() : nullptr;
         double sc[2][kControlFrames];
         for (uint32_t i = 0; i < n; ++i) {
-            sc[0][i] = external_ ? (kl ? kl[i] : 0.0) : inL[i];
-            sc[1][i] = external_ ? (kr ? kr[i] : 0.0) : inR[i];
+            sc[0][i] = caw::finiteOr0(external_ ? (kl ? kl[i] : 0.0) : inL[i]);  // a NaN never sticks
+            sc[1][i] = caw::finiteOr0(external_ ? (kr ? kr[i] : 0.0) : inR[i]);
         }
         if (useHpf_)
             for (int c = 0; c < 2; ++c)
@@ -250,8 +250,7 @@ protected:
                 const double db = lib::gainToDb(level, -200.0);
                 const double d = db - lastDb_;
                 lastDb_ = db;
-                const double fall = d < 0.0 ? d : 0.0;
-                slope_ = fall + (slope_ - fall) * slopeCoef_;
+                slope_ = d + (slope_ - d) * slopeCoef_;  // the trend (a note's ripple averages out)
             } else {
                 lastDb_ = closeDb_;
             }
