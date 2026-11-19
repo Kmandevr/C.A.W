@@ -129,7 +129,10 @@ void main() {
       final s = state('org.caw.synth.flagship');
       final m = ModMatrix(DeviceTarget(s, 'a', DeviceTarget.instrumentSlot));
       expect(m.sourceValue(ModSource.lfo1), ModSource.lfo1.value);
-      expect(m.sourceValue(ModSource.macro1), 0);
+      // 1.1.0 (Raven): LFO 4 and Macro 1..8 at the end of the flagship's own list, after Accent (14).
+      expect(m.sourceValue(ModSource.lfo4), 15);
+      expect(m.sourceValue(ModSource.macro1), 16);
+      expect(m.sourceValue(ModSource.macro8), 23);
     });
 
     test('every built-in effect has a browser entry', () {

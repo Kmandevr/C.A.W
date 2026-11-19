@@ -39,6 +39,7 @@ int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against t
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
 int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices against their ceilings
 int larkCost(double seconds);  // bench/lark_cost.cpp: Lark (org.caw.pitchfix) against its ceilings
+int ravenCost(double seconds);  // bench/raven_cost.cpp: Flagship's 1.1.0 synthesis (Raven) against its ceilings
 
 namespace {
 
@@ -996,6 +997,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (only == 306) return larkCost(secs) ? 1 : 0;  // `caw_bench SECONDS 306`: only Lark (a CI test)
+    if (only == 320) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
     if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
@@ -1007,7 +1009,8 @@ int main(int argc, char** argv) {
         const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
         const bool packOver = packCost(secs) != 0;  // and the AutoStacc beta pack (bench/pack_cost.cpp)
         const bool larkOver = larkCost(secs) != 0;  // and Lark (bench/lark_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver) ? 1 : 0;
+        const bool ravenOver = ravenCost(secs) != 0;  // and Flagship's 1.1.0 modes (bench/raven_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

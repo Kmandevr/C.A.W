@@ -7,9 +7,9 @@ import 'dart:typed_data';
 const _kH = 512; // the engine's harmonics per frame (frame size 1024 / 2)
 
 /// The tables' names and frame counts (`kTables`): the built-in ones, then User (the imported table, its frames
-/// [UserWavetable.frames]; one sine frame when none is loaded).
-const List<String> wavetableNames = ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User'];
-const List<int> wavetableFrames = [4, 5, 5, 16, 4, 1];
+/// [UserWavetable.frames]; one sine frame when none is loaded), then 1.1.0's Additive (eight rule-made spectra).
+const List<String> wavetableNames = ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic', 'User', 'Additive'];
+const List<int> wavetableFrames = [4, 5, 5, 16, 4, 1, 8];
 
 /// The User table's index in [wavetableNames] (`kUserTable`).
 const userTableIndex = 5;
@@ -190,7 +190,31 @@ final List<List<_Frame>> _tables = () {
   ];
   // User with none loaded: a sine.
   final user = [_Frame.harmonics(Float64List.fromList([1]))];
-  return [basic, analog, vocal, sweep, classic, user];
+  // Additive (1.1.0): saw, square, odd-heavy, even-heavy, a comb (every third missing), drawbars, a soft bright
+  // spectrum and a hollow 20 % pulse, Schroeder's phases (the engine's rules).
+  const bars = [0.0, 1.0, 0.8, 0.6, 0.5, 0.0, 0.4, 0.0, 0.3];
+  final additive = [
+    for (var f = 0; f < 8; f++)
+      _Frame.harmonics(() {
+        final a = Float64List(_kH);
+        for (var h = 1; h <= _kH; h++) {
+          final saw = 1.0 / h;
+          a[h - 1] = switch (f) {
+            0 => saw,
+            1 => h.isOdd ? saw : 0,
+            2 => h.isOdd ? saw : saw / 3,
+            3 => h == 1 || h.isEven ? saw : saw / 4,
+            4 => h % 3 != 0 ? saw : 0,
+            5 => h <= 8 ? bars[h] : 0,
+            6 => _rolloff(h, 64) / math.sqrt(h.toDouble()),
+            _ => math.sin(math.pi * h * 0.2).abs() / h,
+          };
+        }
+        _normalize(a);
+        return Float64List.sublistView(a, 0, n);
+      }(), phases),
+  ];
+  return [basic, analog, vocal, sweep, classic, user, additive];
 }();
 
 final Map<(int, int, int), Float32List> _frameCache = {};
@@ -222,14 +246,30 @@ Float32List wavetableFrame(int table, int frame, {int points = 256, UserWavetabl
   });
 }
 
-/// The warp modes (`kWarps`).
-enum Warp { none, bend, sync, mirror, quantize, fm, fold, oscFm }
+/// The warp modes (`kWarps`): 1.0's, then 1.1.0's (another oscillator multiplying or syncing this one, then the
+/// spectral and additive warps the engine reads from precomputed banks).
+enum Warp {
+  none, bend, sync, mirror, quantize, fm, fold, oscFm,
+  oscRm, oscAm, oscSync, stretch, shift, oddEven, formant, smear, disperse, cut, comb
+}
 
 /// What each warp is called on screen (`kWarps`).
-const List<String> warpNames = ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM'];
+const List<String> warpNames = ['None', 'Bend', 'Sync', 'Mirror', 'Quantize', 'FM', 'Fold', 'Osc FM',
+  'Osc RM', 'Osc AM', 'Osc sync', 'Stretch', 'Shift', 'Odd/even', 'Formant', 'Smear', 'Disperse', 'Low/high cut', 'Comb'];
+
+/// The warps that hear another oscillator (or noise): their oscillator's `oscN_mod_src` chooses it.
+const Set<Warp> sourceWarps = {Warp.oscFm, Warp.oscRm, Warp.oscAm, Warp.oscSync};
 
 /// The oscillator (1..3) Osc FM on oscillator [osc] hears: the one before it, round the ring (`fmSource`).
 int oscFmSource(int osc) => osc == 1 ? 3 : osc - 1;
+
+/// The oscillator (1..3) a source warp on [osc] hears for `oscN_mod_src` value [modSrc] (Prev, Osc 1..3, Noise):
+/// null for noise. Itself counts as Prev, as in the engine.
+int? modSourceOsc(int osc, int modSrc) {
+  if (modSrc >= 4) return null;
+  if (modSrc <= 0 || modSrc == osc) return oscFmSource(osc);
+  return modSrc;
+}
 
 /// sin(2 pi u), as the engine's FM and fold warps approximate it (`sineCycles`).
 double _sineCycles(double u) {
@@ -264,8 +304,14 @@ double warpPhase(double t, Warp mode, double amount, {int fmRatio = 1, double mo
     case Warp.quantize:
       final steps = math.pow(2, 8 - 7 * amount).floorToDouble();
       return (t * steps).floorToDouble() / steps;
-    case Warp.none:
+    case Warp.oscSync:
+      // The drawing syncs to its own cycle (one cycle of the source): the sweep's speed-up.
+      final s = t * (1 + 7 * amount);
+      return s - s.floorToDouble();
+    case Warp.none || Warp.oscRm || Warp.oscAm:
       return t;
+    case Warp.stretch || Warp.shift || Warp.oddEven || Warp.formant || Warp.smear || Warp.disperse || Warp.cut || Warp.comb:
+      return t; // the spectral warps reshape the spectrum, not the phase: drawn unwarped
   }
 }
 
@@ -393,9 +439,9 @@ double lfoHz(double rateHz, int sync, double bpm) {
   return bpm / 60 / lfoSyncBeats[sync];
 }
 
-/// The filter types (`kFilterTypes`).
+/// The filter types (`kFilterTypes`): 1.0's, then 1.1.0's models.
 const List<String> filterTypeNames = ['Ladder LP', 'Ladder HP', 'Ladder BP', 'SVF LP', 'SVF HP', 'SVF BP', 'SVF notch',
-  'Comb', 'Formant'];
+  'Comb', 'Formant', 'Diode LP', 'Sallen-Key', 'Phaser', 'Neg comb', 'Vowel'];
 
 /// An APPROXIMATE magnitude response in dB at [hz], for drawing: textbook 4-pole ladder and 2-pole state-variable
 /// shapes, a feedback comb and three formant peaks. It shows where the filter cuts and rings, not the engine's
@@ -405,7 +451,22 @@ double filterResponseDb(double hz, {required int type, required double cutoff, r
   final w = hz / cutoff.clamp(20.0, 20000.0);
   final r = resonance.clamp(0.0, 1.0);
   double mag;
+  // 1.1.0's models drawn as their nearest kin: the diode as the ladder low-pass, the Sallen-Key as the SVF low-pass.
+  if (type == 9) type = 0;
+  if (type == 10) type = 3;
   switch (type) {
+    case 11:
+      // Four (or with morph, eight) first-order all-passes summed with the input: notches where they turn 180°.
+      final stages = morph >= 0.5 ? 8 : 4;
+      final phase = stages * 2 * math.atan(w);
+      mag = (0.5 * (1 + math.cos(phase))).abs().clamp(1e-3, 1.0);
+      mag = math.sqrt(mag) * (1 + 0.6 * r * math.cos(phase).abs());
+    case 12:
+      // A negative feedback comb: peaks at odd multiples of half the cutoff.
+      final g = -(0.4 + 0.595 * r);
+      final ph = 2 * math.pi * w;
+      final re = 1 - g * math.cos(ph), im = g * math.sin(ph);
+      mag = math.sqrt(1 - g * g) / math.sqrt(re * re + im * im);
     case 0 || 1 || 2:
       // (1 + s)^4 + k with s = jw, k up to ~3.8 (self-oscillation at 4).
       final k = 3.8 * r;
@@ -434,7 +495,7 @@ double filterResponseDb(double hz, {required int type, required double cutoff, r
       final re = 1 - damp * math.cos(ph), im = damp * math.sin(ph);
       mag = (1 - damp) / math.sqrt(re * re + im * im);
     default:
-      // Three vowel peaks, the vowel set by morph (A..U), moved by the cutoff over 1 kHz.
+      // Three vowel peaks, the vowel set by morph (A..U), moved by the cutoff over 1 kHz (Vowel: over the dry signal).
       final v = morph.clamp(0.0, 1.0) * 4;
       final v0 = v.floor().clamp(0, 4), v1 = math.min(v0 + 1, 4), m = v - v0;
       final shift = cutoff / 1000;
@@ -447,6 +508,7 @@ double filterResponseDb(double hz, {required int type, required double cutoff, r
         final re = 1 - x * x, im = x / q;
         mag += gains[f] * (x / q) / math.sqrt(re * re + im * im);
       }
+      if (type == 13) mag = 0.4 + 1.2 * mag;
   }
   final m = mix.clamp(0.0, 1.0);
   final out = m * mag + (1 - m);

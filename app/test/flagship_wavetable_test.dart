@@ -184,7 +184,7 @@ void main() {
     expect(UserWavetable.parse(Uint8List.sublistView(bytes, 0, bytes.length - 1)), isNull);
     expect(tableFrameCount(userTableIndex, user), 2);
     expect(tableFrameCount(userTableIndex, null), 1);
-    expect(wavetableNames, hasLength(6));
+    expect(wavetableNames, hasLength(7)); // then 1.1.0's Additive
     // Halfway between the frames they cancel; frame 0 is the sine.
     final mid = oscillatorCycle(userTableIndex, 0.5, Warp.none, 0, points: 64, user: user);
     expect(mid.every((v) => v.abs() < 1e-3), isTrue);
