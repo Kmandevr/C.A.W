@@ -1130,15 +1130,20 @@ class AppState extends ChangeNotifier implements StressHost {
   bool get canUndo => history.canUndo;
   bool get canRedo => history.canRedo;
 
-  bool _historyHeld = false;
+  /// How many holds keep the history open now (an automation take, a preset preview): they can overlap, and the
+  /// burst settles only when the last one ends.
+  int _historyHolds = 0;
+  bool get _historyHeld => _historyHolds > 0;
 
-  /// Keeps the burst of edits open while [hold] is true, so a whole take of automation writing is one undo step;
-  /// edits made before it settle first, as their own step.
+  /// Keeps the burst of edits open while held, so a whole take of automation writing (or a preset preview) is one
+  /// undo step; edits made before the first hold settle first, as their own step. Each `holdHistory(true)` is
+  /// ended by one `holdHistory(false)`; while holds overlap, their edits end as one step when the last one ends.
   void holdHistory(bool hold) {
-    if (hold == _historyHeld) return;
+    if (!hold && _historyHolds == 0) return;
+    _historyHolds += hold ? 1 : -1;
+    if (_historyHolds > (hold ? 1 : 0)) return;  // another hold keeps it open
     _historyTimer?.cancel();
     if (!starting) history.settle(_snapshot());
-    _historyHeld = hold;
     notifyListeners();
   }
 

@@ -73,6 +73,9 @@ void initFlagship(DeviceTarget t) {
 /// patch keeps what is on), and the output volume.
 final _keep = RegExp(r'^(mod\d+_|volume$|velocity$|bend_range$|voice_mode$|glide|.*_on$)');
 
+/// Whether a random patch (this one, or the header's ⋯ › Randomize) leaves parameter [id] alone.
+bool flagshipRandomKeeps(String id) => _keep.hasMatch(id);
+
 /// The source of randomness (tests seed it).
 math.Random flagshipRandom = math.Random();
 
@@ -85,7 +88,7 @@ void randomizeFlagship(DeviceTarget t, double amount, {math.Random? random}) {
   if (info == null || amount <= 0) return;
   final out = <String, double>{};
   for (final p in info.parameters) {
-    if (_keep.hasMatch(p.id)) continue;
+    if (flagshipRandomKeeps(p.id)) continue;
     final v = t.value(p.id);
     if (p.isChoice) {
       if (rng.nextDouble() >= amount) continue;
@@ -100,7 +103,9 @@ void randomizeFlagship(DeviceTarget t, double amount, {math.Random? random}) {
     if (p.step > 0) next = (next / p.step).round() * p.step;
     out[p.id] = next;
   }
+  t.state.endUndoStep();  // an edit still settling stays a step of its own
   t.setAll(out);
+  t.state.endUndoStep();
 }
 
 /// Copied oscillator settings (each `oscN_` value by its suffix), for Paste on another one.
@@ -118,7 +123,9 @@ void copyOscillator(DeviceTarget t, int n) {
 bool pasteOscillator(DeviceTarget t, int n) {
   final c = flagshipOscClipboard;
   if (c == null) return false;
+  t.state.endUndoStep();
   t.setAll({for (final e in c.entries) if (t.param('osc${n}_${e.key}') != null) 'osc${n}_${e.key}': e.value});
+  t.state.endUndoStep();
   return true;
 }
 

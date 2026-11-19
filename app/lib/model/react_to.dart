@@ -33,17 +33,20 @@ extension ReactTo on AppState {
 
   /// Makes [t]'s knob [paramId] react to track [sourceLayerId]: links the modulator that does it, creating it when
   /// there is none, as one undo step. Returns the link, or the reason it can't be made (a loop: a knob can't react
-  /// to the loudness of a track it changes; a full project).
-  ({ModLinkDoc? link, String? why}) reactTo(DeviceTarget t, String paramId, String sourceLayerId, ReactKind kind) {
+  /// to the loudness of a track it changes; a full project), and what it made: [ReactMade.linked] when the link is
+  /// new, [ReactMade.modulatorId] when the modulator is ([undoReactTo] takes back just those).
+  ({ModLinkDoc? link, String? why, ReactMade made}) reactTo(DeviceTarget t, String paramId, String sourceLayerId,
+      ReactKind kind) {
+    const none = ReactMade(linked: false);
     final source = layerById(sourceLayerId);
-    if (source == null) return (link: null, why: 'That track is gone');
+    if (source == null) return (link: null, why: 'That track is gone', made: none);
     final target = ModTarget.ofDevice(t, paramId);
     endUndoStep();
     var m = reactModulator(t, sourceLayerId, kind);
     final made = m == null;
     if (m == null) {
       m = addModulator(kind.componentId, layerId: t.layerId);
-      if (m == null) return (link: null, why: 'A project holds at most $kMaxModulators modulators');
+      if (m == null) return (link: null, why: 'A project holds at most $kMaxModulators modulators', made: none);
       final id = m.id;
       editModulator(id, (x) {
         x.inputId = sourceLayerId;
@@ -56,10 +59,34 @@ extension ReactTo on AppState {
     if (why != null) {
       if (made) removeModulator(m.id);  // the burst then changed nothing: no undo step
       endUndoStep();
-      return (link: null, why: why);
+      return (link: null, why: why, made: none);
     }
+    final had = project.modLinks.any((l) => l.source == ref.modulatorId && l.output == ref.output && l.target == target);
     final link = addModLink(ref, target);
     endUndoStep();
-    return (link: link, why: link == null ? 'That link can\'t be made' : null);
+    return (
+      link: link,
+      why: link == null ? 'That link can\'t be made' : null,
+      made: ReactMade(linked: link != null && !had, linkId: link?.id, modulatorId: made ? m.id : null),
+    );
   }
+
+  /// Takes back what a [reactTo] made (React to…'s Undo), as one undo step of its own: the link, and the modulator
+  /// when it was made for it and nothing else links from it now. Edits made since stay.
+  void undoReactTo(ReactMade made) {
+    endUndoStep();
+    final link = made.linkId;
+    if (made.linked && link != null && modLink(link) != null) removeModLink(link);
+    final m = made.modulatorId;
+    if (m != null && project.modulator(m) != null && !project.modLinks.any((l) => l.source == m)) removeModulator(m);
+    endUndoStep();
+  }
+}
+
+/// What a [ReactTo.reactTo] made: whether the link is new (its id), and the modulator's id when it is new too.
+class ReactMade {
+  const ReactMade({required this.linked, this.linkId, this.modulatorId});
+  final bool linked;
+  final int? linkId;
+  final String? modulatorId;
 }

@@ -146,5 +146,5 @@ Future<void> pickReactTo(BuildContext context, DeviceTarget t, String paramId) a
   DeviceFeel.detent();
   messenger?.showSnackBar(SnackBar(duration: const Duration(seconds: 3),
     content: Text('${t.param(paramId)?.label ?? paramId} reacts to ${layer?.name ?? 'the track'}\'s ${kind.label.toLowerCase()}'),
-    action: SnackBarAction(label: 'Undo', onPressed: s.undo)));
+    action: SnackBarAction(label: 'Undo', onPressed: () => s.undoReactTo(r.made))));
 }

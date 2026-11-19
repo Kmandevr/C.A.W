@@ -5,6 +5,7 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/device_target.dart';
 import '../../model/mod_matrix.dart';
+import '../../model/user_presets.dart' show UserPresets;
 import '../arrange/track_color.dart';
 import '../glass.dart';
 import '../motion.dart';
@@ -190,8 +191,9 @@ class _DeviceInlineState extends State<DeviceInline> {
             mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(t.label, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: t.bypass ? Neon.dim : color)),
-            Text(DevicePresets.label(t), maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 9, color: Neon.dim)),
+            // Its own watch: the name follows a knob step, undo and the library (a rename in another view).
+            ParamWatch(target: t, also: s.userPresets, builder: (_) => Text(DevicePresets.label(t), maxLines: 1,
+              overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Neon.dim))),
           ])),
         )),
         const DeviceMiniVisual(),

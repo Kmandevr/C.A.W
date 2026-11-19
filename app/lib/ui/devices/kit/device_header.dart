@@ -121,7 +121,10 @@ class DeviceABSwitch extends StatefulWidget {
 
 class _DeviceABSwitchState extends State<DeviceABSwitch> {
   @override
-  Widget build(BuildContext context) {
+  // Rebuilt when the side changes in any view of the device, or its values change (undo), not on a knob step.
+  Widget build(BuildContext context) => PresetChanges(target: widget.target, also: DeviceAB.changes, builder: _build);
+
+  Widget _build(BuildContext context) {
     final t = widget.target, color = widget.color;
     final b = DeviceAB.isB(t);
     Widget side(String label, bool isB) => GestureDetector(
@@ -130,7 +133,6 @@ class _DeviceABSwitchState extends State<DeviceABSwitch> {
       onTap: () {
         DeviceFeel.tap();
         DeviceAB.select(t, isB);
-        setState(() {});
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
@@ -147,7 +149,6 @@ class _DeviceABSwitchState extends State<DeviceABSwitch> {
       onLongPress: () {
         DeviceFeel.detent();
         DeviceAB.copyAToB(t);
-        setState(() {});
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(duration: Duration(seconds: 2),
           content: Text('Copied A to B')));
       },

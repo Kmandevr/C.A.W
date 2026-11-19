@@ -19,7 +19,9 @@ import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/devices/device_editor.dart';
 import 'package:caw/ui/devices/device_registry.dart';
 import 'package:caw/ui/devices/flagship/flagship_editor.dart' show flagshipComponentId;
+import 'package:caw/ui/devices/flagship/flagship_tools.dart';
 import 'package:caw/ui/devices/kit/device_menu.dart';
+import 'package:caw/ui/devices/kit/preset_preview.dart';
 import 'package:caw/ui/devices/kit/presets.dart';
 import 'package:caw/ui/devices/kit/hero.dart' show MotionClock;
 import 'package:caw/ui/motion.dart';
@@ -496,6 +498,247 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(s.undo(), isTrue);
       expect(chorus().value('rate'), closeTo(0.6, 1e-9), reason: 'one step back to before the preview');
+      await done(tester);
+    });
+
+    testWidgets('closing the browser with Preview on (a tap outside, Back) cancels it, outside any build',
+        (tester) async {
+      userPresets();
+      await pumpStack(tester);
+      for (final close in [() => tester.tapAt(const Offset(200, 20)), () => tester.binding.handlePopRoute()]) {
+        await tester.tap(inDevice('0', 'fx-presets-0'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('preset-preview')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('preset-user-Fast')));
+        await tester.pumpAndSettle();
+        expect(chorus().value('rate'), closeTo(1.2, 1e-9));
+        await close();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('preset-browser')), findsNothing);
+        expect(chorus().value('rate'), closeTo(0.6, 1e-9));
+      }
+      await tester.pump(const Duration(seconds: 1));
+      expect(s.canUndo, isFalse);
+      await done(tester);
+    });
+
+    testWidgets('Cancel and OK put the playhead back where it was before the preview looped the clip',
+        (tester) async {
+      userPresets();
+      layer().clips.add(ClipDoc(id: 'c', patternId: 'x', startSteps: 32, lengthSteps: 16));
+      await pumpStack(tester);
+      for (final end in ['preset-preview-cancel', 'preset-preview-ok']) {
+        s.seekTo(5);
+        await tester.tap(inDevice('0', 'fx-presets-0'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('preset-preview')));
+        await tester.pumpAndSettle();
+        expect(s.pausedStep, 32, reason: 'it plays from the clip');
+        await tester.tap(find.byKey(ValueKey(end)));
+        await tester.pumpAndSettle();
+        expect(s.pausedStep, 5, reason: end);
+      }
+      await done(tester);
+    });
+
+    test('a preview and an automation take hold the history together: either can end first', () async {
+      final t = chorus();
+      // The take ends inside the preview.
+      final p = PresetPreview.start(t);
+      s.holdHistory(true);
+      t.set('depth', 0.4);
+      s.holdHistory(false);
+      t.set('depth', 0.5);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      expect(s.history.open, isTrue, reason: 'the preview still holds it');
+      p.keep();
+      expect(s.history.open, isFalse);
+      // The preview ends inside the take.
+      s.holdHistory(true);
+      final q = PresetPreview.start(t);
+      t.set('depth', 0.6);
+      q.keep();
+      t.set('depth', 0.7);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      expect(s.history.open, isTrue, reason: 'the take still holds it');
+      s.holdHistory(false);
+      expect(s.history.open, isFalse);
+      expect(s.undo(), isTrue);
+      expect(t.value('depth'), closeTo(0.5, 1e-9), reason: 'the take and the preview inside it: one step');
+    });
+  });
+
+  group('undo history (review)', () {
+    test('decodes each snapshot once: a second look and a new step reuse what it read', () {
+      final t = chorus();
+      for (var i = 1; i <= 5; i++) {
+        t.set('depth', i / 10);
+        s.endUndoStep();
+      }
+      final first = deviceHistoryDecodes;
+      expect(deviceHistory(t), hasLength(5));
+      expect(deviceHistoryDecodes - first, 5);
+      expect(deviceHistory(t), hasLength(5));
+      expect(deviceHistoryDecodes - first, 5, reason: 'cached');
+      t.set('depth', 0.9);
+      s.endUndoStep();
+      expect(deviceHistory(t), hasLength(6));
+      expect(deviceHistoryDecodes - first, 6, reason: 'only the new step');
+    });
+
+    testWidgets('an edit still settling is its own step: "Before the last change" is before it', (tester) async {
+      final t = chorus();
+      await pumpStack(tester);
+      await tester.tap(inDevice('0', 'device-more'));
+      await tester.pumpAndSettle();
+      t.set('depth', 0.3);
+      s.endUndoStep();
+      t.set('depth', 0.9);  // under 600 ms ago: the burst is still open
+      await tester.tap(find.text('Undo history…'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 step back'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('device-history-0')));
+      await tester.pumpAndSettle();
+      expect(t.value('depth'), closeTo(0.3, 1e-9));
+      await done(tester);
+    });
+
+    test('a rack lists no change it did not have (its saved layout is not a knob)', () {
+      addBuiltinEffect(s, layer(), 'org.caw.rack.fx');
+      s.endUndoStep();
+      final rack = DeviceTarget(s, 'a', layer().components.length - 1);
+      chorus().set('depth', 0.4);
+      s.endUndoStep();
+      expect(deviceHistory(rack), isEmpty);
+    });
+
+    test('two of the same device swapped: the list stops at the move, not showing the other one\'s steps', () {
+      chorus(0).set('depth', 0.2);
+      s.endUndoStep();
+      chorus(1).set('depth', 0.8);
+      s.endUndoStep();
+      s.moveNativeEffect(layer(), 1, 0);
+      s.endUndoStep();
+      expect(chorus(0).value('depth'), closeTo(0.8, 1e-9));
+      expect(deviceHistory(chorus(0)), isEmpty, reason: 'its steps before the move are at the other slot');
+      chorus(0).set('depth', 0.5);
+      s.endUndoStep();
+      final steps = deviceHistory(chorus(0));
+      expect(steps, hasLength(1));
+      expect(steps.single.values['depth'], closeTo(0.8, 1e-9));
+    });
+  });
+
+  group('FX row state (review)', () {
+    test('collapsing past the bound drops the oldest key instead of refusing', () {
+      final a = Settings();
+      for (var i = 0; i <= Settings.maxFxCollapsed; i++) {
+        expect(a.setFxRowOpen('p', 'a/$i/x', false), isTrue);
+      }
+      expect(a.fxRowOpen('p', 'a/${Settings.maxFxCollapsed}/x'), isFalse);
+      expect(a.fxRowOpen('p', 'a/0/x'), isTrue, reason: 'the oldest went');
+      expect(a.fxCollapsed['p'], hasLength(Settings.maxFxCollapsed));
+    });
+
+    testWidgets('a removed device\'s key goes when the rows are next saved', (tester) async {
+      await pumpStack(tester);
+      await tester.tap(find.byKey(const ValueKey('fx-fold-1')));
+      await tester.pumpAndSettle();
+      s.removeNativeEffect(layer(), 1);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('fx-fold-0')));
+      await tester.pumpAndSettle();
+      expect(s.settings.fxCollapsed['p'], {'a/0/${chorus().componentId}'});
+      await done(tester);
+    });
+  });
+
+  group('Flagship in the shell (review)', () {
+    DeviceTarget synth() => DeviceTarget(s, 'a', DeviceTarget.instrumentSlot);
+
+    test('⋯ › Randomize keeps what Flagship\'s Random patch keeps', () {
+      final t = synth();
+      final keep = ['volume', 'velocity', 'bend_range', 'voice_mode', 'glide', 'osc2_on', 'fx_dist_on', 'mod1_amt',
+        'mod1_dst', 'mod2_src'];
+      final before = {for (final id in keep) id: t.value(id)};
+      randomizeDevice(t, 1, random: math.Random(5));
+      expect({for (final id in keep) id: t.value(id)}, before);
+      expect(t.value('flt1_cutoff'), isNot(2400), reason: 'the sound still moves');
+    });
+
+    test('⋯ › Reset on Flagship is its Init', () {
+      final t = synth();
+      t.use!.preset = 'Mono bass';
+      t.set('osc1_level', 0.2);
+      resetDevice(t);
+      expect(t.value('osc1_level'), 0.7);
+      expect(DevicePresets.label(t), 'Init');
+    });
+
+    test('a random patch and an oscillator paste are undo steps of their own', () {
+      final t = synth();
+      t.set('flt1_cutoff', 300);  // still settling
+      randomizeFlagship(t, 1, random: math.Random(2));
+      expect(s.undo(), isTrue);
+      expect(t.value('flt1_cutoff'), 300, reason: 'only the random patch went');
+      t.set('osc1_detune', 60);
+      s.endUndoStep();
+      copyOscillator(t, 1);
+      t.set('osc2_level', 0.3);  // still settling
+      expect(pasteOscillator(t, 2), isTrue);
+      expect(s.undo(), isTrue);
+      expect(t.value('osc2_level'), closeTo(0.3, 1e-9), reason: 'only the paste went');
+      expect(t.value('osc2_detune'), isNot(60));
+    });
+  });
+
+  group('knob and header (review)', () {
+    testWidgets('React to…\'s Undo takes back the link only, not an edit made since', (tester) async {
+      await pumpStack(tester);
+      await tester.longPress(inDevice('0', 'dknob-depth'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('knob-menu-react')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kick'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Loudness'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      chorus(1).set('depth', 0.66);  // another edit inside the toast's 3 s
+      await tester.pump();
+      await tester.tap(find.widgetWithText(SnackBarAction, 'Undo'));
+      await tester.pumpAndSettle();
+      expect(s.project.modLinks, isEmpty);
+      expect(s.project.modulators, isEmpty, reason: 'it was made for the link');
+      expect(chorus(1).value('depth'), closeTo(0.66, 1e-9), reason: 'the later edit stays');
+      await done(tester);
+    });
+
+    testWidgets('A/B and the folded row\'s preset name follow changes made elsewhere', (tester) async {
+      final t = chorus();
+      DeviceAB.select(t, false);  // the switch's state is app-wide: an earlier test may have left B on
+      t.set('rate', 1.4);
+      s.userPresets.put(UserPreset(id: 'u1', kind: UserPresetKind.device, name: 'Wide',
+          device: s.captureDevice(t), modified: DateTime(2026, 11, 18)));
+      await pumpStack(tester);
+      Color? sideColor(String side) => (tester.widget<AnimatedContainer>(find.descendant(
+          of: inDevice('0', 'device-ab-$side'), matching: find.byType(AnimatedContainer))).decoration as BoxDecoration).color;
+      expect(sideColor('b'), Colors.transparent);
+      DeviceAB.select(t, true);  // as from the full editor's header
+      await tester.pump();
+      expect(sideColor('b'), isNot(Colors.transparent));
+      DeviceAB.select(t, false);
+      await tester.tap(find.byKey(const ValueKey('fx-fold-0')));
+      await tester.pumpAndSettle();
+      DevicePresets.apply(t, DevicePresets.user(t).single);
+      await tester.pump();
+      expect(find.descendant(of: find.byKey(const ValueKey('fx-row-0')), matching: find.text('Wide')), findsOneWidget);
+      s.userPresets.rename('u1', 'Wider');  // the library, from another view
+      await tester.pump();
+      expect(find.descendant(of: find.byKey(const ValueKey('fx-row-0')), matching: find.text('Wider')), findsOneWidget);
       await done(tester);
     });
   });
