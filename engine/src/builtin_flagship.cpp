@@ -200,7 +200,7 @@ constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
 constexpr std::string_view kFilterTypes[] = {"Ladder LP", "Ladder HP", "Ladder BP", "SVF LP", "SVF HP",
                                              "SVF BP",    "SVF notch", "Comb",     "Formant",
-                                             "Diode LP",  "Sallen-Key LP", "Phaser", "Comb (negative)", "Vowel"};
+                                             "Diode LP",  "Sallen-Key", "Phaser", "Neg comb", "Vowel"};
 static_assert(sizeof(kFilterTypes) / sizeof(kFilterTypes[0]) == kFilterTypeCount);
 constexpr std::string_view kRoutings[] = {"Series", "Parallel"};
 constexpr std::string_view kLfoShapes[] = {"Sine", "Triangle", "Saw up", "Saw down", "Square", "Sample & hold", "Smooth random"};

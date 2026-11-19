@@ -31,10 +31,17 @@ const Map<ModSource, String> _noteSourceNotes = {
 
 /// The sources with a shape of their own, each a tab; the note's own sources share the NOTE tab.
 const List<ModSource> shapedSources = [
-  ModSource.env1, ModSource.env2, ModSource.env3, ModSource.lfo1, ModSource.lfo2, ModSource.lfo3, ModSource.random,
+  ModSource.env1, ModSource.env2, ModSource.env3, ModSource.lfo1, ModSource.lfo2, ModSource.lfo3, ModSource.lfo4,
+  ModSource.random,
 ];
 
-/// The mod sources as tabs (ENV 1 · AMP, ENV 2, ENV 3, LFO 1–3, RANDOM, NOTE), each with its colour and how many
+/// The instrument's macro knobs (1.1.0): sources set by hand (or automation), one MACROS tab.
+const List<ModSource> macroSources = [
+  ModSource.macro1, ModSource.macro2, ModSource.macro3, ModSource.macro4,
+  ModSource.macro5, ModSource.macro6, ModSource.macro7, ModSource.macro8,
+];
+
+/// The mod sources as tabs (ENV 1 · AMP, ENV 2, ENV 3, LFO 1–4, RANDOM, NOTE, MACROS), each with its colour and how many
 /// knobs it moves; the open one drawn big under them. The open tab is the editor's focused source, so a source
 /// opened from the strip (assign mode's Edit) opens here.
 class ModSourceTabs extends StatelessWidget {
@@ -50,7 +57,11 @@ class ModSourceTabs extends StatelessWidget {
     final scope = DeviceScope.of(context);
     final routes = scope.matrix?.routes ?? const <ModRoute>[];
     return ValueListenableBuilder<ModSource>(valueListenable: scope.focusSource, builder: (context, focus, _) {
-      final noteOpen = !shapedSources.contains(focus);
+      final t = scope.target;
+      final macros = t.param('macro1') != null;
+      final macroOpen = macros && macroSources.contains(focus);
+      final noteOpen = !shapedSources.contains(focus) && !macroOpen;
+      final shaped = [for (final s in shapedSources) if (s != ModSource.lfo4 || t.param('lfo4_shape') != null) s];
       Widget tab(String key, String label, Color c, bool selected, int count, VoidCallback onTap) => Padding(
         padding: const EdgeInsets.only(right: 4),
         child: InkWell(
@@ -85,17 +96,23 @@ class ModSourceTabs extends StatelessWidget {
         mainAxisSize: MainAxisSize.min, children: [
           // Every tab in sight: they wrap onto a second row rather than scroll out of view.
           Wrap(runSpacing: 4, children: [
-            for (final s in shapedSources)
+            for (final s in shaped)
               tab('fsrc-tab-${s.name}', _tabLabel(s), modSourceColor(s), s == focus,
                 routes.where((r) => r.source == s).length, () => scope.focusSource.value = s),
             tab('fsrc-tab-note', 'NOTE', Neon.yellow, noteOpen,
-              routes.where((r) => !shapedSources.contains(r.source)).length,
+              routes.where((r) => !shapedSources.contains(r.source) && !macroSources.contains(r.source)).length,
               () => scope.focusSource.value = ModSource.velocity),
+            if (macros)
+              tab('fsrc-tab-macros', 'MACROS', modSourceColor(ModSource.macro1), macroOpen,
+                routes.where((r) => macroSources.contains(r.source)).length,
+                () => scope.focusSource.value = ModSource.macro1),
           ]),
           const SizedBox(height: 8),
           AnimatedSwitcher(duration: Motion.fade(Motion.standard, Motion.of(context)),
             layoutBuilder: (current, previous) => Stack(alignment: Alignment.topCenter, children: [...previous, ?current]),
-            child: noteOpen
+            child: macroOpen
+                ? watchDevice(context, (_) => const _MacroSources(key: ValueKey('source-macros')))
+                : noteOpen
                 ? const _NoteSources(key: ValueKey('source-note'))
                 : watchDevice(context, (_) => SourceBody(focus, key: ValueKey('source-${focus.name}'), wide: wide))),
         ]);
@@ -117,6 +134,29 @@ class _NoteSources extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Text(e.value, style: const TextStyle(fontSize: 11, color: Neon.dim))),
       ])),
+    ]);
+  }
+}
+
+/// The macros (1.1.0): each one's chip (drag it onto knobs) beside its knob.
+class _MacroSources extends StatelessWidget {
+  const _MacroSources({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final routes = DeviceScope.of(context).matrix?.routes ?? const <ModRoute>[];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        for (final m in macroSources)
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            ModSourceChip(m, count: routes.where((r) => r.source == m).length),
+            const SizedBox(width: 2),
+          ]),
+      ]),
+      FKnobRow([for (var i = 1; i <= 8; i++) 'macro$i'], size: 40, color: modSourceColor(ModSource.macro1),
+        labels: {for (var i = 1; i <= 8; i++) 'macro$i': 'Macro $i'}),
+      const Padding(padding: EdgeInsets.only(top: 4), child: Text('Each macro moves every knob it is routed to at once.',
+        style: TextStyle(fontSize: 9, color: Neon.dim))),
     ]);
   }
 }
@@ -153,8 +193,8 @@ class SourceBody extends StatelessWidget {
           if (source == ModSource.env1) const Padding(padding: EdgeInsets.only(top: 4), child: Text(
             'Env 1 shapes each note\'s level.', style: TextStyle(fontSize: 9, color: Neon.dim))),
         ];
-      case ModSource.lfo1 || ModSource.lfo2 || ModSource.lfo3:
-        final p = 'lfo${source.index - ModSource.lfo1.index + 1}_';
+      case ModSource.lfo1 || ModSource.lfo2 || ModSource.lfo3 || ModSource.lfo4:
+        final p = source == ModSource.lfo4 ? 'lfo4_' : 'lfo${source.index - ModSource.lfo1.index + 1}_';
         final synced = scope.target.value('${p}sync') >= 1;
         visual = LfoView(rateParam: '${p}rate', shapeParam: '${p}shape', syncParam: '${p}sync', bpm: bpm, color: c,
           height: wide ? big : (compact ? 64 : 84));
@@ -196,7 +236,7 @@ class SourceBody extends StatelessWidget {
 /// 2 modulation.
 int flagshipPanelOf(String paramId) {
   if (paramId.startsWith('flt') || paramId.startsWith('fx_')) return 1;
-  if (RegExp(r'^(env|lfo|rnd)').hasMatch(paramId)) return 2;
+  if (RegExp(r'^(env|lfo|rnd|macro)').hasMatch(paramId)) return 2;
   return 0;
 }
 

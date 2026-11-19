@@ -371,12 +371,16 @@ class CppBuiltin {
 const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
       'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects; poly, '
-      'mono or legato with glide. Its 215 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
-      'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303, Basic, Pluck and FM bell.',
+      'mono or legato with glide. 1.1.0 adds oscillator RM, AM and sync with a mod source each, spectral and additive warps, '
+      'an Additive table, Diode, Sallen-Key, Phaser, Neg comb and Vowel filters, LFO 4 and eight macros. Its 230 knobs are '
+      'grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, lfo1_..lfo4_, rnd_, mod1_..mod16_, macro1..8 '
+      'and fx_. Presets: the seven 1.0 ones (Init, Morph pad, Mono bass, Acid 303, Basic, Pluck, FM bell) and 18 for the new '
+      'synthesis.',
       ['voice_mode', 'glide', 'flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
        'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
        'fx_chorus_rate', 'fx_chorus_depth', 'fx_chorus_mix', 'fx_delay_on', 'fx_delay_sync', 'fx_delay_time', 'fx_delay_feedback',
-       'fx_delay_mix', 'fx_reverb_on', 'fx_reverb_size', 'fx_reverb_decay', 'fx_reverb_damping', 'fx_reverb_mix']),
+       'fx_delay_mix', 'fx_reverb_on', 'fx_reverb_size', 'fx_reverb_decay', 'fx_reverb_damping', 'fx_reverb_mix',
+       'macro1', 'macro2', 'macro3', 'macro4', 'macro5', 'macro6', 'macro7', 'macro8']),
   CppBuiltin('org.caw.drum.kit', 'Drum kit', true, 'Kick, snare, clap and hi-hats on General MIDI keys (C2 kick, D2 snare, F#2 hat).',
       ['kick_tune', 'kick_decay', 'kick_punch', 'snare_tune', 'snare_snappy', 'clap_decay', 'hat_closed', 'hat_open', 'hat_tone', 'kick',
        'snare', 'clap', 'hats', 'volume']),
