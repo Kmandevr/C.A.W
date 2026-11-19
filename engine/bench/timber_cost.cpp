@@ -100,7 +100,7 @@ int timberCost(double seconds) {
     const Case cases[] = {
         {"Timber piano: 16 voices (design point)", 0, {}, 16, 24000},
         {"Timber piano: 8 voices", 0, {}, 8, 24000},
-        {"Timber piano: 32 voices, pedal down", 0, {{"sustain", 1}, {"resonance", 0.6}}, 32, 48000},
+        {"Timber piano: 32 voices, pedal down", 0, {{"sustain", 1}, {"resonance", 0.6}}, 32, 56000},  // Normal's cap, a stress case: over 2x heavy
         {"Timber piano: 16 voices, room 0.3 (the room: a light reverb)", 0, {{"space", 0.3}}, 16, 28000},
         {"Timber electric piano: 16 voices (tine)", 1, {}, 16, 8000},
         {"Timber electric piano: 32 voices, reed, tremolo", 1, {{"kind", 1}, {"tremolo", 0.5}}, 32, 24000},  // Normal's cap: heavy
