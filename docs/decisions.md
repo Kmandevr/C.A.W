@@ -1,10 +1,14 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Decisions
+
+## 2026-11-19: The audio callback keeps its core busy where Android gives no performance hint (Claude, owner-approved performance work)
+
+**Decision:** on Android, while something plays, the app is in front, the buffer mode is not Battery and no ADPF hint session is open, the device callback spins after its work until 0.8 of its period from its ideal start (`engine/src/load_stabilizer.h`, `stabilize` in `engine/platform/audio_miniaudio.cpp`). The S22+'s Benchmark (2026-11-19) had the hint `unsupported` and the callback's big core at 634 MHz of 2.5 GHz, its live p99 79–139 %. The arithmetic is Oboe's `StabilizedCallback` (Apache-2.0, google/oboe `src/common/StabilizedCallback.cpp`, read 2026-11-19), **reimplemented**, not copied and not a dependency: Oboe is not linked (miniaudio opens the stream), and a wrapper class of 60 lines is not worth vendoring a library for. The share is Oboe's 0.8, not the 50–70 % first suggested: under schedutil's documented `f = 1.25 u f_max` (docs.kernel.org, read 2026-11-19) a lower share lets the clock fall back ([performance](performance.md#live-callback-clock-and-a-fair-benchmark-2026-11-19)). No setting: Battery is the off switch, and the cost (one big core about 80 % busy while playing) is described in [performance](performance.md). Measured only on the phone; on Linux the rules are unit-tested and nothing else changes.
 
 ## 2026-11-18: Merged effects open old projects; files that use them are version 7 (Claude, owner's FX plan)
 
