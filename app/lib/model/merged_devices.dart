@@ -113,6 +113,8 @@ class MergedDevices {
     MergedVariant('org.caw.reverb.reverse', 'org.caw.reverb', 6, retired: false),
     MergedVariant('org.caw.pitchshift', 'org.caw.shift', 0),
     MergedVariant('org.caw.freqshift', 'org.caw.shift', 1),
+    MergedVariant('org.caw.shift.harmonizer', 'org.caw.shift', 2, retired: false),  // Soar (builtin_fx_shift_voices.cpp)
+    MergedVariant('org.caw.shift.octaver', 'org.caw.shift', 3, retired: false),
     MergedVariant('org.caw.convolver', 'org.caw.convolver', 0),
     MergedVariant('org.caw.convolver.cab', 'org.caw.convolver', 1, retired: false),
   ];
@@ -158,6 +160,10 @@ class MergedDevices {
 
   /// The old effect [id]'s variant [variant] plays (its device page and display layout; a new variant's page id, the
   /// Duck's [duckPageId]), or [id] itself for any other id.
+  /// 1.1.0 modes with no page of their own yet: each opens the fallback page (the generic knobs, the shell's
+  /// Variant pill), never its family's page, which does not know it.
+  static const pagesToCome = {'org.caw.shift.harmonizer', 'org.caw.shift.octaver'};
+
   static String pageId(String id, int variant) => _byVariant['$id#$variant']?.oldId ?? id;
 
   /// The engine's caw_migrate_component (`Engine.resolveComponent`), once the engine has loaded (AppState sets it);

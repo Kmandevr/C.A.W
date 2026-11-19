@@ -1,4 +1,4 @@
-// A log-spaced band filterbank (TPT SVF band-passes, envelope followers, a bell cascade) shared by Duck's Carve and Mimic's vocoder.
+// A log-spaced band filterbank (TPT SVF band-passes, envelope followers, a bell cascade, a synthesis bank) shared by Duck's Carve and Mimic's vocoder.
 #pragma once
 
 #include <cmath>
@@ -109,6 +109,18 @@ public:
         }
     }
 
+    // Settles the filter states below 1e-20 to 0 (Mimic calls it at control rate: no subnormal tails).
+    void flush() noexcept {
+        for (int s = 0; s < 2; ++s)
+            for (int k = 0; k < 2; ++k)
+                for (uint32_t b = 0; b < count_; ++b) {
+                    float& p = s1_[s][k][b];
+                    float& q = s2_[s][k][b];
+                    p = p < 1e-20f && p > -1e-20f ? 0.0f : p;
+                    q = q < 1e-20f && q > -1e-20f ? 0.0f : q;
+                }
+    }
+
 private:
     uint32_t count_ = 0, first_ = 0, last_ = 0;
     float a1_[Max] = {}, a2_[Max] = {}, a3_[Max] = {}, norm_[Max] = {};
@@ -188,6 +200,79 @@ private:
     float c_[2][Max][4] = {};
     bool flat_[2][Max] = {};
     float s1_[2][Max] = {}, s2_[2][Max] = {};
+};
+
+// The synthesis side (Mimic's carrier): one signal through the same 4th-order band-passes, each band's output
+// followed (its level, for the caller's gains) and weighted by a gain that ramps in a straight line to the target
+// setGains() gives over the next `frames`, then summed into two outputs by each band's pan weights (left, right).
+template <uint32_t Max>
+class Synthesis {
+public:
+    void setup(uint32_t count, double lo, double hi, double q, double sr) noexcept {
+        count_ = count > Max ? Max : count;
+        for (uint32_t b = 0; b < count_; ++b) {
+            Coef c;
+            c.set(centre(b, count_, lo, hi), q, sr);
+            a1_[b] = c.a1, a2_[b] = c.a2, a3_[b] = c.a3;
+            norm_[b] = c.k * c.k;
+        }
+        for (uint32_t b = count_; b < Max; ++b) a1_[b] = a2_[b] = a3_[b] = norm_[b] = 0.0f;
+    }
+    void setTimes(double attackSeconds, double releaseSeconds, double sr) noexcept {
+        att_ = static_cast<float>(lib::timeCoefficient(attackSeconds, sr));
+        rel_ = static_cast<float>(lib::timeCoefficient(releaseSeconds, sr));
+    }
+    void setPan(uint32_t b, float left, float right) noexcept { panL_[b] = left, panR_[b] = right; }
+    void clear() noexcept {
+        for (uint32_t b = 0; b < Max; ++b) s1a_[b] = s2a_[b] = s1b_[b] = s2b_[b] = env_[b] = gain_[b] = step_[b] = 0.0f;
+    }
+    uint32_t count() const noexcept { return count_; }
+    float env(uint32_t b) const noexcept { return env_[b]; }
+    // The gains to reach over the next `frames` frames (target[0..count)).
+    void setGains(const float* target, uint32_t frames) noexcept {
+        const float inv = 1.0f / static_cast<float>(frames ? frames : 1);
+        for (uint32_t b = 0; b < count_; ++b) step_[b] = (target[b] - gain_[b]) * inv;
+    }
+    void process(float x, float& left, float& right) noexcept {
+        float l = 0.0f, r = 0.0f;
+        const float att = att_, rel = rel_;
+        for (uint32_t b = 0; b < count_; ++b) {
+            const float v3 = x - s2a_[b];
+            const float v1 = a1_[b] * s1a_[b] + a2_[b] * v3;
+            const float v2 = s2a_[b] + a2_[b] * s1a_[b] + a3_[b] * v3;
+            s1a_[b] = 2.0f * v1 - s1a_[b];
+            s2a_[b] = 2.0f * v2 - s2a_[b];
+            const float w3 = v1 - s2b_[b];
+            const float w1 = a1_[b] * s1b_[b] + a2_[b] * w3;
+            const float w2 = s2b_[b] + a2_[b] * s1b_[b] + a3_[b] * w3;
+            s1b_[b] = 2.0f * w1 - s1b_[b];
+            s2b_[b] = 2.0f * w2 - s2b_[b];
+            const float y = w1 * norm_[b];
+            const float a = y < 0.0f ? -y : y;
+            float e = a + (env_[b] - a) * (a > env_[b] ? att : rel);
+            env_[b] = e < 1e-20f ? 0.0f : e;
+            const float g = gain_[b] + step_[b];
+            gain_[b] = g;
+            const float o = y * g;
+            l += o * panL_[b];
+            r += o * panR_[b];
+        }
+        left = l, right = r;
+    }
+    // Settles the filter states below 1e-20 to 0 (call at control rate: no subnormal tails).
+    void flush() noexcept {
+        for (uint32_t b = 0; b < count_; ++b) {
+            s1a_[b] = tiny(s1a_[b]), s2a_[b] = tiny(s2a_[b]), s1b_[b] = tiny(s1b_[b]), s2b_[b] = tiny(s2b_[b]);
+        }
+    }
+
+private:
+    static float tiny(float v) noexcept { return v < 1e-20f && v > -1e-20f ? 0.0f : v; }
+    uint32_t count_ = 0;
+    float a1_[Max] = {}, a2_[Max] = {}, a3_[Max] = {}, norm_[Max] = {};
+    float s1a_[Max] = {}, s2a_[Max] = {}, s1b_[Max] = {}, s2b_[Max] = {};
+    float env_[Max] = {}, gain_[Max] = {}, step_[Max] = {}, panL_[Max] = {}, panR_[Max] = {};
+    float att_ = 0, rel_ = 0;
 };
 
 }  // namespace caw::fx::bands

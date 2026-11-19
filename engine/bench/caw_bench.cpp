@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "reference_cost.h"
 #include "audio_clips.h"
 #include "builtin_components.h"
 #include "builtin_flagship.h"
@@ -32,8 +33,10 @@ using namespace caw;
 using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
+int cleanCost(double seconds);  // bench/clean_cost.cpp: Preen and Hush against their ceilings
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
+int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices against their ceilings
 
 namespace {
 
@@ -150,12 +153,13 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
         inL[i] = static_cast<float>(noise + 0.3 * std::sin(2 * 3.14159265358979 * 220 * i / kRate));
         inR[i] = static_cast<float>(0.8 * noise + 0.3 * std::sin(2 * 3.14159265358979 * 330 * i / kRate));
     }
-    double best = 1e30;
-    for (int run = 0; run < 3; ++run) {
+    bench::RelativeCost rel;  // against the reference, interleaved (reference_cost.h)
+    for (int run = 0; run < bench::kRuns; ++run) {
         p->reset();
         const int blocks = static_cast<int>(seconds * kRate / 64);
-        const auto t0 = Clock::now();
+        rel.begin();
         for (int b = 0; b < blocks; ++b) {
+            rel.tick(b);
             const int at = (b * 64) % (frames - 64);
             const float* in[2] = {inL.data() + at, inR.data() + at};
             float* out[2] = {outL.data(), outR.data()};
@@ -168,9 +172,9 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
             block.parameterCount = d.parameterCount;
             p->process(block);
         }
-        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+        rel.end();
     }
-    return best;
+    return rel.us();
 }
 
 // False when a case with a ceiling (microseconds per second, the x86 figure: the phone budget / 2.5, an
@@ -946,6 +950,13 @@ int main(int argc, char** argv) {
     // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
+    if (only >= 300 && only <= 310) {  // the cost modes: each device is timed against the reference (reference_cost.h)
+        double ref = 1e30;
+        for (int run = 0; run < bench::kRuns; ++run) ref = std::min(ref, bench::referenceUs(secs));
+        std::printf("reference workload: %.0f µs/s now in a long run (1640 on the calibration box); the costs below "
+                    "are relative to it, in that box's µs/s\n", ref);
+    }
+    if (only == 310) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
     if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
@@ -981,13 +992,16 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
+    if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
         const bool suiteOver = !effectsCost(secs);  // the suite's ceilings, the EQ's and Filter's 1.1.0 modes among them
         const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
         const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
         const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver) ? 1 : 0;
+        const bool voiceOver = voiceCost(secs) != 0;  // and the voice devices (bench/voice_cost.cpp)
+        const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

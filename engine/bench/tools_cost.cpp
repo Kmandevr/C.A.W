@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "reference_cost.h"
 #include "builtin_components.h"
 #include "caw/instrument.hpp"
 #include "fx_merged.h"
@@ -39,7 +40,6 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 using namespace caw;
-using Clock = std::chrono::steady_clock;
 using Values = std::vector<std::pair<std::string, double>>;
 
 namespace {
@@ -101,12 +101,13 @@ double audioCost(ModuleProcessor& p, const Values& values, double seconds) {
     for (uint32_t k = 0; k < d.portCount; ++k) keyed = keyed || (d.ports[k].input && d.ports[k].id == "sidechain");
     Transport tr;
     tr.playing = true;
-    double best = 1e30;
-    for (int run = 0; run < 3; ++run) {
+    bench::RelativeCost rel;  // against the reference, interleaved (reference_cost.h)
+    for (int run = 0; run < bench::kRuns; ++run) {
         p.reset();
         const int blocks = static_cast<int>(seconds * kRate / kBlock);
-        const auto t0 = Clock::now();
+        rel.begin();
         for (int b = 0; b < blocks; ++b) {
+            rel.tick(b);
             const int at = (b * static_cast<int>(kBlock)) % (frames - static_cast<int>(kBlock));
             const float* in[2] = {inL.data() + at, inR.data() + at};
             const float* key[2] = {keyL.data() + at, keyR.data() + at};
@@ -139,9 +140,9 @@ double audioCost(ModuleProcessor& p, const Values& values, double seconds) {
             float sink[16];
             p.readDisplay(sink, 16);  // a page on screen: the display work runs (watched)
         }
-        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+        rel.end();
     }
-    return best;
+    return rel.us();
 }
 
 // A MIDI effect on a busy part: a four-note chord every beat at 120 BPM plus a 16th-note line, while playing.
@@ -149,14 +150,15 @@ double midiCost(ModuleProcessor& p, const Values& values, double seconds) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params = paramsOf(d, values);
     std::vector<Event> in(512), out(4096);
-    double best = 1e30;
-    for (int run = 0; run < 3; ++run) {
+    bench::RelativeCost rel;  // against the reference, interleaved (reference_cost.h)
+    for (int run = 0; run < bench::kRuns; ++run) {
         p.reset();
         const int64_t blocks = static_cast<int64_t>(seconds * kRate / kBlock);
         uint32_t id = 0;
         int64_t heldUntil[8] = {}, ids[8] = {};
-        const auto t0 = Clock::now();
+        rel.begin();
         for (int64_t b = 0; b < blocks; ++b) {
+            rel.tick(b);
             const int64_t t = b * kBlock;
             uint32_t n = 0;
             for (uint32_t f = 0; f < kBlock; ++f) {
@@ -184,9 +186,9 @@ double midiCost(ModuleProcessor& p, const Values& values, double seconds) {
             pb.transport = &tr;
             p.processPorts(pb);
         }
-        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+        rel.end();
     }
-    return best;
+    return rel.us();
 }
 
 struct Case {

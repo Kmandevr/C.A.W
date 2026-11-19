@@ -267,8 +267,8 @@ struct Engine::SendTable {
     std::unique_ptr<Route[]> routes;  // count, sized from the layer's routes on the control thread
     int count = 0;
     bool keys = false;  // some route keys a component: the slot runs even while muted or soloed out
-    // Audio thread: the note-ons the slot played in the chunk its routes last ran (keyNotes), which its key routes'
-    // destinations take into their keys.
+    // Audio thread: the note-ons and note-offs the slot played in the chunk its routes last ran (keyNotes), which
+    // its key routes' destinations take into their keys.
     Event keyEvents[ComponentChain::kMaxKeyEvents] = {};
     uint32_t keyEventCount = 0;
     explicit SendTable(int n) : routes(new Route[static_cast<size_t>(n)]), count(n) {}
@@ -5039,12 +5039,28 @@ bool Engine::pullRoutes(Slot& d, int m) noexcept {
     return received;
 }
 
-// The note-ons a playing slot's pattern starts in this chunk (those that play: chance, ratchets; a slide is legato
-// and starts none), as MIDI 2.0 note-ons at their frames, at most `max`.
+// The notes a playing slot's pattern starts and ends in this chunk, as MIDI 2.0 note-ons and note-offs at their
+// frames, at most `max`. Ons: those that play (chance, ratchets); a slide is legato and starts none. Offs: one for
+// each on sent, with the on's id and key: a note that slides on sends none (the slide carries it), and a slide's end
+// sends its first note's. At one frame an off comes before the ons, so a ratchet's next repeat is not let go.
 uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept {
     if (s.mode != Slot::Mode::Play || previewChunk_ || !s.pat) return 0;
     const Pattern& pat = *s.pat;
     auto sampleOf = [this, &s](double step) { return passFrame(s, step); };
+    // The note whose on the key path sent for note k's sound (a slide's chain back to its first note), or -1 when
+    // none was sent; bounded by the pattern's notes.
+    auto voiceOf = [&](size_t k) noexcept -> int64_t {
+        for (size_t guard = 0; guard <= pat.notes.size(); ++guard) {
+            const PatternNote& n = pat.notes[k];
+            if (!notePlays(n, static_cast<uint32_t>(k), s.repeat, seed_)) return -1;
+            if (n.slideFrom < 0) return static_cast<int64_t>(k);
+            k = static_cast<size_t>(n.slideFrom);
+        }
+        return -1;
+    };
+    auto midiKey = [](const PatternNote& n) {
+        return static_cast<uint32_t>(std::clamp(std::lround(n.pitch), 0L, 127L));
+    };
     const PatternEvent* ev = pat.events.data();
     const size_t ne = pat.events.size();
     const int64_t n0 = s.n0, end = n0 + m;
@@ -5053,18 +5069,36 @@ uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const 
     uint32_t count = 0;
     for (; e < ne && count < max && sampleOf(ev[e].step) < end; ++e) {
         const PatternEvent& pe = ev[e];
-        if (!pe.on) continue;
         const PatternNote& n = pat.notes[pe.note];
+        const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, sampleOf(pe.step) - n0));
+        if (!pe.on) {
+            const bool last = pe.sub + 1 >= n.ratchet;
+            if (last && n.slideTo >= 0 && voiceOf(static_cast<size_t>(n.slideTo)) >= 0) continue;  // slides on
+            const int64_t voice = pe.sub == 0 && n.slideFrom >= 0 ? voiceOf(pe.note)
+                                  : notePlays(n, pe.note, s.repeat, seed_) ? static_cast<int64_t>(pe.note)
+                                                                           : -1;
+            if (voice < 0) continue;
+            uint32_t at = count;  // before this frame's ons
+            while (at > 0 && out[at - 1].frame == frame && ((out[at - 1].data[0] >> 20) & 0xFu) == 0x9u) --at;
+            std::move_backward(out + at, out + count, out + count + 1);
+            ++count;
+            Event& x = out[at];
+            x = Event{};
+            x.frame = frame;
+            x.kind = EventKind::Note;
+            x.noteId = static_cast<uint32_t>(voice) + 1;
+            x.data[0] = 0x40000000u | (0x8u << 20) | (midiKey(pat.notes[static_cast<size_t>(voice)]) << 8);  // off
+            continue;
+        }
         if (pe.sub == 0 && n.slideFrom >= 0) continue;
         if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
         Event& x = out[count++];
         x = Event{};
-        x.frame = static_cast<uint32_t>(std::max<int64_t>(0, sampleOf(pe.step) - n0));
+        x.frame = frame;
         x.kind = EventKind::Note;
         x.noteId = pe.note + 1;
-        const uint32_t key = static_cast<uint32_t>(std::clamp(std::lround(n.pitch), 0L, 127L));
         const uint32_t vel = static_cast<uint32_t>(std::clamp(n.vel, 0.0, 1.0) * 65535.0 + 0.5);
-        x.data[0] = 0x40000000u | (0x9u << 20) | (key << 8);  // MIDI 2.0 note on, group 0, channel 0
+        x.data[0] = 0x40000000u | (0x9u << 20) | (midiKey(n) << 8);  // MIDI 2.0 note on, group 0, channel 0
         x.data[1] = vel << 16;
     }
     return count;

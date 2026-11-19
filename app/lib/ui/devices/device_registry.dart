@@ -82,6 +82,7 @@ class DeviceEditors {
     // A merged device (FX consolidation) opens its variant's old effect's page for now (the new device UI is a
     // later part): the page of the old id that variant was.
     if (info != null && MergedDevices.isMerged(id)) id = MergedDevices.pageId(id, info.variantIndex);
+    if (MergedDevices.pagesToCome.contains(id)) return null;  // a 1.1.0 mode without a page yet: the fallback
     final exact = _byId[id];
     if (exact != null || info == null) return exact;
     if (isBuiltinComponent(id) || info.builtin) {

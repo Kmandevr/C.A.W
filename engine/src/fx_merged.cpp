@@ -1,12 +1,14 @@
 // Merged effect devices (FX consolidation, 1.0.8): the family list, variant descriptors and instance creation.
 #include "fx_merged.h"
 #include "builtin_fx_tools.h"
+#include "builtin_fx_voice.h"
 
 #include <cmath>
 #include <deque>
 #include <mutex>
 
 #include "builtin_fx_racks.h"
+#include "fx_clean.h"
 #include "fx_migrate.h"
 
 namespace caw {
@@ -17,7 +19,8 @@ const std::vector<const MergedDevice*>& mergedDevices() {
         std::vector<const MergedDevice*> v;
         for (std::span<const MergedDevice> family : {mergedDynamicsDevices(), mergedDriveDevices(), mergedEqFilterDevices(),
                                                      mergedStereoModDevices(), mergedSpaceDevices(),
-                                                     mergedMeterDevices()})
+                                                     mergedMeterDevices(), mergedVoiceDevices(), mergedPreenDevices(),
+                                                     mergedHushDevices()})
             for (const MergedDevice& d : family) v.push_back(&d);
         return v;
     }();

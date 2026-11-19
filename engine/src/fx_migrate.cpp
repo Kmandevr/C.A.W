@@ -9,6 +9,7 @@
 
 #include "builtin_components.h"
 #include "builtin_fx_racks.h"
+#include "builtin_fx_voice.h"
 #include "fx_merged.h"
 #include "json.h"
 #include "presets.h"
@@ -481,6 +482,8 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
             for (const BuiltinPreset& p : newVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         for (const MergedDevice* d : mergedDevices())  // the EQ's and Filter's 1.1.0 modes (builtin_fx_eq_plume.cpp)
             for (const BuiltinPreset& p : newEqFilterVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
+        for (const MergedDevice* d : mergedDevices())  // Pitch/Shift's Harmonizer and Octaver (builtin_fx_voice.h)
+            for (const BuiltinPreset& p : newVoiceVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         // A device with a layout marker: every preset carries it (so applying one never reads as an older entry).
         for (const LayoutDevice& d : layoutDevices())
             for (BuiltinPreset& p : m[std::string(d.id)]) {

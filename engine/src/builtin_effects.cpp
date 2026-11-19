@@ -1,6 +1,7 @@
 // The built-in effects suite (#173): the shared EffectBase (control grid, sleep, display) and registration.
 #include "builtin_effects.h"
 #include "builtin_fx_tools.h"
+#include "builtin_fx_voice.h"
 #include "fx_merged.h"
 // fx-creative begin
 #include "builtin_fx_creative.h"
@@ -265,6 +266,7 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     // fx-racks begin
     fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
     // fx-racks end
+    fx::registerVoice(registry);  // builtin_fx_voice.h: Mimic (1.1.0; Glint is a merged device)
     fx::registerTools(registry);  // builtin_fx_tools.h: Lo-fi and Phase align (1.1.0; Meters is a merged device)
     fx::registerMergedDevices(registry);  // fx_merged.h: the FX consolidation's merged devices (Pitch/Shift...)
 }

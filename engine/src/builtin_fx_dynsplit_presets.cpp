@@ -1,4 +1,5 @@
 // The presets of 1.1.0's new dynamics variants (Talon's Up and Bus, Hatch's Expand and Pedal gate, Duck's Level and Carve) and Duck's own, listed with the 1.1.0 effect modes' presets by fx::newVariantPresets.
+#include "fx_clean.h"
 #include <span>
 #include <vector>
 
@@ -158,6 +159,7 @@ std::span<const BuiltinPreset> newVariantPresets(std::string_view id) {
     if (id == "org.caw.drive") return driveModePresets();
     if (id == "org.caw.bits") return bitwisePresets();
     if (id == "org.caw.convolver") return cabPresets();
+    if (const auto p = cleanPresets(id); !p.empty()) return p;  // Preen and Hush (fx_clean.h)
     return {};
 }
 
