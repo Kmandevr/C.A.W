@@ -15,7 +15,8 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 
 ## In progress (pushed as backup branches)
 - **fix-109:** merged into the session branch (7118dc1; ctest 11/11).
-- **review-109** (`caw-backup-review-109`): the external-review fixes (the MIDI ring, library warming, Play/Stop status at C API 40, project-sized caps, `send` failures reported, ratchets up to 64).
+- **review-109:** merged (435640d; ctest 11/11). The full app suite runs before the 1.0.9 PR.
+- **1.1.0 running from 435640d:** dsp-dynsplit (the Talon/Hatch/Duck split and migration) and dsp-plume (Plume additions and Wah). Push them to `caw-backup-*` at check-ins. The designs are in the Hub's sound-designs note; 4 owner questions are in its open-questions.
 - **1.1.0 done, waiting for 1.0.9 to ship:** `caw-1.1.0-dsp-drive` and `caw-1.1.0-dsp-tools`. The MIDI effects' C API must be renumbered above 40.
 
 ## Rules for continuing
