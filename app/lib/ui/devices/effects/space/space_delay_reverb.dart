@@ -16,6 +16,7 @@ import '../effect_page.dart';
 import '../space_editors.dart' show DelayHero, ReverbHero, delayModeIcon, delaySeconds;
 import 'space_delay_modes.dart';
 import 'space_devices.dart';
+import 'space_reverb_modes.dart';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Delay
@@ -149,9 +150,12 @@ class ReverbDevicePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
+    final cards = VariantCards(height: 50, icon: (c, r, i, col) =>
+        i >= 2 ? reverbNewModeIcon(c, r.deflate(2), i, col) : _algorithmIcon(c, r, i, col));
+    if (variantOf(context) >= 2) return ReverbModesPage(cards: cards);
     final hall = variantOf(context) == 0;
     return mergedPage(context, 'reverb',
-      cards: VariantCards(icon: _algorithmIcon, height: 50),
+      cards: cards,
       hero: HeroWithMeters(height: 200, gr: false, hero: HeroCanvas(
         color: scope.accent,
         height: 200,

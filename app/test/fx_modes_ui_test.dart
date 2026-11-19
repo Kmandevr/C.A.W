@@ -30,6 +30,11 @@ const modePages = <(String, int, Map<String, double>, String)>[
   ('org.caw.delay', 2, {'sync': 0}, 'delay_tape'),
   ('org.caw.delay', 3, {}, 'delay_reverse'),
   ('org.caw.delay', 4, {}, 'delay_multitap'),
+  ('org.caw.reverb', 2, {}, 'reverb_room'),
+  ('org.caw.reverb', 3, {}, 'reverb_plate'),
+  ('org.caw.reverb', 4, {}, 'reverb_spring'),
+  ('org.caw.reverb', 5, {}, 'reverb_gated'),
+  ('org.caw.reverb', 6, {}, 'reverb_reverse'),
   ('org.caw.bits', 1, {'bits': 8, 'xor': 4352}, 'bits_bitwise'),
 ];
 
@@ -58,6 +63,8 @@ DeviceDisplayFrame modeFrame(String pageId, {int tick = 0}) {
       for (var k = 0; k < 4; k++) {
         raw[9 + k * 5] = level - 6 * k;
       }
+    case 'org.caw.reverb.gated':
+      raw[3] = hit > 0.3 ? 1 : hit * 3;
     case 'org.caw.bits.bitwise':
       for (var i = 0; i < 16; i++) {
         raw[6 + i] = i >= 8 ? (0.1 + 0.08 * (15 - i)) * hit : 0;
@@ -246,6 +253,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(t.value('t1_pan'), greaterThan(0.2));
     await close(tester);
+  });
+
+  testWidgets('Reverb modes: the decay picture drags each mode\'s two knobs', (tester) async {
+    for (final (v, x, y) in const [(2, 'decay', 'size'), (3, 'decay', 'diffusion'), (4, 'decay', 'tension'), (5, 'hold', 'size'),
+        (6, 'length', 'curve')]) {
+      final (_, t) = await open(tester, 'org.caw.reverb', v);
+      final x0 = t.value(x), y0 = t.value(y);
+      await drag(tester, const ValueKey('reverb-hero'), const Offset(50, -40));
+      expect(t.value(x), greaterThan(x0), reason: 'variant $v: $x');
+      expect(t.value(y), greaterThan(y0), reason: 'variant $v: $y');
+      await close(tester);
+    }
   });
 
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {

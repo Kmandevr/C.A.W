@@ -122,8 +122,8 @@ class MergedDevices {
   static const pagesToCome = {
     'org.caw.eq.linear',
     'org.caw.eq.match', 'org.caw.filter.wah', 
-    'org.caw.reverb.room', 'org.caw.reverb.plate', 'org.caw.reverb.spring', 'org.caw.reverb.gated',
-    'org.caw.reverb.reverse', 'org.caw.convolver.cab',
+    
+    'org.caw.convolver.cab',
   };
 
   /// The page id of the Ducker's Duck variant (org.caw.duck 0; 1.0.8-1.0.9 the Compressor's variant 4), which no
