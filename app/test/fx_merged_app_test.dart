@@ -379,6 +379,6 @@ void main() {
     expect(t.info!.parameters[rack.params['mod1_dst']!.round() - 1].id, 's1.mix');
     expect(rack.params['mod2_dst'], 0, reason: 'the route to the reset drive is cleared');
     expect(child.info!.variantIndex, 1);
-    expect(jsonEncode(rack.toJson()), contains('"$rackLayoutParam":3.0'));
+    expect(jsonEncode(rack.toJson()), contains('"$rackLayoutParam":4.0'));
   });
 }

@@ -21,9 +21,10 @@ class MergedVariant {
 const variantParam = 'variant';
 
 /// A rack's layout version (`rack_layout`, the engine's kRackLayoutCurrent): the app always saves it on a rack. 3
-/// since 1.1.0's Talon/Hatch/Duck split (a Compressor child's variants are Talon's).
+/// since 1.1.0's Talon/Hatch/Duck split (a Compressor child's variants are Talon's), 4 since 1.1.0's appended
+/// sidechain filters and Limiter target (later children's flat route indices moved; the engine re-points older racks).
 const rackLayoutParam = 'rack_layout';
-const rackLayoutCurrent = 3.0;
+const rackLayoutCurrent = 4.0;
 
 /// The Compressor's layout marker (`talon_layout`, the engine's fx_dyn_common.h, 1.1.0): the app always saves it on
 /// an org.caw.compressor entry. An entry without it is from 1.0.8 or 1.0.9, whose variants 2 (Gate), 3 (Shape) and

@@ -204,7 +204,11 @@ void main() {
       await openBrowser(tester, s)();
       expect(find.byKey(const ValueKey('fx-browser-tabs')), findsOneWidget);
       expect(find.text('DYNAMICS'), findsOneWidget);
-      expect(find.text(EffectCatalog.of('org.caw.compressor')!.description), findsOneWidget);
+      // The list builds lazily; with 1.1.0's devices Talon sits below the first screen.
+      final talon = find.text(EffectCatalog.of('org.caw.compressor')!.description);
+      await tester.scrollUntilVisible(talon, 200,
+          scrollable: find.byType(Scrollable).last);
+      expect(talon, findsOneWidget);
       await tab(tester, 'racks');
       expect(find.text('Nest · FX rack'), findsOneWidget);
       expect(find.text('Talon · Compressor'), findsNothing);
@@ -217,6 +221,8 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('fx-browser-search')), '');
       await tester.pump();
       // A star puts it in Favourites at the top.
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('fx-fav-org.caw.compressor')), 200,
+          scrollable: find.byType(Scrollable).last);
       await tester.ensureVisible(find.byKey(const ValueKey('fx-fav-org.caw.compressor')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('fx-fav-org.caw.compressor')));
