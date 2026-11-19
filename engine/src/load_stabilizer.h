@@ -56,19 +56,21 @@ public:
             return startNs;
         }
         const int64_t period = int64_t{frames} * 1'000'000'000 / rate;
-        // A new epoch: the first callback, an early one, one an hour of frames on (the products stay in range), one
+        // A new epoch: the first callback, one early by more than jitter, one an hour of frames on (the products stay in range), one
         // more than a period late (a stalled or rerouted stream, or drift: start over rather than spin nothing for
         // long), or one after kNoSpinResync callbacks in a row that spun nothing.
-        if (frames_ == 0 || frames_ > int64_t{rate} * 3600 || noSpin_ >= kNoSpinResync) {
+        const bool fresh = frames_ == 0 || frames_ > int64_t{rate} * 3600 || noSpin_ >= kNoSpinResync;
+        const int64_t late = fresh ? 0 : startNs - epochNs_ - frames_ * 1'000'000'000 / rate;
+        if (fresh || late < -period / 16 || late > period) {
+            // The callback that starts an epoch spins nothing: it may be one of a burst (stream priming, Android's
+            // fixed-block adapter running two or three back to back), and its own start says nothing of when the
+            // next is due, so a full share could make the next one late. The next on-time callback spins.
             epochNs_ = startNs;
-            frames_ = 0;
-        }
-        const int64_t ideal = frames_ * 1'000'000'000 / rate;
-        int64_t late = startNs - epochNs_ - ideal;
-        if (late < 0 || late > period) {
-            epochNs_ = startNs;
-            frames_ = 0;
-            late = 0;
+            frames_ = frames;
+            noSpin_ = 0;
+            window_ = 0;
+            minLate_ = INT64_MAX;
+            return startNs;
         }
         // Drift: the earliest callback of each kDriftWindow is where the device's clock has the schedule now, so the
         // epoch follows it (one-off lateness leaves the earliest on time; lateness that every callback shares moves it).
@@ -79,7 +81,8 @@ public:
             minLate_ = INT64_MAX;
         }
         frames_ += frames;
-        const int64_t d = startNs + static_cast<int64_t>(static_cast<double>(period) * (share > 1.0 ? 1.0 : share)) - late;
+        // Early by less than a sixteenth of a period is jitter: on time (and the drift window moves the epoch to it).
+        const int64_t d = startNs + static_cast<int64_t>(static_cast<double>(period) * (share > 1.0 ? 1.0 : share)) - (late > 0 ? late : 0);
         noSpin_ = d > startNs ? 0 : noSpin_ + 1;
         return d;
     }
