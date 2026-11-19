@@ -71,12 +71,15 @@ uint32_t upLookahead(double ms, double sr) noexcept {
     return std::min<uint32_t>(kUpRing - 17, static_cast<uint32_t>(f));
 }
 
-class TalonUp final : public EffectBase, public VariableLatency {
+class TalonUp final : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     explicit TalonUp(const ModuleDescriptor& d) noexcept : d_(d) {}
     const ModuleDescriptor& descriptor() const noexcept override { return d_; }
     uint32_t latencyFor(const double* values, uint32_t count) const noexcept override {
-        return count > kULookahead ? upLookahead(values[kULookahead], rate()) : 0;
+        return count > kULookahead && !armed() ? upLookahead(values[kULookahead], rate()) : 0;  // armed: none
+    }
+    bool armedDiffers(const double* values, uint32_t count) const noexcept override {
+        return count > kULookahead && upLookahead(values[kULookahead], rate()) > 0;
     }
 
 protected:
@@ -114,7 +117,7 @@ protected:
         if (a != attackFor_ || sr != rateFor_) attackFor_ = a, attack_ = lib::timeCoefficient(a, sr);
         if (r != releaseFor_ || sr != rateFor_) releaseFor_ = r, release_ = lib::timeCoefficient(r, sr);
         rateFor_ = sr;
-        delay_ = upLookahead(param(kULookahead, at), sr);
+        delay_ = armed() ? 0 : upLookahead(param(kULookahead, at), sr);
         detect_ = std::clamp(choice(kUDetect, at), 0, 2);
         link_ = std::clamp(param(kULink, at), 0.0, 1.0);
         key_.set(param(kUScHpf, at), param(kUScLpf, at), sr);

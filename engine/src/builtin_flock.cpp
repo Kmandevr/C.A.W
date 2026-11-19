@@ -44,7 +44,8 @@ namespace grain = lib::grain;
 constexpr uint32_t kGrid = 16;
 constexpr uint32_t kSlots = kVoiceCap + 4;  // spare slots for stolen voices fading out
 constexpr uint32_t kDisplayHead = 12, kPerGrain = 5;
-constexpr uint32_t kDisplayFloats = kDisplayHead + kOverview + kPerGrain * grain::kMaxGrains;
+// Then (1.1.0) one direction flag per grain shown, in the same order: 1 backwards, 0 forwards.
+constexpr uint32_t kDisplayFloats = kDisplayHead + kOverview + (kPerGrain + 1) * grain::kMaxGrains;
 
 constexpr std::string_view kWindows[] = {"Hann", "Tukey", "Gaussian", "Expodec", "Rexpodec"};
 constexpr std::string_view kScales[] = {"Off", "Chromatic", "Major", "Minor", "Pentatonic", "Octaves", "Fifths"};
@@ -592,7 +593,14 @@ private:
             o[3] = x.semitones;
             o[4] = static_cast<float>(x.voice);
         }
-        display_.publish(out, kDisplayHead + kOverview + kPerGrain * shown);
+        // The direction block after the grains (appended, so the grains' indices keep their meaning).
+        float* dir = out + kDisplayHead + kOverview + kPerGrain * shown;
+        for (uint32_t g = 0, k = 0; g < eng_.alive(); ++g) {
+            const grain::Grain& x = eng_.grain(g);
+            if (x.left == 0) continue;
+            dir[k++] = (x.fstep != 0 ? x.fstep < 0 : x.rate < 0.0) ? 1.0f : 0.0f;
+        }
+        display_.publish(out, kDisplayHead + kOverview + (kPerGrain + 1) * shown);
     }
 
     const ProcessBlock* block_ = nullptr;

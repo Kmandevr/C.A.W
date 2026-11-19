@@ -502,6 +502,8 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
             for (const BuiltinPreset& p : newEqFilterVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         for (const MergedDevice* d : mergedDevices())  // Pitch/Shift's Harmonizer and Octaver (builtin_fx_voice.h)
             for (const BuiltinPreset& p : newVoiceVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
+        for (const MergedDevice* d : mergedDevices())  // 1.1.0's presets for variants that had fewer than 8
+            for (const BuiltinPreset& p : appendedVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         // A device with a layout marker: every preset carries it (so applying one never reads as an older entry).
         for (const LayoutDevice& d : layoutDevices())
             for (BuiltinPreset& p : m[std::string(d.id)]) {

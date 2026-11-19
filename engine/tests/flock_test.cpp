@@ -219,10 +219,12 @@ TEST(flock_shares_one_grain_pool_between_its_voices_and_keeps_its_voice_cap) {
             dropped += static_cast<uint32_t>(d[3]);
             CHECK(d[1] <= d[2]);
             CHECK(d[2] == (tier == 0 ? 64.0f : 128.0f));
-            CHECK_EQ(d.size(), static_cast<size_t>(12 + 32 + 5 * d[11]));
+            CHECK_EQ(d.size(), static_cast<size_t>(12 + 32 + 6 * d[11]));  // the grains, then their directions
             for (uint32_t g = 0; g < static_cast<uint32_t>(d[11]); ++g) {
                 const float* o = d.data() + 44 + 5 * g;
                 CHECK(o[0] >= 0 && o[0] <= 1 && o[1] >= 0 && o[1] <= 1 && o[4] < 20);
+                const float dir = d[44 + 5 * static_cast<size_t>(d[11]) + g];
+                CHECK(dir == 0.0f || dir == 1.0f);
             }
         }
         CHECK_EQ(most, tier == 0 ? 64u : 128u);
@@ -289,6 +291,36 @@ TEST(flock_falls_quiet_to_exact_zeros_and_survives_bad_values) {
     loadSample("flock_tiny", tiny, tiny);
     auto t = make({{"filter", 3}, {"resonance", 20}}, "mem:flock_tiny");
     CHECK(finite(playF(*t, {{"filter", 3}, {"resonance", 20}}, {{0.0, 0.3, 60, 1.0}}, 0.5)));
+}
+
+TEST(flock_s_display_flags_each_grain_s_direction_after_the_grains) {
+    // 1.1.0: a block of one flag per grain shown follows the grains (1 backwards, 0 forwards); the grains' five
+    // floats keep their indices. Reverse 0 plays every grain forwards, 1 every grain backwards, 0.5 some of each.
+    for (double reverse : {0.0, 1.0, 0.5}) {
+        const Values v = {{"reverse", reverse}, {"density", 60}, {"size", 200}};
+        auto p = make(v);
+        if (!p) return;
+        uint32_t back = 0, total = 0;
+        for (int step = 0; step < 4; ++step) {
+            playF(*p, v, step == 0 ? std::vector<Note>{{0.0, -1, 60, 0.8}} : std::vector<Note>{}, 0.15);
+            const std::vector<float> d = display(*p);
+            CHECK(d.size() >= 44u);
+            if (d.size() < 44u) return;
+            const uint32_t shown = static_cast<uint32_t>(d[11]);
+            CHECK_EQ(d.size(), static_cast<size_t>(44 + 6 * shown));
+            if (d.size() != 44 + 6 * shown) return;
+            for (uint32_t g = 0; g < shown; ++g) {
+                const float dir = d[44 + 5 * shown + g];
+                CHECK(dir == 0.0f || dir == 1.0f);
+                back += dir == 1.0f ? 1u : 0u;
+                ++total;
+            }
+        }
+        CHECK(total > 0u);
+        if (reverse == 0.0) CHECK_EQ(back, 0u);
+        if (reverse == 1.0) CHECK_EQ(back, total);
+        if (reverse == 0.5) CHECK(back > 0u && back < total);
+    }
 }
 
 TEST(flock_keeps_its_state_and_falls_back_to_its_built_in_tone) {

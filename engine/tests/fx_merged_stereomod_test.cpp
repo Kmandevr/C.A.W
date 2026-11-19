@@ -324,7 +324,10 @@ TEST(stereomod_devices_hold_every_old_preset_with_equal_values) {
             for (const auto& [k, x] : merged->values) got[std::string(k)] = x;
             CHECK(want == got);
         }
-    for (const auto& [device, n] : total) CHECK_EQ(builtinPresets(device).size(), n);
+    // Then 1.1.0's appended ones (the Phaser's, which had none), last.
+    for (const auto& [device, n] : total) CHECK_EQ(builtinPresets(device).size(), n + fx::appendedVariantPresets(device).size());
+    CHECK(fx::appendedVariantPresets(kPhaser).size() >= 8u);
+    if (!total.count(kPhaser)) CHECK_EQ(builtinPresets(kPhaser).size(), fx::appendedVariantPresets(kPhaser).size());
     // The reused Tremolo id keeps its own presets (variant 0) and gains Auto-pan's (variant 1) and the ducker's (2).
     CHECK(!ownBuiltinPresets("org.caw.tremolo").empty() && !ownBuiltinPresets("org.caw.autopan").empty());
     CHECK_EQ(builtinPresets(kTremolo).size(), ownBuiltinPresets("org.caw.tremolo").size() +

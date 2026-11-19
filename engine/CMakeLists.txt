@@ -183,6 +183,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx
 target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_merged_dynamics.cpp src/fx_migrate_dynamics.cpp src/builtin_fx_duck.cpp
   src/builtin_fx_talon.cpp src/builtin_fx_hatch.cpp src/builtin_fx_duck_level_carve.cpp src/builtin_fx_dynsplit_presets.cpp  # 1.1.0: the Talon/Hatch/Duck split
+  src/builtin_more_presets.cpp  # 1.1.0: presets for the devices that had fewer than 8
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
   src/builtin_fx_eq_plume.cpp src/eq_design.cpp src/builtin_fx_filters_wah.cpp  # 1.1.0: the EQ's Linear and Match, the Filter's Wah

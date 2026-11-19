@@ -91,7 +91,9 @@ std::unique_ptr<ModuleProcessor> make(const char* id, const Values& v) {
 }
 
 // Runs `p` over `in` (and `key`, its sidechain, when given) in blocks of `block`.
-Stereo run(ModuleProcessor& p, const Stereo& in, const Stereo* key, const Values& values, uint32_t block = 64) {
+// With `tempo` > 0, a playing transport from beat 0 at that tempo (for the tempo-synced effects); else none.
+Stereo run(ModuleProcessor& p, const Stereo& in, const Stereo* key, const Values& values, uint32_t block = 64,
+           double tempo = 0.0) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
@@ -100,8 +102,13 @@ Stereo run(ModuleProcessor& p, const Stereo& in, const Stereo* key, const Values
             if (d.parameters[k].id == id) params[k].value = v;
     }
     Stereo out{std::vector<float>(in.l.size()), std::vector<float>(in.l.size())};
+    Transport t;
+    t.tempo = tempo;
+    t.playing = tempo > 0.0;
+    const Transport* transport = tempo > 0.0 ? &t : nullptr;
     for (size_t start = 0; start < in.l.size(); start += block) {
         const uint32_t n = static_cast<uint32_t>(std::min<size_t>(block, in.l.size() - start));
+        t.beat = static_cast<double>(start) * tempo / (60.0 * 48000.0);
         const float* ic[2] = {in.l.data() + start, in.r.data() + start};
         float* oc[2] = {out.l.data() + start, out.r.data() + start};
         if (key) {
@@ -117,6 +124,7 @@ Stereo run(ModuleProcessor& p, const Stereo& in, const Stereo* key, const Values
             b.audioOutCount = 1;
             b.parameters = params.data();
             b.parameterCount = d.parameterCount;
+            b.transport = transport;
             CHECK(p.processPorts(b));
         } else {
             AudioProcessBlock b;
@@ -126,6 +134,7 @@ Stereo run(ModuleProcessor& p, const Stereo& in, const Stereo* key, const Values
             b.sampleRate = 48000;
             b.parameters = params.data();
             b.parameterCount = d.parameterCount;
+            b.transport = transport;
             CHECK(p.process(b));
         }
     }
@@ -630,6 +639,61 @@ TEST(the_new_variants_have_job_named_presets_that_play) {
     for (int v : {2, 3}) CHECK(perMode[kComp][v] >= 8);
     for (int v : {1, 2}) CHECK(perMode[kGate][v] >= 8);
     for (int v : {0, 1, 2}) CHECK(perMode[kDuck][v] >= 8);
+}
+
+double peakOf(const Stereo& s) {
+    double m = 0.0;
+    for (size_t i = 0; i < s.l.size(); ++i) m = std::max({m, static_cast<double>(std::fabs(s.l[i])), static_cast<double>(std::fabs(s.r[i]))});
+    return m;
+}
+
+TEST(every_effect_has_at_least_eight_job_named_presets_that_play) {
+    // 1.1.0: the devices (and the Compressor's Down) that had fewer than 8 now have 8 or more. Each preset applies,
+    // names only real parameters within range, and plays music finite, bounded and audible; the appended ones
+    // name their purpose first ("Vocals: ..."). Two seconds, so a reverser's first chunk has come back.
+    const Stereo in = music(96000), key = kicks(96000);
+    const std::set<std::string_view> purposes = {"Guitar", "Vocals", "Drums", "Bass", "Mixing", "Mastering", "Sound design", "Lo-fi"};
+    struct Device { const char* id; int variant; size_t before; };  // `before`: the presets it had before 1.1.0's
+    const Device devices[] = {{"org.caw.limiter", 0, 0}, {"org.caw.transient", 0, 0}, {"org.caw.phaser", 0, 0},
+                              {"org.caw.compressor", 0, 0}, {"org.caw.deesser", -1, 4}, {"org.caw.reverser", -1, 5},
+                              {"org.caw.stutter", -1, 5}, {"org.caw.comb", -1, 5}, {"org.caw.disperser", -1, 5},
+                              {"org.caw.multiband", -1, 6}, {"org.caw.tapestop", -1, 6}, {"org.caw.trancegate", -1, 6},
+                              {"org.caw.resonator", -1, 6}, {"org.caw.formant", -1, 6}, {"org.caw.ringmod", -1, 7}};
+    for (const Device& dev : devices) {
+        std::set<std::string> names;
+        size_t count = 0, index = 0;
+        const auto& all = builtinPresets(dev.id);
+        const size_t firstNew = dev.variant < 0 ? dev.before : all.size() - fx::appendedVariantPresets(dev.id).size();
+        for (const BuiltinPreset& preset : all) {
+            const size_t at = index++;
+            CHECK(names.insert(std::string(preset.name)).second);
+            Values values;
+            CHECK(applyBuiltinPreset(dev.id, preset.name, values));
+            if (dev.variant >= 0 && static_cast<int>(valueOf(values, "variant", 0)) != dev.variant) continue;
+            ++count;
+            const std::string what = std::string(dev.id) + " " + std::string(preset.name);
+            if (at >= firstNew) {
+                const size_t colon = preset.description.find(':');
+                if (colon == std::string_view::npos || !purposes.count(preset.description.substr(0, colon)))
+                    cawtest::fail(__FILE__, __LINE__, what + ": no purpose first");
+            }
+            auto p = make(dev.id, values);
+            if (!p) continue;
+            const ModuleDescriptor& d = p->descriptor();
+            for (const auto& [k, x] : values) {
+                const ParameterDescriptor* q = nullptr;
+                for (uint32_t i = 0; i < d.parameterCount; ++i)
+                    if (d.parameters[i].id == k) q = &d.parameters[i];
+                if (!q || x < q->minimum || x > q->maximum) cawtest::fail(__FILE__, __LINE__, what + ": " + k);
+            }
+            const Stereo out = run(*p, in, keyed(*p) ? &key : nullptr, values, 64, 120.0);  // playing at 120 BPM
+            bool finite = true;
+            for (size_t i = 0; i < out.l.size(); ++i) finite &= std::isfinite(out.l[i]) && std::isfinite(out.r[i]) && std::fabs(out.l[i]) < 4.0f;
+            if (!finite) cawtest::fail(__FILE__, __LINE__, what + ": not finite or too loud (" + std::to_string(peakOf(out)) + ")");
+            if (!(rms(out.l, 4800, out.l.size()) > 1e-3)) cawtest::fail(__FILE__, __LINE__, what + ": not audible");
+        }
+        if (count < 8) cawtest::fail(__FILE__, __LINE__, std::string(dev.id) + ": " + std::to_string(count) + " presets");
+    }
 }
 
 TEST(the_new_variants_publish_their_display_data) {
