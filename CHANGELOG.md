@@ -3,6 +3,49 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.0.8-alpha.1 (2026-11-19)
+
+The effects release: fewer, better effects, each with a page you can play like an instrument, and a redesigned Flagship.
+
+### New
+- **One effect per job:** the overlapping effects are merged into one effect each, with modes:
+  - Compressor (Down, Dynamics, Gate, Shape, Duck)
+  - Limiter
+  - Transient
+  - Drive
+  - Bit distortion
+  - EQ (Bands, Graphic, DJ, Tilt)
+  - Filter
+  - Utility/Stereo
+  - Chorus/Flanger
+  - Phaser
+  - Tremolo/Pan
+  - Delay
+  - Reverb
+  - Pitch/Shift
+
+  Pick the mode from the cards at the top of the effect. Old projects open with the matching effect and mode and sound the same.
+- **A new page for every merged effect:** the visual shows what the effect is doing and takes the big drags, such as an EQ band, the filter's cutoff, a compressor's threshold or the delay's echoes. Knobs handle the fine work.
+- **Duck:** a new Compressor mode that turns one track down when another plays, or levels its own input. It detects by RMS, Peak or true peak (ISP) and has 9 presets, such as "Kick duck bass" and "Voice over music".
+- **A tidier FX chain:** each effect folds to one row with its power, name, a live level and Mix. Open as many as you like, or use Collapse all.
+- **Every effect's header and footer:**
+  - preset arrows, search and ★ favourites;
+  - A/B compare (hold to copy A to B);
+  - a ⋯ menu: copy and paste settings, randomize with an amount, this effect's undo history, and reset;
+  - an output meter with a clip light, plus Mix and Output.
+- **Auto gain:** the ear icon matches an effect's loudness to what goes in, so you judge it by ear and not by level. It is off by default and can be switched on per effect (Settings › Sound sets it for new effects). It plays in a render only when you switch it on.
+- **Hold any knob** to type a value, automate it, MIDI-learn it, reset it, or **React to…** another track: that track's loudness or notes move the knob.
+- **Preset preview:** turn on Preview in the preset browser and tap through presets while your loop plays. Cancel puts everything back.
+- **Flagship on one screen:**
+  - On a tablet, a desktop or a phone held sideways: the three oscillators, both filters with a series/parallel switch, the effects and the modulation together.
+  - On a phone held upright: three panels to swipe, Oscillators, Filters and Modulation.
+  - Drag a modulation source onto any knob, across panels too.
+  - Init, Random patch with an amount, oscillator copy and paste, a keyboard strip, and What's modulating?
+
+### Changed
+- **Projects saved by this version** that use a merged effect, a mode or a rack need 1.0.8 or later to open.
+- **Changing an effect's mode** resets the settings that mean something different in the new mode, along with their automation, modulation and MIDI mappings. One undo brings them all back.
+
 ## 1.0.7-alpha.1 (2026-11-18)
 
 The safety release: C.A.W now checks every plug-in before it runs and tells you, in plain words, what it can do.
