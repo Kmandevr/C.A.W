@@ -28,6 +28,7 @@ A descriptor should cover:
 
 - **Identity and discovery:** stable component ID, display name, version, description, category, tags, author and capability declarations.
 - **Role:** instrument/voice, generator, effect, utility processor, event processor, analysis tool or other declared role. A component may support more than one role where its behavior genuinely allows it.
+  An event processor (one event input, one event output) runs as a track's MIDI effect before its instrument (built 2026-11-19, [engine](engine.md#midi-effects-110)).
 - **Typed ports:** named inputs and outputs, direction, type, channel layout, units, rate, multiplicity, optional/default behavior and sidechain designation.
 - **Parameters:** stable parameter ID, name, description, value type, default, minimum/maximum, step, unit, display format, curve, choices, smoothing, visibility and control scope (project, track, channel, voice or note).
 - **Parameter capabilities:** whether a parameter supports automation, modulation, MIDI mapping, host exposure, sample-accurate changes or block-rate changes.

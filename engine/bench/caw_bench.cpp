@@ -32,6 +32,8 @@ using namespace caw;
 using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
+int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
+
 namespace {
 
 constexpr int kRate = 48000;
@@ -917,6 +919,7 @@ int main(int argc, char** argv) {
     // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
+    if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
     if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
@@ -953,7 +956,9 @@ int main(int argc, char** argv) {
     }
     if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
         effectsCost(secs);
-        return modesCostOver(secs) ? 1 : 0;  // a 1.1.0 mode over its ceiling fails the run
+        const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
+        const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
+        return (modesOver || toolsOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
