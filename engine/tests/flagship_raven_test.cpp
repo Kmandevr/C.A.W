@@ -1,14 +1,18 @@
 // Flagship's 1.1.0 synthesis (Raven): oscillator interaction, spectral banks, LFO 4, macros and filter models, and old presets unchanged.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "caw/instrument.hpp"
+#include "caw/library/wavetable.hpp"
+#include "flagship_banks.h"
 #include "analysis.h"
 #include "engine.h"
 #include "presets.h"
@@ -189,6 +193,15 @@ const std::vector<NewCase>& newCases() {
             {"osc fm from noise", with({{"osc1_warp", 7}, {"osc1_warp_amt", 0.3}, {"osc1_mod_src", 4}})},
             {"osc fm from osc 2", with({{"osc1_warp", 7}, {"osc1_warp_amt", 0.5}, {"osc1_mod_src", 2}})},
         };
+        // The spectral and additive warps (11..18), each between two of its bank's amounts, with the frame moving.
+        const char* names[] = {"stretch", "shift", "odd even", "formant", "smear", "disperse", "low high cut", "comb"};
+        for (int m = 0; m < 8; ++m)
+            c.push_back({std::string("spectral ") + names[m],
+                         with({{"osc1_warp", 11.0 + m}, {"osc1_warp_amt", 0.45}, {"osc1_frame", 0.5}, {"mod3_src", 5},
+                               {"mod3_dst", 3.0}, {"mod3_amt", 0.2}})});
+        c.push_back({"additive table with a spectral warp",
+                     with({{"osc1_table", 6}, {"osc1_frame", 0.3}, {"osc2_table", 6}, {"osc2_warp", 13}, {"osc2_warp_amt", 0.3}})});
+        c.push_back({"harmonic table stretched", with({{"osc1_table", 3}, {"osc1_warp", 11}, {"osc1_warp_amt", 1.0}})});
         return c;
     }();
     return cases;
@@ -279,4 +292,116 @@ TEST(flagship_new_modes_match_their_reference_renders) {
         const Stereo out = play(*p, chord(), 48000, c.values);
         CHECK_REFERENCE(refs, c.name, (cawtest::Audio{out.l, out.r}), cawtest::Class::Stable);  // the noise is seeded
     }
+}
+
+// The banks' resynthesis: amount 0 of every bank is its table again (the FFT and the additive rebuild within -80 dB of
+// the table's peak), and the frames of a table longer than 16 are resampled to 16.
+TEST(flagship_spectral_banks_rebuild_their_tables_at_amount_zero) {
+    lib::Wavetable t;
+    t.prepare(4, 1024);
+    double a[512];
+    for (int f = 0; f < 4; ++f) {
+        for (int h = 1; h <= 512; ++h) a[h - 1] = (f + 1.0) / (h * (1.0 + 0.1 * f * h));
+        double ph[512];
+        for (int h = 1; h <= 512; ++h) ph[h - 1] = 0.37 * h * f;
+        t.setFrameHarmonics(f, a, 512, ph);
+    }
+    for (int mode = 0; mode < flagship::kSpectralModes; ++mode) {
+        std::unique_ptr<flagship::Bank> b = flagship::buildBankNow(t, mode);
+        CHECK(b != nullptr);
+        if (!b) continue;
+        CHECK_EQ(b->frames, 4);
+        CHECK_EQ(b->table.frameCount(), 4 * flagship::kBankLevels);
+        double worst = 0.0, peak = 0.0;
+        for (int f = 0; f < 4; ++f)
+            for (int level = 0; level < t.levels(); ++level) {
+                const float* x = t.levelData(f, level);
+                const float* y = b->table.levelData(f, level);
+                for (int i = 0; i < t.levelSize(level); ++i) {
+                    peak = std::max(peak, static_cast<double>(std::fabs(x[i])));
+                    worst = std::max(worst, static_cast<double>(std::fabs(x[i] - y[i])));
+                }
+            }
+        CHECK(20.0 * std::log10(worst / peak + 1e-30) < -80.0);
+        // Every amount finite and as loud as its frame (within 0.5 dB, the RMS kept).
+        for (int k = 0; k < b->table.frameCount(); ++k) {
+            const float* y = b->table.levelData(k, 0);
+            double sum = 0.0;
+            for (int i = 0; i < 1024; ++i) sum += static_cast<double>(y[i]) * y[i];
+            const float* x = t.levelData(k % 4, 0);
+            double ref = 0.0;
+            for (int i = 0; i < 1024; ++i) ref += static_cast<double>(x[i]) * x[i];
+            CHECK(std::isfinite(sum));
+            CHECK(std::fabs(10.0 * std::log10(sum / ref)) < 0.5);
+        }
+    }
+    lib::Wavetable longer;
+    longer.prepare(40, 1024);
+    for (int f = 0; f < 40; ++f) {
+        a[0] = 1.0;
+        longer.setFrameHarmonics(f, a, 1);
+    }
+    std::unique_ptr<flagship::Bank> b = flagship::buildBankNow(longer, 0);
+    CHECK(b && b->frames == flagship::kBankMaxFrames);
+}
+
+TEST(flagship_spectral_warps_shape_a_saw_as_their_kinds) {
+    Engine e(48000);
+    const size_t n = 16384;
+    const double f0 = 110.0;
+    // The Basic table's saw at 110 Hz. Amounts on a bank level (k / 7) read two frames, as an unwarped table does.
+    const auto render = [&](int warp, double amount) {
+        std::unique_ptr<ModuleProcessor> p = make(e);
+        const Values v = plainPatch({{"osc1_frame", 1.0 / 3.0}, {"osc1_warp", static_cast<double>(warp)}, {"osc1_warp_amt", amount}});
+        const Stereo out = play(*p, held(45), 24000 + n, v);
+        return spectrum(out.l, 24000, n);
+    };
+    const std::vector<double> saw = render(0, 0.0);
+    // Odd/even at 4/7: the even harmonics gone, the odd ones kept.
+    const std::vector<double> odd = render(13, 4.0 / 7.0);
+    CHECK(peakDb(odd, 2 * f0, 4, n) < peakDb(saw, 2 * f0, 4, n) - 50.0);
+    CHECK(peakDb(odd, 4 * f0, 4, n) < peakDb(saw, 4 * f0, 4, n) - 50.0);
+    CHECK(std::fabs(peakDb(odd, 3 * f0, 4, n) - peakDb(saw, 3 * f0, 4, n)) < 3.0);
+    // Low/high cut at full: a band around the 16th harmonic, the fundamental and the top far down.
+    const std::vector<double> band = render(17, 1.0);
+    CHECK(peakDb(band, 16 * f0, 4, n) > peakDb(band, f0, 4, n) + 20.0);
+    CHECK(peakDb(band, 16 * f0, 4, n) > bandDb(band, 64 * f0, 20000, n) + 10.0);
+    // Stretch at full: harmonic h moves to 1 + 3 (h - 1), so the 2nd harmonic's place empties and the 4th fills.
+    const std::vector<double> stretched = render(11, 1.0);
+    CHECK(peakDb(stretched, 2 * f0, 4, n) < peakDb(stretched, 4 * f0, 4, n) - 40.0);
+    // Comb at 2/7 (full depth, notches 6.3 harmonics apart from the fundamental): the 4th harmonic notched out.
+    const std::vector<double> comb = render(18, 2.0 / 7.0);
+    CHECK(peakDb(comb, 4 * f0, 4, n) - peakDb(comb, f0, 4, n) < peakDb(saw, 4 * f0, 4, n) - peakDb(saw, f0, 4, n) - 20.0);
+    // Disperse and smear keep the level; every warp sounds.
+    for (int w : {11, 12, 14, 15, 16}) {
+        const std::vector<double> s = render(w, 0.6);
+        CHECK(std::fabs(bandDb(s, 50, 20000, n) - bandDb(saw, 50, 20000, n)) < 3.0);
+    }
+}
+
+TEST(flagship_spectral_banks_are_shared_and_built_off_the_audio_thread_live) {
+    Engine e(48000);
+    const Values v = plainPatch({{"osc1_frame", 1.0 / 3.0}, {"osc1_table", 1}, {"osc1_warp", 16}, {"osc1_warp_amt", 0.5}});
+    // Offline: two instances, one bank.
+    const int before = flagship::cachedBanks();
+    std::unique_ptr<ModuleProcessor> a = make(e), b = make(e);
+    if (!a || !b) return;
+    const Stereo x = play(*a, held(), 4800, v);
+    const Stereo y = play(*b, held(), 4800, v);
+    CHECK_EQ(flagship::cachedBanks(), before + 1);
+    CHECK(x.l == y.l);
+    // Live: the first notes play unwarped while the worker builds the bank (here the Vocal table's, not built yet).
+    Values w = v;
+    w.push_back({"osc1_table", 2});
+    std::unique_ptr<ModuleProcessor> live = make(e, false);
+    std::unique_ptr<ModuleProcessor> reference = make(e);
+    if (!live || !reference) return;
+    const int have = flagship::cachedBanks();
+    play(*live, held(), 64, w);  // asks for it
+    for (int i = 0; i < 300 && flagship::cachedBanks() == have; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_EQ(flagship::cachedBanks(), have + 1);
+    live->reset();
+    const Stereo l = play(*live, held(), 4800, w);
+    const Stereo r = play(*reference, held(), 4800, w);
+    CHECK(l.l == r.l);  // ready: the same as an offline render
 }

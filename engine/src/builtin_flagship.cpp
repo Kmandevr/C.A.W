@@ -79,7 +79,9 @@ constexpr uint32_t kControlFrames = 16;
 constexpr uint32_t kVoices = 64;  // a voice can be 48 oscillator copies: 64 is plenty; the oldest is stolen past it
 constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 3, kSlots = 16;
 constexpr int kTableCount = 5;  // the built-in tables
-constexpr int kUserTable = kTableCount, kTableChoices = kTableCount + 1;  // then "User": the imported one
+constexpr int kUserTable = kTableCount;              // then "User": the imported one
+constexpr int kAdditiveTable = kTableCount + 1;      // 1.1.0, appended: frames made by additive rules
+constexpr int kTableChoices = kTableCount + 2;
 // The user wavetable's state (see "The user wavetable" below).
 constexpr uint32_t kWtMagic = 0x31545743u;        // "CWT1"
 constexpr uint32_t kWtImportMagic = 0x49545743u;  // "CWTI"
@@ -157,6 +159,8 @@ enum Warp : int {
     // 1.1.0, appended: another oscillator (or noise) multiplying this one (ring and amplitude modulation) or
     // restarting its phase (hard sync).
     kWarpOscRm, kWarpOscAm, kWarpOscSync,
+    // 1.1.0, appended: spectral and additive warps, read from precomputed banks (flagship_banks.h), in its order.
+    kWarpStretch, kWarpShift, kWarpOddEven, kWarpFormant, kWarpSmear, kWarpDisperse, kWarpCut, kWarpComb,
     kWarpCount
 };
 enum Dest : int { kToFilter1, kToFilter2, kToBoth, kToBypass };
@@ -165,10 +169,13 @@ constexpr uint32_t fmSource(uint32_t o) { return (o + kOscs - 1) % kOscs; }
 enum VoiceMode : int { kPoly, kMono, kLegato };
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
-constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic", "User"};
+constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic", "User", "Additive"};
 static_assert(sizeof(kTables) / sizeof(kTables[0]) == kTableChoices);
 constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize", "FM", "Fold", "Osc FM",
-                                       "Osc RM", "Osc AM", "Osc sync"};
+                                       "Osc RM", "Osc AM", "Osc sync", "Stretch", "Shift", "Odd/even", "Formant",
+                                       "Smear", "Disperse", "Low/high cut", "Comb"};
+static_assert(kWarpComb - kWarpStretch + 1 == flagship::kSpectralModes);
+constexpr bool spectral(int w) { return w >= kWarpStretch; }
 constexpr std::string_view kModSources[] = {"Prev", "Osc 1", "Osc 2", "Osc 3", "Noise"};
 constexpr uint32_t kNoiseRow = kOscs;  // the voice's noise, after the oscillators' copies in Voice::fmBuf
 // The warps that hear the source's mono copy (rendered for them into Voice::fmBuf).
@@ -398,6 +405,7 @@ double exp2(double x) noexcept { return lib::fastExp(x * kLn2); }
 // samples, additively: a few tens of milliseconds, off the audio thread) and shared by every instance.
 struct Tables {
     lib::Wavetable table[kTableCount];
+    lib::Wavetable additive;  // 1.1.0: the Additive table
 };
 
 // Scales harmonic amplitudes so the frame's RMS is that of a saw at full scale (1/sqrt(3)): every frame of a
@@ -497,6 +505,35 @@ const Tables& tables() {
         classic.setFrameFunction(1, [](double p) { return lib::triangleWave(p); });
         classic.setFrameFunction(2, [](double p) { return 2.0 * p - 1.0; });
         classic.setFrameFunction(3, [](double p) { return p < 0.5 ? 1.0 : -1.0; });
+        // Additive (1.1.0): eight spectra set by rules, harmonic by harmonic, in an order that morphs from bright to
+        // hollow to organ: saw (every harmonic at 1/h), square (odd ones), odd-heavy (even ones at a third), even-heavy
+        // (odd ones above the fundamental at a quarter), a comb (every third missing), drawbars (1, 2, 3, 4, 6 and 8),
+        // a soft bright spectrum (1/sqrt(h) rolled off from 64) and a hollow 20 % pulse. Schroeder's phases, one set.
+        lib::Wavetable& additive = x.additive;
+        additive.prepare(8, kFrameSize);
+        for (int f = 0; f < 8; ++f) {
+            for (int h = 1; h <= kH; ++h) {
+                const double saw = 1.0 / h;
+                double g = 0.0;
+                switch (f) {
+                    case 0: g = saw; break;
+                    case 1: g = h % 2 ? saw : 0.0; break;
+                    case 2: g = h % 2 ? saw : saw / 3.0; break;
+                    case 3: g = h == 1 || h % 2 == 0 ? saw : saw / 4.0; break;
+                    case 4: g = h % 3 ? saw : 0.0; break;
+                    case 5: {
+                        const double bars[9] = {0.0, 1.0, 0.8, 0.6, 0.5, 0.0, 0.4, 0.0, 0.3};
+                        g = h <= 8 ? bars[h] : 0.0;
+                        break;
+                    }
+                    case 6: g = rolloff(h, 64.0) / std::sqrt(static_cast<double>(h)); break;
+                    default: g = std::fabs(detSin(kPi * h * 0.2)) / h; break;
+                }
+                a[h - 1] = g;
+            }
+            normalize(a, kH);
+            additive.setFrameHarmonics(f, a, kH, phase);
+        }
         return x;
     }();
     return t;
@@ -718,6 +755,7 @@ struct OscKey {
     bool foldWhole = false;  // the fold warp on the stack's sum (Whole stack), not on each copy (Per copy)
     bool foldTwice = false;  // the fold warp at twice the rate (a high note: Voice::foldTwice), not with ADAA
     lib::UnisonSettings unison{-1};
+    const void* bank = nullptr;  // a spectral warp's bank (null: none, or not built yet)
     bool operator==(const OscKey&) const = default;
 };
 
@@ -823,6 +861,21 @@ struct OscVoice {
     bool blep = true;   // Osc sync's jumps band-limited (not at Eco)
     float w1 = 0.0f, w2 = 0.0f, w3 = 0.0f, mix = 0.0f;  // the warp's constants; the morph between frames a and b
     int f0 = -1, f1 = -1;                              // the frames a and b read
+    // The table read: the oscillator's own, or a spectral warp's bank (frames base0 + f at the amount below, base1 + f
+    // at the one above, amix between them). Without a bank: the table, both bases 0 and amix 0.
+    const lib::Wavetable* reading = nullptr;
+    const flagship::Bank* bank = nullptr;
+    int base0 = 0, base1 = 0, frames = 1;
+    float amix = 0.0f;
+    bool bankPending = false;  // a spectral warp whose bank is not built yet: it plays unwarped and asks each control
+    const float* ca[kMaxCopies] = {};  // with a bank: frames base1 + f0 and base1 + f1 (as a and b at base0)
+    const float* cb[kMaxCopies] = {};
+    // Copy c's frames at mip level k.
+    void point(int c, int k) noexcept {
+        a[c] = reading->levelData(base0 + f0, k);
+        b[c] = reading->levelData(base0 + f1, k);
+        if (bank) ca[c] = reading->levelData(base1 + f0, k), cb[c] = reading->levelData(base1 + f1, k);
+    }
     double faster = 1.0;                               // how much faster than the note the warp reads the table
     double pitchOffset[3] = {};                        // octave, semitones and fine, in semitones
     uint32_t phase[kMaxCopies] = {};  // in 32-bit fixed point (2^32 a cycle): it wraps by itself, and steps exactly
@@ -1381,6 +1434,38 @@ bool foldTwiceFor(double hz, double drive) noexcept {
 #endif
 }
 
+// A spectral warp between two of its bank's amounts (1.1.0): each copy reads four frames (two frames at two
+// amounts), the frame morph at each amount, then the morph between the amounts. At an amount on one of the bank's
+// eight levels (amix 0) the oscillator reads two frames as an unwarped one does (addStackWarp<kWarpNone>).
+template <bool Morph>
+void addBank(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    const float mix = o.mix, amix = o.amix;
+    for (int c = 0; c < o.count; ++c) {
+        if (!o.a[c]) continue;
+        const float* A = o.a[c];
+        const float* B = o.b[c];
+        const float* C = o.ca[c];
+        const float* D = o.cb[c];
+        const uint32_t step = o.step[c];
+        uint32_t p = o.phase[c] + first * step;
+        const int sh = o.shift[c];
+        const uint32_t mask = (1u << sh) - 1u;
+        const float scale = 1.0f / static_cast<float>(1u << sh), gl = gL[c], gr = gR[c];
+        for (uint32_t i = 0; i < n; ++i, p += step) {
+            const uint32_t k = p >> sh;
+            const float fr = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
+            float x = A[k] + (A[k + 1] - A[k]) * fr, y = C[k] + (C[k + 1] - C[k]) * fr;
+            if constexpr (Morph) {
+                x += (B[k] + (B[k + 1] - B[k]) * fr - x) * mix;
+                y += (D[k] + (D[k + 1] - D[k]) * fr - y) * mix;
+            }
+            const float v = x + (y - x) * amix;
+            L[i] += v * gl;
+            R[i] += v * gr;
+        }
+    }
+}
+
 // Osc RM and Osc AM (1.1.0): the stack, unwarped, times its source's mono copy m (held to +-2, as Osc FM holds it):
 // ring 1 - a + a m (at full amount the plain product, the sum and difference tones), amplitude 1 - a / 2 + a m / 2
 // (the carrier kept). The product is taken once on the stack's sum, not per copy: about two operations a sample.
@@ -1468,6 +1553,12 @@ void addOscillator(OscVoice& o, float* L, float* R, uint32_t n, uint32_t first, 
     const float* gL = mono ? o.monoGain : o.gainL;
     const float* gR = mono ? o.monoGain : o.gainR;
     if (mono) R = L;  // two half gains into one buffer: the mono sum
+    if (spectral(o.warpMode)) {
+        if (o.amix == 0.0f) addStackWarp<kWarpNone>(o, gL, gR, L, R, n, first, fm);
+        else if (o.mix != 0.0f) addBank<true>(o, gL, gR, L, R, n, first);
+        else addBank<false>(o, gL, gR, L, R, n, first);
+        return;
+    }
     switch (o.warpMode) {
         case kWarpOscRm:
         case kWarpOscAm:
@@ -1793,7 +1884,14 @@ public:
             quality_ = buildingQuality();
             const Tables& built = tables();
             for (int t = 0; t < kTableCount; ++t) table_[t] = &built.table[t];
+            table_[kAdditiveTable] = &built.additive;
             table_[kUserTable] = user_ ? &user_->table : &emptyUserTable();
+            for (int t = 0; t < kTableChoices; ++t)
+                if (t != kUserTable) source_[t] = flagship::builtinSource(t, table_[t]);
+            source_[kUserTable] = user_ ? flagship::registerSource(std::shared_ptr<const lib::Wavetable>(user_, &user_->table))
+                                        : flagship::builtinSource(kUserTable, &emptyUserTable());
+            banks_.setOffline(buildingOffline());
+            flagship::startBankWorker();
             for (auto& pair : combs_)
                 for (lib::CombFilter& c : pair) c.prepare(sr_, 20.0);
             chorus_.prepare(sr_);
@@ -1831,8 +1929,11 @@ public:
                 next = userTableFor(std::move(canonical));
             }
             reset();  // no voice holds the old table's frames
+            banks_.releaseAll();  // nor its banks
             user_ = std::move(next);
             table_[kUserTable] = user_ ? &user_->table : &emptyUserTable();
+            source_[kUserTable] = user_ ? flagship::registerSource(std::shared_ptr<const lib::Wavetable>(user_, &user_->table))
+                                        : flagship::builtinSource(kUserTable, &emptyUserTable());
             return true;
         } catch (...) {
             return false;
@@ -2221,6 +2322,14 @@ private:
             }
         });
 
+        // The banks the sounding voices read stay held; one none read for a second is let go (flagship_banks.h).
+        if (banks_.holding()) {
+            voices_.forEachActive([&](Voice& v) noexcept {
+                for (const OscVoice& o : v.osc) banks_.mark(o.bank);
+            });
+            banks_.idle();
+        }
+
         // The instrument's own parameters, moved by the newest voice.
         const auto g = [&](uint32_t k) noexcept { return value(k, globalOffsets_); };
         const double velocityAmount = clampd(g(kVelocity), 0.0, 1.0);
@@ -2384,7 +2493,8 @@ private:
             v.random.setRateHz(P(kRndRate));
         }
         for (uint32_t o = 0; o < kOscs; ++o) {
-            if (frameOnly & (1u << o)) moveFrame(v.osc[o], P(oscParam(o, kOscFrame)));
+            if (v.osc[o].bankPending) configureOscillator(v, o, P);  // its bank may be ready now
+            else if (frameOnly & (1u << o)) moveFrame(v.osc[o], P(oscParam(o, kOscFrame)));
             else if (moved(1u << o)) configureOscillator(v, o, P);
             else if (pitch) retune(v.osc[o], v.pitch);
         }
@@ -2412,15 +2522,14 @@ private:
         const double position = clampd(frame, 0.0, 1.0);
         if (position == o.key.position) return;
         o.key.position = position;
-        const lib::Wavetable& table = *table_[o.key.table];
-        const double at = position * (table.frameCount() - 1);
-        const int f0 = static_cast<int>(at), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
+        const double at = position * (o.frames - 1);
+        const int f0 = static_cast<int>(at), f1 = f0 + 1 < o.frames ? f0 + 1 : f0;
         o.mix = static_cast<float>(at - f0);
         if (f0 == o.f0 && f1 == o.f1) return;
-        for (int c = 0; c < o.count; ++c)
-            if (o.a[c]) o.a[c] = table.levelData(f0, o.level[c]), o.b[c] = table.levelData(f1, o.level[c]);
         o.f0 = f0;
         o.f1 = f1;
+        for (int c = 0; c < o.count; ++c)
+            if (o.a[c]) o.point(c, o.level[c]);
     }
 
     // Whether a fresh note's oscillator folds at twice the rate (foldTwiceFor), from the highest pitch it may
@@ -2449,6 +2558,8 @@ private:
         o.on = at(kOscOn) >= 0.5;
         if (!o.on) {
             o.count = 0;
+            o.bank = nullptr;
+            o.bankPending = false;
             o.key.table = -1;  // on again: everything is worked out afresh
             o.layoutKey.voices = -1;
             return;
@@ -2471,6 +2582,10 @@ private:
         key.pitch = v.pitch + o.pitchOffset[0] + o.pitchOffset[1] + o.pitchOffset[2];
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, kWarpCount - 1) : kWarpNone;
+        // A spectral warp reads its bank: until it is built (live: by the worker, a few tens of ms), unwarped.
+        const flagship::Bank* bank = spectral(key.warp) ? banks_.find(source_[key.table], key.warp - kWarpStretch) : nullptr;
+        o.bankPending = spectral(key.warp) && !bank;
+        key.bank = bank;
         key.fmRatio = key.warp == kWarpFm ? clampi(P(fmRatioParam(index)), 1, 16) : 1;
         // Eco quality renders the FM warp at the sample rate (no 2x oversampling): it aliases more. The voice's
         // choice from its start holds while it sounds. (The fold runs at the sample rate at every quality: addFold.)
@@ -2495,9 +2610,23 @@ private:
         u.stack = static_cast<lib::UnisonStack>(clampi(at(kOscStack), 0, lib::kUnisonStackCount - 1));
         if (key == o.key) return;  // nothing moved: the copies keep their steps, levels and gains
 
-        const lib::Wavetable& table = *table_[key.table];
-        const double position = key.position * (table.frameCount() - 1);
-        const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
+        const lib::Wavetable& table = bank ? bank->table : *table_[key.table];
+        o.reading = &table;
+        o.bank = bank;
+        o.frames = bank ? bank->frames : table.frameCount();
+        if (bank) {  // the two of the bank's eight amounts the warp amount sits between
+            const double level = key.amount * (flagship::kBankLevels - 1);
+            const int l0 = std::min(static_cast<int>(level), flagship::kBankLevels - 1);
+            const int l1 = std::min(l0 + 1, flagship::kBankLevels - 1);
+            o.base0 = l0 * o.frames;
+            o.base1 = l1 * o.frames;
+            o.amix = static_cast<float>(level - l0);
+        } else {
+            o.base0 = o.base1 = 0;
+            o.amix = 0.0f;
+        }
+        const double position = key.position * (o.frames - 1);
+        const int f0 = static_cast<int>(position), f1 = f0 + 1 < o.frames ? f0 + 1 : f0;
         o.mix = static_cast<float>(position - f0);
         o.f0 = f0;
         o.f1 = f1;
@@ -2509,7 +2638,7 @@ private:
             if (moved == o.key) {
                 o.key = key;
                 for (int c = 0; c < o.count; ++c)
-                    if (o.a[c]) o.a[c] = table.levelData(f0, o.level[c]), o.b[c] = table.levelData(f1, o.level[c]);
+                    if (o.a[c]) o.point(c, o.level[c]);
                 return;
             }
         }
@@ -2596,7 +2725,7 @@ private:
         // Into the fold, or to its other mode: its anti-aliasing starts from 0, as a voice does.
         if (key.warp == kWarpFold && (o.warpMode != kWarpFold || o.key.table < 0 || o.key.foldWhole != key.foldWhole))
             o.clearFold();
-        o.warpMode = key.warp;
+        o.warpMode = spectral(key.warp) && !bank ? kWarpNone : key.warp;
         o.key = key;
         o.faster = faster;
         tuneCopies(o, table);
@@ -2609,12 +2738,11 @@ private:
         if (pitch == o.key.pitch) return;
         o.key.pitch = pitch;
         o.hz = 440.0 * exp2((pitch - 69.0) / 12.0);
-        tuneCopies(o, *table_[o.key.table]);
+        tuneCopies(o, *o.reading);
     }
 
     // Each copy's step, mip level, frames and gains, from the oscillator's pitch, frames and layout.
     void tuneCopies(OscVoice& o, const lib::Wavetable& table) noexcept {
-        const int f0 = o.f0, f1 = o.f1;
         const double faster = o.faster;
         const OscKey& key = o.key;
         const double perSample = o.hz / sr_;
@@ -2627,8 +2755,7 @@ private:
             }
             const int k = mipLevel(dt * faster, table.levels());
             o.dt[c] = dt;
-            o.a[c] = table.levelData(f0, k);
-            o.b[c] = table.levelData(f1, k);
+            o.point(c, k);
             o.size[c] = static_cast<float>(table.levelSize(k));
             o.level[c] = k;
             o.step[c] = static_cast<uint32_t>(dt * 4294967296.0 + 0.5);
@@ -3116,7 +3243,9 @@ private:
     VoiceLanes lanes_;  // the host's voice bus for this block (#127), or none
     HeldNotes held_;  // mono and legato
     lib::CombFilter combs_[kVoices][kFilters * 2];
-    const lib::Wavetable* table_[kTableChoices] = {};  // the built-in tables, then User
+    const lib::Wavetable* table_[kTableChoices] = {};  // the built-in tables, then User, then Additive
+    flagship::SourceId source_[kTableChoices] = {};    // each one's id for the spectral banks
+    flagship::BankUser banks_;                         // the spectral banks this instance reads
     std::shared_ptr<const UserTable> user_;            // the loaded user table (the state), or none
     lib::HalfBandDesign half_{2 * Decimator2x::kStages, 0.04};               // the FM and 2x fold's decimators
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
