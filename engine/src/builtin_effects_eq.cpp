@@ -415,34 +415,44 @@ protected:
     void detect(const float* inL, const float* inR, uint32_t n) noexcept {
         const float* kL = optionalInLeft(0);
         const float* kR = optionalInRight(0);
+        // Each source (the input or the key) on each channel once a run, whatever number of bands hears it.
+        double src[2][4][kControlFrames];
+        bool made[2][4] = {};
         for (uint32_t d = 0; d < dynCount_; ++d) {
             Band& band = bands_[dynOrder_[d]];
-            const float* sl = band.keyed ? kL : inL;
-            const float* sr = band.keyed ? kR : inR;
-            double x[kControlFrames];
-            if (!sl) {
-                for (uint32_t i = 0; i < n; ++i) x[i] = 0.0;
-            } else {
-                switch (band.channel) {
-                    case kSide: for (uint32_t i = 0; i < n; ++i) x[i] = 0.5 * (static_cast<double>(sl[i]) - sr[i]); break;
-                    case kLeft: for (uint32_t i = 0; i < n; ++i) x[i] = sl[i]; break;
-                    case kRight: for (uint32_t i = 0; i < n; ++i) x[i] = sr[i]; break;
-                    default: for (uint32_t i = 0; i < n; ++i) x[i] = 0.5 * (static_cast<double>(sl[i]) + sr[i]); break;
+            const int which = band.keyed ? 1 : 0;
+            const int ch = band.channel == kSide ? 1 : band.channel == kLeft ? 2 : band.channel == kRight ? 3 : 0;
+            double* x = src[which][ch];
+            if (!made[which][ch]) {
+                made[which][ch] = true;
+                const float* sl = which ? kL : inL;
+                const float* sr = which ? kR : inR;
+                if (!sl) {
+                    for (uint32_t i = 0; i < n; ++i) x[i] = 0.0;
+                } else if (ch == 0) {
+                    for (uint32_t i = 0; i < n; ++i) x[i] = 0.5 * (static_cast<double>(sl[i]) + sr[i]);
+                } else if (ch == 1) {
+                    for (uint32_t i = 0; i < n; ++i) x[i] = 0.5 * (static_cast<double>(sl[i]) - sr[i]);
+                } else {
+                    const float* c = ch == 2 ? sl : sr;
+                    for (uint32_t i = 0; i < n; ++i) x[i] = c[i];
                 }
             }
-            const lib::EqFilter& f = band.detectFilter;
-            double y[kControlFrames];
-            runMono(f, band.detector, x, y, n);
+            // The listening filter is one stage (a band-pass, or a 12 dB low- or high-pass), unscaled: the SVF and
+            // the falling peak in one pass.
+            const lib::SvfMix& c = band.detectFilter.stage(0);
+            lib::SvfState st = band.detector[0];
             double env = band.env;
             const double decay = band.decay;
             for (uint32_t i = 0; i < n; ++i) {
-                const double a = std::fabs(y[i]);
+                const double a = std::fabs(st.process(c, x[i]));
                 env *= decay;
                 env = a > env ? a : env;
             }
+            band.detector[0] = st;
             if (!(env == env)) {  // a NaN reached the detector: start it again clean
                 env = 0.0;
-                for (auto& st : band.detector) st.clear();
+                band.detector[0].clear();
             }
             band.env = env < 1e-12 ? 0.0 : env;
         }
@@ -466,7 +476,9 @@ protected:
             if (target == 0.0 && std::fabs(band.dynDb) < 1e-3) band.dynDb = 0.0;
             if (std::fabs(band.dynDb - band.appliedDb) >= 0.005 || (band.dynDb == 0.0 && band.appliedDb != 0.0)) {
                 band.appliedDb = band.dynDb;
-                band.filter.set(static_cast<lib::EqType>(band.type), band.freq, band.gain + band.appliedDb, band.q, sr);
+                // Back at rest: the band exactly as set() makes it; moving: only the gain's coefficients.
+                if (band.appliedDb == 0.0) band.filter.set(static_cast<lib::EqType>(band.type), band.freq, band.gain, band.q, sr);
+                else band.filter.setGainFast(band.gain + band.appliedDb);
             }
         }
     }

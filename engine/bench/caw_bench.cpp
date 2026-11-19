@@ -170,12 +170,15 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
     return best;
 }
 
-void effectsCost(double seconds) {
+// False when a case with a ceiling (microseconds per second, the x86 figure: the phone budget / 2.5, an
+// assumption) went over it, so CI fails a regression.
+bool effectsCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     struct Case {
         const char* name;
         const char* id;
         Values values;
+        double ceiling = 0;  // 0: none
     };
     const Case cases[] = {
         {"eq (default: 6 bands at 0 dB)", "org.caw.eq", {}},
@@ -229,9 +232,32 @@ void effectsCost(double seconds) {
         {"Pitch/Shift: Pitch, a fifth up", "org.caw.shift", {{"variant", 0}, {"semitones", 7}}},
         {"frequency shifter (old id), 100 Hz", "org.caw.freqshift", {{"shift", 100}}},
         {"Pitch/Shift: Frequency, 100 Hz", "org.caw.shift", {{"variant", 1}, {"shift", 100}}},
+        // 1.1.0: the EQ's and Filter's new modes, each with a ceiling (light 2,000, medium 8,000, heavy 24,000).
+        {"EQ: Bands, 4 dynamic bands", "org.caw.eq",
+         {{"b2_dyn", 1}, {"b3_dyn", 1}, {"b3_gain", 3}, {"b5_dyn", 1}, {"b6_dyn", 1}, {"b2_thresh", -40}, {"b3_thresh", -40},
+          {"b5_thresh", -40}, {"b6_thresh", -40}}, 8000},
+        {"EQ: Bands, 8 dynamic bands, 2 cuts", "org.caw.eq",
+         {{"b1_on", 1}, {"b8_on", 1}, {"b1_dyn", 1}, {"b2_dyn", 1}, {"b3_dyn", 1}, {"b4_dyn", 1}, {"b5_dyn", 1}, {"b6_dyn", 1},
+          {"b7_dyn", 1}, {"b8_dyn", 1}}, 24000},  // heavy: its static bands alone cost about 5,800
+        {"EQ: Linear, Eco (2,048 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 0}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, Normal (4,096 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 1}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, High (8,192 taps)", "org.caw.eq", {{"variant", 4}, {"lin_quality", 2}, {"b3_gain", 3}}, 8000},
+        {"EQ: Linear, Normal, learning Match", "org.caw.eq", {{"variant", 4}, {"match", 1}, {"match_learn", 3}}, 8000},
+        {"EQ: Match (curve playing)", "org.caw.eq", {{"variant", 5}}, 8000},
+        {"EQ: Match, learning both", "org.caw.eq", {{"variant", 5}, {"match_learn", 3}}, 8000},
+        {"Filter: Wah, envelope", "org.caw.filter", {{"variant", 3}}, 2000},
+        {"Filter: Wah, pedal", "org.caw.filter", {{"variant", 3}, {"mode", 1}}, 2000},
     };
     std::printf("effects: microseconds of CPU per second of stereo audio, 64-frame blocks (10000 = 1%% of a core)\n");
-    for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));
+    bool ok = true;
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool over = c.ceiling > 0 && us > c.ceiling;
+        ok = ok && !over;
+        if (c.ceiling > 0) std::printf("  %-44s %8.0f   ceiling %6.0f%s\n", c.name, us, c.ceiling, over ? "  OVER" : "");
+        else std::printf("  %-44s %8.0f\n", c.name, us);
+    }
+    return ok;
 }
 
 void flagshipVoiceCost(double seconds) {
@@ -903,9 +929,8 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
-    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
-        effectsCost(secs);
-        return 0;
+    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
+        return effectsCost(secs) ? 0 : 1;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

@@ -33,7 +33,7 @@
 // Match: learns the long-term spectra of a reference (the key) and of the input (eq_design.h's Welch learner),
 // and plays their difference (smoothed, clamped to +-12 dB, times Amount, within Low and High) as a minimum-phase
 // FIR (the cepstral method: the log magnitude's real cepstrum folded onto positive times, then exponentiated) of
-// 2,048 taps in 128-frame partitions: 128 frames of latency. The learned spectra are its saved state. Its display
+// 2,048 taps in 256-frame partitions: 256 frames of latency. The learned spectra are its saved state. Its display
 // carries a fit of up to 8 bells to the curve for the app's "Fit bands" (written into the Bands variant).
 // [Assumption] Not patent-checked (the design notes say: check before it ships).
 
@@ -44,7 +44,7 @@ namespace {
 using eqd::SpectrumLearner;
 
 constexpr uint32_t kLinBlock = 256;
-constexpr uint32_t kMatchBlock = 128, kMatchTaps = 2048, kMatchFft = 4096;
+constexpr uint32_t kMatchBlock = 256, kMatchTaps = 2048, kMatchFft = 4096;
 constexpr uint32_t kShowPoints = eqd::kGrid / 2;  // the display's grid: every other point (1/12 octave)
 constexpr std::string_view kQualities[] = {"Eco", "Normal", "High"};
 constexpr std::string_view kLearn[] = {"Off", "Reference", "Input", "Both"};
@@ -567,7 +567,7 @@ private:
         builtLearn_ = match_.learner.generation();
         match_.makeCurve(rate());
         idx_ = 0;
-        if (match_.flat()) {  // nothing to match: the response is one tap (the input, 128 frames late)
+        if (match_.flat()) {  // nothing to match: the response is one tap (the input, 256 frames late)
             std::fill(re_.begin(), re_.end(), 0.0);
             re_[0] = kMatchFft;
             phase_ = kStage;

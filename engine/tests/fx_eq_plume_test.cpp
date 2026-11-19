@@ -371,7 +371,7 @@ TEST(match_of_a_signal_to_itself_is_flat_and_a_quieter_input_is_lifted) {
     CHECK(shown[1] > 1.5f && shown[2] > 1.5f);  // seconds learned
     for (uint32_t j = 0; j < 120; ++j) CHECK_NEAR(shown[6 + 240 + j], 0.0, 1e-6);
     const Stereo imp = run(*p, impulse(4096));
-    CHECK_NEAR(imp.l[128], 1.0, 1e-4);  // flat: the input, 128 frames late
+    CHECK_NEAR(imp.l[256], 1.0, 1e-4);  // flat: the input, 256 frames late
     // The input at half the reference's level: matched, +6 dB everywhere.
     Stereo half = n;
     for (size_t i = 0; i < half.size(); ++i) half.l[i] *= 0.5f, half.r[i] *= 0.5f;

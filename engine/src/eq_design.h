@@ -42,12 +42,12 @@ private:
     int phase_ = 2;  // 0 reversal, 1 passes, 2 done
 };
 
-// Match's long-term spectra (Welch: 4,096-point Hann frames every 2,048 frames, power summed per bin) of a
+// Match's long-term spectra (Welch: 4,096-point Hann frames, one after another, power summed per bin) of a
 // reference (the key) and of the input, each the mid (L + R) / 2. Audio thread: push() in run(), step() at each
 // control. The sums are the saved snapshot (save()/load(), control thread).
 class SpectrumLearner {
 public:
-    static constexpr uint32_t kN = 4096, kHop = 2048, kBins = kN / 2 + 1;
+    static constexpr uint32_t kN = 4096, kHop = 4096, kBins = kN / 2 + 1;
     enum Which { kReference = 0, kInput = 1 };
 
     bool prepare();  // allocates (control thread)

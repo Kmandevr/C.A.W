@@ -15,7 +15,7 @@
 // Original code (C.A.W. is Apache-2.0); C.A.W's own curves, not measured from any pedal.
 // One trapezoidal state-variable filter per side (Zavalishin's TPT SVF, as the EQ's bands): its band-pass,
 // normalised to unity at the peak, plus a little of its low-pass (a wah keeps some body), mixed with the dry.
-// Mode Envelope: the input's level (a peak follower with Attack and Release) moves the sweep, Sensitivity setting
+// Mode Envelope: the input's level (its peak each control step, followed with Attack and Release) moves the sweep, Sensitivity setting
 // how loud a note must be to open it fully, Range how far it goes, Direction up or down (auto-wah). Mode Pedal:
 // the `pedal` knob (0 heel, 1 toe) is the position, so a knob, an automation lane, a MIDI controller (an
 // expression pedal) or React to... moves it. Each Curve is a sweep range, a Q at heel and at toe (Resonance scales
@@ -80,7 +80,7 @@ protected:
     }
     void clearState() noexcept override {
         left_.clear(), right_.clear();
-        env_ = 0.0;
+        env_ = peak_ = 0.0;
         first_ = true;
         mix_.reset(), out_.reset();
     }
@@ -93,8 +93,9 @@ protected:
             mode_ = std::clamp(choice(kMode, at), 0, 1);
             curve_ = kCurveTable[std::clamp(choice(kCurve, at), 0, 3)];
             sensGain_ = lib::dbToGain(std::clamp(param(kSens, at), 0.0, 1.0) * 40.0);
-            atk_ = 1.0 - detExp(-1.0 / (std::max(1.0, param(kAttack, at)) * 0.001 * sr));
-            rel_ = 1.0 - detExp(-1.0 / (std::max(10.0, param(kRelease, at)) * 0.001 * sr));
+            const double step = static_cast<double>(kControlFrames) / sr;
+            atk_ = 1.0 - detExp(-step / (std::max(1.0, param(kAttack, at)) * 0.001));
+            rel_ = 1.0 - detExp(-step / (std::max(10.0, param(kRelease, at)) * 0.001));
             range_ = std::clamp(param(kRange, at), 0.0, 1.0);
             down_ = choice(kDirection, at) == 1;
             res_ = 0.5 + std::clamp(param(kResonance, at), 0.0, 1.0);
@@ -104,6 +105,11 @@ protected:
         }
         double p = pedal_;
         if (mode_ == 0) {
+            // The level: the peak since the last control, followed with Attack while it rises and Release while it
+            // falls (per control step, on the grid).
+            env_ += (peak_ - env_) * (peak_ > env_ ? atk_ : rel_);
+            if (env_ < 1e-12 || !(env_ == env_)) env_ = 0.0;
+            peak_ = 0.0;
             levelDb_ = lib::gainToDb(env_);
             const double x = std::min(1.0, env_ * sensGain_);
             p = range_ * std::sqrt(x);
@@ -125,14 +131,10 @@ protected:
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
-        if (mode_ == 0) {  // the level the sweep follows: the louder side, a peak with attack and release
-            double e = env_;
-            for (uint32_t i = 0; i < n; ++i) {
-                const double a = std::max(std::fabs(static_cast<double>(inL[i])), std::fabs(static_cast<double>(inR[i])));
-                const double c = a > e ? atk_ : rel_;
-                e += (a - e) * c;
-            }
-            env_ = e < 1e-12 || !(e == e) ? 0.0 : e;
+        if (mode_ == 0) {  // the level the sweep follows: the louder side's peak over the run (control() follows it)
+            float a = 0.0f;
+            for (uint32_t i = 0; i < n; ++i) a = std::max(a, std::max(std::fabs(inL[i]), std::fabs(inR[i])));
+            peak_ = std::max(peak_, a == a ? static_cast<double>(a) : 0.0);
         }
         lib::SvfState l = left_, r = right_;
         for (uint32_t i = 0; i < n; ++i) {
@@ -167,7 +169,7 @@ private:
     int mode_ = 0;
     bool down_ = false, first_ = true, settled_ = false;
     double sensGain_ = 1, atk_ = 1, rel_ = 1, range_ = 1, res_ = 1, mixTarget_ = 1, outTarget_ = 1, pedal_ = 0.5;
-    double env_ = 0, levelDb_ = -120, pos_ = 0, hz_ = 1000, glide_ = 1;
+    double env_ = 0, peak_ = 0, levelDb_ = -120, pos_ = 0, hz_ = 1000, glide_ = 1;
     Ramp mix_, out_;
 };
 
