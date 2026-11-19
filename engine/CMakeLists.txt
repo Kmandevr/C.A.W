@@ -229,6 +229,7 @@ target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#
 target_sources(caw_core PRIVATE src/midi_fx.cpp src/midi_fx_effects.cpp)  # 1.1.0: MIDI effects before an instrument
 target_sources(caw_core PRIVATE src/builtin_fx_meters.cpp src/builtin_fx_lofi.cpp src/builtin_fx_phasealign.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
 target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.cpp src/builtin_fx_shift_voices.cpp src/builtin_fx_vocoder.cpp)  # 1.1.0: Glint, Mimic, Soar's Harmonizer and Octaver
+target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 1.1.0: Lark (org.caw.pitchfix) and the clip pitch editor's engine
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -269,6 +270,7 @@ else()
   target_include_directories(caw_engine PRIVATE src)
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
+target_sources(caw_engine PRIVATE src/capi_pitch_clip.cpp)  # API 42: the clip pitch editor (Lark)
 
 # The file is libcaw.so / caw.dll; only the C API (marked CAW_API) is exported.
 set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
@@ -311,6 +313,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/midi_fx_test.cpp)  # 1.1.0: MIDI effects before the instrument
   target_sources(caw_tests PRIVATE tests/fx_tools_test.cpp)  # 1.1.0: Meters, Lo-fi, Phase align
   target_sources(caw_tests PRIVATE tests/fx_voice_test.cpp)  # 1.1.0: Glint, Soar's Harmonizer and Octaver, Mimic
+  target_sources(caw_tests PRIVATE tests/lark_test.cpp src/capi_pitch_clip.cpp)  # 1.1.0: Lark (live correction, the clip pitch editor, API 42)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
@@ -441,6 +444,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_voice_rt_test.cpp)  # 1.1.0: Glint, Harmonizer, Octaver, Mimic while playing
+  target_sources(caw_rt_tests PRIVATE tests/lark_rt_test.cpp)  # 1.1.0: Lark while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
   target_sources(caw_rt_tests PRIVATE tests/voice_bus_rt_test.cpp)  # #127: instruments rendering into voice-bus lanes
   target_sources(caw_rt_tests PRIVATE tests/audio_rt_test.cpp)  # audio clips, the sampler, monitoring and recording (WP-J)
@@ -478,6 +482,7 @@ target_include_directories(caw_cli PRIVATE src)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
+  target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -495,6 +500,7 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     # 1.1.0's voice devices (Glint, Harmonizer, Octaver, Mimic) against their cost ceilings.
     add_test(NAME caw_voice_cost COMMAND caw_bench 0.5 303)
     add_test(NAME caw_clean_cost COMMAND caw_bench 0.5 310)  # 1.1.0: Preen and Hush
+    add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
   endif()
 endif()
 
