@@ -42,7 +42,7 @@ const char* const kSuite[] = {"org.caw.eq",        "org.caw.compressor", "org.ca
                               "org.caw.delay.pro", "org.caw.saturator",  "org.caw.gate",    "org.caw.transient",
                               "org.caw.filter",    "org.caw.phaser",     "org.caw.flanger", "org.caw.utility"};
 // How many floats each publishes (docs/engine.md, "Display data").
-const uint32_t kDisplaySizes[] = {439, 11, 7, 8, 9, 73, 8, 5, 73, 7, 6, 6};  // the gate: 8 since its sidechain (#175)
+const uint32_t kDisplaySizes[] = {456, 11, 7, 8, 9, 73, 8, 5, 73, 7, 6, 6};  // the gate: 8 since its sidechain (#175)
 
 struct Stereo {
     std::vector<float> l, r;
@@ -592,7 +592,7 @@ TEST(the_eq_display_shows_its_spectrum_and_curve_while_watched) {
     float shown[kMaxDisplayFloats];
     const Values bell = {{"b4_gain", 9}, {"b4_freq", 2000}, {"b4_q", 2}};
     run(*p, sine(500, 0.5, 4800), bell);
-    CHECK_EQ(p->readDisplay(shown, kMaxDisplayFloats), 439u);
+    CHECK_EQ(p->readDisplay(shown, kMaxDisplayFloats), 456u);
     CHECK_EQ(shown[3], 0.0f);  // nobody had looked: no spectrum worked out
     for (int k = 0; k < 20; ++k) {  // a UI reading every frame
         run(*p, sine(500, 0.5, 800), bell);
@@ -900,7 +900,7 @@ TEST(an_eq_on_a_track_publishes_through_the_c_api) {
         caw_engine_process(handle, left.data(), right.data(), 256);
         caw_engine_component_display(handle, "t", 0, shown.data(), 1024);  // a UI watching
     }
-    CHECK_EQ(caw_engine_component_display(handle, "t", 0, shown.data(), 1024), 439);
+    CHECK_EQ(caw_engine_component_display(handle, "t", 0, shown.data(), 1024), 456);
     CHECK_EQ(shown[3], 1.0f);
     CHECK_EQ(caw_engine_component_display(handle, "t", 1, shown.data(), 1024), 11);
     CHECK_EQ(caw_engine_component_display(handle, nullptr, 0, shown.data(), 1024), 7);

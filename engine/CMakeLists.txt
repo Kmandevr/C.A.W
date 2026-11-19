@@ -185,6 +185,7 @@ target_sources(caw_core PRIVATE src/fx_merged.cpp src/fx_migrate.cpp
   src/builtin_fx_talon.cpp src/builtin_fx_hatch.cpp src/builtin_fx_duck_level_carve.cpp src/builtin_fx_dynsplit_presets.cpp  # 1.1.0: the Talon/Hatch/Duck split
   src/builtin_fx_merged_drive.cpp src/fx_migrate_drive.cpp
   src/builtin_fx_merged_eqfilter.cpp src/fx_migrate_eqfilter.cpp
+  src/builtin_fx_eq_plume.cpp src/eq_design.cpp src/builtin_fx_filters_wah.cpp  # 1.1.0: the EQ's Linear and Match, the Filter's Wah
   src/builtin_fx_merged_stereomod.cpp src/fx_migrate_stereomod.cpp
   src/builtin_fx_merged_space.cpp src/fx_migrate_space.cpp)
 # 1.1.0: new modes of merged devices (Delay, Reverb, Drive, Bit distortion, Convolver).
@@ -318,6 +319,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
   target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah
   target_sources(caw_tests PRIVATE tests/fx_merged_dynamics_test.cpp)  # FX consolidation part A: Compressor, Limiter, Transient
   target_sources(caw_tests PRIVATE tests/fx_duck_test.cpp tests/slot_tools_test.cpp)  # 1.0.8: the Duck variant; per-slot auto gain and meters
   target_sources(caw_tests PRIVATE tests/fx_dynsplit_test.cpp)  # 1.1.0: the Talon/Hatch/Duck split and its migration
@@ -429,6 +431,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_drive_rt_test.cpp)  # part B: a Drive variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_space_rt_test.cpp)  # part E: Delay and Reverb variant changes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_modes_rt_test.cpp)  # 1.1.0: the new effect modes while playing

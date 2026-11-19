@@ -1286,6 +1286,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         monitorWanted_.store(monitors, std::memory_order_relaxed);
     }
     const BuildingQuality building(&quality_);
+    const BuildingOffline buildingOffline(offline);
     const BuildingLiveAudio buildingInput(audioIn_.get());
     {
         // Sends to buses only, keys from playing layers, and no loops (parseProject checks it too; this covers

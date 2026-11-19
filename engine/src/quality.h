@@ -11,6 +11,7 @@ enum Quality : int { kQualityEco = 0, kQualityNormal = 1, kQualityHigh = 2 };
 namespace quality_detail {
 inline thread_local const std::atomic<int>* building = nullptr;
 inline const std::atomic<int> normal{kQualityNormal};
+inline thread_local bool offline = false;
 }  // namespace quality_detail
 
 // The Engine sets its quality setting for the components it builds on this thread (the control thread, around a
@@ -37,5 +38,19 @@ inline int qualityNow(const std::atomic<int>* q) noexcept {
     const int v = q ? q->load(std::memory_order_relaxed) : kQualityNormal;
     return v < kQualityEco ? kQualityEco : (v > kQualityHigh ? kQualityHigh : v);
 }
+
+// The Engine says, around a project update of an offline render (Engine::setProjectOffline: an export, stems), that
+// the components it builds on this thread render offline, so listening aids (an EQ's band solo) stay out of it.
+class BuildingOffline {
+public:
+    explicit BuildingOffline(bool offline) noexcept : was_(quality_detail::offline) { quality_detail::offline = offline; }
+    ~BuildingOffline() { quality_detail::offline = was_; }
+    BuildingOffline(const BuildingOffline&) = delete;
+    BuildingOffline& operator=(const BuildingOffline&) = delete;
+
+private:
+    bool was_;
+};
+inline bool buildingOffline() noexcept { return quality_detail::offline; }
 
 }  // namespace caw

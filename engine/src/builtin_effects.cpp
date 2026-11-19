@@ -109,6 +109,7 @@ bool EffectBase::activate(double sampleRate, uint32_t maxFrames) noexcept {
     const ModuleDescriptor& d = descriptor();
     for (uint32_t k = 0; k < d.portCount; ++k) keyed_ = keyed_ || (d.ports[k].input && d.ports[k].id == "sidechain");
     quality_ = buildingQuality();
+    offline_ = buildingOffline();
     clock_.prepare(rate_, 60.0);
     display_.clear();
     if (!prepare(rate_, maxFrames)) return false;

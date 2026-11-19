@@ -479,6 +479,8 @@ const std::vector<BuiltinPreset>* mergedPresets(std::string_view id) {
         // Then the presets of variants with new DSP, as they are (each names its `variant`).
         for (const MergedDevice* d : mergedDevices())
             for (const BuiltinPreset& p : newVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
+        for (const MergedDevice* d : mergedDevices())  // the EQ's and Filter's 1.1.0 modes (builtin_fx_eq_plume.cpp)
+            for (const BuiltinPreset& p : newEqFilterVariantPresets(d->id)) m[std::string(d->id)].push_back(p);
         // A device with a layout marker: every preset carries it (so applying one never reads as an older entry).
         for (const LayoutDevice& d : layoutDevices())
             for (BuiltinPreset& p : m[std::string(d.id)]) {
