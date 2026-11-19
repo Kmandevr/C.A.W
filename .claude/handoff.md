@@ -1,7 +1,7 @@
 # Handoff
 
 Commit: b0228c1 (Main: v1.0.8-alpha.1 released 2026-11-19, PR #255 merged as 78c994b)
-Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Plans live in the private Kmandevr/AutoStacc-Hub (`docs/caw/`); the 1.1.0 plan is `docs/caw/sound-plan.md`.
+Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. Plans live in the private Kmandevr/AutoStacc-Hub (its caw folder); the 1.1.0 plan is its sound-plan note.
 
 ## Goal
 1. **1.0.9:** a performance release (owner, 2026-11-19).
@@ -10,7 +10,13 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
    - Make the Benchmark fair: warm-up, clock and heat recorded, results adjusted for clock.
    - Make Flagship, EQ and Compressor cheaper.
    - After release, ask the owner to rerun the S22+ Benchmark.
-2. **1.1.0:** the effects and instruments suite, names, theme, personality and Easter eggs (all in the private plan). Engine work starts where it doesn't touch 1.0.9's files.
+2. **1.1.0:** the effects and instruments suite, names, theme, personality and Easter eggs (all in the private sound plan). Engine work starts where it doesn't touch 1.0.9's files.
+
+## Done and verified
+- 1.0.8-alpha.1 released with 6 assets; checks: `ctest` 11/11 and CI green on PR #255.
+
+## Open
+- Owner: rerun the S22+ Benchmark after 1.0.9 and approve the 1.1.0 logo designs and instrument pages as they land.
 
 ## In progress (local worktrees under `.claude/worktrees/`, unpushed; merge each into the session branch and push as soon as it reports)
 - **perf-live:** platform core speed (stabilizer), spikes, Benchmark fairness.
