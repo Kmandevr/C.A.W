@@ -417,6 +417,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_drive_rt_test.cpp)  # part B: a Drive variant change while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_space_rt_test.cpp)  # part E: Delay and Reverb variant changes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_eqfilter_rt_test.cpp)  # FX consolidation part C: EQ, Filter
+  target_sources(caw_rt_tests PRIVATE tests/fx_eq_plume_rt_test.cpp)  # 1.1.0: the EQ's and Filter's new modes
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_stereomod_rt_test.cpp)  # FX consolidation D: variant changes while playing
