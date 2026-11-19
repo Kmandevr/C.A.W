@@ -77,7 +77,9 @@ namespace {
 
 constexpr uint32_t kControlFrames = 16;
 constexpr uint32_t kVoices = 64;  // a voice can be 48 oscillator copies: 64 is plenty; the oldest is stolen past it
-constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 3, kSlots = 16;
+constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 4, kSlots = 16;
+constexpr uint32_t kLayoutLfos = 3;  // the LFOs in the 1.0 layout; LFO 4's parameters are appended (1.1.0)
+constexpr uint32_t kMacros = 8;      // 1.1.0: the instrument's macro knobs, mod sources
 constexpr int kTableCount = 5;  // the built-in tables
 constexpr int kUserTable = kTableCount;              // then "User": the imported one
 constexpr int kAdditiveTable = kTableCount + 1;      // 1.1.0, appended: frames made by additive rules
@@ -111,8 +113,8 @@ constexpr uint32_t kFltRouting = kFltBase + kFilters * kFltCount;
 constexpr uint32_t kEnvBase = kFltRouting + 1;
 constexpr uint32_t envParam(uint32_t e, uint32_t p) { return kEnvBase + e * kEnvCount + p; }
 constexpr uint32_t kLfoBase = kEnvBase + kEnvs * kEnvCount;
-constexpr uint32_t lfoParam(uint32_t l, uint32_t p) { return kLfoBase + l * kLfoCount + p; }
-constexpr uint32_t kRndRate = kLfoBase + kLfos * kLfoCount, kRndMode = kRndRate + 1;
+constexpr uint32_t layoutLfoParam(uint32_t l, uint32_t p) { return kLfoBase + l * kLfoCount + p; }
+constexpr uint32_t kRndRate = kLfoBase + kLayoutLfos * kLfoCount, kRndMode = kRndRate + 1;
 // From here on the parameters belong to the whole instrument, not a voice: a voice source modulates them
 // from the newest voice sounding.
 constexpr uint32_t kVolume = kRndMode + 1, kVelocity = kVolume + 1, kBendRange = kVelocity + 1;
@@ -147,12 +149,20 @@ static_assert(kFoldModeBase + kOscs == 215, "the 1.0 parameter list's size is pa
 // Prev (round the ring, as Osc FM always did: the default), Osc 1..3 (itself counts as Prev) or Noise.
 constexpr uint32_t kModSrcBase = kFoldModeBase + kOscs;
 constexpr uint32_t modSrcParam(uint32_t o) { return kModSrcBase + o; }
-constexpr uint32_t kParamCount = kModSrcBase + kOscs;
+// LFO 4 (shape, rate, sync, mode, as the others), then the macros.
+constexpr uint32_t kLfo4Base = kModSrcBase + kOscs;
+constexpr uint32_t lfoParam(uint32_t l, uint32_t p) { return l < kLayoutLfos ? layoutLfoParam(l, p) : kLfo4Base + p; }
+constexpr uint32_t kMacroBase = kLfo4Base + kLfoCount;
+constexpr uint32_t macroParam(uint32_t m) { return kMacroBase + m; }
+constexpr uint32_t kParamCount = kMacroBase + kMacros;
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
-    kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent, kSourceCount
+    kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent,
+    kSrcLfo4, kSrcMacro1,  // 1.1.0, appended: LFO 4, then Macro 1..8
+    kSourceCount = kSrcMacro1 + kMacros
 };
+constexpr int lfoSource(uint32_t l) { return l < kLayoutLfos ? kSrcLfo1 + static_cast<int>(l) : kSrcLfo4; }
 enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
 enum Warp : int {
     kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize, kWarpFm, kWarpFold, kWarpFmOsc,
@@ -201,7 +211,8 @@ constexpr std::string_view kDelaySyncs[] = {"Off", "1/16", "1/8", "1/8 dotted", 
 constexpr double kDelaySyncWholes[] = {0.0, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 1.0};
 constexpr std::string_view kSources[] = {"None",     "Env 1", "Env 2",      "Env 3",    "LFO 1",  "LFO 2",    "LFO 3",
                                          "Random",   "Velocity", "Note",    "Pitch bend", "Pressure", "Timbre", "Mod wheel",
-                                         "Accent"};
+                                         "Accent",   "LFO 4",    "Macro 1", "Macro 2",    "Macro 3",  "Macro 4",
+                                         "Macro 5",  "Macro 6",  "Macro 7", "Macro 8"};
 constexpr std::string_view kVoiceModes[] = {"Poly", "Mono", "Legato"};
 constexpr std::string_view kPolarities[] = {"Unipolar", "Bipolar"};
 static_assert(sizeof(kSources) / sizeof(kSources[0]) == kSourceCount);
@@ -258,7 +269,7 @@ public:
             num(p + "sustain", n + "sustain", envDefaults[e][2], 0.0, 1.0);
             expo(p + "release", n + "release", envDefaults[e][3], 0.001, 10.0, "s");
         }
-        for (uint32_t l = 0; l < kLfos; ++l) {
+        for (uint32_t l = 0; l < kLayoutLfos; ++l) {
             const std::string p = "lfo" + std::to_string(l + 1) + "_", n = "LFO " + std::to_string(l + 1) + " ";
             pick(p + "shape", n + "shape", 0.0, kLfoShapes, count(kLfoShapes));
             expo(p + "rate", n + "rate", 2.0, 0.01, 40.0, "Hz");
@@ -319,6 +330,12 @@ public:
         for (uint32_t o = 0; o < kOscs; ++o)
             pick("osc" + std::to_string(o + 1) + "_mod_src", "Osc " + std::to_string(o + 1) + " mod source", 0.0, kModSources,
                  count(kModSources));
+        pick("lfo4_shape", "LFO 4 shape", 0.0, kLfoShapes, count(kLfoShapes));
+        expo("lfo4_rate", "LFO 4 rate", 2.0, 0.01, 40.0, "Hz");
+        pick("lfo4_sync", "LFO 4 sync", 0.0, kLfoSyncs, count(kLfoSyncs));
+        pick("lfo4_mode", "LFO 4 mode", 0.0, kLfoModes, count(kLfoModes));
+        for (uint32_t m = 0; m < kMacros; ++m)
+            num("macro" + std::to_string(m + 1), "Macro " + std::to_string(m + 1), 0.0, 0.0, 1.0);
     }
 
 private:
@@ -2185,7 +2202,7 @@ private:
         const double done = n >= kControlFrames ? 1.0 : frames / kControlFrames;
         uint32_t voiceLfos = 0;  // the retriggered LFOs a slot listens to: a voice's own (a free one is the instrument's)
         for (uint32_t l = 0; l < kLfos; ++l)
-            if (uses(kSrcLfo1 + l) && retriggered(l)) voiceLfos |= 1u << l;
+            if (uses(lfoSource(l)) && retriggered(l)) voiceLfos |= 1u << l;
         voices_.forEachActive([&](Voice& v) noexcept {
             for (OscVoice& o : v.osc)
                 for (int c = 0; c < o.count; ++c)
@@ -2235,8 +2252,9 @@ private:
             case kSrcEnv3: return v.env[source - kSrcEnv1].level();
             case kSrcLfo1:
             case kSrcLfo2:
-            case kSrcLfo3: {
-                const uint32_t l = static_cast<uint32_t>(source - kSrcLfo1);
+            case kSrcLfo3:
+            case kSrcLfo4: {
+                const uint32_t l = source == kSrcLfo4 ? 3u : static_cast<uint32_t>(source - kSrcLfo1);
                 return 0.5 * ((retriggered(l) ? v.lfo[l].value() : freeLfo_[l]) + 1.0);
             }
             case kSrcRandom: return 0.5 * (v.random.value() + 1.0);
@@ -2247,7 +2265,10 @@ private:
             case kSrcTimbre: return v.timbre;
             case kSrcModWheel: return modWheel_;
             case kSrcAccent: return clampd((v.velocity - 0.7) / 0.3, 0.0, 1.0);  // a 303's: above 0.7, fully at 1
-            default: return 0.0;
+            default:  // the macros: the instrument's knobs, the same for every voice
+                if (source >= kSrcMacro1 && source < kSourceCount)
+                    return clampd(base_[macroParam(static_cast<uint32_t>(source - kSrcMacro1))], 0.0, 1.0);
+                return 0.0;
         }
     }
 
@@ -2288,7 +2309,7 @@ private:
         // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
         // they follow its position.
         for (uint32_t l = 0; l < kLfos; ++l) {
-            if (!uses(kSrcLfo1 + l)) continue;
+            if (!uses(lfoSource(l))) continue;
             const int sync = clampi(base_[lfoParam(l, kLfoSync)], 0, 9);
             if (knobsChanged_) {
                 lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
@@ -2482,7 +2503,7 @@ private:
                 v.env[e].set(P(envParam(e, kEnvAttack)), P(envParam(e, kEnvDecay)), P(envParam(e, kEnvSustain)),
                              P(envParam(e, kEnvRelease)), sr_);
         for (uint32_t l = 0; l < kLfos && moved(kMovedLfos); ++l) {
-            if (!uses(kSrcLfo1 + l) || !retriggered(l)) continue;  // unused, or the instrument's
+            if (!uses(lfoSource(l)) || !retriggered(l)) continue;  // unused, or the instrument's
             const int sync = clampi(P(lfoParam(l, kLfoSync)), 0, 9);
             v.lfo[l].setShape(static_cast<lib::LfoShape>(clampi(P(lfoParam(l, kLfoShape)), 0, 6)));
             if (sync > 0) v.lfo[l].setRateBeats(kLfoSyncBeats[sync], tempo_);

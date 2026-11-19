@@ -201,6 +201,11 @@ const std::vector<NewCase>& newCases() {
                                {"mod3_dst", 3.0}, {"mod3_amt", 0.2}})});
         c.push_back({"additive table with a spectral warp",
                      with({{"osc1_table", 6}, {"osc1_frame", 0.3}, {"osc2_table", 6}, {"osc2_warp", 13}, {"osc2_warp_amt", 0.3}})});
+        // LFO 4 (retriggered, on osc 1's frame) and two macros (on the warp amount and, scaled by velocity, the level).
+        c.push_back({"lfo 4 and macros", with({{"lfo4_shape", 2}, {"lfo4_rate", 3.0}, {"lfo4_mode", 1}, {"mod4_src", 15},
+                                               {"mod4_dst", 3.0}, {"mod4_amt", 0.4}, {"macro1", 0.7}, {"mod5_src", 16},
+                                               {"mod5_dst", 12.0}, {"mod5_amt", 0.6}, {"osc1_warp", 1}, {"macro8", 0.5},
+                                               {"mod6_src", 23}, {"mod6_via", 8}, {"mod6_dst", 4.0}, {"mod6_amt", -0.3}})});
         c.push_back({"harmonic table stretched", with({{"osc1_table", 3}, {"osc1_warp", 11}, {"osc1_warp_amt", 1.0}})});
         return c;
     }();
@@ -404,4 +409,42 @@ TEST(flagship_spectral_banks_are_shared_and_built_off_the_audio_thread_live) {
     const Stereo l = play(*live, held(), 4800, w);
     const Stereo r = play(*reference, held(), 4800, w);
     CHECK(l.l == r.l);  // ready: the same as an offline render
+}
+
+TEST(flagship_lfo_4_and_the_macros_are_mod_sources) {
+    Engine e(48000);
+    const ModuleProcessor* probe = nullptr;
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    probe = p.get();
+    const ModuleDescriptor& d = probe->descriptor();
+    const ParameterDescriptor& src = d.parameters[index(d, "mod1_src")];
+    CHECK_EQ(src.choiceCount, 24u);
+    CHECK_EQ(src.choices[15], std::string_view("LFO 4"));
+    CHECK_EQ(src.choices[16], std::string_view("Macro 1"));
+    CHECK_EQ(src.choices[23], std::string_view("Macro 8"));
+    // A macro at 1 moving osc 1's level (destination: the parameter's index + 1) by -1: silent; at 0, as without.
+    const double level = index(d, "osc1_level") + 1.0;
+    const auto rms = [&](Values v) {
+        std::unique_ptr<ModuleProcessor> q = make(e);
+        const Stereo out = play(*q, held(), 9600, plainPatch(v));
+        double sum = 0;
+        for (size_t i = 4800; i < out.l.size(); ++i) sum += static_cast<double>(out.l[i]) * out.l[i];
+        return std::sqrt(sum / 4800);
+    };
+    const double plain = rms({});
+    CHECK(plain > 0.05);
+    CHECK(rms({{"mod1_src", 19}, {"mod1_dst", level}, {"mod1_amt", -1.0}, {"macro4", 1.0}}) < 1e-4);
+    CHECK_NEAR(rms({{"mod1_src", 19}, {"mod1_dst", level}, {"mod1_amt", -1.0}, {"macro4", 0.0}}), plain, 1e-9);
+    // LFO 4 as a square at 5 Hz on the level: the output swings at its rate (two loud and two quiet tenths a second).
+    std::unique_ptr<ModuleProcessor> q = make(e);
+    const Stereo out = play(*q, held(), 48000, plainPatch({{"lfo4_shape", 4}, {"lfo4_rate", 5.0}, {"mod1_src", 15},
+                                                          {"mod1_dst", level}, {"mod1_amt", -0.8}, {"mod1_bipolar", 0}}));
+    double lo = 1e9, hi = 0;
+    for (int w = 0; w < 10; ++w) {
+        double sum = 0;
+        for (int i = 0; i < 2400; ++i) sum += std::fabs(out.l[4800 * w + 1200 + i]);
+        lo = std::min(lo, sum), hi = std::max(hi, sum);
+    }
+    CHECK(hi > 3.0 * lo);
 }
