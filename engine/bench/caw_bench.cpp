@@ -32,6 +32,7 @@ using namespace caw;
 using namespace caw::stress;
 using Clock = std::chrono::steady_clock;
 
+int cleanCost(double seconds);  // bench/clean_cost.cpp: Preen and Hush against their ceilings
 int toolsCost(double seconds);  // bench/tools_cost.cpp: 1.1.0's tools against their ceilings
 int dynsplitCost(double seconds);  // bench/dynsplit_cost.cpp: 1.1.0's dynamics split against its ceilings
 
@@ -946,6 +947,7 @@ int main(int argc, char** argv) {
     // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
     // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
+    if (only == 310) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
     if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
@@ -987,7 +989,8 @@ int main(int argc, char** argv) {
         const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
         const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
         const bool dynsplitOver = dynsplitCost(secs) != 0;  // and the dynamics variants (bench/dynsplit_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver) ? 1 : 0;
+        const bool cleanOver = cleanCost(secs) != 0;  // and Preen and Hush (bench/clean_cost.cpp)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || cleanOver) ? 1 : 0;
     }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

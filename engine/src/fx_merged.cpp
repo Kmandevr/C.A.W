@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "builtin_fx_racks.h"
+#include "fx_clean.h"
 #include "fx_migrate.h"
 
 namespace caw {
@@ -17,7 +18,7 @@ const std::vector<const MergedDevice*>& mergedDevices() {
         std::vector<const MergedDevice*> v;
         for (std::span<const MergedDevice> family : {mergedDynamicsDevices(), mergedDriveDevices(), mergedEqFilterDevices(),
                                                      mergedStereoModDevices(), mergedSpaceDevices(),
-                                                     mergedMeterDevices()})
+                                                     mergedMeterDevices(), mergedPreenDevices(), mergedHushDevices()})
             for (const MergedDevice& d : family) v.push_back(&d);
         return v;
     }();
