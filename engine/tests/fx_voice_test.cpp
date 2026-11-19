@@ -329,7 +329,8 @@ TEST(voice_devices_match_their_reference_renders) {
     const Stereo bass = render("org.caw.exciter", {{"variant", 1}, {"freq", 120}, {"amount", 0.6}, {"cut", 0.5}}, in);
     CHECK_REFERENCE(refs, "glint_bass", (cawtest::Audio{bass.l, bass.r}), cawtest::Class::Stable);
     const Stereo harm = render("org.caw.shift", {{"variant", 2}, {"voices", 3}, {"key", 9}, {"scale", 1}}, in);
-    CHECK_REFERENCE(refs, "soar_harmonizer", (cawtest::Audio{harm.l, harm.r}), cawtest::Class::Stable);
+    // Chaotic: the tracker's threshold decisions move a grain by a frame on a 1-ulp difference (a Debug build).
+    CHECK_REFERENCE(refs, "soar_harmonizer", (cawtest::Audio{harm.l, harm.r}), cawtest::Class::Chaotic);
     const Stereo oct = render("org.caw.shift", {{"variant", 3}, {"up", 0.4}}, in);
     CHECK_REFERENCE(refs, "soar_octaver", (cawtest::Audio{oct.l, oct.r}), cawtest::Class::Stable);
     const std::vector<Event> ev = {notes::noteOn(4800, 1, 57, 0.8), notes::noteOn(4800, 2, 60, 0.8), notes::noteOn(28800, 3, 62, 0.8)};
