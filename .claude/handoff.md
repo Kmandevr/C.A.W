@@ -16,7 +16,17 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 ## In progress (pushed as backup branches)
 - **fix-109:** merged into the session branch (7118dc1; ctest 11/11).
 - **review-109:** merged (435640d; ctest 11/11). The full app suite runs before the 1.0.9 PR.
-- **1.1.0 running from 435640d:** dsp-dynsplit (the Talon/Hatch/Duck split and migration) and dsp-plume (Plume additions and Wah). Push them to `caw-backup-*` at check-ins. The designs are in the Hub's sound-designs note; 4 owner questions are in its open-questions.
+- **1.1.0 done from 435640d, backed up:**
+  - `caw-1.1.0-dsp-dynsplit`: the Talon/Hatch/Duck split and migration.
+  - `caw-1.1.0-dsp-plume`: Plume's dynamics, solo, Linear and Match, and Wah.
+
+  Follow-ups for these two:
+  - Carve can dip more than its Range;
+  - give Bus's cost ceiling more headroom;
+  - back up a project before its first conversion;
+  - Pedal gate's pre-FX key needs the sidechain picker;
+  - the effects need an armed signal;
+  - interim Talon/Hatch/Duck pages need the owner's look. The designs are in the Hub's sound-designs note; 4 owner questions are in its open-questions.
 - **1.1.0 done, waiting for 1.0.9 to ship:** `caw-1.1.0-dsp-drive` and `caw-1.1.0-dsp-tools`. The MIDI effects' C API must be renumbered above 40.
 
 ## Rules for continuing
