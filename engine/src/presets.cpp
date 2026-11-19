@@ -133,12 +133,17 @@ Values basic() {
     return v;
 }
 
+}  // namespace
+void appendRavenPresets(std::vector<BuiltinPreset>& out);  // builtin_flagship_presets.cpp
+namespace {
+
 // The .caw synth voices' presets (#122): defined in the parity block at the end of this file.
 Values pluck();
 Values fmBell();
 
 const std::vector<BuiltinPreset>& flagshipPresets() {
-    static const std::vector<BuiltinPreset> p = {
+    static const std::vector<BuiltinPreset> p = [] {
+        std::vector<BuiltinPreset> v = {
         {"Init", "Flagship's own default: a warm, wide saw stack", {}},
         {"Morph pad", "A sine-to-square morph with unison and a slow drift (the Morph synth)", morphPad()},
         {"Mono bass", "A saw and a sub an octave down, a low-pass and legato glide (the Bass)", monoBass()},
@@ -146,7 +151,10 @@ const std::vector<BuiltinPreset>& flagshipPresets() {
         {"Basic", "Two oscillators, a low-pass and an ADSR (the Basic synth)", basic()},
         {"Pluck", "A bright saw whose low-pass closes as it fades: a plucked string (the .caw synth.pluck)", pluck()},
         {"FM bell", "A sine phase-modulated at three times its pitch, the index falling with the note (the .caw synth.fm)", fmBell()},
-    };
+        };
+        appendRavenPresets(v);  // 1.1.0's synthesis (builtin_flagship_presets.cpp)
+        return v;
+    }();
     return p;
 }
 

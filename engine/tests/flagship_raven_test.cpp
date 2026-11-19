@@ -488,3 +488,34 @@ TEST(flagship_new_filter_models_shape_a_saw_as_their_kinds) {
     CHECK(std::fabs(peakDb(vowel, 55, 3, n) - peakDb(dry, 55, 3, n)) < 10.0);
     CHECK(peakDb(vowel, 715, 4, n) - peakDb(dry, 715, 4, n) > peakDb(vowel, 1540, 4, n) - peakDb(dry, 1540, 4, n) + 6.0);
 }
+
+TEST(flagship_s_1_1_0_presets_play_and_use_the_new_synthesis) {
+    // Every preset after the 1.0 seven sounds (finite, bounded, not silent) and sets a 1.1.0 warp, filter, source,
+    // table or parameter.
+    Engine e(48000);
+    const auto& all = builtinPresets(kId);
+    CHECK(all.size() >= 7 + 12);
+    for (size_t k = 7; k < all.size(); ++k) {
+        const BuiltinPreset& preset = all[k];
+        bool uses = false;
+        for (const auto& [id, v] : preset.values) {
+            const std::string s(id);
+            uses = uses || (s.size() > 5 && s.substr(s.size() - 5) == "_warp" && v >= 8) ||
+                   (s.size() > 5 && s.substr(s.size() - 5) == "_type" && s[0] == 'f' && v >= 9) ||
+                   (s.size() > 4 && s.substr(s.size() - 4) == "_src" && v >= 15) || (s.substr(0, 4) == "lfo4") ||
+                   (s.size() > 6 && s.substr(s.size() - 6) == "_table" && v == 6) || s.find("_mod_src") != std::string::npos;
+        }
+        if (!uses) cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + " uses none of 1.1.0's synthesis");
+        std::unique_ptr<ModuleProcessor> p = make(e);
+        if (!p) continue;
+        const Stereo out = play(*p, chord(), 48000, presetValues(preset.name));
+        float peak = 0.0f;
+        bool finite = true;
+        for (size_t i = 0; i < out.l.size(); ++i) {
+            finite = finite && std::isfinite(out.l[i]) && std::isfinite(out.r[i]);
+            peak = std::max(peak, std::max(std::fabs(out.l[i]), std::fabs(out.r[i])));
+        }
+        if (!finite || !(peak > 0.01f) || !(peak < 2.0f))
+            cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + ": peak " + std::to_string(peak));
+    }
+}

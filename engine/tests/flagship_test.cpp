@@ -876,7 +876,7 @@ TEST(flagship_presets_set_their_values_and_an_entry_names_one) {
     std::unique_ptr<ModuleProcessor> p = make(e);
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
-    CHECK_EQ(builtinPresets(kId).size(), 7u);
+    CHECK_EQ(builtinPresets(kId).size(), 25u);  // 1.0's 7, then 1.1.0's 18 (Raven's synthesis)
     for (const BuiltinPreset& preset : builtinPresets(kId))
         for (const auto& [id, v] : preset.values) {
             const int k = paramIndex(d, std::string(id));
