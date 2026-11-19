@@ -20,6 +20,7 @@
 #include "caw/library/spectrum.hpp"
 #include "analysis.h"
 #include "capi_internal.h"
+#include "stereo_pair.h"
 
 // M_PI is not standard C++ (MSVC lacks it without _USE_MATH_DEFINES).
 static constexpr double kTestPi = 3.14159265358979323846;
@@ -214,6 +215,20 @@ TEST(fast_log_and_decibels_match_the_library_maths) {
     CHECK_NEAR(lib::dbToGain(-6.0), std::pow(10.0, -0.3), 1e-12);
     CHECK_NEAR(lib::gainToDb(0.5), 20 * std::log10(0.5), 1e-12);
     CHECK_EQ(lib::gainToDb(0.0), -120.0);
+}
+
+TEST(fast_log_pair_gives_fast_log_s_bits_lane_by_lane) {
+    // The compressor's two-at-a-time curve (stereo_pair.h): fastLog's bits for every positive normal double.
+    size_t differ = 0, tried = 0;
+    for (double x = 2.2250738585072014e-308; x < 1.7976931348623157e308 / 1.37; x *= 1.37, ++tried) {
+        const double y = x * 1.0000001;
+        const Pair v = fastLogNormalPair(pairOf(x, y));
+        differ += lane(v, 0) != lib::fastLog(x) || lane(v, 1) != lib::fastLog(y);
+    }
+    for (double x : {1.0, 0.5, 2.0, 1.4142135623730951, 1.4142135623730954, 0.7071067811865475, 1e-5, 0.999999})
+        differ += lane(fastLogNormalPair(pairOf(x, x)), 0) != lib::fastLog(x);
+    CHECK(tried > 2000);
+    CHECK_EQ(differ, 0u);
 }
 
 TEST(a_parametric_band_has_its_type_s_response_measured_and_computed) {

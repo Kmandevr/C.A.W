@@ -1,6 +1,8 @@
 // Two doubles as one vector (SSE2 or NEON): a stereo pair's channels through one stream of the same arithmetic.
 #pragma once
 
+#include <cstdint>
+
 #include "caw/library/fastmath.hpp"
 
 namespace caw {
@@ -68,6 +70,36 @@ inline Pair tanhApproxPair(Pair x) noexcept {
     return lib::tanhApproxRational(x);
 #else
     return pairOf(lib::tanhApprox(lane(x, 0)), lib::tanhApprox(lane(x, 1)));
+#endif
+}
+
+// lib::fastLog per lane for lanes that are positive, normal and finite (DBL_MIN .. DBL_MAX; others give a finite
+// value that means nothing: check the domain first). Its steps lane by lane: the exponent from the bits, the
+// mantissa folded into [sqrt(1/2), sqrt(2)), the same series, the exponent converted lane by lane (exact). Elsewhere
+// two calls.
+inline Pair fastLogNormalPair(Pair x) noexcept {
+#if defined(__GNUC__)
+    typedef uint64_t U2 __attribute__((vector_size(16)));
+    const U2 bits = (U2)x;  // a vector cast: the same bits
+    U2 e = (bits >> 52) & 0x7ffULL;
+    Pair m = (Pair)((bits & 0x000fffffffffffffULL) | 0x3ff0000000000000ULL);  // 1 .. 2
+    const auto big = m > splat(1.4142135623730951);  // -1 where it folds
+    m = big ? m * splat(0.5) : m;
+    e -= (U2)big;  // + 1 where it folded
+    typedef int64_t I2 __attribute__((vector_size(16)));
+    const Pair k = __builtin_convertvector((I2)e - 1023, Pair);  // exact: |e - 1023| < 2^11
+    const Pair s = (m - splat(1.0)) / (m + splat(1.0)), s2 = s * s;
+    Pair p = splat(1.0 / 17.0);
+    p = p * s2 + 1.0 / 15.0;
+    p = p * s2 + 1.0 / 13.0;
+    p = p * s2 + 1.0 / 11.0;
+    p = p * s2 + 1.0 / 9.0;
+    p = p * s2 + 1.0 / 7.0;
+    p = p * s2 + 1.0 / 5.0;
+    p = p * s2 + 1.0 / 3.0;
+    return k * 6.93147180369123816490e-01 + (2.0 * s + 2.0 * s * s2 * p) + k * 1.90821492927058770002e-10;
+#else
+    return pairOf(lib::fastLog(lane(x, 0)), lib::fastLog(lane(x, 1)));
 #endif
 }
 
