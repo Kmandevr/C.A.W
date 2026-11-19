@@ -301,7 +301,7 @@ const VoiceBus* NoteFxHost::begin(const Event* events, uint32_t count, uint32_t 
     lanes_[kRest].flags = restOn_ ? (kLaneAssigned | kLaneRest) : 0u;
     // Which global binding (if any) each note-link group adds to.
     if (links_)
-        for (size_t g = 0; g < links_->groups.size() && g < static_cast<size_t>(kMaxNoteLinks); ++g) {
+        for (size_t g = 0; g < links_->groups.size() && g < static_cast<size_t>(kNoteFxMaxBindings); ++g) {
             groupGlobal_[g] = -1;
             for (uint32_t b = 0; b < globalCount_; ++b)
                 if (global_[b].entry == links_->groups[g].entry && global_[b].param == links_->groups[g].param)
@@ -346,7 +346,7 @@ void NoteFxHost::walk(Slot& s, uint32_t from, uint32_t end, uint32_t& count, uin
 }
 
 const ChainModulation* NoteFxHost::slotModulation(Slot* s, uint32_t from, uint32_t len) noexcept {
-    const size_t groups = s && links_ ? std::min<size_t>(links_->groups.size(), kMaxNoteLinks) : 0;
+    const size_t groups = s && links_ ? std::min<size_t>(links_->groups.size(), kNoteFxMaxBindings) : 0;
     uint32_t n = 0;
     // Global links alone: the chunk's offsets from this stretch's frame.
     for (uint32_t b = 0; b < globalCount_ && n < kNoteFxMaxBindings; ++b) {

@@ -1551,6 +1551,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
     std::map<std::string, std::vector<std::string>> warnings;
+    for (std::string& w : modulationCostWarnings(p)) warnings["project"].push_back(std::move(w));  // never a refusal
     if (keepTempo)
         warnings["project"].push_back("the tempo map can't change while recording: it stays until the recording stops");
     // A native component chain's automation lanes: a chain about to be sent takes its table now (the
