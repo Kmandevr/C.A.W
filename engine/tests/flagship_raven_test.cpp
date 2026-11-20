@@ -526,3 +526,81 @@ TEST(flagship_s_1_1_0_presets_play_and_use_the_new_synthesis) {
             cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + ": peak " + std::to_string(peak));
     }
 }
+
+// 1.1.1: a slot on one of the choice lists 1.1.0 appended to (the oscillators' tables and warps, the filters' types)
+// moves a saved patch's knob to the choice 1.0.9 moved it to. A slot moves a knob by a fraction of its travel, so
+// the longer lists had sent an old patch's modulated filter type into the new comb, phaser and diode models (the
+// owner's report: an old project playing echoes with no delay on the track). Velocity 1 is a source held at 1:
+// knob + amount x the 1.0 list's last index, rounded and kept within that list, is what the patch must play.
+TEST(a_slot_moves_an_old_patch_s_tables_warps_and_filter_types_as_1_0_9_did) {
+    Engine e(48000);
+    const std::vector<Event> note = {notes::noteOn(0, 1, 45, 1.0), notes::noteOff(24000, 1, 45)};
+    auto moved = [&](const Values& patch, const std::string& target, double amount) {
+        std::unique_ptr<ModuleProcessor> p = make(e, false);
+        Values v = patch;
+        if (p) {
+            v.push_back({"mod2_src", 8});  // velocity
+            v.push_back({"mod2_dst", index(p->descriptor(), target) + 1.0});
+            v.push_back({"mod2_amt", amount});
+            v.push_back({"mod2_bipolar", 0});
+        }
+        return p ? play(*p, note, 36000, v) : Stereo{};
+    };
+    auto plain = [&](const Values& patch) {
+        std::unique_ptr<ModuleProcessor> p = make(e, false);
+        return p ? play(*p, note, 36000, patch) : Stereo{};
+    };
+    auto same = [&](const Stereo& a, const Stereo& b, const std::string& what) {
+        double diff = 0.0, ref = 0.0;
+        for (size_t i = 0; i < a.l.size() && i < b.l.size(); ++i) {
+            diff += (a.l[i] - b.l[i]) * (a.l[i] - b.l[i]) + (a.r[i] - b.r[i]) * (a.r[i] - b.r[i]);
+            ref += b.l[i] * b.l[i] + b.r[i] * b.r[i];
+        }
+        const double db = 10.0 * std::log10(diff / std::max(ref, 1e-30) + 1e-30);
+        if (a.l.empty() || !(ref > 0.0) || db > -120.0)
+            cawtest::fail(__FILE__, __LINE__, what + ": " + std::to_string(db) + " dB from the 1.0.9 choice");
+    };
+    const Values low = {{"flt1_cutoff", 300.0}, {"flt1_resonance", 0.6}, {"fx_reverb_on", 0}};
+    auto with = [&](Values v, std::initializer_list<std::pair<std::string, double>> more) {
+        v.insert(v.end(), more.begin(), more.end());
+        return v;
+    };
+    // Ladder LP + 7/8 of the travel: the comb (7 of 1.0's 0..8), not the phaser (11 of 0..13).
+    same(moved(low, "flt1_type", 7.0 / 8.0), plain(with(low, {{"flt1_type", 7}})), "filter type up from Ladder LP");
+    // The comb pushed past the list's end: the formant, 1.0's last (not the diode, the 1.1.0 type after it).
+    same(moved(with(low, {{"flt1_type", 7}}), "flt1_type", 0.6), plain(with(low, {{"flt1_type", 8}})), "filter type past the end");
+    // Filter 2 alike, down from the formant by 3 of its 8 steps.
+    const Values both = with(low, {{"flt2_on", 1}, {"flt2_type", 8}, {"osc1_dest", 1}});
+    same(moved(both, "flt2_type", -3.0 / 8.0), plain(with(low, {{"flt2_on", 1}, {"flt2_type", 5}, {"osc1_dest", 1}})),
+         "filter 2 type down from the formant");
+    // A table: Basic + 0.6 of 1.0's six is Harmonic (3), not Classic (4 of the seven with Additive).
+    same(moved({}, "osc1_table", 0.6), plain({{"osc1_table", 3}}), "table");
+    // A warp: Bend + 4/7 is FM (1 + 4 of 1.0's 0..7), not Odd/even (1 + 4/7 of 0..18, rounded: 13).
+    const Values warped = {{"osc1_warp", 1}, {"osc1_warp_amt", 0.5}};
+    same(moved(warped, "osc1_warp", 4.0 / 7.0), plain({{"osc1_warp", 5}, {"osc1_warp_amt", 0.5}}), "warp");
+    // Past the end: Osc FM, 1.0's last, not Osc RM.
+    same(moved(warped, "osc1_warp", 1.0), plain({{"osc1_warp", 7}, {"osc1_warp_amt", 0.5}}), "warp past the end");
+}
+
+// A knob on a 1.1.0 choice: the slot moves it over the whole list (nothing saved before 1.1.0 can be there).
+TEST(a_slot_moves_a_1_1_0_choice_over_the_whole_list) {
+    Engine e(48000);
+    const std::vector<Event> note = {notes::noteOn(0, 1, 45, 1.0), notes::noteOff(24000, 1, 45)};
+    auto render = [&](Values v) {
+        std::unique_ptr<ModuleProcessor> p = make(e, false);
+        return p ? play(*p, note, 36000, v) : Stereo{};
+    };
+    std::unique_ptr<ModuleProcessor> d = make(e, false);
+    if (!d) return;
+    const double dst = index(d->descriptor(), "flt1_type") + 1.0;
+    // Diode LP (9) + 4/13 of the 14 types: Vowel (13).
+    const Values base = {{"flt1_cutoff", 900.0}, {"flt1_resonance", 0.5}, {"fx_reverb_on", 0}};
+    Values moved = base, vowel = base;
+    moved.insert(moved.end(), {{"flt1_type", 9}, {"mod2_src", 8}, {"mod2_dst", dst}, {"mod2_amt", 4.0 / 13.0}});
+    vowel.push_back({"flt1_type", 13});
+    const Stereo a = render(moved), b = render(vowel);
+    double diff = 0.0, ref = 0.0;
+    for (size_t i = 0; i < a.l.size() && i < b.l.size(); ++i) diff += (a.l[i] - b.l[i]) * (a.l[i] - b.l[i]), ref += b.l[i] * b.l[i];
+    CHECK(ref > 0.0);
+    CHECK(diff <= ref * 1e-12);
+}

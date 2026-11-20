@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../model/easter_eggs.dart';
+import 'capped_ticker.dart';
 import 'motion.dart';
 import 'theme.dart';
 
@@ -135,8 +136,14 @@ class CrowLoader extends StatefulWidget {
 }
 
 class _CrowLoaderState extends State<CrowLoader> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: crowLoaderLap);
+  /// The loader's frames a second (1.1.1: it drew on every frame the screen ran, 120 on the S22+).
+  static const maxHz = 30.0;
+  late final _ticker = CappedTicker(_tick, maxHz: maxHz, vsync: this);
+  final _t = ValueNotifier<double>(0); // 0 to 1 of a lap
   MotionLevel? _level;
+
+  void _tick(Duration elapsed) =>
+      _t.value = (elapsed.inMicroseconds % crowLoaderLap.inMicroseconds) / crowLoaderLap.inMicroseconds;
 
   @override
   void didChangeDependencies() {
@@ -145,17 +152,17 @@ class _CrowLoaderState extends State<CrowLoader> with SingleTickerProviderStateM
     if (level == _level) return;
     _level = level;
     if (level == MotionLevel.off) {
-      _c
-        ..stop()
-        ..value = 0;
+      _ticker.stop();
+      _t.value = 0;
     } else {
-      _c.repeat();
+      _ticker.start();
     }
   }
 
   @override
   void dispose() {
-    _c.dispose();
+    _ticker.dispose();
+    _t.dispose();
     super.dispose();
   }
 
@@ -167,10 +174,13 @@ class _CrowLoaderState extends State<CrowLoader> with SingleTickerProviderStateM
       child: SizedBox.square(
         key: ValueKey('crow-loader-${_level?.name}'),
         dimension: widget.size,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (context, _) =>
-              CustomPaint(painter: CrowLoaderPainter(t: _c.value, level: _level ?? MotionLevel.full, color: color)),
+        // In a layer of its own: each step repaints the crow, not the screen around it.
+        child: RepaintBoundary(
+          child: ValueListenableBuilder<double>(
+            valueListenable: _t,
+            builder: (context, t, _) =>
+                CustomPaint(painter: CrowLoaderPainter(t: t, level: _level ?? MotionLevel.full, color: color)),
+          ),
         ),
       ),
     );

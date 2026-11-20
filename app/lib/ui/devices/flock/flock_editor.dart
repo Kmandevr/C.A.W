@@ -453,14 +453,16 @@ class _FlockVisualState extends State<FlockVisual> {
                   window: ClipWindow(offset: 0, perPixel: info.seconds / size.width, fileSeconds: info.seconds),
                   color: scope.accent.withValues(alpha: 0.3), gain: 1, fadeIn: 0, fadeOut: 0,
                   inCurve: FadeCurve.linear, outCurve: FadeCurve.linear, path: sample)))),
-            DeviceDisplay(builder: (context, f) => DevicePhase(
+            // Filling the picture (tight constraints): a motion frame's relayout stays inside it, so the page around
+            // it is not laid out and repainted with every frame (1.1.1: the whole page repainted 60 times a second).
+            Positioned.fill(child: DeviceDisplay(builder: (context, f) => DevicePhase(
               builder: (context, seconds) {
                 final fr = FlockFrame(f);
                 final secs = fr.live && fr.seconds > 0 ? fr.seconds : info?.seconds ?? 2.0;
                 return CustomPaint(size: size, painter: FlockPainter(FlockPicture(
                   value: t.value, frame: fr, seconds: secs, sample: sample != null && info != null && !(fr.live && fr.missing),
                   time: seconds, accent: scope.accent, secondary: style.secondary, active: _active)));
-              })),
+              }))),
           ]),
         );
       }),

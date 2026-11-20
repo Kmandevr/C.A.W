@@ -27,9 +27,16 @@ double expect(double x, int bits, int shift, uint32_t xor16, uint32_t and16) {
 TEST(bitwise_is_bit_distortions_second_variant) {
     const fx::MergedDevice* m = fx::findMergedDevice(kBits);
     CHECK(m && m->variants.size() == 2u);
-    const ModuleDescriptor* d = checkVariant(kBits, 1, "Bitwise");
-    if (!d) return;
-    CHECK_EQ(d->parameterCount, 7u);
+    CHECK(m && m->variants[1].name == std::string("Bitwise"));
+    if (!m) return;
+    const ModuleDescriptor* d = &m->variants[1].descriptor();
+    // 1.1.0's six, `variant` (index 6, structural), then 1.1.1's glitch ops and the sidechain filter appended.
+    CHECK_EQ(d->parameterCount, 27u);
+    const ParameterDescriptor& v = d->parameters[6];
+    CHECK(v.id == fx::kVariantParam);
+    CHECK_EQ(v.defaultValue, 1.0);
+    CHECK_EQ(v.choiceCount, 2u);
+    CHECK(!v.automatable && !v.modulatable && !v.midiMappable);
     CHECK_EQ(d->latencyFrames, 0u);
     CHECK(d->cpuClass == CpuClass::Light);
 }
@@ -60,7 +67,7 @@ TEST(bitwise_publishes_its_lanes_flipping) {
     if (!p) return;
     run(*p, sine(440, 0.5, 4800), with({{"bits", 16}}, 1));
     float shown[64];
-    CHECK_EQ(p->readDisplay(shown, 64), 38u);
+    CHECK_EQ(p->readDisplay(shown, 64), 45u);  // 1.1.1 appends 7 (fx_bits_glitch_test.cpp)
     CHECK_EQ(shown[2], 16.0f);
     CHECK(shown[6] > 0.2f && shown[6] <= 1.0f);  // the lowest lane flips often
     CHECK(shown[6 + 15] < 0.03f);                  // the sign lane twice a cycle (880 a second)

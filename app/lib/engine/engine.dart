@@ -986,6 +986,10 @@ class Engine implements TempoEngine {
   /// Returns the buffer size now in frames (0 where there is none).
   int setAudioBackground(bool background) => _b.audioSetBackground(_handle, background ? 1 : 0);
 
+  /// The platform's heat for the device callback's load stabilizer (API 45): warm and hot let its core's clock settle
+  /// lower, critical stops it (the [EnginePressure] index is the engine's CAW_PRESSURE_* code).
+  void setAudioThermal(EnginePressure pressure) => _b.audioSetThermal(_handle, pressure.index);
+
   /// The AAudio output's buffer sized automatically (API 34, #236): call about once a second while the device runs;
   /// a new stream starts at [startFrames] (0: two bursts). Returns the buffer size now in frames (0: none).
   int tuneAudioBuffer(int startFrames) => _b.audioTuneBuffer(_handle, startFrames);

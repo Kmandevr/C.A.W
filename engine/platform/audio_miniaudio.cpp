@@ -503,8 +503,14 @@ void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 
                 return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             };
             const int64_t from = std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count();
-            if (a->stabilizer.wanted(now() - from, static_cast<int>(frames), static_cast<int>(rate))) {
-                spun = caw::LoadStabilizer::spinUntil(a->stabilizer.deadline(from, static_cast<int>(frames), static_cast<int>(rate)), now);
+            // The share it spins to follows the recent peak work and the heat (LoadStabilizer::spinShare); none
+            // at critical heat.
+            const double share = a->stabilizer.wanted(now() - from, static_cast<int>(frames), static_cast<int>(rate))
+                                     ? a->stabilizer.spinShare(a->owner->thermal.load(std::memory_order_relaxed))
+                                     : 0.0;
+            if (share > 0.0) {
+                spun = caw::LoadStabilizer::spinUntil(
+                    a->stabilizer.deadline(from, static_cast<int>(frames), static_cast<int>(rate), share), now);
                 state = caw::StabilizerState::On;
             } else {
                 a->stabilizer.reset();
@@ -1685,6 +1691,10 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
     (void)start_frames;
     return 0;
 #endif
+}
+
+void caw_audio_set_thermal(CawEngine* e, int32_t pressure) {
+    if (e) e->thermal.store(pressure, std::memory_order_relaxed);  // read by the load stabilizer (spinShare)
 }
 
 int32_t caw_audio_set_background(CawEngine* e, int32_t background) {

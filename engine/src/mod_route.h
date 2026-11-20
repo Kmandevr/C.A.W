@@ -31,7 +31,17 @@ inline double modCurve(double u, double curve) noexcept {
 }
 
 // The plain value of parameter `p` at base value `base` moved by `offset` of its normalized travel.
+// A choice list a later release appended to moves an old choice within the old list (modulationTop).
 inline double modulatedValue(const ParameterDescriptor& p, double base, double offset) noexcept {
+    if (p.legacyChoiceCount != 0) {
+        if (const double top = modulationTop(p, base); top < p.maximum) {
+            ParameterDescriptor old = p;
+            old.maximum = top;
+            old.choiceCount = p.legacyChoiceCount;
+            old.legacyChoiceCount = 0;
+            return modulatedValue(old, base, offset);
+        }
+    }
     const double n = std::clamp(normalizeParameter(p, base) + offset, 0.0, 1.0);
     return constrainParameter(p, denormalizeParameter(p, n));
 }

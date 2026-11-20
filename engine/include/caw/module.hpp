@@ -106,6 +106,11 @@ struct ParameterDescriptor {
     // Display only: where an editor files the parameter, as a slash path ("a1/body": pad A1's body layer; "kit/glue").
     // Built-in components set it (docs/engine.md); it is not part of the C interface, so a loaded component has none.
     std::string_view group;
+    // Engine-internal, like `group` (not part of the C interface): a choice list a later release appended to. On one of
+    // its first `legacyChoiceCount` choices a modulation (a mod slot, a project link, a rack route) moves the value in
+    // that old list's steps and within it, as the release before did; on an appended choice, over the whole list.
+    // 0: none (the whole list, always). Flagship's tables, warps and filter types (1.1.1).
+    uint32_t legacyChoiceCount = 0;
 };
 enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
 struct UiControlDescriptor {

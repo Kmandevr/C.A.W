@@ -307,6 +307,8 @@ bool modesCostOver(double seconds) {
         {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
         {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
         {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
+        {"Bit distortion: Bitwise, echo ring (1.1.1)", "org.caw.bits", {{"variant", 1}, {"combine", 2}, {"echo", 3}, {"combine_mask", 65280}, {"tone", 9000}}, kLight},
+        {"Bit distortion: Bitwise, every glitch op", "org.caw.bits", {{"variant", 1}, {"xor", 3840}, {"or", 48}, {"rotate", 1}, {"reverse", 3}, {"combine", 2}, {"freeze", 61440}, {"flips", 0.1}, {"pattern", 93}, {"tone", 6000}, {"gate", -50}}, kLight},
         {"Convolver: Cab (default: 4x12)", "org.caw.convolver", {{"variant", 1}}, kMedium},
         {"Convolver: Cab, far mic", "org.caw.convolver", {{"variant", 1}, {"distance", 1}}, kMedium},
         // modes-bench end
@@ -948,6 +950,112 @@ int runDrift(double secs, int argc, char** argv) {
     return 0;
 }
 
+// `caw_bench SECONDS 602 [--only ID[,ID]] [--runs N] [--threads 0|auto] [--frames N] [--cost]`: where the one-off slow
+// callbacks come from. Plays each Benchmark scenario as the Benchmark's DSP rows do (0.25 s stopped, Play, 1.7 s
+// untimed, then SECONDS timed; --threads auto: the mix pool on Auto as Engine::useBenchmarkMixPool, the default 0:
+// serial) N times (default 3) from a fresh engine, and prints each run's p50, p99, worst and its 5 slowest
+// callbacks (index and µs). A slow callback that comes back at the same index in every run is work in the code
+// (deterministic: a lazy build, a recompute); one that moves is the machine (preemption, interrupts). --cost reads
+// every slot's cost (Engine::componentCost) four times a second of audio, as a device header does, so the audio
+// thread times every slot throughout (the readout's cost on the callback). --check RATIO (a CI test) fails when a
+// scenario's slowest callback, by its fastest run, is over RATIO times the median callback.
+int runSpikes(double secs, int argc, char** argv) {
+    int frames = 256, runs = 3;
+    double check = 0;  // --check RATIO: fail on a slow callback that is work (see below)
+    bool pool = false, cost = false;
+    std::string only;
+    for (int a = 3; a < argc; ++a) {
+        const std::string k = argv[a];
+        if (k == "--cost") { cost = true; continue; }
+        const char* v = a + 1 < argc ? argv[a + 1] : nullptr;
+        if (!v) { std::fprintf(stderr, "%s needs a value\n", k.c_str()); return 2; }
+        if (k == "--frames") frames = std::atoi(v);
+        else if (k == "--runs") runs = std::atoi(v);
+        else if (k == "--threads") pool = std::string(v) != "0";
+        else if (k == "--only") only = std::string(",") + v + ",";
+        else if (k == "--check") check = std::atof(v);
+        else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
+        ++a;
+    }
+    if (frames < 16 || frames > 4096 || runs < 1 || runs > 20 || secs <= 0 || check < 0) return 2;
+    int failed = 0;
+    const std::string dir = (std::filesystem::temp_directory_path() / "caw_bench_suite").string();
+    std::filesystem::create_directories(dir);
+    const int64_t calls = static_cast<int64_t>(secs * kRate / frames);
+    std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
+    std::printf("%-18s %3s %8s %8s %8s  slowest callbacks (index:us)\n", "scenario", "run", "p50 us", "p99 us", "worst");
+    for (const SuiteScenario& sc : benchmarkScenarios()) {
+        if (!only.empty() && only.find(std::string(",") + sc.id + ",") == std::string::npos) continue;
+        ProjectSpec project;
+        std::string error;
+        if (!makeScenario(sc, dir, project, error)) continue;
+        std::map<int64_t, int> seen;  // a slow index: in how many runs
+        std::vector<double> least(static_cast<size_t>(calls), 1e30);  // each callback's fastest run
+        for (int run = 0; run < runs; ++run) {
+            Engine e(kRate);
+            e.setShedding(false);
+            if (pool) e.useBenchmarkMixPool();
+            else e.setMixParallel(Engine::MixParallel::Never);
+            e.setProject(project);
+            for (int c = 0; c < kRate / 4 / frames; ++c) e.process(l.data(), r.data(), frames);
+            e.play();
+            const double budget = 1e6 * frames / kRate;
+            for (int c = 0; c < static_cast<int>(1.7 * kRate / frames); ++c) {
+                const auto t0 = Clock::now();
+                e.process(l.data(), r.data(), frames);
+                e.reportLoad(std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / budget, frames, frames);
+            }
+            std::vector<double> us(static_cast<size_t>(calls));
+            const int64_t costEvery = std::max<int64_t>(1, kRate / 4 / frames);  // the device header's 4 reads a second
+            for (int64_t c = 0; c < calls; ++c) {
+                if (cost && c % costEvery == 0) {  // --cost: every slot's cost read, as headers on every device would
+                    double share = 0;
+                    uint32_t latency = 0;
+                    bool armed = false;
+                    for (const LayerSpec& layer : project.layers) {
+                        if (!layer.instrument.id.empty()) e.componentCost(layer.id, Engine::kInstrumentIndex, share, latency, armed);
+                        for (uint32_t k = 0; k < layer.components.size(); ++k) e.componentCost(layer.id, k, share, latency, armed);
+                    }
+                }
+                const auto t0 = Clock::now();
+                e.process(l.data(), r.data(), frames);
+                us[static_cast<size_t>(c)] = std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
+                e.reportLoad(us[static_cast<size_t>(c)] / budget, frames, frames);
+                least[static_cast<size_t>(c)] = std::min(least[static_cast<size_t>(c)], us[static_cast<size_t>(c)]);
+            }
+            std::vector<int64_t> order(us.size());
+            for (size_t i = 0; i < order.size(); ++i) order[i] = static_cast<int64_t>(i);
+            std::sort(order.begin(), order.end(), [&](int64_t a, int64_t b) { return us[static_cast<size_t>(a)] > us[static_cast<size_t>(b)]; });
+            std::vector<double> sorted = us;
+            std::sort(sorted.begin(), sorted.end());
+            const auto pct = [&](double q) { return sorted[std::min(sorted.size() - 1, static_cast<size_t>(q * static_cast<double>(sorted.size())))]; };
+            std::printf("%-18s %3d %8.1f %8.1f %8.1f ", sc.id, run, pct(0.5), pct(0.99), sorted.back());
+            for (size_t k = 0; k < 5 && k < order.size(); ++k) {
+                std::printf(" %lld:%.0f", static_cast<long long>(order[k]), us[static_cast<size_t>(order[k])]);
+                ++seen[order[k]];
+            }
+            std::printf("\n");
+        }
+        std::string again;
+        for (const auto& [index, n] : seen)
+            if (n == runs && runs > 1) again += " " + std::to_string(index);
+        std::printf("%-18s     in every run's slowest 5:%s\n", sc.id, again.empty() ? " none" : again.c_str());
+        // The work in each callback: its fastest of the runs (a preemption or an interrupt lands on a different
+        // callback in each run, so the least time drops it; work in the code is there every run). --check: the
+        // slowest callback's work within RATIO of the median's, or within 100 µs of it (the lightest scenarios).
+        std::vector<double> sorted = least;
+        std::sort(sorted.begin(), sorted.end());
+        const double median = sorted[sorted.size() / 2], worst = sorted.back();
+        const auto at = std::max_element(least.begin(), least.end()) - least.begin();
+        const bool bad = check > 0 && runs > 1 && worst > check * median && worst - median > 100.0;
+        failed += bad ? 1 : 0;
+        std::printf("%-18s     work: median %.1f us, slowest %.1f us at %lld (%.2f x)%s\n", sc.id, median, worst,
+                    static_cast<long long>(at), worst / median, bad ? "  OVER" : "");
+    }
+    if (failed > 0) std::printf("%d scenarios have a callback whose work is over %.1f x the median's\n", failed, check);
+    return failed > 0 ? 1 : 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -971,7 +1079,8 @@ int main(int argc, char** argv) {
     if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
     if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
     if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
-    if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
+    if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)
+    if (only == 602) return runSpikes(secs, argc, argv);  // `caw_bench SECONDS 602 [options]`: the one-off slow callbacks (runSpikes)
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
     {
