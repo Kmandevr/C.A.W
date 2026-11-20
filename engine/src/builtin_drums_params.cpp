@@ -689,7 +689,8 @@ const std::vector<NeedRule>& needs() {
                     kinds = drums;
                 if (k == kPcWires || k == kPcWireLevel) kinds = {kPieceSnare};
                 if (k == kPcBeater || k == kPcPort) kinds = {kPieceKick};
-                if (k == kPcAlloy || k == kPcSwell) kinds = cymbals;
+                if (k == kPcAlloy) kinds = cymbals;
+                if (k == kPcSwell) kinds = {kPieceCrash, kPieceRide, kPieceSplash, kPieceChina};  // a hat has no cascade
                 std::vector<Need> all = {pk(kinds)};
                 if (k == kPcWireLevel) all.push_back(Need{pieceParam(piece, kPcWires), true, {}});
                 add(pieceParam(piece, k), all, true);

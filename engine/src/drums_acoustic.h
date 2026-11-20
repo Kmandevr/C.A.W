@@ -35,6 +35,7 @@ inline constexpr uint32_t kMaxModes = 128;  // per piece: a drum's batter + reso
 inline constexpr uint32_t kMaxWires = 16;
 inline constexpr uint32_t kResoWireModes = 12;  // the snare-side head's modes the wires touch
 inline constexpr uint32_t kRing = 32;           // the kit sum's history (sympathetic drive), a power of two
+inline constexpr uint32_t kCell = 16;           // the longest span process() takes (frames): a control period
 
 // A part of a piece that rings: a run of modes in the piece's arrays.
 struct Segment {
@@ -101,7 +102,7 @@ struct Piece {
     // Eco cymbal: noise into the high band growing with the low modes' energy squared.
     float swellEnv = 0, swellK = 0, swellGain = 0, swellHp[2] = {}, swellLp = 0;
     // Hi-hat: the top plate's rigid height (the clutch on the rod), the pedal's target, and the plates' contact.
-    float hatZ = 0, hatV = 0, hatTarget = 0, hatOm = 0, hatC = 0, hatK = 0, hatDPrev = 0, hatForce = 0, hatPressure = 0;
+    float hatZ = 0, hatV = 0, hatTarget = 0, hatOm = 0, hatC = 0, hatK = 0, hatDPrev = 0, hatPressure = 0, hatPressureSum = 0;
     int hatOverride = -1;              // a Closed, Open or Foot articulation's pedal (0..1000), else -1: the pedal
     float hatFootBoost = 0;
     double lastPedal = -1;
@@ -109,6 +110,7 @@ struct Piece {
     uint32_t noiseLeft = 0, noiseLength = 1;
     float noiseLevel = 0, noiseLp = 0, noiseK = 0.5f, noiseHp = 0;
     uint32_t rng = 1;
+    uint32_t rollRng = 7;  // a roll's own draws (its strokes are planned a span ahead: they must not take the noise's)
     // Roll: alternating press strokes while its note is held.
     uint32_t rollNote = 0, rollEvery = 0, rollIn = 0, rollLeft = 0;
     bool rolling = false;
@@ -143,6 +145,9 @@ public:
     bool wakeHat(uint32_t piece) noexcept;
     // Adds the kit's n (<= 16) frames into left/right (and its room send into `room`, when not null).
     void process(double* left, double* right, double* room, uint32_t n) noexcept;
+    // Once a control period (16 frames, on the host's own grid, so a render is the same at any block size): the
+    // glide, the hat's clamping, waking a snare the kit drove, and putting quiet pieces to sleep.
+    void endCell() noexcept;
     bool awake() const noexcept { return awake_ != 0; }
     // Tests and display.
     const Piece& piece(uint32_t p) const noexcept { return pieces_[p < kPieces ? p : 0]; }
@@ -164,6 +169,8 @@ private:
     float noiseSample(Piece& p) noexcept;
     float stickForce(Striker& s, float uPred) noexcept;
     void control(Piece& p) noexcept;
+    void span(double* left, double* right, double* room, uint32_t n) noexcept;
+    void silence(uint32_t piece) noexcept;
     static void applyDamp(Piece& p, uint32_t segment, float d) noexcept;
 
     double sr_ = 48000, dt_ = 1.0 / 48000;
@@ -176,7 +183,8 @@ private:
     uint32_t bleedAt_ = 0, bleedDelay_ = 72;
     float ring_[kRing] = {};  // the kit's raw sum, per sample (the sympathetic drive reads it kRing / 2 later)
     uint64_t clock_ = 0;
-    float bleedGain_ = 0, level_ = 1;
+    uint32_t cellFrames_ = 0;  // frames since the last endCell
+    float bleedGain_ = 0.5f, level_ = 1;
 };
 
 }  // namespace caw::drums::acoustic

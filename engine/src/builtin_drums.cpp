@@ -2060,6 +2060,7 @@ private:
             }
         }
         if (acoustic_.awake()) {
+            acoustic_.endCell();  // the last 16 frames' glide, clamping, waking and sleeping
             readAcousticKit(b, at);
             for (uint32_t pc = 0; pc < kPieces; ++pc)
                 if (acoustic_.piece(pc).awake) readPiece(b, pc, at);
@@ -2226,8 +2227,8 @@ private:
             padLevel_[pad] = peak;
             if (lane) toLane(*lane, laneL, laneR, at, n);
         }
+        const bool quietKit = live_ == 0 && !acoustic_.awake();  // (the kit sleeps only at a control: see control())
         if (acoustic_.awake()) acoustic_.process(busL[0], busR[0], roomOn_ ? send : nullptr, n);  // 1.1.2: the kit's pieces
-        const bool quietKit = live_ == 0 && !acoustic_.awake();
         if (lanes_.any()) {  // the host's per-note FX, then each lane into the output its hit plays to
             lanes_.run(at, n);
             for (uint32_t k = 0; k < lanes_.count(); ++k) {
