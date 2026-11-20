@@ -156,3 +156,30 @@ TEST(load_stabilizer_is_wanted_only_when_the_work_share_says_the_clock_matters) 
     CHECK(!s.wanted(work(0.1), 1024, kRate));
     CHECK_NEAR(s.workShare(), 0.1, 0.001);
 }
+
+// Heat (1.1.1): it spins only as far as the clock needs. Peak work at or over the target holds the full 0.8; less
+// spins proportionally less (never under 0.6 of 0.8); one slow callback raises it at once and it comes down over a
+// few seconds; warm and hot raise the target, critical stops it.
+TEST(load_stabilizer_spins_only_as_far_as_the_clock_needs) {
+    LoadStabilizer s;
+    const auto work = [](double share) { return static_cast<int64_t>(share * kPeriod); };
+    for (int c = 0; c < 200; ++c) s.wanted(work(0.30), 1024, kRate);
+    CHECK_NEAR(s.peakWork(), 0.30, 1e-6);
+    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare * 0.30 / LoadStabilizer::kWorkTarget, 1e-6);  // 0.48
+    for (int c = 0; c < 200; ++c) s.wanted(work(0.10), 1024, kRate);
+    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare * LoadStabilizer::kMinShareRatio, 1e-6);  // the floor, 0.48
+    s.wanted(work(0.70), 1024, kRate);  // one slow callback: the full share at once
+    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare, 1e-6);
+    for (int c = 0; c < 47; ++c) s.wanted(work(0.10), 1024, kRate);  // about a second later: still up
+    CHECK(s.peakWork() > 0.45);
+    for (int c = 0; c < 470; ++c) s.wanted(work(0.10), 1024, kRate);  // ten seconds later: back down
+    CHECK_NEAR(s.peakWork(), 0.10, 1e-6);
+    for (int c = 0; c < 400; ++c) s.wanted(work(0.55), 1024, kRate);
+    CHECK_NEAR(s.spinShare(0), LoadStabilizer::kShare, 1e-6);           // over 0.5: hold the clock
+    CHECK_NEAR(s.spinShare(LoadStabilizer::kThermalWarm), LoadStabilizer::kShare * 0.55 / 0.6, 1e-6);
+    CHECK_NEAR(s.spinShare(LoadStabilizer::kThermalHot), LoadStabilizer::kShare * 0.55 / 0.7, 1e-6);
+    CHECK_EQ(s.spinShare(LoadStabilizer::kThermalCritical), 0.0);
+    CHECK_NEAR(s.spinShare(99), LoadStabilizer::kShare, 1e-6);           // unknown pressure: normal
+    s.resetLoad();
+    CHECK_EQ(s.peakWork(), 0.0);
+}

@@ -50,6 +50,7 @@ int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
 int32_t caw_audio_tune_buffer(CawEngine*, int32_t) { return 0; }
 
 int32_t caw_audio_set_background(CawEngine*, int32_t) { return 0; }
+void caw_audio_set_thermal(CawEngine*, int32_t) {}
 
 char* caw_audio_input_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
 

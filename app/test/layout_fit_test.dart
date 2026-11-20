@@ -368,7 +368,6 @@ MusicVideoDoc _video() => MusicVideoDoc(
     );
 
 void main() {
-  setUpAll(() => StressRunner.cooldownScale = 0); // the Benchmark's pauses after hot steps: none in tests
   if (_out.isNotEmpty) Directory(_out).createSync(recursive: true);
 
   // --- startup, first run, update prompt ---

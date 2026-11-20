@@ -1,5 +1,5 @@
 // Benchmarks an open device editor with full motion, for one simulated second at a 120 Hz display: how many frames
-// it asks for, how many widgets rebuild and how many render objects repaint, stopped (no display data) and playing
+// it asks for (motion at most 60), how many widgets rebuild and how many render objects repaint, stopped (no display data) and playing
 // (display frames at 30 Hz), each frame's build, layout and paint time and the screen's raster; then 20 live steps
 // of a value and of a knob. Prints BENCH lines; the counts are asserted so they cannot grow back.
 import 'package:caw/engine/component_info.dart';
@@ -71,13 +71,14 @@ void main() {
       // ignore: avoid_print
       print('BENCH $id per second: stopped $stopped; touched $touched; playing $playing (raster ${raster.toStringAsFixed(2)} ms); '
           'first parameter 20 steps: $first; knob $knobId 20 steps: $knob');
-      // Motion runs on every frame while the engine sounds or a finger is down (beta plan B3) and repaints its own
-      // visual alone (B4); stopped, silent and untouched it asks for none (the battery rule). The display data
-      // still comes at 30 Hz. Ceilings (B5): the counts are exact in the test VM.
+      // Motion runs at up to 60 frames a second (MotionClock.maxHz, 1.1.1; before, every frame the screen drew,
+      // beta plan B3) while the engine sounds or a finger is down, and repaints its own visual alone (B4); stopped,
+      // silent and untouched it asks for none (the battery rule). The display data still comes at 30 Hz. Ceilings
+      // (B5): the counts are exact in the test VM.
       final c = _ceilings[id]!;
       expect(stopped.frames, 0);
-      expect(touched.frames, c.motion ? greaterThanOrEqualTo(119) : lessThanOrEqualTo(1));
-      expect(playing.frames, lessThanOrEqualTo(c.motion ? 121 : 31));
+      expect(touched.frames, c.motion ? inInclusiveRange(55, 61) : lessThanOrEqualTo(1));
+      expect(playing.frames, lessThanOrEqualTo(c.motion ? 61 : 31));
       expect(stopped.painted, lessThanOrEqualTo(c.stoppedPainted));
       expect(playing.painted, lessThanOrEqualTo(c.playingPainted));
       expect(knob.builds, lessThanOrEqualTo(c.knobBuilds));
@@ -94,8 +95,8 @@ void main() {
 // The device shell (2026-11-18) puts its header and footer (Mix, Output: a second knob of the same value) on every
 // page, so a step that rebuilds the page (EQ `b1_on`, ping-pong `mode`) rebuilds them too: about 140 widgets a step.
 const _ceilings = <String, ({bool motion, int stoppedPainted, int playingPainted, int firstBuilds, int knobBuilds})>{
-  'org.caw.eq': (motion: false, stoppedPainted: 10, playingPainted: 830, firstBuilds: 16800, knobBuilds: 3800),
-  'org.caw.compressor': (motion: false, stoppedPainted: 10, playingPainted: 500, firstBuilds: 1200, knobBuilds: 1200),
+  'org.caw.eq': (motion: false, stoppedPainted: 10, playingPainted: 890, firstBuilds: 16800, knobBuilds: 3800),
+  'org.caw.compressor': (motion: false, stoppedPainted: 10, playingPainted: 560, firstBuilds: 1200, knobBuilds: 1200),
   'org.caw.delay.pingpong': (motion: true, stoppedPainted: 10, playingPainted: 1560, firstBuilds: 12300, knobBuilds: 1720),
   'org.caw.phaser': (motion: true, stoppedPainted: 10, playingPainted: 1520, firstBuilds: 2050, knobBuilds: 1220),
   // The flagship opens on its Oscillators panel (a phone): no modulated knob or moving drawing there, so no motion.

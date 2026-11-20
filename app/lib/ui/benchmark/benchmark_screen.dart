@@ -244,8 +244,13 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     Navigator.of(context).push(panelRoute<void>(context, (_) => PartDetailPage(result: res, partId: id)));
   }
 
-  Widget _runningCard(BuildContext context, MotionLevel level) => Card(
-        key: const ValueKey('bench-running'),
+  // Its own listener on the runner's 10 Hz progress (StressRunner.progress): a poll rebuilds this card alone, and the
+  // bar steps with it, without an animation asking for every frame between (the timed scenarios share the cores).
+  Widget _runningCard(BuildContext context, MotionLevel level) => ValueListenableBuilder<int>(
+      key: const ValueKey('bench-running'),
+      valueListenable: r.progress,
+      builder: (context, _, _) => Card(
+        key: const ValueKey('bench-running-card'),
         color: Neon.panel.withValues(alpha: 0.5),
         margin: EdgeInsets.zero,
         child: Padding(
@@ -261,11 +266,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
               Text('${(100 * r.load).round()}% load', style: Neon.code(size: 12, color: Neon.dim)),
             ]),
             const SizedBox(height: 8),
-            TweenAnimationBuilder<double>(
-              tween: Tween(end: r.fraction),
-              duration: Motion.move(Motion.standard, level),
-              builder: (_, v, _) => LinearProgressIndicator(value: v, minHeight: 3),
-            ),
+            RepaintBoundary(child: LinearProgressIndicator(value: r.fraction, minHeight: 3)),
             const SizedBox(height: 10),
             SizedBox(
               height: 120,
@@ -295,7 +296,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
             ),
           ]),
         ),
-      );
+      ));
 
   Widget _results(BuildContext context, StressResult res, MotionLevel level) {
     final done = !r.running;

@@ -1,10 +1,17 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-19
+updated: 2026-11-20
 ---
 
 # Decisions
+
+## 2026-11-20: Device motion at 60 frames a second; the stabilizer follows the clock's need and the heat; a real-world Benchmark (Claude, on the owner's 1.1.1 report)
+
+**Owner (2026-11-20):** fix the new playback spikes and UI slowdowns; the app and the Benchmark should run without thermal trouble; the Benchmark measures real-world performance: no cool-down pauses, the measured numbers the headline, the top-clock figure off the front ([performance](performance.md#playback-spikes-and-ui-load-111-2026-11-20)).
+- **Device motion is held to 60 frames a second (Claude):** the beta plan's B3 drew it on every frame the screen ran (up to 240 Hz); each motion frame repaints the whole visual and keeps the raster and GPU threads busy on the cores the audio shares. The playhead, scrolling, drags and the Frame rate setting are unchanged. Meters read 30 times a second without asking for the frames between, the crow loader draws 30 and Parrot 20. **[Assumption]** 60 is smooth enough for these pictures; the owner may want it to follow the Frame rate setting instead.
+- **The load stabilizer spins only as far as the clock needs (Claude):** to its 0.8 share while the recent peak callback takes half its period or more, proportionally less below (never under 0.48), with the target raised to 0.6 and 0.7 at thermal status warm and hot and no spin at critical; the app passes the thermal state (`caw_audio_set_thermal`, API 45). Rejected: switching it off at warm (the owner's phone sits there, and it is what took the live rows to 0 xruns) and a lower fixed share (by schedutil's 1.25 b f it lets the clock fall on heavy projects too).
+- **The Benchmark:** the cool-down pauses are removed and every number on screen and in the shared text is the measured one; `clock_share` and the `*_at_top_clock` figures stay in the JSON as context (the format only gains fields).
 
 ## 2026-11-19: The bird theme and personality in the app (Claude, building the owner's sound plan)
 
@@ -54,7 +61,7 @@ updated: 2026-11-19
 
 ## 2026-11-19: The audio callback keeps its core busy where Android gives no performance hint (Claude, owner-approved performance work)
 
-**Decision:** on Android, while something plays, the app is in front, the buffer mode is not Battery and no ADPF hint session is open, the device callback spins after its work until 0.8 of its period from its ideal start (`engine/src/load_stabilizer.h`, `stabilize` in `engine/platform/audio_miniaudio.cpp`). The S22+'s Benchmark (2026-11-19) had the hint `unsupported` and the callback's big core at 634 MHz of 2.5 GHz, its live p99 79–139 %. The arithmetic is Oboe's `StabilizedCallback` (Apache-2.0, google/oboe `src/common/StabilizedCallback.cpp`, read 2026-11-19), **reimplemented**, not copied and not a dependency: Oboe is not linked (miniaudio opens the stream), and a wrapper class of 60 lines is not worth vendoring a library for. The share is Oboe's 0.8, not the 50–70 % first suggested: under schedutil's documented `f = 1.25 u f_max` (docs.kernel.org, read 2026-11-19) a lower share lets the clock fall back ([performance](performance.md#live-callback-clock-and-a-fair-benchmark-2026-11-19)). No setting: Battery is the off switch, and the cost (one big core about 80 % busy while playing) is described in [performance](performance.md). Measured only on the phone; on Linux the rules are unit-tested and nothing else changes.
+**Decision:** on Android, while something plays, the app is in front, the buffer mode is not Battery and no ADPF hint session is open, the device callback spins after its work until 0.8 of its period from its ideal start (`engine/src/load_stabilizer.h`, `stabilize` in `engine/platform/audio_miniaudio.cpp`). The S22+'s Benchmark (2026-11-19) had the hint `unsupported` and the callback's big core at 634 MHz of 2.5 GHz, its live p99 79–139 %. The arithmetic is Oboe's `StabilizedCallback` (Apache-2.0, google/oboe `src/common/StabilizedCallback.cpp`, read 2026-11-19), **reimplemented**, not copied and not a dependency: Oboe is not linked (miniaudio opens the stream), and a wrapper class of 60 lines is not worth vendoring a library for. The share is Oboe's 0.8, not the 50–70 % first suggested: under schedutil's documented `f = 1.25 u f_max` (docs.kernel.org, read 2026-11-19) a lower share lets the clock fall back ([performance](performance.md#live-callback-clock-and-the-benchmark)). No setting: Battery is the off switch, and the cost (one big core about 80 % busy while playing) is described in [performance](performance.md). Measured only on the phone; on Linux the rules are unit-tested and nothing else changes.
 
 ## 2026-11-18: Merged effects open old projects; files that use them are version 7 (Claude, owner's FX plan)
 

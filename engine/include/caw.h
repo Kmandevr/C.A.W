@@ -194,8 +194,11 @@ extern "C" {
    monitoring on or auto runs its effects' near-zero-delay versions (Linear EQ minimum phase, Preen's and Pitch fix's
    monitoring windows, look-aheads off...), the full ones in playback of other tracks and in every export, and the
    latency compensation follows. Every keyed effect takes sc_hpf, sc_lpf and sc_listen (appended; off by default);
-   the Limiter appends target_on and target (a loudness target it reports against; docs/engine.md). */
-#define CAW_API_VERSION 44
+   the Limiter appends target_on and target (a loudness target it reports against; docs/engine.md).
+   45 (2026-11-20, 1.1.1): caw_audio_set_thermal tells the device callback's load stabilizer the platform's thermal
+   state; the stabilizer spins only as far as the clock needs (its recent peak work against a target that rises
+   with the heat) and not at all at CAW_PRESSURE_THERMAL_CRITICAL. Nothing else changes. */
+#define CAW_API_VERSION 45
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -704,6 +707,10 @@ CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
    it had; no reopen. Call it only while nothing monitors the input. Returns the buffer size now in frames (0 where
    the backend has no such size, or nothing runs); caw_audio_latency reports the new latency. */
 CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
+/* API version 45. The platform's thermal state for the device callback's load stabilizer (CAW_PRESSURE_*: warm and
+   hot let the callback's clock settle lower, critical stops the stabilizer; anything else counts as normal). Kept
+   across device reopens; any thread. A no-op where there is no stabilizer (not Android). */
+CAW_API void caw_audio_set_thermal(CawEngine* e, int32_t pressure);
 /* API version 34 (#236). The AAudio output's buffer sized automatically, as Oboe's LatencyTuner does: call it from
    the control side about once a second while the device runs. A new stream (an open, a reroute) starts at
    [start_frames] (the size remembered for this kind of output; 0: two bursts), rounded to whole bursts between two
