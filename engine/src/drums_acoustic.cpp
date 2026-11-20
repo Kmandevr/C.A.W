@@ -254,6 +254,10 @@ void AcousticKit::configure(Piece& p) noexcept {
     p.configured = true;
     p.seg[0] = p.seg[1] = p.seg[2] = Segment{};
     p.wires = 0;
+    p.rattleGain = 0.0f;  // the wires (or Eco's stand-in) only while a snare has them on
+    p.glideK = 0.0f;
+    p.airK = 0.0f;
+    p.swellGain = 0.0f;
     if (!isCymbalPiece(p.set.kind)) p.triplets = 0;
     if (isDrumPiece(p.set.kind)) configureDrum(p);
     else if (p.set.kind != kPieceOff) configureCymbal(p);
@@ -581,7 +585,7 @@ void AcousticKit::startStroke(Piece& p, Striker& s, double velocity, float pos, 
         for (uint32_t i = 0; i < p.seg[0].count; ++i) sum += static_cast<double>(phi[i]) * phi[i];
         s.C = static_cast<float>(dt_ * dt_ / m + p.seg[0].g * sum);
     } else {
-        s.C = static_cast<float>(dt_ * dt_ / m + p.seg[2].g * p.seg[2].count);
+        s.C = static_cast<float>(dt_ * dt_ / m);
     }
 }
 
@@ -679,7 +683,7 @@ void AcousticKit::strike(uint32_t piece, int artic, double velocity, double jitt
             startStroke(p, s, vel, pos, a, false, false, 0);
             break;
     }
-    if (p.set.kind == kPieceKick) noiseBurst(0.015, 0.25, 0.3);  // the pedal's mechanism
+    if (p.set.kind == kPieceKick) noiseBurst(0.025, 0.6, 0.25);  // the pedal's mechanism (its spring and cam)
     if (kit_.stick == kStickBrushes && p.set.kind != kPieceKick && a != kArtChoke) noiseBurst(0.08, 0.5, 0.9);  // the swish
 }
 
@@ -805,12 +809,9 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
             if (r.count > 2) yp[r.at + 2] += 0.6f * symR;
             const float FA = ca ? stickForce(sa, dotModes(b.count, p.phiA, yp)) : 0.0f;
             const float FB = cb ? stickForce(sb, dotModes(b.count, p.phiB, yp)) : 0.0f;
-            float FR = 0.0f;
-            if (rim) {
-                float uEdge = 0.0f;
-                for (uint32_t k = 0; k < sh.count; ++k) uEdge += yp[sh.at + k];
-                FR = stickForce(p.rim, uEdge);
-            }
+            // The rim: a steel or cast hoop, far stiffer than the stick's tip (a fixed surface for the contact); its
+            // force rings the shell and pulls the head at its edge.
+            const float FR = rim ? stickForce(p.rim, 0.0f) : 0.0f;
             if (FA > 0.0f) addModes(b.count, yp, p.phiA, gb * FA);
             if (FB > 0.0f) addModes(b.count, yp, p.phiB, gb * FB);
             if (FR > 0.0f) addModes(b.count, yp, p.phiEdge, gb * 0.3f * FR);  // the rim pulls the head at its edge
@@ -856,9 +857,9 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
             float x = (fWires - p.lastF) * 0.02f;
             p.lastF = fWires;
             if (eco) {  // Eco: noise gated by the snare-side head's motion
-                const float vel = std::fabs(y1[r.at] - y2[r.at]) * scale;
+                const float vel = (std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1])) * scale;
                 p.wireGate += 0.01f * (vel - p.wireGate);
-                x = unit(p.rng) * std::max(0.0f, p.wireGate - 0.002f) * 0.05f;
+                x = unit(p.rng) * std::max(0.0f, p.wireGate - 0.0005f) * 0.05f;
             }
             p.rattleHp[0] = p.rattleK * p.rattleHp[0] + (1.0f - p.rattleK) * x;
             const float h = x - p.rattleHp[0];
@@ -1036,7 +1037,7 @@ void AcousticKit::span(double* left, double* right, double* room, uint32_t n) no
         bool bad = false;
         for (uint32_t t = 0; t < n; ++t) {
             const float a = std::fabs(p.out[t]);
-            bad = bad || !(a < 50.0f);
+            bad = bad || !(a < 16.0f);
             p.peak = std::max(p.peak, a);
         }
         if (bad) {

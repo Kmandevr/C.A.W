@@ -243,8 +243,12 @@ TEST(acoustic_membrane_modes_follow_the_bessel_zeros_and_air_pulls_them_toward_h
     }
     // Rendered: the (1,1) mode is where the model says (within 1.5 %).
     const double f11 = k.modeHz(0, 0, 1);
-    std::vector<float> x = kitRender(k, 0.5, {{0, 0, kArtOffCenter, 0.3}});
-    CHECK(std::fabs(peakHz(x, 0.05, 0.35, f11 * 0.95, f11 * 1.05) / f11 - 1.0) < 0.015);
+    // (struck near the edge, where the (1,1) mode is strong and the (0,1) weak): a peak of its own, not a slope
+    std::vector<float> x = kitRender(k, 0.5, {{0, 0, kArtEdge, 0.3}});
+    const double seen = peakHz(x, 0.05, 0.35, f11 * 0.97, f11 * 1.03);
+    if (!(std::fabs(seen / f11 - 1.0) < 0.015)) std::printf("  (1,1) at %.2f Hz, the model's %.2f\n", seen, f11);
+    CHECK(std::fabs(seen / f11 - 1.0) < 0.015);
+    CHECK(seen > f11 * 0.971 && seen < f11 * 1.029);
     // With the air loading, the (m,1) family moves toward harmonic (1 : 1.5 : 2 for (1,1), (2,1), (3,1)).
     const double r21 = k.modeHz(0, 0, 2) / f11, r31 = k.modeHz(0, 0, 4) / f11;
     p.air = 1.0;
@@ -310,7 +314,9 @@ TEST(acoustic_snare_wires_buzz_grow_with_velocity_and_answer_the_kick) {
         sn.wires = 0.0;
         k.setPiece(0, sn, q);
         const std::vector<float> off = kitRender(k, 0.4, {{0, 0, kArtHit, 0.8}});
-        CHECK(db(band(on, 0.02, 0.2, 5000, 12000), band(off, 0.02, 0.2, 5000, 12000)) > 10.0);  // the wires' buzz
+        const double buzz = db(band(on, 0.02, 0.2, 5000, 12000), band(off, 0.02, 0.2, 5000, 12000));
+        if (!(buzz > 10.0)) std::printf("  wires on/off at quality %d: %.1f dB\n", q, buzz);
+        CHECK(buzz > 10.0);  // the wires' buzz
         sn.wires = 0.6;
         k.setPiece(0, sn, q);
         double last = 0.0;
