@@ -324,6 +324,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
   target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
+  target_sources(caw_tests PRIVATE tests/timber_sim_test.cpp)  # 1.1.2: Timber's Simulated models (realism checks, block sizes, tiers, references)
   target_sources(caw_tests PRIVATE tests/timber_compat_test.cpp)  # 1.1.2: Timber's 1.1.0 presets render bit-identically (models other than the piano)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
@@ -458,6 +459,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
   target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
+  target_sources(caw_rt_tests PRIVATE tests/timber_sim_rt_test.cpp)  # 1.1.2: Timber's Simulated models while playing
   target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing

@@ -277,7 +277,7 @@ struct Wind {
     bool sim = false, steep = true, dynamicReed = false;
     double noises = kNoisesDefault;
     float reedA1 = 0, reedA2 = 0, reedG = 0;
-    float jetGain = 1.2f, jetDiff = 0.0f, jetOffset = 0.2f, jetRatio = 0.5f, boreLp = 0.3f, coneK = 3.0f, saxLp = 0.5f, lipOpen = 4.0f, lipFlow = 0.18f, lipRatio = 0.9f, lipMax = 6.0f, jetSharp = -3.0f;
+    float jetGain = 1.2f, jetDiff = 0.0f, jetOffset = 0.2f, jetRatio = 0.5f, boreLp = 0.3f, coneK = 3.0f, saxLp = 0.5f, lipOpen = 4.0f, lipFlow = 0.18f, lipRatio = 0.9f, lipMax = 6.0f, steepK = 15.0f, turbFloor = 0.01f, jetSharp = -3.0f;
     double sr = 48000, modWheel = 0;
     std::unique_ptr<float[]> memory;
     uint32_t lineLen = 0, count = 0;
@@ -511,6 +511,7 @@ struct Wind {
             out[i] = o * loud * g * kOut[instrument];
         }
     }
+    static constexpr float kRadiate = 24.0f;  // the brass's radiation line's middle, in samples
     // The mouth pressure against the window's middle (breath 0.5): 1 there.
     float pressureScale() const noexcept { return static_cast<float>(0.5 + breath) / 1.0f; }
 
@@ -537,14 +538,14 @@ struct Wind {
         static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
         // The player blows harder for a louder note: the velocity and expression move the mouth pressure (so a
         // brass note brightens with level), the rest of the loudness is the gain.
-        const float push = static_cast<float>(0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
+        const float push = static_cast<float>(instrument == 3 ? 0.75 + 0.5 * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
         const float base = (kLow[instrument] + kSpan[instrument] * static_cast<float>(breath)) * push;
         const float loud = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
         const float vibAm = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
-        const float turbAmt = static_cast<float>(0.5 * noise + 0.01);
+        const float turbAmt = static_cast<float>(0.5 * noise + turbFloor);
         const float slope = -static_cast<float>(0.19 + 0.06 * reed) / base;
         const float y0 = static_cast<float>(jetOffset + 0.15 * (reed - 0.5));
-        const float ks = steep ? static_cast<float>(1.5 * sr / 48000.0) : 0.0f;
+        const float ks = steep ? static_cast<float>(steepK * sr / 48000.0) : 0.0f;
         for (uint32_t i = 0; i < n; ++i) {
             v.env = std::clamp(v.env + v.envStep, 0.0f, 1.0f);
             v.tongue = std::clamp(v.tongue + v.tongueStep, 0.0f, 1.0f);
@@ -614,9 +615,7 @@ struct Wind {
                     break;
                 }
                 default: {  // brass
-                    // The crest's own pressure (the last sample's arrival) shortens its delay.
-                    const float b = v.bore.frac(std::max(2.0f, v.d - ks * v.q1));
-                    v.q1 = b;
+                    const float b = v.bore.frac(v.d);
                     const float dp = pm - 0.85f * b;
                     const float lip = v.lipG * dp + v.lipA1 * v.lip1 + v.lipA2 * v.lip2;
                     v.lip2 = v.lip1, v.lip1 = lip;
@@ -627,6 +626,13 @@ struct Wind {
                     const float dd = x - v.dcx + 0.995f * v.dcy;
                     v.dcx = x, v.dcy = dd;
                     w = y = std::clamp(dd, -4.0f, 4.0f);
+                    if (ks > 0.0f) {
+                        // Brassiness: on the way out to the bell (not in the loop: Hirschberg et al. find it matters
+                        // for the radiated sound, not for the oscillation) a crest travels faster than a trough, so
+                        // the wave steepens as it gets louder: a short line read earlier by the wave's own pressure.
+                        v.jet.push(y);
+                        y = v.jet.frac(std::clamp(kRadiate - ks * y, 1.0f, 2.0f * kRadiate - 1.0f));
+                    }
                     break;
                 }
             }

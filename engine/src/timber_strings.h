@@ -207,7 +207,7 @@ struct Pluck {
         v.shapeAt = 0, v.shapeLen = std::max<uint32_t>(4, v.excLeft);
         const bool guitar = instrument <= 1;
         // The action's gap in loop units: a hard pluck of a low string reaches it (fitted by ear [Assumption]).
-        v.gap = guitar && buzz ? static_cast<float>((instrument == 0 ? 0.36 : 0.42) * (1.0 + 0.012 * (v.pitch - 40.0))) : 0.0f;
+        v.gap = guitar && buzz ? static_cast<float>((instrument == 0 ? 0.26 : 0.32) * (1.0 + 0.012 * (v.pitch - 40.0))) : 0.0f;
         v.wound = guitar && v.pitch < (instrument == 0 ? 55.0 : 50.0);
         v.slideFrom = v.pitch, v.slidePhase = 0, v.slideInc = 0, v.slideAmp = 0, v.slideStep = 0;
         // The longitudinal mode of a guitar string: about 13x the transverse fundamental of the open string (Bank and
@@ -244,7 +244,9 @@ struct Pluck {
             v.slideFrom = v.pitch;
             // Windings about 0.8 mm apart [Assumption: a typical wound string]: the pulse rate is speed / pitch.
             v.slideInc = static_cast<float>(std::min(0.45, speed / 0.0008 / sr));
-            const float target = static_cast<float>(std::min(1.0, 2.5 * speed) * 0.5 * noises);
+            // The pulses' size as the square root of the speed: with their rate also rising with it, the RMS
+            // level then rises linearly with the speed, as measured.
+            const float target = static_cast<float>(std::sqrt(std::min(1.0, speed / 0.4)) * 0.5 * noises);
             v.slideStep = (target - v.slideAmp) / kControlFrames;
             v.longitudinal.flush();
             v.touchLp.flush();
@@ -294,7 +296,7 @@ struct Pluck {
             v.x1 = x, v.y1 = t;
             v.z = v.b * t + v.p * v.z;
             float w = v.z + e;
-            if (w < -v.gap && v.gap > 0.0f) w = -v.gap - 0.3f * (w + v.gap);  // the fret: an inelastic stop
+            if (w < -v.gap && v.gap > 0.0f) w = -v.gap - 0.7f * (w + v.gap);  // the fret: the string bounces off it, losing some
             v.line.push(w);
             out[i] = w * 0.6f;
         }
@@ -352,6 +354,7 @@ struct Bowed {
         uint32_t age = 0;
         // 1.1.2 Simulated: the bristles' mean deflection z and its rate, and (for tests) the samples sliding / all.
         float z = 0, zd = 0, invZss = 1e9f;  // 1 / zss at the last sample's sliding speed
+        bool lifted = false;
         uint32_t sliding = 0, counted = 0;
         Noise noise;
     };
@@ -363,7 +366,7 @@ struct Bowed {
     double noises = kNoisesDefault;
     // The elasto-plastic bow (normalised to the waves' units): stiffness per second, the bristles' damping,
     // the static and dynamic friction coefficients, the Stribeck velocity and the breakaway share of zss.
-    float sigma0 = 4800.0f, sigma1 = 0.05f, muS = 0.45f, muD = 0.2f, vStribeck = 0.1f, breakaway = 0.7f, forceScale = 12.0f;
+    float sigma0 = 4800.0f, sigma1 = 0.3f, muS = 0.45f, muD = 0.2f, vStribeck = 0.1f, breakaway = 0.7f, forceScale = 12.0f;
     double sr = 48000, modWheel = 0;
     float bodyAmount = 0.5;
     int bodyFor = -1;
@@ -433,6 +436,7 @@ struct Bowed {
         v.tunedPitch = -1;
         v.z = v.zd = 0;
         v.invZss = 1e9f;
+        v.lifted = false;
         v.sliding = v.counted = 0;
         v.noise.s = 0xB0A1u + 17u * v.key;
         tune(v, 0.0);
@@ -462,6 +466,7 @@ struct Bowed {
         v.vib -= std::floor(v.vib);
         tune(v, 25.0 * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
         v.lp = flushf(v.lp), v.dc = flushf(v.dc), v.z = flushf(v.z), v.zd = flushf(v.zd);
+        v.lifted = sim && v.bowStep < 0.0f && v.bow <= 0.0f;
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (sim) {
@@ -514,12 +519,16 @@ struct Bowed {
         const float invVs2 = 1.0f / (vStribeck * vStribeck);
         const float B = s0 * k2 + s1, invOneB = 1.0f / (1.0f + B);
         const float cz = 1.0f - k2 * s0 * invOneB, cg = k2 * invOneB;  // z = zt + k2 zd with zd = (g1 - s0 zt) / (1 + B)
-        const float nAmt = static_cast<float>(0.6 * noises), slideAt = 0.02f * target;
+        const float nAmt = static_cast<float>(0.6 * noises), slideAt = 0.2f * target;
         // The state in locals: the delay lines' stores cannot then make the compiler reload it every sample.
         float z = v.z, zdLast = v.zd, invZss = v.invZss, bow = v.bow, lp = v.lp, dc = v.dc;
         const float bowStep = v.bowStep, dn = v.dn, db = v.db;
         uint32_t sliding = 0;
         Noise noise = v.noise;
+        // Released and the bow's speed down to 0: the bow leaves the string and the player's fingers damp it (the
+        // elastic bristles alone, against a resting bow, would hand the string back its energy).
+        const bool lifted = v.lifted;  // decided on the control grid (voiceControl), so any block size gives the same bits
+        const float reflect = lifted ? 0.8f : 0.97f;
         Line neck = v.neck, bridge = v.bridge;
         for (uint32_t i = 0; i < n; ++i) {
             bow = std::clamp(bow + bowStep, 0.0f, 1.0f);
@@ -527,7 +536,9 @@ struct Bowed {
             const float nb = neck.frac(dn), bb = bridge.frac(db);
             const float vh = nb + bb;
             float f, slide;
-            if (simEco) {
+            if (lifted) {
+                f = 0, slide = 0, z = zdLast = 0;
+            } else if (simEco) {
                 const float dv = vb - vh;
                 const float q = 1.0f + kk * kk * dv * dv;
                 f = dv / (q * q);
@@ -570,11 +581,12 @@ struct Bowed {
                 const float e1 = 1.0f + vr * vr * invVs2;
                 invZss = s0 * e1 / (fc * e1 + fs - fc);
             }
-            if (slide > slideAt) f += nAmt * slide * noise.next(), ++sliding;  // bow noise, only while it slides
+            // Bow noise, only while it slides and the bow moves (a resting bow adds none: no energy without motion).
+            if (slide > slideAt) f += nAmt * bow * slide * noise.next(), ++sliding;
             neck.push(-(bb + f));
             const float toBridge = nb + f;
             lp += lpk * (toBridge - lp);
-            bridge.push(-0.97f * lp);
+            bridge.push(-reflect * lp);
             dc += dck * (toBridge - dc);
             out[i] = (toBridge - dc) * 0.3f;
         }
