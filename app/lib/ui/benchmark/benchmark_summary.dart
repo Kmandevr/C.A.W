@@ -257,10 +257,33 @@ String scenarioNumbers(ScenarioResult s) {
       '${s.callbacks} callbacks of ${s.frames} frames '
       '(${(s.meanUs / 1000).toStringAsFixed(2)} ms mean, ${(s.p99Us / 1000).toStringAsFixed(2)} ms p99, '
       '${(s.budgetUs / 1000).toStringAsFixed(2)} ms budget).'
-      '${s.clockShare == null ? '' : '\nIts core ran at ${(100 * s.clockShare!).round()}% of its top clock: at the top '
-          'clock about ${s.scaledToTopClock(s.p99Pct)!.round()}% at the 99th percentile.'}'
+      '${conditionsText(s).isEmpty ? '' : '\n${conditionsText(s)}'}'
       '${s.spikes > 0 ? '\n${s.spikes} one-off ${s.spikes == 1 ? 'spike' : 'spikes'} (over twice the 99th percentile).' : ''}';
 }
+
+/// How the device was while a row ran, as context for its numbers (which are what it measured, heat and clock as
+/// they were): its core's clock against the top and the platform's thermal status. Empty when neither is known.
+String conditionsText(ScenarioResult s) {
+  final parts = <String>[
+    if (s.clockShare != null)
+      'its core at ${(s.coreKhzStart / 1e6).toStringAsFixed(2)}–${(s.coreKhzEnd / 1e6).toStringAsFixed(2)} of '
+          '${(s.coreMaxKhz / 1e6).toStringAsFixed(2)} GHz',
+    if (thermalWords(s.thermalStart['status']) case final w?) 'heat $w',
+  ];
+  return parts.isEmpty ? '' : 'Measured as the device ran: ${parts.join(', ')}.';
+}
+
+/// Android's thermal status (PowerManager.THERMAL_STATUS_*) in words, or null when unknown.
+String? thermalWords(Object? status) => switch (status) {
+      0 => 'none',
+      1 => 'light',
+      2 => 'moderate',
+      3 => 'severe',
+      4 => 'critical',
+      5 => 'emergency',
+      6 => 'shutdown',
+      _ => null,
+    };
 
 /// Grows and shrinks to its child through the motion tokens; at Reduced or Off it snaps (an AnimatedSize with no
 /// duration re-dirties itself in its own layout).

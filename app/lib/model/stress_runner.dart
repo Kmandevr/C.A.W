@@ -20,7 +20,7 @@ enum StressPlanKind {
 /// One step of a plan: a request and the words the screen shows for it.
 class StressStep {
   const StressStep(this.request, this.label,
-      {required this.estimateSeconds, this.warmUp = false, this.buffer, this.cooldown = Duration.zero});
+      {required this.estimateSeconds, this.warmUp = false, this.buffer});
   final StressRequest request;
   final String label;
 
@@ -30,12 +30,8 @@ class StressStep {
   /// Live: the buffer it asks for (StressBuffer).
   final String? buffer;
 
-  /// About how long it takes, for the overall progress (its cooldown included).
+  /// About how long it takes, for the overall progress.
   final double estimateSeconds;
-
-  /// A pause after it, the device left idle (an Extreme scenario or a ramp runs the phone hot), so the next step
-  /// starts cooler ([StressRunner.cooldownScale] scales it; tests set 0).
-  final Duration cooldown;
 }
 
 /// What the Benchmark sets aside while it runs: the app's own transport and audio device (AppState).
@@ -51,19 +47,17 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
   final full = kind == StressPlanKind.full;
   final plain = full ? 4.0 : 1.5, rampStep = full ? 1.5 : 0.5;
   const warm = 1.7; // the engine's warm-up after Play (stress_run.h, warmupSeconds)
-  const cool = Duration(seconds: stressCooldownSeconds);
   final first = scenarios.any((s) => s.id == 'song8') ? 'song8' : scenarios.isEmpty ? '' : scenarios.first.id;
   final listed = {for (final s in scenarios) s.id};
   StressStep playing(StressScenarioInfo s) {
-    final extreme = s.tier == 'extreme';
     return StressStep(StressRequest(scenario: s.id, seconds: plain, workDir: workDir), 'Playing ${s.name}',
-        estimateSeconds: plain + 0.5 + warm + (extreme ? stressCooldownSeconds : 0), cooldown: extreme ? cool : Duration.zero);
+        estimateSeconds: plain + 0.5 + warm);
   }
 
-  // Heat (2026-11-19): the S22+'s clock fell from 2.28 to 1.65 GHz by the last scenarios, so the order runs coolest
-  // first: the light and heavy scenarios, then the live checks (the device's own callbacks, the numbers the app
-  // plays with), then the Extreme scenarios and the ramps, each with a pause after, then the profiles and the heat
-  // test (which wants the heat). Each row also records its thermal state and core clock.
+  // Real-world numbers (owner, 2026-11-20): no pauses to cool between steps, so heat that builds shows in the rows
+  // that follow, as it would in a session. The order puts the light and heavy scenarios first, then the live checks
+  // (the device's own callbacks, the numbers the app plays with), then the Extreme scenarios and the ramps, then the
+  // profiles and the heat test. Each row records its thermal state and core clock as context.
   return [
     if (first.isNotEmpty)
       StressStep(StressRequest(scenario: first, seconds: 1, workDir: workDir), 'Getting ready',
@@ -86,11 +80,11 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
     for (final s in scenarios)
       if (s.tier == 'extreme') playing(s),
     StressStep(StressRequest(kind: StressKind.rampTracks, seconds: rampStep, workDir: workDir), 'Adding tracks',
-        estimateSeconds: (rampStep + warm) * 12 + stressCooldownSeconds, cooldown: cool),
+        estimateSeconds: (rampStep + warm) * 12),
     StressStep(StressRequest(kind: StressKind.rampVoices, seconds: rampStep, workDir: workDir), 'Adding Flagship voices',
-        estimateSeconds: (rampStep + warm) * 11 + stressCooldownSeconds, cooldown: cool),
+        estimateSeconds: (rampStep + warm) * 11),
     StressStep(StressRequest(kind: StressKind.rampEffects, seconds: rampStep, workDir: workDir), 'Adding effects to one track',
-        estimateSeconds: (rampStep + warm) * 11 + stressCooldownSeconds, cooldown: cool),
+        estimateSeconds: (rampStep + warm) * 11),
     for (final id in [
       'song8',
       if (full) ...['song16', 'flagship_heavy16', ...profiledFeatureScenarios.where(listed.contains)] else
@@ -113,11 +107,6 @@ List<StressStep> stressPlan(StressPlanKind kind, List<StressScenarioInfo> scenar
           buffer: StressBuffer.playing),
   ];
 }
-
-/// The pause after an Extreme scenario or a ramp, in seconds ([StressStep.cooldown]). [Assumption] a few seconds
-/// idle let a phone's clock recover from a short burst (it does not undo minutes of heat: the rows' thermal state
-/// shows that).
-const int stressCooldownSeconds = 3;
 
 /// The scenarios a Full run also profiles when the engine lists them (API 30), so the parts' drill-down shows where
 /// each part mattered most: one per feature that has a part of its own.
@@ -161,9 +150,6 @@ class StressRunner extends ChangeNotifier {
   /// The redos a step gets when the app leaves the foreground while it runs.
   static const int maxBackgroundRedos = 2;
 
-  /// Scales each step's [StressStep.cooldown] (tests set 0, so they don't wait).
-  static double cooldownScale = 1;
-
   final StressBackend backend;
   final StressHost? host;
 
@@ -202,6 +188,11 @@ class StressRunner extends ChangeNotifier {
 
   /// Points received so far (the graph repaints when it moves).
   int pointsSeen = 0;
+
+  /// Bumped by the 10 Hz progress poll ([phase] in a ramp, [fraction], [load], [loadPoints]); the runner itself
+  /// notifies only when a step starts or ends (1.1.1: the poll rebuilt the whole screen, its results list
+  /// included, ten times a second, on the cores the timed scenarios run on).
+  final ValueNotifier<int> progress = ValueNotifier(0);
 
   StressJob? _job;
   bool _cancelled = false;
@@ -365,7 +356,6 @@ class StressRunner extends ChangeNotifier {
               thermalStart: thermalStart, thermalEnd: thermalEnd, backgrounded: redos > 0, startedAtS: startedAt);
         }
         notifyListeners();
-        if (ran && !gaveUp) await _coolDown(step.cooldown * cooldownScale);
       }
       result.stoppedBecause = _safetyStop ?? (_cancelled ? 'You stopped it' : null);
       return result;
@@ -420,7 +410,7 @@ class StressRunner extends ChangeNotifier {
       if (step.request.kind.index >= StressKind.rampTracks.index && step.request.kind.index <= StressKind.rampEffects.index && p.count > 0) {
         phase = '${step.label}: ${p.count}';
       }
-      notifyListeners();
+      if (!_disposed) progress.value++;
     });
     try {
       return await job.result;
@@ -433,19 +423,6 @@ class StressRunner extends ChangeNotifier {
       loadPoints.addAll(rest);
       if (loadPoints.length > maxPoints) loadPoints.removeRange(0, loadPoints.length - maxPoints);
     }
-  }
-
-  // The pause after a hot step, in slices so Stop, a safety stop or the app leaving ends it at once.
-  Future<void> _coolDown(Duration d) async {
-    if (d <= Duration.zero) return;
-    final prev = phase;
-    phase = 'Letting the device cool';
-    notifyListeners();
-    final until = DateTime.now().add(d);
-    while (!_cancelled && _safetyStop == null && DateTime.now().isBefore(until)) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    phase = prev;
   }
 
   Future<Map<String, Object?>> _thermal() async {
@@ -542,6 +519,7 @@ class StressRunner extends ChangeNotifier {
     _disposed = true;
     _cancelled = true;
     _poll?.cancel();
+    progress.dispose();
     _pressureSub?.cancel();
     _foregroundSub?.cancel();
     _job?.cancel();

@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-19
+updated: 2026-11-20
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -158,7 +158,7 @@ The track header is the quick-control surface (mute, solo, instrument, folder an
 1. **One hero** at the top, about a third of a phone's height, drawn from the device's real parameters and its live display data ([engine](engine.md#display-data)), edited directly: dragging the hero edits the parameters it shows. Drawings computed in Dart, not read from the engine, say "≈".
 2. **Main controls next, big:** 50–56 dp knobs in balanced rows, drawn-icon tiles for modes and types (48 dp tall), pill toggles. **Everything else behind MORE** (closed by default).
 3. **The same gestures everywhere:** drag a handle or the hero; a second finger (or Shift) is fine adjust; a pinch on an EQ node or the stereo field widens it; double-tap resets (an EQ node too: its band's power is a button of its own); hold a knob for its menu (type a value, Modulation…, Automate, React to…, MIDI learn, reset), an EQ node for its type; the mouse wheel sets Q. A drag shows its value in a bubble above the finger.
-4. **Motion shows state, cheaply:** ping-pong balls, sweeping notches, ripples and particles run only with full motion (Minimal and reduced motion stop them) and redraw on every frame while shown, each in a layer of its own so a frame repaints only the moving visual (beta plan B3, 2026-11-12); the display data still comes at 30 Hz; levels scroll as history.
+4. **Motion shows state, cheaply:** ping-pong balls, sweeping notches, ripples and particles run only with full motion (Minimal and reduced motion stop them) and redraw at up to 60 frames a second while shown (every frame the screen drew from beta plan B3, 2026-11-12, until 1.1.1), each in a layer of its own so a frame repaints only the moving visual; the display data still comes at 30 Hz; levels scroll as history.
 5. **Feedback on every touch:** a light haptic on grab, detent, tap and release through one hook (`DeviceFeel.hook`), which plays the frame's haptics (grab, tick, tap, drop); mode tiles and toggles dip and glow while pressed.
 
 **Palette: each family its own pair of neon accents** (from theme slots, so a user theme recolours every device): EQ blue → mint; dynamics orange → yellow; space (reverb, delay) violet → blue; drive red → pink; filter mint → green; modulation pink → violet, except the merged Chorus/Flanger, Phaser and Tremolo/Pan pages, which take the device UI plan's cyan (the theme's blue slot) → violet (1.0.8, `DeviceEditorEntry.accent`); utility yellow → green; synth green → blue; drums orange → pink; creative (the Creative and Pitch & Time effects) yellow → pink, except the merged Pitch/Shift page, in the plan's pink. Side-by-side things (EQ bands, drum pads) cycle through all eight hues. The header's badge, stripe and the hero's tint use the pair; a project's own C++ keeps its track colour.

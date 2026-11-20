@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../model/device_slot_audio.dart';
 import '../../../model/device_target.dart';
+import '../../capped_ticker.dart';
 import '../../motion.dart';
 import '../../theme.dart';
 import 'device_menu.dart';
@@ -41,8 +42,12 @@ class DeviceHeader extends StatelessWidget {
   final double wideAt;
   final double nameSize;
 
+  // Its own Material and layer (1.1.1): a tap's ink ripple (⋯, ?, the name) animates for about a second, and on
+  // the page's Material it repainted the whole device page on every frame of it; here it repaints the header alone.
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => RepaintBoundary(child: Material(type: MaterialType.transparency, child: _build(context)));
+
+  Widget _build(BuildContext context) => GestureDetector(
     behavior: HitTestBehavior.opaque,
     onLongPressStart: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
     onSecondaryTapUp: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
@@ -75,7 +80,7 @@ class DeviceHeader extends StatelessWidget {
                 const Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: AutoStaccBadge(small: true)))],
               // Zero wide while the engine has no cost for it, so the name keeps its room; at most half the line.
               ConstrainedBox(constraints: BoxConstraints(maxWidth: (name.maxWidth * 0.5).clamp(0.0, 120.0)),
-                child: FittedBox(fit: BoxFit.scaleDown, child: DeviceCostReadout(target: t, color: color))),
+                child: FittedBox(fit: BoxFit.scaleDown, child: RepaintBoundary(child: DeviceCostReadout(target: t, color: color)))),
             ])),
             if (subtitle != null) Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 9, color: Neon.dim)),
@@ -268,8 +273,8 @@ class DeviceAutoGainButton extends StatefulWidget {
 }
 
 class _DeviceAutoGainButtonState extends State<DeviceAutoGainButton> with SingleTickerProviderStateMixin {
-  late final _ticker = createTicker(_tick);
-  Duration _last = Duration.zero;
+  // Four reads a second, no frames asked for in between (CappedTicker).
+  late final _ticker = CappedTicker(_tick, maxHz: 4, vsync: this);
   String? _trim;
 
   @override
@@ -280,8 +285,6 @@ class _DeviceAutoGainButtonState extends State<DeviceAutoGainButton> with Single
 
   // The trim, read about four times a second while shown (a ticker: it stops while the device is off screen).
   void _tick(Duration at) {
-    if (at - _last < const Duration(milliseconds: 250)) return;
-    _last = at;
     final text = _read();
     if (text != _trim) setState(() => _trim = text);
   }

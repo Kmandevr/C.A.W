@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'capped_ticker.dart';
 import 'motion.dart';
 
 /// Parrot's motion rules, as numbers a test can check.
@@ -49,14 +50,18 @@ class ParrotGlow extends StatefulWidget {
 }
 
 class _ParrotGlowState extends State<ParrotGlow> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: ParrotMotion.huePeriod);
+  // The wash's steps a second (1.1.1): a full-screen layer redrawn on every frame kept a 120 Hz screen drawing at
+  // 120 for a hue that turns once in 6 s; 20 steps a second move it 1.2 degrees each.
+  static const maxHz = 20.0;
+  late final _ticker = CappedTicker((t) => _t.value = t, maxHz: maxHz, vsync: this);
+  final _t = ValueNotifier<Duration>(Duration.zero);
   MotionLevel _level = MotionLevel.full;
 
   void _sync() {
     if (widget.on && _level == MotionLevel.full) {
-      if (!_c.isAnimating) _c.repeat();
+      _ticker.start();
     } else {
-      _c.stop();
+      _ticker.stop();
     }
   }
 
@@ -75,30 +80,30 @@ class _ParrotGlowState extends State<ParrotGlow> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _c.dispose();
+    _ticker.dispose();
+    _t.dispose();
     super.dispose();
   }
 
+  // The same tree on or off, so turning it on or off never rebuilds the app under it from scratch.
   @override
-  Widget build(BuildContext context) {
-    if (!widget.on) return widget.child;
-    return Stack(fit: StackFit.passthrough, children: [
-      widget.child,
-      Positioned.fill(
-        child: IgnorePointer(
-          child: RepaintBoundary(
-            child: AnimatedBuilder(
-              animation: _c,
-              builder: (context, _) => CustomPaint(
-                key: const ValueKey('parrot-glow'),
-                painter: _ParrotPainter(_c.lastElapsedDuration ?? Duration.zero, _level),
+  Widget build(BuildContext context) => Stack(fit: StackFit.passthrough, children: [
+        widget.child,
+        if (widget.on)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: ValueListenableBuilder<Duration>(
+                  valueListenable: _t,
+                  builder: (context, t, _) => CustomPaint(
+                    key: const ValueKey('parrot-glow'),
+                    painter: _ParrotPainter(t, _level),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ),
-    ]);
-  }
+      ]);
 }
 
 class _ParrotPainter extends CustomPainter {

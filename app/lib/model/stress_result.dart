@@ -135,8 +135,8 @@ class ScenarioResult {
   }
 
   /// [Assumption] what the load would be with the core at its top clock: the raw share times [clockShare] (time
-  /// scales with the clock; memory stalls don't, so this is a lower bound). Lets runs at different clocks (a cool
-  /// and a hot phone, a governor that kept the clock low) be compared; the raw share is what the device did.
+  /// scales with the clock; memory stalls don't, so this is a lower bound). Kept in the JSON only, as context for
+  /// comparing runs at different clocks; every number the app shows is the raw share, what the device did.
   double? scaledToTopClock(double pct) {
     final c = clockShare;
     return c == null ? null : pct * c;
@@ -598,6 +598,12 @@ class StressResult {
       b.writeln('What takes the time: ${[for (final c in top) '${c.name} ${c.pct.round()}%'].join(', ')}');
     }
     if (stoppedBecause != null) b.writeln('Stopped early: $stoppedBecause');
+    // The numbers are what the device measured as it was: how warm it ran, for context.
+    final heat = [for (final s in scenarios) if (s.thermalStart['status'] case final int v) v];
+    if (heat.isNotEmpty) {
+      final lo = heat.reduce((a, b) => a < b ? a : b), hi = heat.reduce((a, b) => a > b ? a : b);
+      b.writeln('Measured as the device ran (no pauses to cool): thermal status ${lo == hi ? '$lo' : '$lo to $hi'}');
+    }
     b.writeln();
     for (final s in scenarios) {
       if (s.ran) {
