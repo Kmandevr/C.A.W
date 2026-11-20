@@ -1047,6 +1047,22 @@ class Engine implements TempoEngine {
     }
   }
 
+  /// A whole kit of [kind] (0 Synth, 1 Produced, 2 Acoustic) in [style], from [seed], in [key] (0..11, −1 none), an
+  /// Acoustic kit's pads on e-drum [map] (0 GM, 1 Roland, 2 Alesis): `{"ok", "name", "description", "params"}`
+  /// (`caw_drums_kit_build`).
+  static Map<String, dynamic>? drumsKitBuild(int kind, int style, int seed, int key, int map) =>
+      _drumsJson((b) => b.drumsKitBuild(kind, style, seed & 0xFFFFFFFF, key, map));
+
+  /// A kit tool on an entry's values: `{"tool", "entry": {"params"}, ...}` → `{"ok", "params"}` (`caw_drums_kit_tool`).
+  static Map<String, dynamic>? drumsKitTool(Map<String, dynamic> request) {
+    final s = jsonEncode(request).toNativeUtf8();
+    try {
+      return _drumsJson((b) => b.drumsKitTool(s));
+    } finally {
+      calloc.free(s);
+    }
+  }
+
   static Map<String, dynamic>? _drumsJson(Pointer<Utf8> Function(Bindings b) call) {
     final b = Bindings.instance;
     final r = call(b);

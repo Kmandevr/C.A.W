@@ -368,6 +368,15 @@ abstract class DrumsApi {
   /// The library's sounds as pad values by suffix (`caw_drums_info`'s `sounds`), or null.
   List<({String name, int type, Map<String, double> params})>? sounds();
 
+  /// 1.1.2: `caw_drums_kit_build`'s `params` (a whole entry's values), or null.
+  Map<String, double>? kitBuild(int kind, int style, int seed, int key, int map) => null;
+
+  /// `caw_drums_kit_tool`'s `params` for [request] (`{"tool", "entry", ...}`), or null.
+  Map<String, double>? kitTool(Map<String, dynamic> request) => null;
+
+  /// The builders' choices (`caw_drums_info`'s `builders`: synth, produced, acoustic styles, maps, chains), or null.
+  Map<String, List<String>>? builders() => null;
+
   static DrumsApi current = const EngineDrumsApi();
 }
 
@@ -412,6 +421,33 @@ class EngineDrumsApi extends DrumsApi {
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  Map<String, double>? kitBuild(int kind, int style, int seed, int key, int map) {
+    try {
+      final r = Engine.drumsKitBuild(kind, style, seed, key, map);
+      return r == null ? null : _numbers(r['params']);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Map<String, double>? kitTool(Map<String, dynamic> request) {
+    try {
+      final r = Engine.drumsKitTool(request);
+      return r == null ? null : _numbers(r['params']);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Map<String, List<String>>? builders() {
+    final b = info?['builders'] as Map?;
+    if (b == null) return null;
+    return {for (final e in b.entries) e.key as String: [for (final x in (e.value as List?) ?? const []) if (x is String) x]};
   }
 
   @override
@@ -521,6 +557,46 @@ bool _apply(DeviceTarget t, DrumsLayout layout, int pad, Map<String, double>? r,
   };
   if (values.isEmpty) return false;
   writePad(t, layout, pad, values);
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Kits of three kinds (1.1.2)
+
+/// The kinds of kit Rook builds, in the engine's order (`caw_drums_kit_build`'s kind).
+const drumKitKinds = ['Synth', 'Produced', 'Acoustic'];
+
+/// The instrument's values become [params] (a whole entry's: every value moved from the defaults), as one undo step;
+/// a new kit ([fresh]) also clears the pads' samples.
+void _replaceKit(DeviceTarget t, Map<String, double> params, {bool fresh = false}) {
+  final l = t.layer, use = t.use;
+  if (l == null || use == null) return;
+  t.state.endUndoStep();
+  t.state.editLayer(l, (_) {
+    use.params = Map.of(params);
+    use.preset = null;
+    if (fresh) use.samples = [];
+  });
+}
+
+/// Builds a kit of [kind] in [style] (indexes of [drumKitKinds] and its builder's styles) over the instrument:
+/// [seed], [key] 0..11 (−1: none) and, for an Acoustic kit, the e-drum [map]. False when the engine gave nothing.
+bool buildDrumKit(DeviceTarget t, {required int kind, required int style, required int seed, int key = -1, int map = 0,
+    DrumsApi? api}) {
+  final r = (api ?? DrumsApi.current).kitBuild(kind, style, seed, key, map);
+  if (r == null || r.isEmpty) return false;
+  _replaceKit(t, r, fresh: true);
+  return true;
+}
+
+/// A kit tool ("mutate", "tune_to_key", "match_loudness", "finish", "map"...) on the instrument's values, with its
+/// arguments; one undo step. False when the engine gave nothing.
+bool drumKitTool(DeviceTarget t, String tool, Map<String, Object?> args, {DrumsApi? api}) {
+  final use = t.use;
+  if (use == null) return false;
+  final r = (api ?? DrumsApi.current).kitTool({'tool': tool, 'entry': {'params': use.params}, ...args});
+  if (r == null) return false;
+  _replaceKit(t, r);
   return true;
 }
 
