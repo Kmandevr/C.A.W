@@ -353,7 +353,7 @@ struct Bowed {
         double vib = 0, tunedPitch = -1, baseHz = 440;
         uint32_t age = 0;
         // 1.1.2 Simulated: the bristles' mean deflection z and its rate, and (for tests) the samples sliding / all.
-        float z = 0, zd = 0, invZss = 1e9f;  // 1 / zss at the last sample's sliding speed
+        float z = 0, zd = 0, zt = 0, invZss = 1e9f;  // zt: z advanced by half the last rate; 1 / zss at the last sliding speed
         bool lifted = false;
         uint32_t sliding = 0, counted = 0;
         Noise noise;
@@ -434,7 +434,7 @@ struct Bowed {
         v.vibAmount = 0;
         v.age = 0;
         v.tunedPitch = -1;
-        v.z = v.zd = 0;
+        v.z = v.zd = v.zt = 0;
         v.invZss = 1e9f;
         v.lifted = false;
         v.sliding = v.counted = 0;
@@ -465,7 +465,7 @@ struct Bowed {
         v.vib += vibRate * dt;
         v.vib -= std::floor(v.vib);
         tune(v, 25.0 * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
-        v.lp = flushf(v.lp), v.dc = flushf(v.dc), v.z = flushf(v.z), v.zd = flushf(v.zd);
+        v.lp = flushf(v.lp), v.dc = flushf(v.dc), v.z = flushf(v.z), v.zd = flushf(v.zd), v.zt = flushf(v.zt);
         v.lifted = sim && v.bowStep < 0.0f && v.bow <= 0.0f;
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
@@ -519,9 +519,10 @@ struct Bowed {
         const float invVs2 = 1.0f / (vStribeck * vStribeck);
         const float B = s0 * k2 + s1, invOneB = 1.0f / (1.0f + B);
         const float cz = 1.0f - k2 * s0 * invOneB, cg = k2 * invOneB;  // z = zt + k2 zd with zd = (g1 - s0 zt) / (1 + B)
+        const float c1 = 1.0f - 2.0f * k2 * s0 * invOneB, c2 = 2.0f * k2 * invOneB;  // the next zt = z + k2 zd
         const float nAmt = static_cast<float>(0.6 * noises), slideAt = 0.2f * target;
         // The state in locals: the delay lines' stores cannot then make the compiler reload it every sample.
-        float z = v.z, zdLast = v.zd, invZss = v.invZss, bow = v.bow, lp = v.lp, dc = v.dc;
+        float z = v.z, zdLast = v.zd, zt = v.zt, invZss = v.invZss, lp = v.lp, dc = v.dc;
         const float bowStep = v.bowStep, dn = v.dn, db = v.db;
         uint32_t sliding = 0;
         Noise noise = v.noise;
@@ -531,27 +532,27 @@ struct Bowed {
         const float reflect = lifted ? 0.8f : 0.97f;
         Line neck = v.neck, bridge = v.bridge;
         for (uint32_t i = 0; i < n; ++i) {
-            bow = std::clamp(bow + bowStep, 0.0f, 1.0f);
-            const float vb = bow * target;
+            v.bow = std::clamp(v.bow + bowStep, 0.0f, 1.0f);  // in the voice: a running sum (see the winds)
+            const float bow = v.bow, vb = bow * target;
             const float nb = neck.frac(dn), bb = bridge.frac(db);
             const float vh = nb + bb;
             float f, slide;
             if (lifted) {
-                f = 0, slide = 0, z = zdLast = 0;
+                f = 0, slide = 0, z = zdLast = zt = 0;
             } else if (simEco) {
                 const float dv = vb - vh;
                 const float q = 1.0f + kk * kk * dv * dv;
                 f = dv / (q * q);
                 slide = std::fabs(dv - f);
             } else {
-                const float zt = z + k2 * zdLast;
+                // zt (z advanced half a step by the last rate) is the state carried from sample to sample: in the
+                // elastic case the next one is one multiply-add of this one, so the chain stays short.
                 const float g1 = vb - vh;
                 const float A = g1 - s0 * zt;
-                // The elastic (sticking) solution is exact while alpha is 0: most of each period. (z0 is written so
-                // that the sample-to-sample chain through z is two multiply-adds.)
+                // The elastic (sticking) solution is exact while alpha is 0: most of each period.
                 float zd = A * invOneB;
                 const float z0 = zt * cz + g1 * cg, vr0 = A - B * zd;
-                float zNew = z0;
+                float zNew = z0, ztNext = zt * c1 + g1 * c2;
                 if ((vr0 > 0) == (z0 > 0) && std::fabs(z0) * invZss > brk) {
                     // Past the breakaway (a share of zss, from the Stribeck curve at the last sample's sliding speed,
                     // below): Newton's method from the last sample's rate.
@@ -570,9 +571,11 @@ struct Bowed {
                         zd += (vr * g - zd) * (1.0f - x + x * x);
                     }
                     zNew = zt + k2 * zd;
+                    ztNext = zNew + k2 * zd;
                 }
                 zdLast = zd;
                 z = zNew;
+                zt = ztNext;
                 f = s0 * z + s1 * zd;
                 const float vr = g1 - f;
                 slide = std::fabs(vr);
@@ -591,7 +594,7 @@ struct Bowed {
             out[i] = (toBridge - dc) * 0.3f;
         }
         v.neck.w = neck.w, v.bridge.w = bridge.w;
-        v.z = z, v.zd = zdLast, v.invZss = invZss, v.bow = bow, v.lp = lp, v.dc = dc;
+        v.z = z, v.zd = zdLast, v.zt = zt, v.invZss = invZss, v.lp = lp, v.dc = dc;
         v.noise = noise;
         v.sliding += sliding, v.counted += n;
     }

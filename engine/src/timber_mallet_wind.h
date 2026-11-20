@@ -533,6 +533,10 @@ struct Wind {
     // crests arrive early and it steepens with level (a read of the bore at a delay shortened by its own value).
     // Pad, key and valve clicks are half-sine forces into the bore at each note and slur (`noises`).
     CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
+        // The filters' state in locals (the bore's stores cannot then make the compiler reload it every sample); the
+        // ramps (breath, tongue, growl, jet) stay in the voice, so -fassociative-math cannot turn their running sums
+        // into closed forms whose rounding would depend on where a block starts.
+        float lp_ = v.lp, dcx_ = v.dcx, dcy_ = v.dcy, lip1_ = v.lip1, lip2_ = v.lip2, reed1_ = v.reed1, reed2_ = v.reed2, apX_ = v.apX, apY_ = v.apY, turb_ = v.turb, q1_ = v.q1;
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
         static constexpr float kOut[4] = {0.5f, 0.25f, 0.45f, 0.45f};
         static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
@@ -558,73 +562,73 @@ struct Wind {
             switch (instrument) {
                 case 0: {  // clarinet
                     const float b = v.bore.frac(v.d);
-                    v.lp += 0.5f * (b - v.lp);
-                    float dp = -0.95f * v.lp - pm;
+                    lp_ += 0.5f * (b - lp_);
+                    float dp = -0.95f * lp_ - pm;
                     if (dynamicReed) {
-                        const float r2 = reedG * dp + reedA1 * v.reed1 + reedA2 * v.reed2;
-                        v.reed2 = v.reed1, v.reed1 = r2, dp = r2;
+                        const float r2 = reedG * dp + reedA1 * reed1_ + reedA2 * reed2_;
+                        reed2_ = reed1_, reed1_ = r2, dp = r2;
                     }
                     const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
                     const float re = r + (1.0f - r) * v.tongue;
                     const float flow = (1.0f - re) * (pm + dp);
-                    v.turb = turbAmt * flow * nz;
-                    w = re * (-0.95f * v.lp) + (1.0f - re) * pm + v.turb + click;
+                    turb_ = turbAmt * flow * nz;
+                    w = re * (-0.95f * lp_) + (1.0f - re) * pm + turb_ + click;
                     y = w;
                     break;
                 }
                 case 2: {  // sax: the cone
                     const float a = v.bore.frac(v.d);
-                    v.lp += saxLp * (a - v.lp);
-                    const float h = -0.95f * v.lp;
+                    lp_ += saxLp * (a - lp_);
+                    const float h = -0.95f * lp_;
                     // The truncated cone's closed end: (a - z^-1) / (1 - a z^-1), -1 at low frequencies (as an apex)
                     // and +1 at high ones (as a closed cylinder).
-                    const float ap0 = v.coneA * h - v.apX + v.coneA * v.apY;
-                    v.apX = h, v.apY = ap0;
-                    const float ap = ap0 - v.dcx + 0.995f * v.dcy;  // the bore passes no DC back (the mean flow leaves)
-                    v.dcx = ap0, v.dcy = ap;
+                    const float ap0 = v.coneA * h - apX_ + v.coneA * apY_;
+                    apX_ = h, apY_ = ap0;
+                    const float ap = ap0 - dcx_ + 0.995f * dcy_;  // the bore passes no DC back (the mean flow leaves)
+                    dcx_ = ap0, dcy_ = ap;
                     float dp = ap - pm;
                     if (dynamicReed) {
-                        const float r2 = reedG * dp + reedA1 * v.reed1 + reedA2 * v.reed2;
-                        v.reed2 = v.reed1, v.reed1 = r2, dp = r2;
+                        const float r2 = reedG * dp + reedA1 * reed1_ + reedA2 * reed2_;
+                        reed2_ = reed1_, reed1_ = r2, dp = r2;
                     }
                     const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
                     const float re = r + (1.0f - r) * v.tongue;
                     const float flow = (1.0f - re) * (pm - ap);
-                    v.turb = turbAmt * flow * nz;
-                    w = re * ap + (1.0f - re) * pm + v.turb + click;
+                    turb_ = turbAmt * flow * nz;
+                    w = re * ap + (1.0f - re) * pm + turb_ + click;
                     y = w;
                     break;
                 }
                 case 1: {  // flute
                     const float b = v.bore.frac(v.d);
-                    v.lp += boreLp * (b - v.lp);
-                    float t = v.lp;
-                    const float d = t - v.dcx + 0.995f * v.dcy;
-                    v.dcx = t, v.dcy = d, t = d;
+                    lp_ += boreLp * (b - lp_);
+                    float t = lp_;
+                    const float d = t - dcx_ + 0.995f * dcy_;
+                    dcx_ = t, dcy_ = d, t = d;
                     v.djCur += v.djStep;
                     const float eta = v.jet.frac(v.djCur);
                     const float U = v.jetU * open;
                     v.jetU += v.jetUStep;
                     v.jet.push(0.5f * t);
                     const float q = 0.5f * U * (1.0f + softClip(jetSharp * (eta - y0)));  // the flux into the pipe
-                    const float drive = jetGain * (q - 0.5f * U) - jetDiff * (q - v.q1);
-                    v.q1 = q;
-                    v.turb = turbAmt * 0.6f * U * q * nz;  // turbulence ~ U^2, entering with the flux
-                    w = drive + 0.5f * t + v.turb + click;
+                    const float drive = jetGain * (q - 0.5f * U) - jetDiff * (q - q1_);
+                    q1_ = q;
+                    turb_ = turbAmt * 0.6f * U * q * nz;  // turbulence ~ U^2, entering with the flux
+                    w = drive + 0.5f * t + turb_ + click;
                     y = b;
                     break;
                 }
                 default: {  // brass
                     const float b = v.bore.frac(v.d);
                     const float dp = pm - 0.85f * b;
-                    const float lip = v.lipG * dp + v.lipA1 * v.lip1 + v.lipA2 * v.lip2;
-                    v.lip2 = v.lip1, v.lip1 = lip;
+                    const float lip = v.lipG * dp + v.lipA1 * lip1_ + v.lipA2 * lip2_;
+                    lip2_ = lip1_, lip1_ = lip;
                     const float hgt = std::clamp(0.02f + lipOpen * lip, 0.0f, lipMax) * open;  // the lips part only so far
                     const float flow = hgt * (dp > 0 ? std::sqrt(dp) : -std::sqrt(-dp));
-                    v.turb = turbAmt * 0.5f * std::fabs(flow) * nz;
-                    const float x = 0.85f * b + lipFlow * flow + v.turb + click;
-                    const float dd = x - v.dcx + 0.995f * v.dcy;
-                    v.dcx = x, v.dcy = dd;
+                    turb_ = turbAmt * 0.5f * std::fabs(flow) * nz;
+                    const float x = 0.85f * b + lipFlow * flow + turb_ + click;
+                    const float dd = x - dcx_ + 0.995f * dcy_;
+                    dcx_ = x, dcy_ = dd;
                     w = y = std::clamp(dd, -4.0f, 4.0f);
                     if (ks > 0.0f) {
                         // Brassiness: on the way out to the bell (not in the loop: Hirschberg et al. find it matters
@@ -641,6 +645,17 @@ struct Wind {
             v.ox = y, v.oy = o;
             out[i] = o * loud * v.g * kOut[instrument];
         }
+        v.lp = lp_;
+        v.dcx = dcx_;
+        v.dcy = dcy_;
+        v.lip1 = lip1_;
+        v.lip2 = lip2_;
+        v.reed1 = reed1_;
+        v.reed2 = reed2_;
+        v.apX = apX_;
+        v.apY = apY_;
+        v.turb = turb_;
+        v.q1 = q1_;
     }
 
     void post(float*, float*, uint32_t, const Shared&) noexcept {}

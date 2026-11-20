@@ -86,6 +86,25 @@ TEST(timber_sim_models_render_the_same_bits_at_any_block_size_and_tier) {
                     cawtest::fail(__FILE__, __LINE__, "model " + std::to_string(model) + " tier " + std::to_string(tier) + " differs at block " + std::to_string(block));
             }
         }
+    // Every kind within each model at Normal (each kind runs its own path).
+    struct Kind {
+        int model;
+        const char* id;
+        int count;
+    };
+    for (const Kind k : {Kind{1, "kind", 2}, Kind{3, "instrument", 4}, Kind{4, "section", 4}, Kind{5, "instrument", 6}, Kind{6, "instrument", 4}})
+        for (int i = 1; i < k.count; ++i) {
+            const Values v = simOf(k.model, {{"space", 0.3}, {"noises", 0.8}, {k.id, static_cast<double>(i)}});
+            const std::vector<Note> n = {{0.0, 0.4, 60, 0.8}, {0.013, 0.31, 67, 0.5}, {0.2, -1, 72.3, 1.0}};
+            Stereo ref;
+            for (uint32_t block : {64u, 1u, 37u}) {
+                auto p = make(v);
+                const Stereo s = play(*p, v, n, 0.6, 48000, block, {{0.3, 1, 0.7}});
+                if (block == 64) ref = s;
+                else if (!same(ref, s))
+                    cawtest::fail(__FILE__, __LINE__, "model " + std::to_string(k.model) + " " + k.id + " " + std::to_string(i) + " differs at block " + std::to_string(block));
+            }
+        }
 }
 
 TEST(timber_sim_models_fall_quiet_to_exact_zeros_and_survive_bad_values) {
