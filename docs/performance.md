@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
 covers: [engine/bench/, engine/src/meters.cpp, engine/src/load_stabilizer.h, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
-updated: 2026-11-19
+updated: 2026-11-20
 ---
 
 # Performance

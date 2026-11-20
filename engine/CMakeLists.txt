@@ -334,6 +334,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_reverb_modes_test.cpp)  # 1.1.0: the Reverb's Room, Plate, Spring, Gated and Reverse
   target_sources(caw_tests PRIVATE tests/fx_drive_modes_test.cpp)  # 1.1.0: the Drive's Amp, Pedal and Bands
   target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
+  target_sources(caw_tests PRIVATE tests/fx_bits_glitch_test.cpp)  # 1.1.1: Bitwise glitch ops
   target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah

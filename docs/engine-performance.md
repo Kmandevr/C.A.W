@@ -2,7 +2,7 @@
 title: Engine performance
 summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A6).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
-updated: 2026-11-19
+updated: 2026-11-20
 ---
 
 # Engine performance

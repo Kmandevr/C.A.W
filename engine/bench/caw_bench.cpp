@@ -307,6 +307,8 @@ bool modesCostOver(double seconds) {
         {"Drive: Bands, 1 band", "org.caw.drive", {{"variant", 6}, {"bands", 0}}, kMedium},
         {"Bit distortion: Bitwise (default: 12 bits)", "org.caw.bits", {{"variant", 1}}, kLight},
         {"Bit distortion: Bitwise, shift, XOR, AND", "org.caw.bits", {{"variant", 1}, {"shift", 1}, {"xor", 4080}, {"and", 65504}}, kLight},
+        {"Bit distortion: Bitwise, echo ring (1.1.1)", "org.caw.bits", {{"variant", 1}, {"combine", 2}, {"echo", 3}, {"combine_mask", 65280}, {"tone", 9000}}, kLight},
+        {"Bit distortion: Bitwise, every glitch op", "org.caw.bits", {{"variant", 1}, {"xor", 3840}, {"or", 48}, {"rotate", 1}, {"reverse", 3}, {"combine", 2}, {"freeze", 61440}, {"flips", 0.1}, {"pattern", 93}, {"tone", 6000}, {"gate", -50}}, kLight},
         {"Convolver: Cab (default: 4x12)", "org.caw.convolver", {{"variant", 1}}, kMedium},
         {"Convolver: Cab, far mic", "org.caw.convolver", {{"variant", 1}, {"distance", 1}}, kMedium},
         // modes-bench end
