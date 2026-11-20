@@ -717,14 +717,20 @@ class LayerDoc {
   bool get isStereo => isFolder || instrument != null || components.isNotEmpty || isAudio;
 
   /// Makes [componentId] the track's instrument (null: none). The same id keeps its values; another one starts
-  /// from its defaults.
+  /// from its defaults, except the values in [newInstrumentValues].
   void setInstrument(String? componentId) {
     if (componentId == null) {
       instrument = null;
       return;
     }
-    if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId);
+    if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId, {...?newInstrumentValues[componentId]});
   }
+
+  /// What a newly added instrument starts with besides its defaults: a new Timber piano plays Simulated (1.1.2; the
+  /// engine's default stays Classic so older projects and presets sound as they did; owner, 2026-11-20).
+  static const newInstrumentValues = <String, Map<String, double>>{
+    'org.caw.timber': {'sim': 1},
+  };
 
   /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4).
   Map<String, dynamic> toJson({int Function(String assetId)? rateOf}) => {

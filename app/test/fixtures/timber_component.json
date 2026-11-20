@@ -90,6 +90,162 @@
      }
     },
     {
+     "name": "Real grand",
+     "description": "Piano, Simulated: a concert grand with its natural mechanical noises, for solo and classical playing",
+     "params": {
+      "sim": 1,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Real grand, close-miked",
+     "description": "Piano, Simulated: the grand heard from inside, its hammers, keys and dampers up front",
+     "params": {
+      "sim": 1,
+      "noise": 1,
+      "space": 0.05,
+      "body": 0.65,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Recital hall grand",
+     "description": "Piano, Simulated: a grand in a hall with the strings ringing into each other, for classical recordings",
+     "params": {
+      "sim": 1,
+      "space": 0.35,
+      "glide": 0.7,
+      "sympathy": 0.8,
+      "resonance": 0.5,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Bright pop grand",
+     "description": "Piano, Simulated: a bright, close grand that cuts through a band mix",
+     "params": {
+      "sim": 1,
+      "hammer": 0.75,
+      "tone": 0.2,
+      "space": 0.1,
+      "noise": 0.25,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Warm jazz grand",
+     "description": "Piano, Simulated: a warm grand played with a light touch, for trio and lounge",
+     "params": {
+      "sim": 1,
+      "hammer": 0.35,
+      "tone": -0.1,
+      "space": 0.12,
+      "touch": 0.4,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Real upright",
+     "description": "Piano, Simulated: a home upright in a small room, for songwriting and practice",
+     "params": {
+      "sim": 1,
+      "character": 1,
+      "space": 0.08,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Felt upright",
+     "description": "Piano, Simulated: an upright with its felt rail down, soft and close, for film and lo-fi",
+     "params": {
+      "sim": 1,
+      "character": 2,
+      "hammer": 0.2,
+      "noise": 0.6,
+      "space": 0.2,
+      "release": 0.5,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Struck touch, real action",
+     "description": "Piano, Simulated: the action's delay and the finger on the key, for expressive solo playing",
+     "params": {
+      "sim": 1,
+      "action": 1,
+      "touch": 0.8,
+      "noise": 0.5,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Pedalled ballad",
+     "description": "Piano, Simulated: rich sympathetic ringing under the sustain pedal, for ballads (play the pedal by CC 64)",
+     "params": {
+      "sim": 1,
+      "resonance": 0.6,
+      "sympathy": 0.8,
+      "space": 0.25,
+      "hammer": 0.45,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Ambient pedal wash",
+     "description": "Piano, Simulated: the pedal held down for good and a wide room, for ambient beds",
+     "params": {
+      "sim": 1,
+      "sustain": 1,
+      "resonance": 0.9,
+      "space": 0.45,
+      "hammer": 0.3,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Soft-pedal nocturne",
+     "description": "Piano, Simulated: una corda and a soft hammer, for quiet, intimate pieces",
+     "params": {
+      "sim": 1,
+      "soft": 1,
+      "hammer": 0.3,
+      "space": 0.25,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Honky-tonk upright",
+     "description": "Piano, Simulated: an old upright out of tune with itself, for saloon and ragtime",
+     "params": {
+      "sim": 1,
+      "character": 1,
+      "unison": 5,
+      "hammer": 0.7,
+      "noise": 0.5,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Light real piano (Eco)",
+     "description": "Piano, Simulated at Eco: the real piano for less CPU, for big projects on a phone",
+     "params": {
+      "sim": 1,
+      "tier": 1,
+      "variant": 0
+     }
+    },
+    {
+     "name": "Studio grand for export (High)",
+     "description": "Piano, Simulated at High: more strings' detail and phantom partials, for final renders",
+     "params": {
+      "sim": 1,
+      "tier": 3,
+      "phantom": 0.7,
+      "noise": 0.4,
+      "variant": 0
+     }
+    },
+    {
      "name": "Tine ballad",
      "description": "Electric piano: a mellow tine piano with a slow stereo pan, for soul and ballads",
      "params": {
@@ -757,6 +913,145 @@
        "name": "Resonance",
        "unit": "",
        "default": 0.3,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": []
+      },
+      {
+       "id": "sim",
+       "name": "Mode",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": false,
+       "modulatable": false,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "tier",
+       "name": "Quality",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 3,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": false,
+       "modulatable": false,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": [
+        "Setting",
+        "Eco",
+        "Normal",
+        "High"
+       ]
+      },
+      {
+       "id": "noise",
+       "name": "Noise",
+       "unit": "",
+       "default": 0.35,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": []
+      },
+      {
+       "id": "touch",
+       "name": "Touch",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": []
+      },
+      {
+       "id": "action",
+       "name": "Action delay",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": [
+        "Off",
+        "On"
+       ]
+      },
+      {
+       "id": "glide",
+       "name": "Pitch glide",
+       "unit": "",
+       "default": 0.5,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": []
+      },
+      {
+       "id": "sympathy",
+       "name": "Sympathy",
+       "unit": "",
+       "default": 0.5,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "piano",
+       "choices": []
+      },
+      {
+       "id": "phantom",
+       "name": "Phantom partials",
+       "unit": "",
+       "default": 0.5,
        "min": 0,
        "max": 1,
        "step": 0,
@@ -2968,6 +3263,145 @@
      "name": "Resonance",
      "unit": "",
      "default": 0.3,
+     "min": 0,
+     "max": 1,
+     "step": 0,
+     "curve": "linear",
+     "smoothing_frames": 480,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": []
+    },
+    {
+     "id": "sim",
+     "name": "Mode",
+     "unit": "",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 1,
+     "curve": "linear",
+     "smoothing_frames": 0,
+     "automatable": false,
+     "modulatable": false,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": [
+      "Classic",
+      "Simulated"
+     ]
+    },
+    {
+     "id": "tier",
+     "name": "Quality",
+     "unit": "",
+     "default": 0,
+     "min": 0,
+     "max": 3,
+     "step": 1,
+     "curve": "linear",
+     "smoothing_frames": 0,
+     "automatable": false,
+     "modulatable": false,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": [
+      "Setting",
+      "Eco",
+      "Normal",
+      "High"
+     ]
+    },
+    {
+     "id": "noise",
+     "name": "Noise",
+     "unit": "",
+     "default": 0.35,
+     "min": 0,
+     "max": 1,
+     "step": 0,
+     "curve": "linear",
+     "smoothing_frames": 480,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": []
+    },
+    {
+     "id": "touch",
+     "name": "Touch",
+     "unit": "",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 0,
+     "curve": "linear",
+     "smoothing_frames": 480,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": []
+    },
+    {
+     "id": "action",
+     "name": "Action delay",
+     "unit": "",
+     "default": 0,
+     "min": 0,
+     "max": 1,
+     "step": 1,
+     "curve": "linear",
+     "smoothing_frames": 0,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": [
+      "Off",
+      "On"
+     ]
+    },
+    {
+     "id": "glide",
+     "name": "Pitch glide",
+     "unit": "",
+     "default": 0.5,
+     "min": 0,
+     "max": 1,
+     "step": 0,
+     "curve": "linear",
+     "smoothing_frames": 480,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": []
+    },
+    {
+     "id": "sympathy",
+     "name": "Sympathy",
+     "unit": "",
+     "default": 0.5,
+     "min": 0,
+     "max": 1,
+     "step": 0,
+     "curve": "linear",
+     "smoothing_frames": 480,
+     "automatable": true,
+     "modulatable": true,
+     "midi_mappable": true,
+     "group": "piano",
+     "choices": []
+    },
+    {
+     "id": "phantom",
+     "name": "Phantom partials",
+     "unit": "",
+     "default": 0.5,
      "min": 0,
      "max": 1,
      "step": 0,

@@ -558,3 +558,5 @@ The Benchmark's profile runs split `Engine::process` by engine part ([engine](en
 | worst_all | 4,494 | devices 75, mix 9, automation 6 |
 
 What it says: instruments and effects are where a real song's time goes (four fifths and more); the engine's own work shows only in projects built to stress it. A track's fader moved per sample (project modulation of volume) makes `mix` the largest part of `modulation_dense`, since the fader then runs its per-sample path; the meters (peaks, scopes, correlation) are the next largest engine part in small projects. These are this VM's shares, not a phone's.
+
+Per-device costs and ceilings are in [engine](engine.md) and [performance](performance.md) (Timber's Simulated piano added 2026-11-20).

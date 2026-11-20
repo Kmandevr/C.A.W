@@ -261,6 +261,6 @@ size_t timberBytes(uint32_t variant, double sampleRate) noexcept {
         default: return 0;
     }
 }
-size_t timberTableBytes() noexcept { return sizeof(Tables); }
+size_t timberTableBytes() noexcept { return sizeof(Tables) + psim::tableBytes(); }  // 1.1.2: and the Simulated piano's
 
 }  // namespace caw::timber
