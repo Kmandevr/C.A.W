@@ -19,6 +19,10 @@ double constrainParameter(const ParameterDescriptor& parameter, double plain) no
 // out[i] = constrainParameter(p, denormalizeParameter(p, clamp(n0 + offset[i], 0, 1))) for i < count, with the
 // curve's log worked out once for the block (the same bits, which a block split must not change): a held base
 // under audio-rate modulation.
+// The top of the travel a modulation moves parameter `parameter` over from base value `base`: its maximum, or for a
+// choice list a later release appended to (ParameterDescriptor::legacyChoiceCount) and a base among the old choices,
+// the old list's last value.
+double modulationTop(const ParameterDescriptor& parameter, double base) noexcept;
 void denormalizeOffsets(const ParameterDescriptor& parameter, double n0, const float* offset, uint32_t count,
                         double* out) noexcept;
 

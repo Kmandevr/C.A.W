@@ -1,5 +1,6 @@
 // The flagship synth (#171): three wavetable oscillators with unison, two filters, a mod matrix and an effects rack.
 #include "builtin_flagship.h"
+#include "params.h"
 #include "quality.h"
 #include "stereo_pair.h"
 
@@ -236,7 +237,7 @@ public:
         for (uint32_t o = 0; o < kOscs; ++o) {
             const std::string p = "osc" + std::to_string(o + 1) + "_", n = "Osc " + std::to_string(o + 1) + " ";
             pick(p + "on", n + "on", o == 0 ? 1.0 : 0.0, kOffOn, count(kOffOn));
-            pick(p + "table", n + "table", 0.0, kTables, count(kTables));
+            pick(p + "table", n + "table", 0.0, kTables, count(kTables)).legacyChoiceCount = kUserTable + 1;  // 1.0's list
             num(p + "frame", n + "frame", 1.0 / 3.0, 0.0, 1.0);  // the Basic table's saw
             num(p + "level", n + "level", 0.7, 0.0, 1.0);
             num(p + "pan", n + "pan", 0.0, -1.0, 1.0);
@@ -245,7 +246,7 @@ public:
             num(p + "fine", n + "fine", 0.0, -100.0, 100.0, "ct");
             num(p + "phase", n + "phase", 0.0, 0.0, 1.0);
             num(p + "phase_rand", n + "phase randomness", 1.0, 0.0, 1.0);
-            pick(p + "warp", n + "warp", 0.0, kWarps, count(kWarps));
+            pick(p + "warp", n + "warp", 0.0, kWarps, count(kWarps)).legacyChoiceCount = kWarpFmOsc + 1;
             num(p + "warp_amt", n + "warp amount", 0.0, 0.0, 1.0);
             whole(p + "unison", n + "unison", o == 0 ? 7.0 : 1.0, 1.0, kMaxCopies);
             num(p + "detune", n + "detune", 25.0, 0.0, 100.0, "ct");
@@ -258,7 +259,8 @@ public:
         for (uint32_t f = 0; f < kFilters; ++f) {
             const std::string p = "flt" + std::to_string(f + 1) + "_", n = "Filter " + std::to_string(f + 1) + " ";
             pick(p + "on", n + "on", f == 0 ? 1.0 : 0.0, kOffOn, count(kOffOn));
-            pick(p + "type", n + "type", f == 0 ? kLadderLp : kSvfLp, kFilterTypes, count(kFilterTypes));
+            pick(p + "type", n + "type", f == 0 ? kLadderLp : kSvfLp, kFilterTypes, count(kFilterTypes)).legacyChoiceCount =
+                kFormant + 1;
             expo(p + "cutoff", n + "cutoff", f == 0 ? 2400.0 : 1200.0, 20.0, 20000.0, "Hz");
             num(p + "resonance", n + "resonance", 0.15, 0.0, 1.0);
             expo(p + "drive", n + "drive", 1.0, 1.0, 10.0);
@@ -372,12 +374,13 @@ private:
         p.step = 1.0;
         p.smoothingFrames = 0;
     }
-    void pick(std::string id, std::string name, double def, const std::string_view* labels, uint32_t n) {
+    ParameterDescriptor& pick(std::string id, std::string name, double def, const std::string_view* labels, uint32_t n) {
         ParameterDescriptor& p = add(std::move(id), std::move(name), def, 0.0, static_cast<double>(n - 1), {});
         p.step = 1.0;
         p.choices = labels;
         p.choiceCount = n;
         p.smoothingFrames = 0;  // a choice jumps
+        return p;
     }
     std::string ids_[kParamCount], names_[kParamCount];
     std::string_view targets_[kModTargets + 1];
@@ -2251,7 +2254,7 @@ private:
         sinceControl_ = 0;
     }
 
-    // A parameter's value as a fraction 0..1 of its knob's travel (the curve's, up to `top`: modTop), and back.
+    // A parameter's value as a fraction 0..1 of its knob's travel (the curve's, up to `top`: modulationTop), and back.
     double toNorm(uint32_t k, double v, double top) const noexcept {
         const ParameterDescriptor& d = params().d[k];
         if (d.curve == ParameterCurve::Exponential) {
@@ -2267,22 +2270,6 @@ private:
                                                           : d.minimum + n * (top - d.minimum);
         if (d.step > 0.0) v = d.minimum + std::floor((v - d.minimum) / d.step + 0.5) * d.step;
         return clampd(v, d.minimum, top);
-    }
-    // The top of the travel a slot moves parameter k over from the knob's value v: its maximum, except for the three
-    // choice lists 1.1.0 appended to (the oscillators' tables and warps, the filters' types). A slot moved a choice by
-    // a fraction of its list, so a longer list would move a saved patch's knob to other choices (an LFO on a filter
-    // type swept into the new comb, phaser and diode models: 1.1.1). On a 1.0 choice the slot moves it in the 1.0
-    // list's steps and within it, as 1.0.9 did; on a 1.1.0 choice, over the whole list.
-    static double modTop(uint32_t k, double v, double maximum) noexcept {
-        double top = maximum;
-        if (k < kFltBase) {
-            const uint32_t p = k % kOscCount;
-            if (p == kOscTable) top = kUserTable;
-            else if (p == kOscWarp) top = kWarpFmOsc;
-        } else if (k < kFltRouting && (k - kFltBase) % kFltCount == kFltType) {
-            top = kFormant;
-        }
-        return v <= top ? top : maximum;
     }
 
     bool uses(uint32_t source) const noexcept { return (used_ >> source) & 1u; }
@@ -2465,7 +2452,9 @@ private:
             if (src == kSrcNone || dst < 0 || amount == 0.0) continue;
             if (!targetOf_[dst]) {
                 targetParam_[targetCount_] = static_cast<uint32_t>(dst);
-                const double top = modTop(static_cast<uint32_t>(dst), base_[dst], params().d[dst].maximum);
+                // A choice list 1.1.0 appended to (tables, warps, filter types) moves a 1.0 choice within 1.0's list, as
+                // 1.0.9 did (legacyChoiceCount, params.h's modulationTop; 1.1.1).
+                const double top = modulationTop(params().d[dst], base_[dst]);
                 targetTop_[targetCount_] = top;
                 targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst], top);
                 targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
@@ -3343,7 +3332,7 @@ private:
     int lastQuality_ = -1;  // used_: bit s set when a slot listens to source s
     uint32_t targetParam_[kSlots] = {};
     double targetNorm_[kSlots] = {};
-    double targetTop_[kSlots] = {};  // the top of each one's travel (modTop)
+    double targetTop_[kSlots] = {};  // the top of each one's travel (modulationTop)
     uint8_t targetOf_[kModTargets] = {};  // 1 + the parameter's index into targetParam_, 0 if no slot moves it
     double globalOffsets_[kSlots] = {};
 

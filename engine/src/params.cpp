@@ -33,8 +33,25 @@ double denormalizeParameter(const ParameterDescriptor& p, double normalized) noe
     return clampToRange(p, p.minimum + n * (p.maximum - p.minimum));
 }
 
+double modulationTop(const ParameterDescriptor& p, double base) noexcept {
+    if (p.legacyChoiceCount == 0 || p.choiceCount <= p.legacyChoiceCount) return p.maximum;
+    const double top = p.minimum + static_cast<double>(p.legacyChoiceCount - 1);
+    return constrainParameter(p, base) <= top ? top : p.maximum;
+}
+
 void denormalizeOffsets(const ParameterDescriptor& p, double n0, const float* offset, uint32_t count,
                         double* out) noexcept {
+    if (p.legacyChoiceCount != 0) {  // an old choice (modulationTop): the same steps over the old list
+        const double base = constrainParameter(p, denormalizeParameter(p, n0));
+        if (const double top = modulationTop(p, base); top < p.maximum) {
+            ParameterDescriptor old = p;
+            old.maximum = top;
+            old.choiceCount = p.legacyChoiceCount;
+            old.legacyChoiceCount = 0;
+            denormalizeOffsets(old, normalizeParameter(old, base), offset, count, out);
+            return;
+        }
+    }
     const bool expo = p.maximum > p.minimum && p.curve == ParameterCurve::Exponential;
     const double logRatio = expo ? detLog(p.maximum / p.minimum) : 0.0;  // denormalizeParameter's, once
     for (uint32_t i = 0; i < count; ++i) {
