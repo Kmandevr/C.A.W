@@ -3,6 +3,25 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.1-alpha.1 (2026-11-20)
+
+Fixes after 1.1.0: smoother playback, a cooler phone, older Flagship sounds back as they were, and new glitch modes in Bits.
+
+### Fixed
+- **Spikes while playing, opening menus or with a device open:** device pages no longer redraw the screen nonstop (an open page drew about 120 frames a second even when stopped; now none when stopped, and device animations run at up to 60 frames a second). Device pictures, menus, the loader and the Benchmark screen redraw only what changes.
+- **Older Flagship patches with echoes:** 1.1.0 added new filter types, wavetables and warps, so an LFO or envelope on an old patch could reach the new comb and phaser filters. Old patches now play exactly as in 1.0.9; modulation on a new choice still reaches the whole list.
+- Lark's "Edit pitch…" button no longer overflows a narrow phone screen.
+
+### Changed
+- **Cooler phone:** the playback stabilizer now works only as hard as needed and backs off as the phone warms up.
+- **The Benchmark measures real-world performance:** no cool-down pauses, and the numbers shown are the measured ones, heat included.
+
+### New
+- **Bits · Bitwise:** new glitch operations beside bit shift: OR, rotate, reverse, freeze, seeded bit flips, and combining with the key track or a delayed copy of itself, with smoothing, a gate and mix so it stays musical.
+
+### For contributors
+- Engine C API 45: `caw_audio_set_thermal`.
+
 ## 1.1.0-alpha.1 (2026-11-20)
 
 The effects and instruments suite: new effects, four new and reworked instruments, and a little bird in everything. Every device now has a crow-family name with a plain subtitle (Talon · Compressor, Plume · EQ), and a plain search still finds it ("EQ", "compressor", "autotune").
