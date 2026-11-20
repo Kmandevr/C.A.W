@@ -92,8 +92,7 @@ struct Piano {
         float energy = 0, gE = 0, glideCents = 0, glideScale = 0;
         float landGap = 0, landGap0 = 0;  // the damper felt's distance from the string while it lands
         bool landing = false;
-        float sympC = 0;                // the held key's share of the bridge sum
-        float own[32] = {};             // this voice's own part of the bridge sum (it does not drive itself)
+        float sympC = 0;                // a silently held key's share of the bridge sum (0: the voice was struck)
         psim::Contact keybed, finger;
         uint32_t keybedAt = 0, fingerAt = 0;  // frames from note-on
         bool keybedPending = false, fingerPending = false;
@@ -130,7 +129,7 @@ struct Piano {
     psim::ModeBank<kRes, false> res;
     psim::Resonator keyFrame, trapwork, damperRail;
     psim::Contact trap;
-    float busBoard[kControlFrames] = {}, busFrame[kControlFrames] = {};
+    float busBoard[kControlFrames] = {}, busFrame[kControlFrames] = {}, busBridge[kControlFrames] = {};
     float bridge[32] = {};  // the bridge sum's last 32 frames, by absolute frame (the held keys' input)
     uint64_t simPos = 0;
     bool pedalDown = false;
@@ -148,7 +147,7 @@ struct Piano {
     // What the tests read (kept, never used for sound): the resonance bank's input energy, the damper buzz's energy
     // into the board, and strings switched off (to hear the noises alone).
     double resInputEnergy = 0, buzzEnergy = 0, lastStrikeAt = -1, lastKeybedAt = -1;
-    bool testMuteStrings = false;
+    bool testMuteStrings = false, testMuteKeys = false;
 
     static uint32_t lineSize(double sr, double lowestHz) noexcept { return pow2At(static_cast<uint32_t>(sr / lowestHz) + 64); }
     // Floats per voice and for the bank at `sr` (the lowest string of each slot: A0, A#0..A2, A#2 up; C2 for the bank).
@@ -500,10 +499,12 @@ struct Piano {
     // [Assumption] The levels and contact constants below are set by ear-free calibration in the tests (loudness
     // against Classic, the noises against the tone) and from typical published magnitudes; none is a measurement.
     static constexpr float kStringGain = 0.011f;   // the string's input per newton of hammer force
-    static constexpr float kThumpGain = 0.0016f;   // the force's share straight to the board (the attack thump)
-    static constexpr float kKeybedGain = 0.35f, kFingerGain = 0.25f, kBuzzGain = 0.5f, kPedalGain = 0.04f, kLiftGain = 0.004f;
+    // The noises at `noise` 1 sit about 20 dB under an mf C4 (close-miked), at the default 0.35 about 30 dB under (a
+    // listener's distance): timber_piano_sim_test prints them.
+    static constexpr float kThumpGain = 0.008f;    // the force's share straight to the board (the attack thump)
+    static constexpr float kKeybedGain = 1.5e-3f, kFingerGain = 1.0e-3f, kBuzzGain = 2.5f, kPedalGain = 5.0e-4f, kLiftGain = 0.02f;
     static constexpr float kBuzzAbsorb = 0.08f;    // the felt's grip on the buzzing string
-    static constexpr float kHeldGain = 0.0006f;    // a held key's share of the bridge sum at `sympathy` 1
+    static constexpr float kHeldGain = 0.001f;     // a silently held key's share of the bridge sum at `sympathy` 1
     static constexpr float kGlideRef = 0.02f;      // the mean square of a loud bass string at its strike
     static constexpr float kResDrive = 0.004f, kBoardGain = 1.0f;
 
@@ -521,13 +522,13 @@ struct Piano {
     }
     // [Assumption] A smooth level correction along the keyboard so an mf strike is about as loud everywhere (set by
     // timber_piano_sim_test's keyboard check).
+    // The treble needs the most: its strike point is near the agraffe, so the force and its reflection nearly cancel
+    // at the low partials, and the board's response falls above 1 kHz. Matched to Classic's level per key.
     static double keyLevel(double key) noexcept {
-        static constexpr double kKey[] = {21, 36, 48, 60, 72, 84, 96, 108};
-        static constexpr double kL[] = {0.55, 0.8, 1.0, 1.15, 1.25, 1.2, 1.0, 0.8};
-        if (key <= kKey[0]) return kL[0];
-        for (int i = 1; i < 8; ++i)
-            if (key <= kKey[i]) return kL[i - 1] + (kL[i] - kL[i - 1]) * (key - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);
-        return kL[7];
+        static constexpr double kDb[13] = {5.2, 9.7, 13.6, 12.4, 11.9, 10.7, 11.0, 16.7, 24.7, 28.5, 29.0, 35.1, 39.2};  // A0, E1, .. A7
+        const double x = clampd((key - 21.0) / 7.0, 0, 12);
+        const int i = std::min(static_cast<int>(x), 11);
+        return detPow(10.0, (kDb[i] + (kDb[i + 1] - kDb[i]) * (x - i)) / 20.0);
     }
 
     void prepareSim() noexcept {
@@ -581,6 +582,9 @@ struct Piano {
         board.design(sr, tier == kQualityEco ? 0 : (tier == kQualityHigh ? 2 : 1), character);
         if (stretch != resStretch) tuneRes();
         res.groups = tier == kQualityEco ? kRes / 8 : kRes / 4;  // Eco: the lower 16
+        // On the control grid only (so any block size gives the same bits): the bank runs while the pedal feeds it
+        // or it still rings.
+        resRun = (pedal > 0 && resonance > 0) || resEnergy > 1e-14f;
         // The pedal's own noise (output only: it never reaches the resonance or the strings).
         const bool down = pedalDown ? pedal > 0.25 : pedal > 0.35;
         if (down != pedalDown) {
@@ -608,6 +612,7 @@ struct Piano {
         liftNext = 0;
     }
     int liftNext = 0;
+    bool resRun = false;
 
     void tuneSim(Voice& v) noexcept {
         const double pitch = clampd(v.pitch, 21.0, 120.0), key = std::min(pitch, 108.0);
@@ -630,12 +635,15 @@ struct Piano {
         const int k0 = static_cast<int>(kf);
         const int k1 = std::min(k0 + 1, 88);
         v.a = dispA[t][k0] + (dispA[t][k1] - dispA[t][k0]) * static_cast<float>(kf - k0);
-        int n = key < 34 ? 1 : (key < 46 ? 2 : 3);
-        if (t == kQualityEco) n = key >= 72 ? 1 : std::min(n, 2);
+        // At least two lanes (the SIMD lanes run either way): a single bass string's two polarisations, slightly
+        // apart, give its two-stage decay as a unison pair does.
+        int n = key < 46 ? 2 : 3;
+        if (t == kQualityEco) n = 2;
         v.strings = n;
         static constexpr double kSpreadCents[3][3] = {{0, 0, 0}, {-0.5, 0.5, 0}, {-0.6, 0.15, 0.55}};
+        const double spread = key < 34 ? 1.0 : unison;  // a single string's polarisations: a fixed split
         for (int s = 0; s < n; ++s) {
-            const double hz = noteHz(pitch + (cents + unison * kSpreadCents[n - 1][s]) / 100.0) * std::sqrt(1.0 + B);
+            const double hz = noteHz(pitch + (cents + spread * kSpreadCents[n - 1][s]) / 100.0) * std::sqrt(1.0 + B);
             const double w = kTwoPi * hz / sr;
             const double fixed = v.disp * allpassDelay(v.a, w) + onePoleDelay(p, w);
             v.rest[s] = std::max(2.5, sr / hz - fixed);
@@ -710,7 +718,9 @@ struct Piano {
         const float contact = bil([](const psim::HammerData& x) { return x.contactMs; });
         lastCutoff = 1000.0f / std::max(0.1f, contact);  // the pulse's brightness, as 1 / its contact time
         const double f1 = noteHz(key);
-        v.pgain = silent ? 0.0f : static_cast<float>(peak * kStringGain * keyLevel(key));
+        // The string's input: the force compressed a little (the board's and the ear's loudness grow slower than
+        // the force; set against the Salamander Grand's pp-to-ff level, timber_piano_sim_test).
+        v.pgain = silent ? 0.0f : static_cast<float>(detPow(peak / 10.0, 0.75) * 10.0 * kStringGain * keyLevel(key));
         v.thump = silent ? 0.0f : peak * kThumpGain;
         v.ppos = 0;
         v.pstep = piano_curves::kPulseRate / sr;
@@ -739,8 +749,10 @@ struct Piano {
         v.energy = v.gE = 0;
         v.glideScale = (tier == kQualityEco || key >= 72) ? 0.0f : static_cast<float>(glide * 10.0 * detPow((72.0 - key) / 51.0, 1.5));
         v.landing = false, v.landGap = v.landGap0 = 0;
-        v.sympC = static_cast<float>(sympathy * kHeldGain);
-        for (float& o : v.own) o = 0;
+        // Struck strings drive the bridge; strings held down without a strike listen to it. So no string both drives
+        // and listens across voices, and the coupling cannot feed back on itself (a delayed loop between voices
+        // would not be passive).
+        v.sympC = silent ? static_cast<float>(sympathy * kHeldGain) : 0.0f;
         v.phantomGain = 0;
         if (tier == kQualityHigh && phantomLevel > 0) {
             const double fl2 = psim::longitudinalHz(key);
@@ -750,6 +762,7 @@ struct Piano {
         }
         static constexpr float kStrike[3] = {1.0f, 0.72f, 0.5f};
         for (int k = 0; k < 3; ++k) v.strike[k] = k < v.strings ? kStrike[k] : 0.0f;
+        if (key < 34) v.strike[1] = 0.3f;  // the hammer drives the vertical polarisation; the other mostly by coupling
         if (v.strings == 3) v.strike[2] *= static_cast<float>(1.0 - soft);
         v.exciting = !silent;
         v.out = static_cast<float>(0.5 / std::sqrt(static_cast<double>(v.strings)));
@@ -794,17 +807,6 @@ struct Piano {
         v.phantom[0].flush(), v.phantom[1].flush();
     }
 
-    // The hammer's force at table frame y (the zones' and speeds' pulses blended), normalised to its peak.
-    static float pulseAt(const Voice& v, double y) noexcept {
-        if (y < 0.0) return 0.0f;
-        const int i = static_cast<int>(y);
-        if (i + 1 >= piano_curves::kPulseFrames) return 0.0f;
-        const float f = static_cast<float>(y - i);
-        float r = 0;
-        for (int k = 0; k < 4; ++k) r += v.pw[k] * (v.pulse[k][i] + (v.pulse[k][i + 1] - v.pulse[k][i]) * f);
-        return r * (1.0f / 32767.0f);
-    }
-
     void renderSim(Voice& v, float* out, uint32_t n) noexcept {
         uint32_t shortest = v.D[0];
         for (int s = 1; s < v.strings; ++s) shortest = std::min(shortest, v.D[s]);
@@ -814,141 +816,20 @@ struct Piano {
         }
         renderSimFrames(v, out, n, 0);
     }
-    void renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexcept {
-        const int ns = v.strings, M = v.disp;
-        const F4 a = f4(v.a), b = f4(v.b), p = f4(v.p);
-        const float c = v.c, gain = v.out, dt = static_cast<float>(1.0 / sr);
-        const float noiseK = static_cast<float>(noise);
-        float e[kControlFrames], hs[kControlFrames];
-        for (uint32_t i = 0; i < n; ++i) {
-            // The hammer: its force pulse, minus its reflection from the near end (the strike point's comb).
-            float x = 0;
-            if (v.wait > 0) {
-                --v.wait;
-            } else if (v.exciting) {
-                const float F0 = pulseAt(v, v.ppos), F = F0 - pulseAt(v, v.ppos - v.tap);
-                v.feltY += v.felt * (F - v.feltY);
-                x = v.feltY * v.pgain;
-                busBoard[at + i] += F0 * v.thump * noiseK;
-                v.ppos += v.pstep;
-                if (v.ppos - v.tap >= piano_curves::kPulseFrames) v.exciting = false;
-            }
-            e[i] = x;
-            // The contacts: the key's front on the keybed, the finger on the key (into the key frame).
-            const uint64_t f = v.simFrames + i;
-            if (v.keybedPending && f >= v.keybedAt) v.keybedPending = false, v.keybed.on = noiseK > 0;
-            if (v.fingerPending && f >= v.fingerAt) v.fingerPending = false, v.finger.on = noiseK > 0;
-            if (v.keybed.on) busFrame[at + i] += v.keybed.step(dt) * v.keybedGain * noiseK;
-            if (v.finger.on) busFrame[at + i] += v.finger.step(dt) * v.fingerGain * noiseK;
-            // A held key's strings listen to the bridge (every voice's sum but their own), 16 frames late.
-            const uint32_t r = static_cast<uint32_t>(simPos + at + i - kControlFrames) & 31u;
-            hs[i] = v.sympC * (bridge[r] - v.own[r]);
-        }
-        v.simFrames += n;
-        F4 Y[kControlFrames];
-        for (uint32_t i = 0; i < n; ++i) Y[i] = f4(0.0f);
-        for (int s = 0; s < ns; ++s) {
-            const Line& l = v.line[s];
-            const uint32_t from = l.w - v.D[s];
-            for (uint32_t i = 0; i < n; ++i) Y[i][s] = l.buf[(from + i) & l.mask];
-        }
-        F4 x1, y1, eta;
-        for (int k = 0; k < 4; ++k) x1[k] = v.apx[k], y1[k] = v.apy[k], eta[k] = v.eta[k];
-        for (uint32_t i = 0; i < n; ++i) {
-            const F4 t = eta * (Y[i] - y1) + x1;
-            x1 = Y[i], y1 = t, Y[i] = t;
-        }
-        for (int k = 0; k < 4; ++k) v.apx[k] = x1[k], v.apy[k] = y1[k];
-        for (int m = 0; m < M; ++m) {
-            for (int k = 0; k < 4; ++k) x1[k] = v.dx[m][k], y1[k] = v.dy[m][k];
-            for (uint32_t i = 0; i < n; ++i) {
-                const F4 t = a * (Y[i] - y1) + x1;
-                x1 = Y[i], y1 = t, Y[i] = t;
-            }
-            for (int k = 0; k < 4; ++k) v.dx[m][k] = x1[k], v.dy[m][k] = y1[k];
-        }
-        F4 z;
-        for (int k = 0; k < 4; ++k) z[k] = v.z[k];
-        for (uint32_t i = 0; i < n; ++i) {
-            z = b * Y[i] + p * z;
-            Y[i] = z;
-        }
-        for (int k = 0; k < 4; ++k) v.z[k] = z[k];
-        const bool mute = testMuteStrings;
-        for (uint32_t i = 0; i < n; ++i) {
-            const float S = Y[i][0] + Y[i][1] + Y[i][2] + Y[i][3];
-            float w[3], o = 0;
-            for (int s = 0; s < ns; ++s) o += w[s] = Y[i][s] - c * S + v.strike[s] * e[i] + hs[i];
-            if (v.landing) {  // the landing felt against the string's own motion: a one-sided contact
-                const float ex = std::fabs(o) - v.landGap;
-                if (ex > 0) {
-                    const float Fb = (o > 0 ? 1.0f : -1.0f) * ex * std::sqrt(ex) * 4.0f;
-                    for (int s = 0; s < ns; ++s) w[s] -= kBuzzAbsorb * Fb / ns;
-                    o -= kBuzzAbsorb * Fb;
-                    busBoard[at + i] += Fb * kBuzzGain * noiseK;
-                    buzzEnergy += static_cast<double>(Fb) * Fb;
-                }
-            }
-            if (mute) o = 0, w[0] = w[1] = w[2] = 0;
-            for (int s = 0; s < ns; ++s) v.line[s].push(w[s]);
-            v.energy += o * o;
-            float y = o * gain;
-            if (v.phantomGain > 0) {  // High: longitudinal modes driven by the transverse motion squared
-                const float d = o * o;
-                y += (v.phantom[0].run(d) + 0.5f * v.phantom[1].run(d)) * v.phantomGain;
-            }
-            out[i] = y;
-            v.own[static_cast<uint32_t>(simPos + at + i) & 31u] = y * (v.panL + v.panR);
-        }
-    }
+    // Per sample, in timber_piano_sim.cpp: compiled with strict floating point (no reassociation), so the
+    // Simulated piano gives the same bits at any block size (the engine's fast flags may regroup a sum differently
+    // in a loop's main and remainder bodies).
+    void renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexcept;
+    void postSim(float* l, float* r, uint32_t n, const Shared& s) noexcept;
+    float resEnergy = 0;  // the register bank's energy at the end of the last block (postSim)
 
-    void postSim(float* l, float* r, uint32_t n, const Shared& s) noexcept {
-        float x[kControlFrames], bin[kControlFrames], ro[kControlFrames] = {}, kf[kControlFrames] = {};
-        float tw[kControlFrames] = {}, ti[kControlFrames] = {}, li[kControlFrames] = {}, rail[kControlFrames] = {};
-        float bl[kControlFrames] = {}, br[kControlFrames] = {};
-        for (uint32_t i = 0; i < n; ++i) {
-            x[i] = l[i] + r[i];
-            bridge[static_cast<uint32_t>(simPos + i) & 31u] = x[i];
-        }
-        // The register bank (pedal down), fed by the strings alone: no noise ever reaches it.
-        const float drive = static_cast<float>(kResDrive * resonance * pedal);
-        if (drive > 0 || res.energy() > 1e-14f) {
-            float rin[kControlFrames];
-            for (uint32_t i = 0; i < n; ++i) rin[i] = x[i] * drive, resInputEnergy += static_cast<double>(rin[i]) * rin[i];
-            res.process(rin, ro, nullptr, n);
-        }
-        keyFrame.process(busFrame, kf, nullptr, n);
-        // The pedal: the trapwork's contact into its wood, the dampers' felts into the rail.
-        for (uint32_t i = 0; i < n; ++i) {
-            ti[i] = trap.on ? trap.step(static_cast<float>(1.0 / sr)) * kPedalGain * static_cast<float>(noise) : 0.0f;
-            while (liftNext < liftCount && lifts[liftNext].at <= liftClock) li[i] += lifts[liftNext++].amp * kLiftGain * static_cast<float>(noise);
-            ++liftClock;
-        }
-        trapwork.process(ti, tw, nullptr, n);
-        damperRail.process(li, rail, nullptr, n);
-        for (uint32_t i = 0; i < n; ++i) bin[i] = x[i] + ro[i] + busBoard[i] + 0.5f * kf[i];
-        board.process(bin, bl, br, n);
-        const float wet = static_cast<float>(clampd(s.body, 0, 1)) * kBoardGain, dry = 1.0f - static_cast<float>(clampd(s.body, 0, 1));
-        float peak = 0;
-        for (uint32_t i = 0; i < n; ++i) {
-            const float direct = 0.5f * kf[i] + tw[i] + rail[i];
-            l[i] = bl[i] * wet + l[i] * dry + direct;
-            r[i] = br[i] * wet + r[i] * dry + direct;
-            peak = std::max(peak, std::fabs(bin[i]) + std::fabs(direct));
-            busBoard[i] = busFrame[i] = 0;
-        }
-        simPos += n;
-        simPeak = std::max(simPeak, peak);
-        simQuiet = peak < 1e-7f && !trap.on && liftNext >= liftCount && board.energy() < 1e-12f && res.energy() < 1e-12f &&
-                   keyFrame.energy() < 1e-12f && trapwork.energy() < 1e-12f && damperRail.energy() < 1e-12f;
-    }
     void clearSim() noexcept {
         board.clear(), res.clear(), keyFrame.clear(), trapwork.clear(), damperRail.clear();
         trap.on = false;
         liftCount = liftNext = 0;
-        for (uint32_t i = 0; i < kControlFrames; ++i) busBoard[i] = busFrame[i] = 0;
+        for (uint32_t i = 0; i < kControlFrames; ++i) busBoard[i] = busFrame[i] = busBridge[i] = 0;
         for (float& b : bridge) b = 0;
-        simPeak = 0;
+        simPeak = 0, resEnergy = 0;
         simQuiet = true;
         simActive = false;
     }

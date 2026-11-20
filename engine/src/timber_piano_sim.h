@@ -153,7 +153,7 @@ struct Contact {
 // sound) and 2-6 s (the aftersound, octaves 1-4; higher up the recordings end in their noise floor first).
 inline double simT60(double key) noexcept {
     static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 108};
-    static constexpr double kT[] = {30, 28, 26, 22, 26, 14, 6.0, 2.5};
+    static constexpr double kT[] = {34, 31, 26, 17, 26, 14, 6.0, 1.4};
     if (key <= kKey[0]) return kT[0];
     for (int i = 1; i < 8; ++i)
         if (key <= kKey[i]) {
@@ -164,7 +164,7 @@ inline double simT60(double key) noexcept {
 }
 inline double simPrompt(double key) noexcept {  // the prompt T60 over the aftersound's
     static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 108};
-    static constexpr double kR[] = {0.45, 0.45, 0.30, 0.25, 0.11, 0.15, 0.45, 0.9};
+    static constexpr double kR[] = {0.5, 0.5, 0.30, 0.30, 0.11, 0.15, 0.45, 0.9};
     if (key <= kKey[0]) return kR[0];
     for (int i = 1; i < 8; ++i)
         if (key <= kKey[i]) return kR[i - 1] + (kR[i] - kR[i - 1]) * (key - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);

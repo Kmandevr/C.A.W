@@ -251,12 +251,22 @@ TEST(timber_piano_attack_thump_grows_with_velocity_and_is_strongest_in_the_trebl
         for (int k = 0; k < 3; ++k) {
             const Values v = sim({{"noise", 1}});
             auto p = make(v);
-            pianoOf(*p).testMuteStrings = true;
+            pianoOf(*p).testMuteStrings = pianoOf(*p).testMuteKeys = true;  // the hammer's thump alone
             const std::vector<float> m = play(*p, v, {{0.0, -1, r == 0 ? 36.0 : 84.0, 0.2 + 0.35 * k}}, 0.1).mono();
             lv[r][k] = rmsDb(m, 0, 2400);
         }
     if (verbose()) std::printf("thump C2 %.1f %.1f %.1f, C6 %.1f %.1f %.1f dB\n", lv[0][0], lv[0][1], lv[0][2], lv[1][0], lv[1][1], lv[1][2]);
     for (int r = 0; r < 2; ++r) CHECK(lv[r][0] < lv[r][1] && lv[r][1] < lv[r][2] && lv[r][0] > -120);
+    if (verbose()) {  // the noises against the tone (C4, mf), at the default level and close-miked
+        for (double nz : {0.35, 1.0}) {
+            const Values v = sim({{"noise", nz}, {"touch", 1}, {"action", 1}});
+            auto p = make(v), q = make(v);
+            pianoOf(*p).testMuteStrings = true;
+            const double noiseDb = rmsDb(play(*p, v, {{0.0, 0.3, 60, 0.7}}, 0.6).mono(), 0, 28800);
+            const double toneDb = rmsDb(play(*q, v, {{0.0, 0.3, 60, 0.7}}, 0.6).mono(), 0, 28800);
+            std::printf("noise %.2f: the noises alone %.1f dB, with the tone %.1f dB\n", nz, noiseDb, toneDb);
+        }
+    }
     for (int k = 0; k < 3; ++k) CHECK(lv[1][k] > lv[0][k]);
 }
 
@@ -397,6 +407,7 @@ TEST(timber_piano_simulated_falls_quiet_to_exact_zeros_and_survives_bad_values) 
     std::vector<Note> chord;
     for (int k = 0; k < 16; ++k) chord.push_back({0.01 * k, -1, 36.0 + 3 * k, 0.9});
     const std::vector<float> m = play(*q, h, chord, 6.0).mono();
+    if (verbose()) std::printf("16 held keys, pedal down: %.1f dB in the first second, %.1f dB at 5-6 s\n", rmsDb(m, 0, 48000), rmsDb(m, 5 * 48000, 48000));
     CHECK(rmsDb(m, 5 * 48000, 48000) < rmsDb(m, 0, 48000) - 6);
 }
 
