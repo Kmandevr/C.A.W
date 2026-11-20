@@ -98,22 +98,27 @@ const MembraneTable& membrane() {
     return t;
 }
 
-// The modal kernels (structure of arrays, no aliasing: they vectorize). y = (a1 y1 - a2 y2) d is a mode's next
-// displacement before new forces; the radiated sum is the weighted velocity sum w (y - y1).
+// The modal kernels (structure of arrays, no aliasing, every count a multiple of 4: they vectorize with no scalar
+// tail). y = a1 y1 - a2 y2 is a mode's next displacement before new forces (the damping is in a1, a2); the radiated
+// sum is the weighted velocity sum w (y - y1).
 inline void predictModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
                          const float* __restrict y2, float* __restrict yp) noexcept {
+    n &= ~3u;
     for (uint32_t k = 0; k < n; ++k) yp[k] = a1[k] * y1[k] - a2[k] * y2[k];
 }
 inline float dotModes(uint32_t n, const float* __restrict a, const float* __restrict b) noexcept {
+    n &= ~3u;
     float s = 0.0f;
     for (uint32_t k = 0; k < n; ++k) s += a[k] * b[k];
     return s;
 }
 inline void addModes(uint32_t n, float* __restrict y, const float* __restrict phi, float c) noexcept {
+    n &= ~3u;
     for (uint32_t k = 0; k < n; ++k) y[k] += c * phi[k];
 }
 inline float commitModes(uint32_t n, const float* __restrict yp, float* __restrict y1, float* __restrict y2,
                          const float* __restrict w) noexcept {
+    n &= ~3u;
     float out = 0.0f;
     for (uint32_t k = 0; k < n; ++k) {
         out += w[k] * (yp[k] - y1[k]);
@@ -124,6 +129,7 @@ inline float commitModes(uint32_t n, const float* __restrict yp, float* __restri
 }
 inline float stepModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
                        float* __restrict y2, const float* __restrict w) noexcept {
+    n &= ~3u;
     float out = 0.0f;
     for (uint32_t k = 0; k < n; ++k) {
         const float y = a1[k] * y1[k] - a2[k] * y2[k];
@@ -167,9 +173,10 @@ struct Counts {
     uint32_t batter, reso, shell;
 };
 Counts drumCounts(int kind, int q) noexcept {
-    static constexpr Counts kKick[3] = {{12, 4, 2}, {24, 8, 4}, {48, 16, 8}};
-    static constexpr Counts kSnare[3] = {{16, 8, 4}, {32, 12, 6}, {48, 16, 8}};
-    static constexpr Counts kTom[3] = {{12, 4, 2}, {24, 8, 4}, {48, 16, 8}};
+    // (each a multiple of 4: the kernels run in fours)
+    static constexpr Counts kKick[3] = {{12, 4, 4}, {24, 8, 4}, {48, 16, 8}};
+    static constexpr Counts kSnare[3] = {{16, 8, 4}, {32, 12, 8}, {48, 16, 8}};
+    static constexpr Counts kTom[3] = {{12, 4, 4}, {24, 8, 4}, {48, 16, 8}};
     const Counts* c = kind == kPieceKick ? kKick : (kind == kPieceSnare ? kSnare : kTom);
     return c[q < 0 ? 0 : (q > 2 ? 2 : q)];
 }
@@ -182,10 +189,12 @@ bool AcousticKit::prepare(double sampleRate) {
     sr_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
     dt_ = 1.0 / sr_;
     (void)membrane();  // built here, not on the audio thread
-    ohLength_ = static_cast<uint32_t>(sr_ * 0.008) + 4;
-    oh_.assign(static_cast<size_t>(ohLength_) * kPieces, 0.0f);
+    uint32_t size = 64;
+    while (size < static_cast<uint32_t>(sr_ * 0.008) + kCell + 4) size *= 2;  // the longest delay (2 m: 5.8 ms) and a span
+    ohL_.assign(size, 0.0f);
+    ohR_.assign(size, 0.0f);
+    ohMask_ = size - 1;
     bleedDelay_ = static_cast<uint32_t>(sr_ * 0.0015) + 1;
-    bleed_.assign(bleedDelay_ + kCell + 1, 0.0f);
     for (Piece& p : pieces_) p = Piece{};
     level_ = static_cast<float>(dbGain(kit_.level));
     bleedGain_ = static_cast<float>(kit_.bleed);
@@ -206,13 +215,13 @@ void AcousticKit::reset() noexcept {
         p.symp = static_cast<float>(kit_.sympathy);
         if (was) configure(p);
     }
-    std::fill(oh_.begin(), oh_.end(), 0.0f);
-    std::fill(bleed_.begin(), bleed_.end(), 0.0f);
+    std::fill(ohL_.begin(), ohL_.end(), 0.0f);
+    std::fill(ohR_.begin(), ohR_.end(), 0.0f);
     std::fill(ring_, ring_ + kRing, 0.0f);
     awake_ = 0;
     clock_ = 0;
     cellFrames_ = 0;
-    ohAt_ = bleedAt_ = 0;
+    ohAt_ = 0;
 }
 
 void AcousticKit::setKit(const KitSettings& k) noexcept {
@@ -278,7 +287,9 @@ static void setMode(Piece& p, uint32_t i, double hz, double t60, double weight, 
     const double r = std::exp(-6.907755278982137 / (std::max(t60, 0.005) * sr));
     p.om[i] = static_cast<float>(om);
     p.rr[i] = static_cast<float>(r);
-    p.a1[i] = p.a1b[i] = static_cast<float>(2.0 * r * cosr(om));
+    p.cs[i] = static_cast<float>(cosr(om));
+    p.sn[i] = static_cast<float>(lib::fastSinCycles(om * (1.0 / kTwoPi)));
+    p.a1[i] = p.a1b[i] = p.a1n[i] = static_cast<float>(2.0 * r * cosr(om));
     p.a2[i] = p.a2b[i] = static_cast<float>(r * r);
     p.w[i] = static_cast<float>(weight);
 }
@@ -440,6 +451,10 @@ void AcousticKit::configureCymbal(Piece& p) noexcept {
         for (uint32_t k = 0; k < top; ++k) sum += p.seg[0].g * p.phiEdge[k] * p.phiEdge[k];
         for (uint32_t k = 0; k < bottom; ++k) sum += p.seg[1].g * p.phiEdge[top + k] * p.phiEdge[top + k];
         p.hatC = static_cast<float>(dt_ * dt_ / 0.4 + sum);
+        // both plates in one pass: the gap reads +top -bottom at the edge, the force pushes them apart
+        for (uint32_t k = 0; k < top; ++k) p.hatEta[k] = p.phiEdge[k], p.hatPush[k] = -p.seg[0].g * p.phiEdge[k];
+        for (uint32_t k = top; k < top + bottom; ++k) p.hatEta[k] = -p.phiEdge[k], p.hatPush[k] = p.seg[1].g * p.phiEdge[k];
+        for (uint32_t k = top; k < top + bottom; ++k) p.w[k] *= 0.7f;  // the bottom plate radiates less (under the top)
     }
     // The cascade (the design's reduced coupling): each mode above the lowest quarter driven by the product of the
     // two lower modes whose frequencies add up nearest to its own. Energy climbs a step at a time, so a hard hit's
@@ -499,8 +514,9 @@ void AcousticKit::mics(Piece& p) noexcept {
     const double dl = std::sqrt((x + 0.6) * (x + 0.6) + d * d), dr = std::sqrt((x - 0.6) * (x - 0.6) + d * d);
     p.ohL = static_cast<float>(kOh[m] * level * 0.6 / dl);
     p.ohR = static_cast<float>(kOh[m] * level * 0.6 / dr);
-    p.ohDelayL = std::min<uint32_t>(ohLength_ - 1, static_cast<uint32_t>(dl / 343.0 * sr_));
-    p.ohDelayR = std::min<uint32_t>(ohLength_ - 1, static_cast<uint32_t>(dr / 343.0 * sr_));
+    const uint32_t most = ohMask_ > kCell ? ohMask_ - kCell : 0;
+    p.ohDelayL = std::min<uint32_t>(most, static_cast<uint32_t>(dl / 343.0 * sr_));
+    p.ohDelayR = std::min<uint32_t>(most, static_cast<uint32_t>(dr / 343.0 * sr_));
     p.roomSend = static_cast<float>(kRoomAmt[m] * clampd(kit_.room, 0, 1) * level * 2.0);
     p.bleedSend = static_cast<float>(0.25 * clampd(kit_.bleed, 0, 1) * level * (isCymbalPiece(s.kind) ? 1.5 : 1.0));
 }
@@ -919,11 +935,10 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
 void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
     (void)clock;
     const Segment top = p.seg[0], bot = p.seg[1];
-    const float gt = top.g, gb = bot.g;
+    const float gt = top.g;
     const float dt = static_cast<float>(dt_);
     const float scale = static_cast<float>(sr_) * p.gain;
     const uint32_t all = top.count + bot.count;
-    float* const phiB = p.phiEdge + top.count;
     alignas(32) float yp[kMaxModes];
     float pressure = 0.0f;
     for (uint32_t t = 0; t < n; ++t) {
@@ -939,14 +954,12 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
         const float zP = p.hatZ + vz * dt;
         float out;
         if (zP > 0.006f && !ca && !cb) {  // wide open and untouched: the plates ring on their own
-            out = stepModes(top.count, p.a1, p.a2, p.y1, p.y2, p.w) +
-                  0.7f * stepModes(bot.count, p.a1 + top.count, p.a2 + top.count, p.y1 + top.count, p.y2 + top.count,
-                                   p.w + top.count);
+            out = stepModes(all, p.a1, p.a2, p.y1, p.y2, p.w);
             p.hatDPrev = -zP;
         } else {
             predictModes(all, p.a1, p.a2, p.y1, p.y2, yp);
             // The plates' contact near the edge (down positive: the top plate sits zP above the bottom one).
-            const float eta = (dotModes(top.count, p.phiEdge, yp) - zP) - dotModes(bot.count, phiB, yp + top.count);
+            const float eta = dotModes(all, p.hatEta, yp) - zP;
             float Fc = 0.0f;
             if (eta > 0.0f) {
                 const float sq = std::sqrt(eta);
@@ -957,10 +970,7 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
             p.hatDPrev = eta - Fc * p.hatC;
             vz += Fc * dt / 0.4f;
             pressure += Fc;
-            if (Fc > 0.0f) {
-                addModes(top.count, yp, p.phiEdge, -gt * Fc);
-                addModes(bot.count, yp + top.count, phiB, gb * Fc);
-            }
+            if (Fc > 0.0f) addModes(all, yp, p.hatPush, Fc);
             // the stick pushes the top plate on its felt clutch down toward the bottom one, as well as bending it
             if (ca) {
                 const float F = stickForce(sa, dotModes(top.count, p.phiA, yp) + sa.ref - zP);
@@ -970,8 +980,7 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
                 const float F = stickForce(sb, dotModes(top.count, p.phiB, yp) + sb.ref - zP);
                 if (F > 0.0f) addModes(top.count, yp, p.phiB, gt * F), vz -= F * dt / 0.4f;
             }
-            out = commitModes(top.count, yp, p.y1, p.y2, p.w) +
-                  0.7f * commitModes(bot.count, yp + top.count, p.y1 + top.count, p.y2 + top.count, p.w + top.count);
+            out = commitModes(all, yp, p.y1, p.y2, p.w);
         }
         p.hatV = vz;
         p.hatZ += vz * dt;
@@ -996,9 +1005,13 @@ void AcousticKit::control(Piece& p) noexcept {
     if (std::fabs(g - p.glideNow) < 1e-4f && !(g == 0.0f && p.glideNow != 0.0f)) return;
     p.glideNow = g;
     const Segment& r = p.seg[1];
+    // cos(w (1 + g)) = cos w cos(wg) - sin w sin(wg), the small angle wg by its series (wg < 0.25 rad here)
+    const float db = p.seg[0].damp, drr = p.seg[1].damp;
     for (uint32_t k = 0; k < b.count + r.count; ++k) {
-        p.a1b[k] = static_cast<float>(2.0 * p.rr[k] * cosr(p.om[k] * (1.0 + g)));
-        p.a1[k] = p.a1b[k] * p.seg[k < b.count ? 0 : 1].damp;
+        const float x = p.om[k] * g, x2 = x * x;
+        const float c = 1.0f - x2 * (0.5f - x2 * (1.0f / 24.0f)), s = x * (1.0f - x2 * (1.0f / 6.0f));
+        p.a1b[k] = 2.0f * p.rr[k] * (p.cs[k] * c - p.sn[k] * s);
+        p.a1[k] = p.a1b[k] * (k < b.count ? db : drr);
     }
 }
 
@@ -1007,7 +1020,7 @@ void AcousticKit::process(double* left, double* right, double* room, uint32_t n)
 }
 
 void AcousticKit::span(double* left, double* right, double* room, uint32_t n) noexcept {
-    float sum[kCell] = {}, bleedIn[kCell] = {};
+    float sum[kCell] = {};
     for (uint32_t i = 0; i < kPieces; ++i) {
         Piece& p = pieces_[i];
         if (!p.awake) continue;
@@ -1044,35 +1057,36 @@ void AcousticKit::span(double* left, double* right, double* room, uint32_t n) no
             silence(i);
             continue;
         }
-        // Mics: close (panned), the overhead pair (delayed by distance), the room send and the bleed bus.
-        float* line = oh_.data() + static_cast<size_t>(i) * ohLength_;
-        const uint32_t len = ohLength_;
-        uint32_t at = ohAt_, rl = (ohAt_ + len - p.ohDelayL) % len, rr = (ohAt_ + len - p.ohDelayR) % len;
+        // Mics: close (panned), the overhead pair (delayed by distance: added where it will be heard), the room send
+        // and the bleed bus (every close mic hearing the others 1.5 ms late, centred).
+        float* const ohl = ohL_.data();
+        float* const ohr = ohR_.data();
+        const uint32_t mask = ohMask_, dl = ohAt_ + p.ohDelayL, dr = ohAt_ + p.ohDelayR, db = ohAt_ + bleedDelay_;
+        const float level = level_, cl = p.closeL * level, cr = p.closeR * level, gl = p.ohL * level, gr = p.ohR * level,
+                    bl = p.bleedSend * level * bleedGain_ * 0.7f, rs = p.roomSend * level;
         for (uint32_t t = 0; t < n; ++t) {
-            const float y = p.out[t] * level_;
-            sum[t] += p.out[t];
-            p.own[(clock_ + t) & (kRing - 1)] = p.out[t];
-            line[at] = y;
-            left[t] += y * p.closeL + line[rl] * p.ohL;
-            right[t] += y * p.closeR + line[rr] * p.ohR;
-            if (room) room[t] += y * p.roomSend;
-            bleedIn[t] += y * p.bleedSend;
-            if (++at == len) at = 0;
-            if (++rl == len) rl = 0;
-            if (++rr == len) rr = 0;
+            const float y = p.out[t];
+            sum[t] += y;
+            p.own[(clock_ + t) & (kRing - 1)] = y;
+            left[t] += y * cl;
+            right[t] += y * cr;
+            ohl[(dl + t) & mask] += y * gl;
+            ohr[(dr + t) & mask] += y * gr;
+            ohl[(db + t) & mask] += y * bl;
+            ohr[(db + t) & mask] += y * bl;
         }
+        if (room)
+            for (uint32_t t = 0; t < n; ++t) room[t] += p.out[t] * rs;
     }
-    // The bleed bus: every close mic hearing the others 1.5 ms late, centred.
-    const uint32_t size = static_cast<uint32_t>(bleed_.size());
+    // The rings' slots for these frames: heard now, then cleared for their next turn.
     for (uint32_t t = 0; t < n; ++t) {
-        bleed_[bleedAt_] = bleedIn[t];
-        const float b = bleed_[(bleedAt_ + size - bleedDelay_) % size] * bleedGain_;
-        if (++bleedAt_ == size) bleedAt_ = 0;
-        left[t] += b * 0.7f;
-        right[t] += b * 0.7f;
+        const uint32_t at = (ohAt_ + t) & ohMask_;
+        left[t] += ohL_[at];
+        right[t] += ohR_[at];
+        ohL_[at] = ohR_[at] = 0.0f;
         ring_[(clock_ + t) & (kRing - 1)] = sum[t];
     }
-    ohAt_ = (ohAt_ + n) % ohLength_;
+    ohAt_ = (ohAt_ + n) & ohMask_;
     clock_ += n;
     cellFrames_ += n;
 }
@@ -1099,6 +1113,16 @@ void AcousticKit::endCell() noexcept {
                 }
             }
         }
+        // Denormal guard (for the targets without flush-to-zero, fp_mode.h): a mode, wire or filter far below
+        // hearing is set to exact zero, so it never computes as a subnormal.
+        const uint32_t all = p.seg[0].count + p.seg[1].count + p.seg[2].count;
+        for (uint32_t k = 0; k < all; ++k) {
+            const bool tiny = std::fabs(p.y1[k]) < 1e-20f && std::fabs(p.y2[k]) < 1e-20f;
+            p.y1[k] = tiny ? 0.0f : p.y1[k];
+            p.y2[k] = tiny ? 0.0f : p.y2[k];
+        }
+        for (float* f : {&p.rattleHp[0], &p.rattleHp[1], &p.wireGate, &p.swellHp[0], &p.swellLp, &p.noiseLp, &p.swellEnv})
+            if (std::fabs(*f) < 1e-20f) *f = 0.0f;
         const bool busy = p.stick[0].active || p.stick[1].active || p.rim.active || p.rolling || p.noiseLeft ||
                           (p.set.kind == kPieceHiHat && std::fabs(p.hatV) > 1e-4f);
         p.quietFrames = p.peak < 1e-5f && !busy ? p.quietFrames + cellFrames_ : 0;
@@ -1114,27 +1138,40 @@ void AcousticKit::endCell() noexcept {
     cellFrames_ = 0;
     if (!awake_) {  // the whole kit asleep: its history starts over at the next stroke
         std::fill(ring_, ring_ + kRing, 0.0f);
-        std::fill(bleed_.begin(), bleed_.end(), 0.0f);
+        std::fill(ohL_.begin(), ohL_.end(), 0.0f);
+        std::fill(ohR_.begin(), ohR_.end(), 0.0f);
     }
 }
 
 void AcousticKit::silence(uint32_t i) noexcept {
-    Piece& p = pieces_[i];
-    const PieceSettings s = p.set;
-    const int q = p.quality;
-    const uint32_t seed = p.rng;
-    const uint8_t pk = p.pairKind, pa = p.pairAlloy, pq = p.pairQuality;
-    const uint32_t triplets = p.triplets;
-    uint16_t ti[96], tj[96], tk[96];
-    std::copy(p.ti, p.ti + 96, ti), std::copy(p.tj, p.tj + 96, tj), std::copy(p.tk, p.tk + 96, tk);
-    p = Piece{};
-    p.set = s, p.quality = q, p.rng = seed;
-    p.pairKind = pk, p.pairAlloy = pa, p.pairQuality = pq, p.triplets = triplets;  // the cascade's pairs stay found
-    std::copy(ti, ti + 96, p.ti), std::copy(tj, tj + 96, p.tj), std::copy(tk, tk + 96, p.tk);
-    configure(p);
-    p.symp = static_cast<float>(kit_.sympathy);
+    quietState(pieces_[i]);
     awake_ &= ~(1u << i);
-    std::fill(oh_.begin() + static_cast<size_t>(i) * ohLength_, oh_.begin() + static_cast<size_t>(i + 1) * ohLength_, 0.0f);
+}
+
+// A piece at rest: every state to exact zero, its tuning and damping as configured (no re-tuning: cheap to sleep).
+void AcousticKit::quietState(Piece& p) noexcept {
+    const uint32_t all = p.seg[0].count + p.seg[1].count + p.seg[2].count;
+    for (uint32_t k = 0; k < all; ++k) {
+        p.y1[k] = p.y2[k] = 0.0f;
+        p.a1[k] = p.a1b[k] = p.a1n[k];
+        p.a2[k] = p.a2b[k];
+    }
+    for (Segment& sg : p.seg) sg.damp = 1.0f;
+    for (uint32_t w = 0; w < kMaxWires; ++w) p.wx[w] = p.wv[w] = p.wDPrev[w] = 0.0f;
+    p.stick[0] = p.stick[1] = p.rim = Striker{};
+    p.rattleHp[0] = p.rattleHp[1] = p.lastF = p.wireGate = 0.0f;
+    p.rattleEnergy = 0.0;
+    p.glideNow = 0.0f;
+    p.swellEnv = p.swellHp[0] = p.swellHp[1] = p.swellLp = 0.0f;
+    p.hatV = p.hatDPrev = p.hatPressure = p.hatPressureSum = p.hatFootBoost = 0.0f;
+    p.hatZ = p.hatTarget;
+    p.noiseLeft = 0;
+    p.noiseLp = 0.0f;
+    p.rolling = false;
+    p.quietFrames = 0;
+    p.peak = 0.0f;
+    p.awake = false;
+    std::fill(p.own, p.own + kRing, 0.0f);
 }
 
 uint32_t AcousticKit::awakeCount() const noexcept {

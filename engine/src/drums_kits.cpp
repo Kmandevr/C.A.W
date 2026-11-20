@@ -90,6 +90,17 @@ void tuneVoice(Voice& v, int key) {
     v[kTune] = constrainPad(kTune, v[kTune] + 12.0 * std::log2(nearestInKey(f, key) / f));
 }
 
+// A generated pad keeps only the per-pad dynamics its role needs: the randomizer's compressor, transient shaper,
+// clipper and drive switch on per voice (and oversample), so a kit's character goes on its bus instead.
+void lean(Voice& v, bool keepDrive) {
+    const int type = static_cast<int>(v[kType]);
+    const bool hit = type == kTypeKick || type == kTypeSnare || type == kTypeClap || type == kTypeBass;
+    v[kComp] = 0.0;
+    v[kClip] = kClipOff;
+    if (!hit) v[kTrAttack] = 0.0, v[kTrSustain] = 0.0, v[kEqLow] = 0.0, v[kEqMid] = 0.0, v[kEqHigh] = 0.0;
+    if (!keepDrive || !hit) v[kDriveType] = kDriveOff;
+}
+
 // ---------- Level matching (renders each pad: control thread) ----------
 
 double targetPeakDb(int type) {
@@ -184,8 +195,10 @@ void synthKit(const SynthStyle& st, uint32_t seed, int key, bool match, State& s
         v[kNote] = kNoteAuto;
         v[kTune] = constrainPad(kTune, v[kTune] + kSlotTune[slot]);
         v = randomizeVoice(type, seed * 977u + slot * 131u + 1u, st.amount, v, false);
-        // the kit's shared character: one drive, one tone range, one length
-        if (st.drive != kDriveOff) v[kDriveType] = st.drive, v[kDrive] = st.driveAmount * (0.8 + 0.4 * r.next());
+        // the kit's shared character: one drive (on the hits; the rest share the bus), one tone range, one length
+        lean(v, false);
+        if (st.drive != kDriveOff && (type == kTypeKick || type == kTypeSnare || type == kTypeClap))
+            v[kDriveType] = st.drive, v[kDrive] = st.driveAmount * (0.8 + 0.4 * r.next());
         v[kDirt] = constrainPad(kDirt, st.dirt + 0.1 * (r.next() - 0.5));
         v[kTone] = constrainPad(kTone, st.tone + 0.2 * (r.next() - 0.5));
         v[kLength] = constrainPad(kLength, st.length + 0.2 * (r.next() - 0.5));
@@ -327,6 +340,7 @@ void producedKit(const ProducedStyle& st, uint32_t seed, int key, bool match, St
         if (slot) {
             v[kTune] = constrainPad(kTune, v[kTune] + kSlotTune[slot]);
             v = randomizeVoice(type, seed * 613u + slot * 37u + 5u, 0.12, v, false);  // a touch of the seed
+            lean(v, true);
         }
         if (st.swing > 0.0 && (type == kTypeClosedHat || type == kTypeOpenHat || type == kTypeRim))
             v[kSwing] = st.swing, v[kHumanize] = 0.15;

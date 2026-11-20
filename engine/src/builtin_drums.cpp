@@ -806,6 +806,7 @@ public:
         lastPad_ = -1;
         acoustic_.reset();
         lastPedal_ = -1.0;
+        acousticRead_ = ~0ull;
     }
 
     bool quiet() const noexcept override { return settled_ && !lanes_.any() && pending_ == 0; }
@@ -2061,9 +2062,14 @@ private:
         }
         if (acoustic_.awake()) {
             acoustic_.endCell();  // the last 16 frames' glide, clamping, waking and sleeping
-            readAcousticKit(b, at);
-            for (uint32_t pc = 0; pc < kPieces; ++pc)
-                if (acoustic_.piece(pc).awake) readPiece(b, pc, at);
+            // The knobs move between blocks (or ramp within one): read once a block unless one ramps.
+            if (acousticRead_ != blockCount_ || acousticRamps_) {
+                acousticRead_ = blockCount_;
+                acousticRamps_ = false;
+                readAcousticKit(b, at);
+                for (uint32_t pc = 0; pc < kPieces; ++pc)
+                    if (acoustic_.piece(pc).awake) readPiece(b, pc, at);
+            }
         }
         // Kit effects' knobs.
         glueAmount_ = clampd(parameterAt(b, kGlue, at, 0), 0, 1);
@@ -2300,8 +2306,9 @@ private:
 
     // ---------- The Acoustic kit (1.1.2) ----------
 
-    double knob(const ProcessBlock& b, uint32_t index, uint32_t at) const noexcept {
-        return parameterAt(b, index, at, parameterTable()[index].defaultValue);
+    double knob(const ProcessBlock& b, uint32_t index, uint32_t at) noexcept {
+        if (b.parameters && index < b.parameterCount && b.parameters[index].samples) acousticRamps_ = true;
+        return parameterAt(b, index, at, table_[index].defaultValue);
     }
     void readAcousticKit(const ProcessBlock& b, uint32_t at) noexcept {
         acoustic::KitSettings k;
@@ -2570,7 +2577,10 @@ private:
     DisplayBuffer<kDisplayFloats> display_;
     bool watched_ = true;  // a UI read the display lately (publish): hits capture their waveform
     acoustic::AcousticKit acoustic_;  // 1.1.2: the Acoustic kit's 16 pieces
+    const ParameterDescriptor* table_ = parameterTable();
     double lastPedal_ = -1.0;
+    uint64_t acousticRead_ = ~0ull;  // the block its settings were last read in
+    bool acousticRamps_ = false;     // one of them ramps: read them every control
     DisplayClock displayClock_;
     float frame_[kDisplayFloats] = {};
     float padLevel_[kPads] = {};

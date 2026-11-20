@@ -74,10 +74,13 @@ struct Piece {
     float a1b[kMaxModes] = {}, a2b[kMaxModes] = {};  // the coefficients before a hand's or the hat's damping (with glide)
     float w[kMaxModes] = {};           // radiation weight
     float om[kMaxModes] = {};          // the mode's angular step (rad per sample) before glide
+    float cs[kMaxModes] = {}, sn[kMaxModes] = {};  // its cos and sin (the glide re-tunes by angle addition)
+    float a1n[kMaxModes] = {};         // a1 with no glide and no damping (sleep restores it)
     float rr[kMaxModes] = {};          // pole radius
     float phiA[kMaxModes] = {}, phiB[kMaxModes] = {};  // the two sticks' strike weights on segment 0
     float phiEdge[kMaxModes] = {};     // a hat's contact ring (both plates), a drum's bearing edge (segment 0)
     float strain[kMaxModes] = {};      // a drum's (j/a)^2 per mode: tension modulation's weights
+    float hatEta[kMaxModes] = {}, hatPush[kMaxModes] = {};  // a hat: the plates' gap weights (+top, -bottom), the force's
     float ratio[kMaxModes] = {};       // the mode's frequency over the first (tests and display)
     int order[kMaxModes] = {};         // a membrane mode's m (angular order)
     Striker stick[2], rim;
@@ -171,16 +174,18 @@ private:
     void control(Piece& p) noexcept;
     void span(double* left, double* right, double* room, uint32_t n) noexcept;
     void silence(uint32_t piece) noexcept;
+    void quietState(Piece& p) noexcept;
     static void applyDamp(Piece& p, uint32_t segment, float d) noexcept;
 
     double sr_ = 48000, dt_ = 1.0 / 48000;
     KitSettings kit_;
     Piece pieces_[kPieces];
     uint32_t awake_ = 0;  // bit per piece
-    std::vector<float> oh_;  // per piece: its overhead delay line (ohLength_ each)
-    uint32_t ohLength_ = 0, ohAt_ = 0;
-    std::vector<float> bleed_;
-    uint32_t bleedAt_ = 0, bleedDelay_ = 72;
+    // The overheads and the bleed bus as output-side rings: a piece adds each frame where it will be heard (now plus
+    // its delay), and the kit reads one slot a frame. Power-of-two sizes.
+    std::vector<float> ohL_, ohR_;
+    uint32_t ohMask_ = 0, ohAt_ = 0;
+    uint32_t bleedDelay_ = 72;
     float ring_[kRing] = {};  // the kit's raw sum, per sample (the sympathetic drive reads it kRing / 2 later)
     uint64_t clock_ = 0;
     uint32_t cellFrames_ = 0;  // frames since the last endCell
