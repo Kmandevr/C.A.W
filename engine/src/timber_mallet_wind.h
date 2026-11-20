@@ -28,7 +28,7 @@ struct Mallet {
     static constexpr uint32_t kEcoCap = 16, kNormalCap = 32, kHighCap = 32, kPool = kHighCap + 8;
     static constexpr bool kRestrike = true, kHeldSilenceEnds = true;
     static constexpr double kMinLife = 0.02, kSpread = 0.5;
-    enum P : uint32_t { kInstrument, kHardness, kDecay, kPosition, kDamping, kDampen, kMotor, kModelParams };
+    enum P : uint32_t { kInstrument, kHardness, kDecay, kPosition, kDamping, kDampen, kMotor, kSim, kNoises, kModelParams };
     static constexpr int kModes = 8;
 
     struct Voice : VoiceBase {
@@ -37,10 +37,17 @@ struct Mallet {
         bool damped = false;
         uint32_t clickLeft = 0;
         Noise noise;
+        // 1.1.2 Simulated: the mallet's contact, each mode's force input (its shape at the strike point over its
+        // modal mass and frequency) and its share of the sound (radiation), applied when the contact ends.
+        Contact contact;
+        F4 phi[2], place[2], radiate[2];
+        float contactPeak = 0;
     };
 
     int instrument = 0;
     double hardness = 0.5, decay = 1, position = 0.3, damping = 0.4, dampen = 0, motor = 0;
+    bool sim = false, contactOn = true;
+    double noises = kNoisesDefault;
     double sr = 48000, phase = 0;
 
     size_t allocBytes() const noexcept { return 0; }
@@ -54,7 +61,7 @@ struct Mallet {
         return true;
     }
     void reset() noexcept { clearPost(); }
-    void control(const double* p, const Shared&) noexcept {
+    void control(const double* p, const Shared& s) noexcept {
         instrument = static_cast<int>(clampd(p[kInstrument], 0, 5) + 0.5);
         hardness = clampd(p[kHardness], 0, 1);
         decay = clampd(p[kDecay], 0.25, 4);
@@ -62,6 +69,9 @@ struct Mallet {
         damping = clampd(p[kDamping], 0, 1);
         dampen = clampd(p[kDampen], 0, 1);
         motor = clampd(p[kMotor], 0, 10);
+        sim = p[kSim] >= 0.5;
+        noises = clampd(p[kNoises], 0, 1);
+        contactOn = s.quality != kQualityEco;  // Eco: 1.1.0's strike
     }
     struct Table {
         double ratio[kModes], weight[kModes], t60;
@@ -116,7 +126,66 @@ struct Mallet {
         }
         v.clickLeft = static_cast<uint32_t>(0.0008 * sr * hardness);
         v.noise.s = 0x9E37u + v.key;
+        v.contact.done = true;
+        if (sim && contactOn) strikeSim(v);
     }
+    // 1.1.2 Simulated: the bar is struck by a mallet head through a Hunt-Crossley contact (Hunt and Crossley, J.
+    // Appl. Mech. 42(2), 1975): the head (its mass the unit) arrives at the velocity's speed, the felt or rubber's
+    // stiffness sets the contact time (`hardness`: about 4 ms for yarn down to 0.25 ms for a hard plastic head, a
+    // little shorter the harder the blow, as Hertz's law has it), and the bar's modes feel the force through their
+    // shape at the strike point (`position`) over their modal mass and frequency. So a hard mallet's short contact
+    // excites the high modes, a soft one's long contact only the low ones, and the strike's brightness grows with
+    // velocity: no tilt is set by hand. The head's own knock (`noises`) is a small noise with the force.
+    // [Assumption] the modal masses are equal (four times the head's), not measured.
+    void strikeSim(Voice& v) noexcept {
+        const Table& t = table(instrument);
+        const double w0 = kTwoPi * v.hz;
+        for (int k = 0; k < kModes; ++k) {
+            const double r = t.ratio[k] / t.ratio[0];
+            const bool on = k < t.modes && v.hz * t.ratio[k] < 0.45 * sr;
+            const double place = on ? 0.3 + 0.7 * std::fabs(std::sin(kPi * (k + 1) * (0.1 + 0.4 * position))) : 0.0;
+            v.place[k / 4][k % 4] = static_cast<float>(place);
+            v.phi[k / 4][k % 4] = static_cast<float>(on ? place / (4.0 * w0 * r) / sr : 0.0);
+            v.radiate[k / 4][k % 4] = static_cast<float>(on ? t.weight[k] * r : 0.0);
+            v.zr[k / 4][k % 4] = 0.0f, v.zi[k / 4][k % 4] = 0.0f;
+        }
+        const double vel = v.velocity;
+        const double tc = 0.004 * detPow(16.0, -hardness);  // 4 ms .. 0.25 ms
+        const double v0 = 0.2 + 1.8 * vel;
+        v.contact.strike(static_cast<float>(v0), tc, 0.3 / v0, sr);  // lambda = 3 (1 - e) / 2 v0 for a restitution e = 0.8
+        v.contactPeak = 0;
+        v.clickLeft = 0;
+    }
+    // The contact's samples: the bar's displacement under the head is the modes' sum through their shapes.
+    CAW_TIMBER_NOINLINE uint32_t renderContact(Voice& v, float* out, uint32_t n) noexcept {
+        const int blocks = table(instrument).modes > 4 ? 2 : 1;
+        const float knock = static_cast<float>(0.002 * noises);
+        // The modes' displacements are scaled for the ear once the contact ends; until then the output uses them.
+        const float gain = static_cast<float>(kSimGain * (0.12 + 0.88 * v.velocity) / (0.2 + 1.8 * v.velocity));
+        uint32_t i = 0;
+        for (; i < n && !v.contact.done; ++i) {
+            float yb = 0;
+            for (int b = 0; b < blocks; ++b) {
+                const F4 d = v.place[b] * v.zi[b];
+                yb += d[0] + d[1] + d[2] + d[3];
+            }
+            const float f = v.contact.step(yb);
+            v.contactPeak = std::max(v.contactPeak, f);
+            float y = 0;
+            for (int b = 0; b < blocks; ++b) {
+                const F4 zr = v.zr[b] + v.phi[b] * f4(f);
+                const F4 r = v.c[b] * zr - v.s[b] * v.zi[b], im = v.s[b] * zr + v.c[b] * v.zi[b];
+                v.zr[b] = r, v.zi[b] = im;
+                const F4 o = v.radiate[b] * im;
+                y += o[0] + o[1] + o[2] + o[3];
+            }
+            out[i] = y * gain + knock * f * v.noise.next() / (1.0f + v.contactPeak);
+        }
+        if (v.contact.done)  // from here the modes ring as 1.1.0's, each already at its loudness
+            for (int b = 0; b < 2; ++b) v.zr[b] = v.zr[b] * v.radiate[b] * f4(gain), v.zi[b] = v.zi[b] * v.radiate[b] * f4(gain);
+        return i;
+    }
+    static constexpr double kSimGain = 3000.0;  // the modes' displacement to the 1.1.0 strike's level (measured)
     void release(Voice& v, const Shared& s) noexcept {
         if (dampen <= 0.0) return;
         v.damped = true;
@@ -129,6 +198,11 @@ struct Mallet {
             for (int k = 0; k < 4; ++k) v.zr[b][k] = flushf(v.zr[b][k]), v.zi[b][k] = flushf(v.zi[b][k]);
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
+        if (!v.contact.done) {  // Simulated, while the head touches (then the 1.1.0 loop, below)
+            const uint32_t i = renderContact(v, out, n);
+            if (i < n) render(v, out + i, n - i);
+            return;
+        }
         const int blocks = table(instrument).modes > 4 ? 2 : 1;
         for (uint32_t i = 0; i < n; ++i) {
             float y = 0;
@@ -450,7 +524,7 @@ struct Wind {
     // and Wijnands, JASA 99(3), 1996): the wave toward the bell travels faster where its pressure is high, so its
     // crests arrive early and it steepens with level (a read of the bore at a delay shortened by its own value).
     // Pad, key and valve clicks are half-sine forces into the bore at each note and slur (`noises`).
-    void renderSim(Voice& v, float* out, uint32_t n) noexcept {
+    CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
         static constexpr float kOut[4] = {0.5f, 0.25f, 0.45f, 0.45f};
         static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};

@@ -112,12 +112,13 @@ void epianoParams(fx::ParamTable& t) {
     t.num("tremolo", "Tremolo", 0.0, 0.0, 1.0).group = "epiano";
     t.expo("rate", "Tremolo rate", 4.0, 0.5, 12.0, "Hz").group = "epiano";
     t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "epiano";
+    simParams(t, "epiano");  // 1.1.2
 }
 const ModuleDescriptor& epianoDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<EPiano>(1, 0.12, 0.5, 0.1, CpuClass::Medium, &epianoParams);
     return d;
 }
-static_assert(EPiano::kModelParams == 8);
+static_assert(EPiano::kModelParams == 10);
 
 // ---------- Organ ----------
 constexpr std::string_view kPercs[] = {"Off", "2nd", "3rd"};
@@ -138,12 +139,13 @@ void organParams(fx::ParamTable& t) {
     t.num("click", "Key click", 0.3, 0.0, 1.0).group = "organ";
     t.num("drive", "Drive", 0.1, 0.0, 1.0).group = "organ";
     t.pick("rotary", "Rotary", 1.0, kRotaries).group = "organ";
+    simParams(t, "organ", false);  // 1.1.2: `click` is the contacts' hardness
 }
 const ModuleDescriptor& organDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Organ>(2, 0.01, 0.5, 0.1, CpuClass::Medium, &organParams);
     return d;
 }
-static_assert(Organ::kModelParams == 15);
+static_assert(Organ::kModelParams == 16);
 
 // ---------- Plucked ----------
 constexpr std::string_view kPlucked[] = {"Steel guitar", "Nylon guitar", "Harp", "Koto"};
@@ -154,12 +156,13 @@ void pluckParams(fx::ParamTable& t) {
     t.num("damping", "Damping", 0.0, 0.0, 1.0).group = "plucked";
     t.num("brightness", "Brightness", 0.5, 0.0, 1.0).group = "plucked";
     t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "plucked";
+    simParams(t, "plucked");  // 1.1.2
 }
 const ModuleDescriptor& pluckDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Pluck>(3, 0.15, 0.5, 0.12, CpuClass::Medium, &pluckParams);
     return d;
 }
-static_assert(Pluck::kModelParams == 6);
+static_assert(Pluck::kModelParams == 8);
 
 // ---------- Bowed ----------
 constexpr std::string_view kSections[] = {"Violin", "Viola", "Cello", "Bass"};
@@ -171,12 +174,13 @@ void bowedParams(fx::ParamTable& t) {
     t.num("vibrato", "Vibrato", 0.3, 0.0, 1.0).group = "bowed";
     t.expo("vib_rate", "Vibrato rate", 5.5, 2.0, 9.0, "Hz").group = "bowed";
     t.expo("attack", "Attack", 0.12, 0.005, 2.0, "s").group = "bowed";
+    simParams(t, "bowed");  // 1.1.2
 }
 const ModuleDescriptor& bowedDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Bowed>(4, 0.25, 0.6, 0.2, CpuClass::Medium, &bowedParams);
     return d;
 }
-static_assert(Bowed::kModelParams == 7);
+static_assert(Bowed::kModelParams == 9);
 
 // ---------- Mallets ----------
 constexpr std::string_view kMallets[] = {"Marimba", "Vibraphone", "Xylophone", "Glockenspiel", "Chimes", "Bell"};
@@ -188,12 +192,13 @@ void malletParams(fx::ParamTable& t) {
     t.num("damping", "High damping", 0.4, 0.0, 1.0).group = "mallets";
     t.num("dampen", "Key-up damper", 0.0, 0.0, 1.0).group = "mallets";
     t.num("motor", "Motor", 0.0, 0.0, 10.0, "Hz").group = "mallets";
+    simParams(t, "mallets");  // 1.1.2
 }
 const ModuleDescriptor& malletDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Mallet>(5, 0.3, 0.5, 0.15, CpuClass::Medium, &malletParams);
     return d;
 }
-static_assert(Mallet::kModelParams == 7);
+static_assert(Mallet::kModelParams == 9);
 
 // ---------- Winds ----------
 constexpr std::string_view kWinds[] = {"Clarinet", "Flute", "Sax", "Brass"};

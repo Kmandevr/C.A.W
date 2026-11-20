@@ -7,6 +7,14 @@
 
 #include "timber_dsp.h"
 
+// The Simulated paths are kept out of line where they sit beside a 1.1.0 loop, so the compiler's choices for that
+// loop (the engine builds with -fassociative-math) stay as they were and 1.1.0 presets render bit for bit.
+#if defined(_MSC_VER)
+#define CAW_TIMBER_NOINLINE __declspec(noinline)
+#else
+#define CAW_TIMBER_NOINLINE __attribute__((noinline))
+#endif
+
 namespace caw::timber {
 
 // The appended `sim` choice of every model but the piano (0 Classic: 1.1.0 bit for bit; 1 Simulated).
@@ -53,7 +61,7 @@ struct Contact {
         vel -= f * invMass * dt;
         y += vel * dt;
         if (left) --left;
-        if (left == 0 || (vel < 0 && comp <= 0 && y < surface - 1e-3f)) done = true, touching = false;
+        if (left == 0 || (vel < 0 && comp <= 0 && y < surface - 1e-4f)) done = true, touching = false;
         return f;
     }
 };
