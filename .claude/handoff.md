@@ -11,11 +11,11 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - 1.1.0-alpha.1 released with APK, Windows zip and update files. The owner's Benchmark after it: the stabilizer on, 0 xruns live, low-latency at 192 frames.
 - CI lessons: bits are per build. The drums compat test has tables for x86-64 Release, Arm64, Windows x64 and x86-64 Debug, each from 20bcb8b's own code. Cost tests run RUN_SERIAL. Carve, Mimic and Raven's files build strict-FP.
 
-## State (2026-11-20)
-- Merged on the session branch (pushed): the Raven echo fix (old choices stay in the 1.0 list for slots and project links), 1.1.1 spikes/UI load/heat (fix-spikes: capped tickers, layers, stabilizer by need and thermal, real-world Benchmark; API 45). Engine/app full tests NOT yet run on the merged branch.
-- Bits modes finished but NOT merged: branch caw-backup-bits-modes (worktree .claude/worktrees/bits-modes, cdd1300). Merge, build, ctest, app suite (fixture/goldens), then 1.1.1 bump, CHANGELOG, PR, CI, merge, release.
-- 1.1.2 design written (Hub docs/caw/sound-designs.md "1.1.2: realism"); its owner questions are unanswered (open-questions.md): piano default/budget, Yamaha design-around, Acoustic kit layout, scope.
-- Owner decisions pending from fix-spikes: the 60 fps device-motion cap; stabilizer thresholds 0.5/0.6/0.7 (tune from the next Benchmark).
+## State (2026-11-20, after 1.1.1)
+- 1.1.1 merged (#260) and its release dispatched. Main = 2a9934c.
+- **1.1.2 running** (worktrees from Main under .claude/worktrees): tim-piano (simulated piano), tim-models (flute, reeds, brass, bowed, plucked, mallets, EP, organ), rook-kits (Synth / Produced / Acoustic kits). Design: Hub docs/caw/sound-designs.md "1.1.2: realism"; answers: Hub decisions.md 2026-11-20. Back them up at each check-in: WIP snapshots to caw-backup-<name> (commit-tree with a temp index; never touch their files).
+- Then: merge (tim-piano first, then tim-models; Timber shares builtin_timber*.cpp), full tests, refresh fixture and goldens, 1.1.2 version + CHANGELOG, PR, CI, merge, release.
+- Follow-up: device motion cap should follow the Frame rate setting (decided; built as a fixed 60).
 
 ## Open (owner)
 - Branch cleanup: this session can't delete branches (the proxy refuses); the owner deletes merged ones on GitHub.
