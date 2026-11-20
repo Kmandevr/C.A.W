@@ -394,6 +394,31 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('Bitwise 1.1.1: OR and Freeze chips edit their masks, a step turns off, Key combines', (tester) async {
+    final (_, t) = await open(tester, 'org.caw.bits', 1);
+    await tester.tap(find.byKey(const ValueKey('bitwise-op-3')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bit-lane-15')));
+    await tester.pumpAndSettle();
+    expect(t.value('or').round(), 1 << 15);
+    await tester.tap(find.byKey(const ValueKey('bitwise-op-6')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bit-lane-14')));
+    await tester.pumpAndSettle();
+    expect(t.value('freeze').round(), 1 << 14);
+    await tester.ensureVisible(find.byKey(const ValueKey('bitwise-step-0')));
+    await tester.tap(find.byKey(const ValueKey('bitwise-step-0')));
+    await tester.pumpAndSettle();
+    expect(t.value('pattern').round(), 254);
+    await tester.ensureVisible(find.byKey(const ValueKey('bitwise-op-8')));
+    await tester.tap(find.byKey(const ValueKey('bitwise-op-8')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('bitwise-combine')));
+    await tester.pumpAndSettle();
+    expect(t.value('combine').round(), 1);
+    await close(tester);
+  });
+
   testWidgets('Delay modes: the picture drags time and feedback; a tap drags its pan', (tester) async {
     var (_, t) = await open(tester, 'org.caw.delay', 2, values: {'sync': 0});
     final time = t.value('time'), fb = t.value('feedback');
@@ -672,6 +697,14 @@ void main() {
     expect(painted.length, base.length);
     expect(painted.sublist(276), base.sublist(276));
     expect(irisPaintOf(painted)!.toSet(), {5});
+  });
+
+  test('Bitwise arithmetic 1.1.1: rotate, reverse and OR as the engine does them', () {
+    // 4 bits, 0.5 -> word 4 (0100): rotate 1 -> 1000 (-8, the sign), reverse the lowest 3 -> 0001, OR 0x1000 -> 0101.
+    expect(bitwiseSample(0.5, bits: 4, shift: 0, xor: 0, and: 0xffff, rotate: 1), closeTo(-8 / 7, 1e-9));
+    expect(bitwiseSample(0.5, bits: 4, shift: 0, xor: 0, and: 0xffff, reverse: 3), closeTo(1 / 7, 1e-9));
+    expect(bitwiseSample(0.5, bits: 4, shift: 0, xor: 0, and: 0xffff, or: 0x1000), closeTo(5 / 7, 1e-9));
+    expect(bitwiseSample(0, bits: 4, shift: 0, xor: 0, and: 0xffff, or: 0xffff), 0);
   });
 
   test('Bitwise arithmetic: plain quantiser at defaults, silence stays silence', () {
