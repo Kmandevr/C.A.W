@@ -324,6 +324,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
   target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
+  target_sources(caw_tests PRIVATE tests/timber_compat_test.cpp)  # 1.1.2: Timber's 1.1.0 presets render bit-identically (models other than the piano)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
