@@ -13,6 +13,7 @@
 #include "timber_keys.h"
 #include "timber_mallet_wind.h"
 #include "timber_piano.h"
+#include "timber_sim.h"
 #include "timber_strings.h"
 
 namespace caw::timber {
@@ -70,6 +71,16 @@ const ModuleDescriptor& modelDescriptor(uint32_t index, double release, double b
     m.capabilities = kCapabilityNotesIn | kCapabilityMidiIn;  // the sustain pedal and the mod wheel
     m.cpuClass = cpu;
     return m;
+}
+
+// ---------- 1.1.2: the simulated models' appended knobs (every model but the piano) ----------
+constexpr std::string_view kSimModes[] = {"Classic", "Simulated"};
+// `sim` (Classic plays as 1.1.0, bit for bit) and, unless the model has its own (the organ's key click),
+// `noises`: the mechanical noises, subtle by default, 1 close-miked.
+void simParams(fx::ParamTable& t, const char* group, bool noises = true) {
+    ParameterDescriptor& m = t.pick("sim", "Sim", kSimDefault, kSimModes);
+    m.group = group;
+    if (noises) t.num("noises", "Noises", kNoisesDefault, 0.0, 1.0).group = group;
 }
 
 // ---------- Piano ----------
@@ -195,12 +206,13 @@ void windParams(fx::ParamTable& t) {
     t.expo("vib_rate", "Vibrato rate", 5.0, 2.0, 9.0, "Hz").group = "winds";
     t.num("growl", "Growl", 0.0, 0.0, 1.0).group = "winds";
     t.expo("attack", "Attack", 0.04, 0.005, 2.0, "s").group = "winds";
+    simParams(t, "winds");  // 1.1.2
 }
 const ModuleDescriptor& windDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Wind>(6, 0.08, 0.5, 0.15, CpuClass::Medium, &windParams);
     return d;
 }
-static_assert(Wind::kModelParams == 8);
+static_assert(Wind::kModelParams == 10);
 
 template <class M, const ModuleDescriptor& (*D)(), int Index>
 ModuleProcessor* make() noexcept {

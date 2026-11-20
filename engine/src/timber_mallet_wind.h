@@ -9,6 +9,7 @@
 
 #include "caw/library/fastmath.hpp"
 #include "timber_core.h"
+#include "timber_sim.h"
 
 namespace caw::timber {
 
@@ -179,7 +180,7 @@ struct Wind {
     static constexpr uint32_t kEcoCap = 8, kNormalCap = 8, kHighCap = 8, kPool = 16 + 8;
     static constexpr bool kRestrike = true, kHeldSilenceEnds = false;
     static constexpr double kMinLife = 0.05, kSpread = 0.25;
-    enum P : uint32_t { kInstrument, kBreath, kNoise, kReed, kVibrato, kVibRate, kGrowl, kAttack, kModelParams };
+    enum P : uint32_t { kInstrument, kBreath, kNoise, kReed, kVibrato, kVibRate, kGrowl, kAttack, kSim, kNoises, kModelParams };
 
     struct Voice : VoiceBase {
         Line bore, jet;
@@ -190,10 +191,19 @@ struct Wind {
         float lipA1 = 0, lipA2 = 0, lipG = 0, lip1 = 0, lip2 = 0;
         Noise noise;
         double tunedPitch = -1, baseHz = 440;
+        // 1.1.2 Simulated: the tongue on the reed (1 closed), the jet's last flow and travel ramp, the sax's apex
+        // line length (the jet line serves it), the High reed's mass-spring, the pad clicks, the last turbulence.
+        float coneA = 0, apX = 0, apY = 0, tongue = 0, tongueStep = 0, q1 = 0, djStep = 0, djCur = 2, da = 2, reed1 = 0, reed2 = 0, turb = 0;
+        double clickPitch = -1;
+        Click click;
     };
 
     int instrument = 0;
     double breath = 0.6, noise = 0.15, reed = 0.5, vibrato = 0.2, vibRate = 5, growl = 0, attack = 0.04;
+    bool sim = false, steep = true, dynamicReed = false;
+    double noises = kNoisesDefault;
+    float reedA1 = 0, reedA2 = 0, reedG = 0;
+    float jetGain = 1.2f, jetDiff = 0.0f, jetOffset = 0.2f, jetRatio = 0.5f, boreLp = 0.3f, coneK = 3.0f, saxLp = 0.5f, lipOpen = 4.0f, lipFlow = 0.18f, lipRatio = 0.9f, lipMax = 6.0f, jetSharp = -3.0f;
     double sr = 48000, modWheel = 0;
     std::unique_ptr<float[]> memory;
     uint32_t lineLen = 0, count = 0;
@@ -231,6 +241,15 @@ struct Wind {
         growl = clampd(p[kGrowl], 0, 1);
         attack = clampd(p[kAttack], 0.005, 2);
         modWheel = s.modWheel;
+        sim = p[kSim] >= 0.5;
+        noises = clampd(p[kNoises], 0, 1);
+        steep = s.quality != kQualityEco;          // Eco: no brassy steepening
+        dynamicReed = s.quality == kQualityHigh;  // High: the reed as a mass-spring
+        if (dynamicReed) {  // the reed's own resonance (about 2.3 kHz, damped), unit gain at DC
+            const double w = kTwoPi * std::min(2300.0, 0.4 * sr) / sr, r = 0.86;
+            reedA1 = static_cast<float>(2.0 * r * std::cos(w)), reedA2 = static_cast<float>(-r * r);
+            reedG = 1.0f - reedA1 - reedA2;
+        }
     }
     // The measured pull of each kind's excitation on its pitch, as a period factor (timber_test checks the result).
     static double periodFactor(int instrument) noexcept {
@@ -247,23 +266,48 @@ struct Wind {
             if (pitch <= kKey[i]) return p[i - 1] + (p[i] - p[i - 1]) * (pitch - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);
         return p[4];
     }
+    // Simulated: each kind's period factor and its remaining pull at the five keys (cents), measured in timber_test.
+    static double simPeriod(int instrument) noexcept {
+        static constexpr double kF[4] = {1.0, 1.0, 1.0, 1.0};
+        return kF[instrument];
+    }
+    static double simPull(int instrument, double pitch) noexcept {
+        static constexpr double kKey[5] = {45, 50, 62, 74, 81};
+        static constexpr double kPull[4][5] = {{0, 0, 0, 1, 2}, {84, 63, 26, 12, 3}, {104, 65, 32, 19, 14}, {140, 106, 57, 35, 34}};
+        const double* p = kPull[instrument];
+        if (pitch <= kKey[0]) return p[0];
+        for (int i = 1; i < 5; ++i)
+            if (pitch <= kKey[i]) return p[i - 1] + (p[i] - p[i - 1]) * (pitch - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);
+        return p[4];
+    }
     void tune(Voice& v, double cents) noexcept {
         // Brass: the lips pull the pitch by a measured amount that grows down the range; it is aimed off by that.
         if (v.pitch != v.tunedPitch) {  // the note's own pitch, aimed off by its kind's pull (worked out once)
-            double aim = -residualPull(instrument, v.pitch);
-            if (instrument == 3) aim -= 6.0 - 3.4 * (clampd(v.pitch, 34.0, 100.0) - 62.0);
+            double aim = sim ? -simPull(instrument, v.pitch) : -residualPull(instrument, v.pitch);
+            if (instrument == 3 && !sim) aim -= 6.0 - 3.4 * (clampd(v.pitch, 34.0, 100.0) - 62.0);
             v.baseHz = noteHz(clampd(v.pitch, 34.0, 100.0) + aim / 100.0);
         }
         const double f0 = v.baseHz * lib::fastExp(cents * 5.776226504666211e-4);  // ln 2 / 1200
-        const double period = sr / f0 * periodFactor(instrument);
+        const double period = sr / f0 * (sim ? simPeriod(instrument) : periodFactor(instrument));
         // Clarinet and sax: half a period (closed at the reed, inverted at the bell). Flute: the model speaks at 1.5x
         // its bore's lowest mode, so the bore is 1.5 periods. Brass: the lips pick the bore's 2nd mode (2 periods).
         static constexpr double kBore[4] = {0.5, 1.5, 0.5, 2.0};
         const float cap = static_cast<float>(v.bore.mask - 4);
         v.d = std::min(cap, static_cast<float>(std::max(2.0, kBore[instrument] * period - 1.0)));
         v.dj = std::min(cap, static_cast<float>(std::max(2.0, v.d * (0.28 + 0.1 * reed))));
+        if (sim && instrument == 1) {  // an open-open pipe: a period round trip, both ends inverting (+1 in all)
+            v.d = std::min(cap, static_cast<float>(std::max(2.0, period * simPeriod(1) - 1.0)));
+            v.dj = std::min(cap, static_cast<float>(std::max(2.0, v.d * (jetRatio + 0.1 * (reed - 0.5)))));
+        }
+        if (sim && instrument == 2) {  // the cone: a period round trip less the closed end's and the bell's delays
+            const double w0 = kTwoPi * f0 / sr, K = 2.0, wc = coneK * w0;
+            const double a = (K - wc) / (K + wc);
+            v.coneA = static_cast<float>(a);
+            const double rest = period * simPeriod(2) - onePoleDelay(1.0 - saxLp, w0) - allpassDelay(-a, w0);
+            v.d = std::min(cap, static_cast<float>(std::max(2.0, rest)));
+        }
         if (instrument == 3) {  // the lips: a two-pole resonance at the note
-            const double w = kTwoPi * f0 * (0.92 + 0.02 * reed) / sr, r = 0.997;
+            const double w = kTwoPi * f0 * ((sim ? lipRatio : 0.92) + 0.02 * reed) / sr, r = 0.997;
             v.lipA1 = static_cast<float>(2.0 * r * std::cos(w)), v.lipA2 = static_cast<float>(-r * r);
             v.lipG = static_cast<float>(0.002 * std::sin(w) / 0.043);  // the same peak gain at every pitch
         }
@@ -281,9 +325,24 @@ struct Wind {
         v.noise.s = 0xB1ABu + 31u * v.key;
         v.tunedPitch = -1;
         tune(v, 0);
+        if (sim) {
+            // The tongue holds the reed (the lips, the flute's air) until the note's start, then leaves it in 4-12 ms;
+            // the key's pad (the valve) closes first, its click ringing in the new bore.
+            v.tongue = 1, v.tongueStep = -static_cast<float>(1.0 / ((0.012 - 0.008 * v.velocity) * sr));
+            v.q1 = v.djStep = v.reed1 = v.reed2 = v.turb = v.apX = v.apY = 0;
+            v.djCur = std::min(static_cast<float>(v.jet.mask - 4), v.dj * 2.5f);
+            padClick(v);
+        }
+    }
+    void padClick(Voice& v) noexcept {
+        v.clickPitch = v.pitch;
+        const double a = noises * (0.4 + 0.6 * v.velocity) * (instrument == 3 ? 0.12 : 0.3);
+        v.click.start(static_cast<float>(a), instrument == 3 ? 0.002 : 0.001, sr);
     }
     void release(Voice& v, const Shared& s) noexcept {
         v.envStep = -static_cast<float>(1.0 / std::max(1.0, std::max(0.01, s.release) * sr));
+        if (sim && s.release < 0.06)  // a short release is a tongued stop: the tongue back on the reed
+            v.tongueStep = static_cast<float>(1.0 / (std::max(0.004, s.release) * sr));
     }
     void voiceControl(Voice& v, const Shared&) noexcept {
         const double dt = kControlFrames / sr;
@@ -298,10 +357,23 @@ struct Wind {
         v.gStep = static_cast<float>((1.0 + amt * lib::fastSinCycles(v.growl) - v.g) / kControlFrames);
         v.lp = flushf(v.lp), v.dcx = flushf(v.dcx), v.dcy = flushf(v.dcy), v.ox = flushf(v.ox), v.oy = flushf(v.oy);
         v.lip1 = flushf(v.lip1), v.lip2 = flushf(v.lip2);
+        if (sim) {
+            v.apX = flushf(v.apX), v.apY = flushf(v.apY), v.q1 = flushf(v.q1), v.reed1 = flushf(v.reed1), v.reed2 = flushf(v.reed2);
+            if (std::fabs(v.pitch - v.clickPitch) >= 0.5) padClick(v);  // a slur to another note: its keys move
+            if (instrument == 1) {  // the jet's travel time from its speed, U = sqrt(2 p / rho): toward its value at the next point
+                const float p = std::max(0.16f, std::min(1.0f, v.env + v.envStep * kControlFrames) * pressureScale());
+                const float target = std::min(static_cast<float>(v.jet.mask - 4), v.dj / std::sqrt(p));
+                v.djStep = (std::max(2.0f, target) - v.djCur) / kControlFrames;
+            }
+        }
     }
     // Each kind speaks only in a window of mouth pressure (its excitation's own regime), so `breath` moves the
     // pressure within that window, and the velocity, poly pressure and mod wheel set the loudness.
     void render(Voice& v, float* out, uint32_t n) noexcept {
+        if (sim) {
+            renderSim(v, out, n);
+            return;
+        }
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
         static constexpr float kOut[4] = {0.5f, 0.2f, 0.45f, 0.8f};  // about level with each other
         static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
@@ -358,6 +430,130 @@ struct Wind {
             out[i] = o * loud * g * kOut[instrument];
         }
     }
+    // The mouth pressure against the window's middle (breath 0.5): 1 there.
+    float pressureScale() const noexcept { return static_cast<float>(0.5 + breath) / 1.0f; }
+
+    // ---------- 1.1.2 Simulated ----------
+    // Flute: the jet drive (Fletcher, JASA 60(2), 1976; Verge, Hirschberg and Causse, JASA 101(5), 1997): the jet
+    // leaves the flue at U = sqrt(2 p / rho) and travels to the labium at about U / 2, so its delay is the nominal
+    // one over sqrt(p) (a weak breath is slow: the attack's search; a strong one overblows); there the acoustic
+    // flow has deflected it, and the share of it entering the pipe is 1/2 (1 + tanh((eta - y0) / b)) (the jet
+    // offset y0 from `reed`); the pipe is driven by that flux's change. Breath turbulence (Verge et al.: amplitude
+    // as U^2) enters with the flux, so it pulses with the period (Chafe, ICMC 1995). The tongue starts each note.
+    // Clarinet and sax: the reed table (McIntyre, Schumacher and Woodhouse, JASA 74(5), 1983; Smith, ICMC 1986)
+    // with the tongue as a contact on the reed (a closed reed reflects all and passes no flow), turbulence as the
+    // flow through the reed, and at High the reed's own mass-spring resonance before the table. The sax's bore is
+    // a cone: the reed sits between a short apex line and the bell line (both inverting, as r p in a cone), so it
+    // sounds every harmonic (after Scavone's 1997 thesis, two waveguides of a truncated cone).
+    // Brass: the lips as a mass-spring valve (after Adachi and Sato, JASA 99(2), 1996, one outward-striking mass):
+    // its opening h = max(0, h0 + y), the flow h sqrt(|dp|) into the bore; brassiness (Hirschberg, Gilbert, Msallam
+    // and Wijnands, JASA 99(3), 1996): the wave toward the bell travels faster where its pressure is high, so its
+    // crests arrive early and it steepens with level (a read of the bore at a delay shortened by its own value).
+    // Pad, key and valve clicks are half-sine forces into the bore at each note and slur (`noises`).
+    void renderSim(Voice& v, float* out, uint32_t n) noexcept {
+        const float expr = static_cast<float>(std::max(v.pressure, modWheel));
+        static constexpr float kOut[4] = {0.5f, 0.25f, 0.45f, 0.45f};
+        static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
+        // The player blows harder for a louder note: the velocity and expression move the mouth pressure (so a
+        // brass note brightens with level), the rest of the loudness is the gain.
+        const float push = static_cast<float>(0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
+        const float base = (kLow[instrument] + kSpan[instrument] * static_cast<float>(breath)) * push;
+        const float loud = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
+        const float vibAm = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
+        const float turbAmt = static_cast<float>(0.5 * noise + 0.01);
+        const float slope = -static_cast<float>(0.19 + 0.06 * reed) / base;
+        const float y0 = static_cast<float>(jetOffset + 0.15 * (reed - 0.5));
+        const float ks = steep ? static_cast<float>(1.5 * sr / 48000.0) : 0.0f;
+        for (uint32_t i = 0; i < n; ++i) {
+            v.env = std::clamp(v.env + v.envStep, 0.0f, 1.0f);
+            v.tongue = std::clamp(v.tongue + v.tongueStep, 0.0f, 1.0f);
+            const float open = 1.0f - v.tongue;
+            const float pm = v.env * base * (1.0f + vibAm);
+            v.g += v.gStep;
+            const float nz = v.noise.next();
+            const float click = v.click.next();
+            float w, y;
+            switch (instrument) {
+                case 0: {  // clarinet
+                    const float b = v.bore.frac(v.d);
+                    v.lp += 0.5f * (b - v.lp);
+                    float dp = -0.95f * v.lp - pm;
+                    if (dynamicReed) {
+                        const float r2 = reedG * dp + reedA1 * v.reed1 + reedA2 * v.reed2;
+                        v.reed2 = v.reed1, v.reed1 = r2, dp = r2;
+                    }
+                    const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
+                    const float re = r + (1.0f - r) * v.tongue;
+                    const float flow = (1.0f - re) * (pm + dp);
+                    v.turb = turbAmt * flow * nz;
+                    w = re * (-0.95f * v.lp) + (1.0f - re) * pm + v.turb + click;
+                    y = w;
+                    break;
+                }
+                case 2: {  // sax: the cone
+                    const float a = v.bore.frac(v.d);
+                    v.lp += saxLp * (a - v.lp);
+                    const float h = -0.95f * v.lp;
+                    // The truncated cone's closed end: (a - z^-1) / (1 - a z^-1), -1 at low frequencies (as an apex)
+                    // and +1 at high ones (as a closed cylinder).
+                    const float ap0 = v.coneA * h - v.apX + v.coneA * v.apY;
+                    v.apX = h, v.apY = ap0;
+                    const float ap = ap0 - v.dcx + 0.995f * v.dcy;  // the bore passes no DC back (the mean flow leaves)
+                    v.dcx = ap0, v.dcy = ap;
+                    float dp = ap - pm;
+                    if (dynamicReed) {
+                        const float r2 = reedG * dp + reedA1 * v.reed1 + reedA2 * v.reed2;
+                        v.reed2 = v.reed1, v.reed1 = r2, dp = r2;
+                    }
+                    const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
+                    const float re = r + (1.0f - r) * v.tongue;
+                    const float flow = (1.0f - re) * (pm - ap);
+                    v.turb = turbAmt * flow * nz;
+                    w = re * ap + (1.0f - re) * pm + v.turb + click;
+                    y = w;
+                    break;
+                }
+                case 1: {  // flute
+                    const float b = v.bore.frac(v.d);
+                    v.lp += boreLp * (b - v.lp);
+                    float t = v.lp;
+                    const float d = t - v.dcx + 0.995f * v.dcy;
+                    v.dcx = t, v.dcy = d, t = d;
+                    v.djCur += v.djStep;
+                    const float eta = v.jet.frac(v.djCur);
+                    const float U = std::sqrt(std::max(0.0f, pm)) * open;
+                    v.jet.push(0.5f * t);
+                    const float q = 0.5f * U * (1.0f + softClip(jetSharp * (eta - y0)));  // the flux into the pipe
+                    const float drive = jetGain * (q - 0.5f * U) - jetDiff * (q - v.q1);
+                    v.q1 = q;
+                    v.turb = turbAmt * 0.6f * U * q * nz;  // turbulence ~ U^2, entering with the flux
+                    w = drive + 0.5f * t + v.turb + click;
+                    y = b;
+                    break;
+                }
+                default: {  // brass
+                    const float b0 = v.bore.frac(v.d);
+                    const float b = ks > 0.0f ? v.bore.frac(std::max(2.0f, v.d - ks * b0)) : b0;
+                    const float dp = pm - 0.85f * b;
+                    const float lip = v.lipG * dp + v.lipA1 * v.lip1 + v.lipA2 * v.lip2;
+                    v.lip2 = v.lip1, v.lip1 = lip;
+                    const float hgt = std::clamp(0.02f + lipOpen * lip, 0.0f, lipMax) * open;  // the lips part only so far
+                    const float flow = hgt * (dp > 0 ? std::sqrt(dp) : -std::sqrt(-dp));
+                    v.turb = turbAmt * 0.5f * std::fabs(flow) * nz;
+                    const float x = 0.85f * b + lipFlow * flow + v.turb + click;
+                    const float dd = x - v.dcx + 0.995f * v.dcy;
+                    v.dcx = x, v.dcy = dd;
+                    w = y = std::clamp(dd, -4.0f, 4.0f);
+                    break;
+                }
+            }
+            v.bore.push(w);
+            const float o = y - v.ox + 0.995f * v.oy;
+            v.ox = y, v.oy = o;
+            out[i] = o * loud * v.g * kOut[instrument];
+        }
+    }
+
     void post(float*, float*, uint32_t, const Shared&) noexcept {}
     bool postQuiet() const noexcept { return true; }
     void clearPost() noexcept {}
