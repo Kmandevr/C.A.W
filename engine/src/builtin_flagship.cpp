@@ -2251,22 +2251,38 @@ private:
         sinceControl_ = 0;
     }
 
-    // A parameter's value as a fraction 0..1 of its knob's travel (the curve's), and back.
-    double toNorm(uint32_t k, double v) const noexcept {
+    // A parameter's value as a fraction 0..1 of its knob's travel (the curve's, up to `top`: modTop), and back.
+    double toNorm(uint32_t k, double v, double top) const noexcept {
         const ParameterDescriptor& d = params().d[k];
         if (d.curve == ParameterCurve::Exponential) {
             const double r = params().logRange[k];
             return v <= d.minimum || r <= 0.0 ? 0.0 : detLog(v / d.minimum) / r;
         }
-        return d.maximum > d.minimum ? (v - d.minimum) / (d.maximum - d.minimum) : 0.0;
+        return top > d.minimum ? (v - d.minimum) / (top - d.minimum) : 0.0;
     }
-    double fromNorm(uint32_t k, double n) const noexcept {
+    double fromNorm(uint32_t k, double n, double top) const noexcept {
         const ParameterDescriptor& d = params().d[k];
         n = clampd(n, 0.0, 1.0);
         double v = d.curve == ParameterCurve::Exponential ? d.minimum * lib::fastExp(n * params().logRange[k])
-                                                          : d.minimum + n * (d.maximum - d.minimum);
+                                                          : d.minimum + n * (top - d.minimum);
         if (d.step > 0.0) v = d.minimum + std::floor((v - d.minimum) / d.step + 0.5) * d.step;
-        return clampd(v, d.minimum, d.maximum);
+        return clampd(v, d.minimum, top);
+    }
+    // The top of the travel a slot moves parameter k over from the knob's value v: its maximum, except for the three
+    // choice lists 1.1.0 appended to (the oscillators' tables and warps, the filters' types). A slot moved a choice by
+    // a fraction of its list, so a longer list would move a saved patch's knob to other choices (an LFO on a filter
+    // type swept into the new comb, phaser and diode models: 1.1.1). On a 1.0 choice the slot moves it in the 1.0
+    // list's steps and within it, as 1.0.9 did; on a 1.1.0 choice, over the whole list.
+    static double modTop(uint32_t k, double v, double maximum) noexcept {
+        double top = maximum;
+        if (k < kFltBase) {
+            const uint32_t p = k % kOscCount;
+            if (p == kOscTable) top = kUserTable;
+            else if (p == kOscWarp) top = kWarpFmOsc;
+        } else if (k < kFltRouting && (k - kFltBase) % kFltCount == kFltType) {
+            top = kFormant;
+        }
+        return v <= top ? top : maximum;
     }
 
     bool uses(uint32_t source) const noexcept { return (used_ >> source) & 1u; }
@@ -2309,7 +2325,9 @@ private:
         // filter that reads it keeps its coefficients.
         return t && offsets[t - 1] != 0.0 ? modulated(k, t - 1, offsets) : base_[k];
     }
-    CAW_NO_INLINE double modulated(uint32_t k, int t, const double* offsets) const noexcept { return fromNorm(k, targetNorm_[t] + offsets[t]); }
+    CAW_NO_INLINE double modulated(uint32_t k, int t, const double* offsets) const noexcept {
+        return fromNorm(k, targetNorm_[t] + offsets[t], targetTop_[t]);
+    }
 
     // Once per control period: the knobs, the matrix, every sounding voice's settings and the effects.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
@@ -2447,7 +2465,9 @@ private:
             if (src == kSrcNone || dst < 0 || amount == 0.0) continue;
             if (!targetOf_[dst]) {
                 targetParam_[targetCount_] = static_cast<uint32_t>(dst);
-                targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst]);
+                const double top = modTop(static_cast<uint32_t>(dst), base_[dst], params().d[dst].maximum);
+                targetTop_[targetCount_] = top;
+                targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst], top);
                 targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
             }
             const int via = clampi(base_[viaParam(s)], 0, kSourceCount - 1);
@@ -3323,6 +3343,7 @@ private:
     int lastQuality_ = -1;  // used_: bit s set when a slot listens to source s
     uint32_t targetParam_[kSlots] = {};
     double targetNorm_[kSlots] = {};
+    double targetTop_[kSlots] = {};  // the top of each one's travel (modTop)
     uint8_t targetOf_[kModTargets] = {};  // 1 + the parameter's index into targetParam_, 0 if no slot moves it
     double globalOffsets_[kSlots] = {};
 
