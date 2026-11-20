@@ -347,10 +347,12 @@ class _TimberVisualState extends State<TimberVisual> {
           onVerticalDragCancel: sideways ? null : () => _up(t),
           child: AnimatedSwitcher(
             duration: Motion.fade(Motion.standard, Motion.of(context)),
-            child: DeviceDisplay(key: ValueKey('timber-picture-$model'), builder: (context, f) => DevicePhase(
+            // At the picture's size (tight constraints): a motion frame's relayout stays inside it, not the page.
+            child: SizedBox.fromSize(key: ValueKey('timber-picture-$model'), size: size, child: DeviceDisplay(
+              builder: (context, f) => DevicePhase(
               builder: (context, seconds) => CustomPaint(size: size, painter: TimberPainter(TimberPicture(
                 model: model, value: t.value, frame: TimberFrame(f), seconds: seconds,
-                accent: scope.accent, secondary: style.secondary)))))),
+                accent: scope.accent, secondary: style.secondary))))))),
         );
       }),
     );

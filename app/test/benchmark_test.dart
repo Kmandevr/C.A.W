@@ -143,7 +143,6 @@ class FakeHost implements StressHost {
 }
 
 void main() {
-  setUpAll(() => StressRunner.cooldownScale = 0); // the pauses after hot steps: none in tests
 
   test('a Quick run plays every scenario, the three ramps, a profile and a live check, then sends H2 stress', () async {
     final fake = FakeStress();
@@ -227,7 +226,7 @@ void main() {
     }
   });
 
-  test('the plan runs coolest first: light and heavy, then live, then Extreme and the ramps with a pause after', () {
+  test('the plan runs light and heavy, then live, then Extreme and the ramps, with no pauses to cool', () async {
     final plan = stressPlan(StressPlanKind.full, _scenarios);
     int at(bool Function(StressStep s) f) => plan.indexWhere(f);
     final firstLive = at((s) => s.request.mode == StressMode.live);
@@ -239,13 +238,16 @@ void main() {
     expect(at((s) => s.request.scenario == 'tail_floor'), lessThan(firstLive)); // idle with the light ones
     expect(firstLive, lessThan(extreme));
     expect(extreme, lessThan(ramp));
-    expect(plan[extreme].cooldown, const Duration(seconds: stressCooldownSeconds));
-    expect(plan[ramp].cooldown, const Duration(seconds: stressCooldownSeconds));
-    expect(plan[heavy].cooldown, Duration.zero);
     expect(plan.last.request.kind, StressKind.sustained);
+    // Real-world numbers (owner, 2026-11-20): the runner never stops to let the device cool.
+    final runner = StressRunner(backend: FakeStress());
+    final phases = <String>{};
+    runner.addListener(() => phases.add(runner.phase));
+    await runner.run(StressPlanKind.quick);
+    expect(phases.where((p) => p.contains('cool')), isEmpty);
   });
 
-  test('a row keeps its spikes, its clock against the top and its load at the top clock', () async {
+  test('a row keeps its spikes and its clock (the JSON keeps the top-clock figure; the words say the measured one)', () async {
     final fake = FakeStress(extra: {'spikes': 3, 'core_khz_start': 1000000, 'core_khz_end': 1500000, 'core_max_khz': 2500000});
     final res = await StressRunner(backend: fake).run(StressPlanKind.quick);
     final row = res.scenarios.firstWhere((s) => s.id == 'song8' && !s.live);
@@ -258,7 +260,10 @@ void main() {
     expect(j['p99_pct_at_top_clock'], 20.0); // song8's p99 is 40% in the fake
     expect(j['started_at_s'], isA<double>());
     expect(scenarioNumbers(row), contains('3 one-off spikes'));
-    expect(scenarioNumbers(row), contains('50% of its top clock'));
+    // The words give the measured numbers and the clock as context, never the top-clock figure (owner, 2026-11-20).
+    expect(scenarioNumbers(row), contains('1.00–1.50 of 2.50 GHz'));
+    expect(scenarioNumbers(row), isNot(contains('top clock')));
+    expect(res.summary(), isNot(contains('top clock')));
     // An unknown clock leaves the scaled numbers out rather than guessing.
     final unknown = ScenarioResult(id: 'x', name: 'x', tier: 'normal', callbacks: 1, meanPct: 10, p99Pct: 20);
     expect(unknown.clockShare, isNull);

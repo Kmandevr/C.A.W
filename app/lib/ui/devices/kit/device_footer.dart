@@ -7,6 +7,7 @@ import '../../../engine/component_info.dart';
 import '../../../model/device_slot_audio.dart';
 import '../../../model/device_target.dart';
 import '../../arrange/knob.dart' show Taper;
+import '../../capped_ticker.dart';
 import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_scope.dart';
@@ -94,11 +95,18 @@ class SlotMeter extends StatefulWidget {
 }
 
 class _SlotMeterState extends State<SlotMeter> with SingleTickerProviderStateMixin {
-  late final _ticker = createTicker(_tick);
+  // 30 reads a second, and no frames asked for in between (1.1.1: a ticker on every frame kept a 120 Hz screen
+  // drawing at 120 for a meter that moves at 30).
+  late final _ticker = CappedTicker(_tick, maxHz: 30, vsync: this);
+
+  // Reads only while the engine sounds (AppState.sounding) or the bar is still falling: a stopped, silent engine
+  // has no level to show, and no ticks keep a still screen drawing.
+  late final _sounding = widget.target.state.sounding;
 
   @override
   void initState() {
     super.initState();
+    _sounding.addListener(_wake);
     _ticker.start();
   }
   final _level = ValueNotifier<double>(0); // 0..1 of the meter's −60..+6 dB span
@@ -107,14 +115,21 @@ class _SlotMeterState extends State<SlotMeter> with SingleTickerProviderStateMix
 
   @override
   void dispose() {
+    _sounding.removeListener(_wake);
     _ticker.dispose();
     _level.dispose();
     super.dispose();
   }
 
+  void _wake() {
+    if (_sounding.value && !_ticker.isActive) {
+      _last = Duration.zero;
+      _ticker.start();
+    }
+  }
+
   void _tick(Duration at) {
-    if (at - _last < const Duration(milliseconds: 33)) return;
-    final dt = (at - _last).inMicroseconds / 1e6;
+    final dt = math.min(0.25, (at - _last).inMicroseconds / 1e6);
     _last = at;
     final peak = DeviceSlotAudio.current?.outputPeak(widget.target);
     final pos = peak == null || peak <= 0 ? 0.0 : meterPosition(20 * math.log(peak) / math.ln10);
@@ -122,13 +137,15 @@ class _SlotMeterState extends State<SlotMeter> with SingleTickerProviderStateMix
     final fall = math.max(0.0, _level.value - dt * 20 / 66);
     _level.value = math.max(pos, fall);
     if (peak != null && peak >= 1.0 && !_clip) setState(() => _clip = true);
+    if (!_sounding.value && _level.value <= 0) _ticker.stop();
   }
 
   @override
   Widget build(BuildContext context) {
     final c = widget.color;
-    final bar = ValueListenableBuilder<double>(valueListenable: _level, builder: (context, v, _) => CustomPaint(
-      painter: _MeterPainter(v, c), size: Size.infinite));
+    // In a layer of its own: a level step repaints the bar, not the page around it.
+    final bar = RepaintBoundary(child: ValueListenableBuilder<double>(valueListenable: _level,
+      builder: (context, v, _) => CustomPaint(painter: _MeterPainter(v, c), size: Size.infinite)));
     if (widget.compact) return SizedBox(height: 6, child: bar);
     return Row(key: const ValueKey('device-meter'), children: [
       const Text('OUT', style: TextStyle(fontSize: 9, letterSpacing: 1, fontWeight: FontWeight.w800, color: Neon.dim)),

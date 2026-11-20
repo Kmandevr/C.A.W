@@ -4,9 +4,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../../../model/device_display.dart';
+import '../../capped_ticker.dart';
 import '../../motion.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
@@ -25,12 +25,14 @@ class DeviceDisplay extends StatelessWidget {
     final t = DeviceScope.of(context).target;
     // Off screen (an inline device scrolled away, a covered route) nothing listens, so nothing is polled.
     final live = TickerMode.valuesOf(context).enabled;
-    return ValueListenableBuilder<DeviceDisplayFrame?>(
+    // In a layer of its own (1.1.1): each display frame (about 30 a second while playing) repaints what it builds,
+    // not the page around it (its cards, knobs and curves were repainted with every frame).
+    return RepaintBoundary(child: ValueListenableBuilder<DeviceDisplayFrame?>(
         valueListenable: live ? DeviceDisplaySource.current.frames(t) : _idle, builder: (context, f, _) {
       // A display frame rebuilds this alone: say which part of the editor it is in (ParamWatch) before it reads.
       DeviceScope.onLookup?.call(context);
       return builder(context, f);
-    });
+    }));
   }
 }
 
@@ -106,8 +108,10 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(covariant _GridPainter o) => o.color != color;
 }
 
-/// Seconds since a visual's motion started, advanced on every frame the screen draws (beta plan B3: device motion
-/// at the display's rate, up to 240 Hz, not the display data's 30) while something moves: the song plays or the
+/// Seconds since a visual's motion started, advanced on the screen's frames at up to [maxHz] (beta plan B3 drew
+/// device motion at the display's rate, up to 240 Hz; 1.1.1 holds it to 60, [CappedTicker], since each motion frame
+/// repaints the whole visual and a phone at 120 Hz spent twice the raster and GPU work for motion the eye barely
+/// tells apart) while something moves: the song plays or the
 /// engine sounds ([sounding], the app's [AppState.sounding]: stopped and silent, the engine runs no component or
 /// modulator, so nothing it shows moves), or a finger or button is down on a device editor ([touching]). Otherwise
 /// it holds its time and asks for no frames, so a still screen gets Auto's idle drop (the battery rule); it goes on
@@ -120,11 +124,14 @@ class MotionClock {
   @visibleForTesting
   static bool hold = false;
 
+  /// The most motion frames a second (1.1.1).
+  static const double maxHz = 60;
+
   /// Fingers and buttons down on a device editor ([MotionTouch]).
   static final ValueNotifier<int> touching = ValueNotifier(0);
 
   final ValueNotifier<double> seconds = ValueNotifier(0);
-  Ticker? _ticker;
+  CappedTicker? _ticker;
   bool _on = false, _disposed = false;
   double _from = 0; // the time held when the ticker last stopped
   ValueListenable<bool>? _sounding;
@@ -132,7 +139,7 @@ class MotionClock {
   /// Whether motion is on (the time is the motion's, not a still one), moving or holding.
   bool get running => _on;
 
-  /// Whether it is moving now: asking for every frame.
+  /// Whether it is moving now: asking for frames (at up to [maxHz]).
   bool get ticking => _ticker != null;
 
   /// Turns motion on or off; off, it starts from 0 again next time. [sounding] says when the engine runs (null:
@@ -168,7 +175,8 @@ class MotionClock {
       return;
     }
     final from = _from;
-    _ticker = Ticker((elapsed) => seconds.value = from + elapsed.inMicroseconds / 1e6, debugLabel: 'MotionClock')
+    _ticker = CappedTicker((elapsed) => seconds.value = from + elapsed.inMicroseconds / 1e6, maxHz: maxHz,
+        debugLabel: 'MotionClock')
       ..start();
   }
 

@@ -338,6 +338,9 @@ class EditMotion {
   /// back to [standard] (the caller's own transition) or a fade.
   static Widget transition(Animation<double> animation, Widget child,
       {bool enter = true, bool fadeOnly = false, Widget Function(Animation<double>, Widget)? standard}) {
+    // In a layer of its own (1.1.1): a scale or slide moves the layer, so the child is painted once, not on every
+    // frame of the transition (a menu's 400 render objects were repainted 120 times a second while it opened).
+    child = RepaintBoundary(child: child);
     final kind = fadeOnly ? MotionTransition.fade : (enter ? feel.enter : feel.exit);
     final t = CurvedAnimation(parent: animation, curve: curveOr(Curves.easeOutCubic), reverseCurve: exitCurve);
     Widget fade(Widget c) => FadeTransition(opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut), child: c);

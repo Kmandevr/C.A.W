@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 44;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 45;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -358,6 +358,8 @@ class Bindings {
             'caw_audio_set_background'),
         audioTuneBuffer = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32), int Function(Pointer<Void>, int)>(
             'caw_audio_tune_buffer'),
+        audioSetThermal = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+            'caw_audio_set_thermal'),
         stop = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -617,6 +619,7 @@ class Bindings {
   final int Function(Pointer<Void>) audioBufferFrames;
   final int Function(Pointer<Void>, int) audioSetBackground;
   final int Function(Pointer<Void>, int) audioTuneBuffer;
+  final void Function(Pointer<Void>, int) audioSetThermal;
   final int Function(Pointer<Void>) releaseTouches;
   final int Function(Pointer<Void>) stop;
   final int Function(Pointer<Void>) clearOverload;

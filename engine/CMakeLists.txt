@@ -334,6 +334,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_reverb_modes_test.cpp)  # 1.1.0: the Reverb's Room, Plate, Spring, Gated and Reverse
   target_sources(caw_tests PRIVATE tests/fx_drive_modes_test.cpp)  # 1.1.0: the Drive's Amp, Pedal and Bands
   target_sources(caw_tests PRIVATE tests/fx_bits_bitwise_test.cpp)  # 1.1.0: Bit distortion's Bitwise
+  target_sources(caw_tests PRIVATE tests/fx_bits_glitch_test.cpp)  # 1.1.1: Bitwise glitch ops
   target_sources(caw_tests PRIVATE tests/fx_cab_test.cpp)  # 1.1.0: the Convolver merged, its Cab variant
   target_sources(caw_tests PRIVATE tests/fx_merged_eqfilter_test.cpp)  # FX consolidation part C: EQ, Filter
   target_sources(caw_tests PRIVATE tests/fx_eq_plume_test.cpp)  # 1.1.0: the EQ's dynamics, solo, Linear and Match; the Wah
@@ -527,10 +528,13 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
     add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
     add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
+    # 1.1.1: no Benchmark scenario has a callback whose work (its fastest of 3 runs) is over 3 times the median's: a
+    # rare costly block (a lazy build, a recompute on the audio thread) fails it; preemption does not.
+    add_test(NAME caw_spike_check COMMAND caw_bench 1 602 --runs 3 --check 3)
     # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
     # x64 runner then measured cases 10-20 % over their usual figure (Timber's organ 8,002 against 8,000 on PR #258).
     set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
-                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost
+                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost caw_spike_check
                          PROPERTIES RUN_SERIAL TRUE)
   endif()
 endif()

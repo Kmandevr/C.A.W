@@ -7,6 +7,7 @@
 #include "caw.h"
 #include "component_chain.h"
 #include "engine.h"
+#include "mod_route.h"
 #include "modulation_links.h"
 #include "project.h"
 #include "test.h"
@@ -409,4 +410,69 @@ TEST(modulation_is_project_sized_with_a_cpu_warning_and_a_safety_bound) {
     many += "]";
     CHECK(!parseProject(json(many), parsed, error));
     CHECK(error.find(std::to_string(kModSafetyLimit)) != std::string::npos);
+}
+
+namespace {
+
+// Flagship with filter 1's type at `type`, a held A2, and optionally Macro 1 (at 1) linked to the type by `amount`.
+std::vector<float> flagshipFilterType(double type, double amount) {
+    const std::string body =
+        R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nlength: 16\n---\n0 A2 12 1\n"}],
+        "layers":[{"id":"a","name":"A","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_type":)" +
+        std::to_string(type) + R"(,"flt1_cutoff":300,"flt1_resonance":0.6,"fx_reverb_on":0}}}])" +
+        (amount != 0.0 ? R"(,"modulators":[{"id":"mac","component":{"id":"org.caw.mod.macros","params":{"macro1":1}}}],
+        "modulation":[{"id":1,"source":"mac","target":{"type":"instrument","layer":"a","param":"flt1_type"},"amount":)" +
+                             std::to_string(amount) + "}]"
+                       : std::string()) +
+        "}";
+    ProjectSpec p;
+    std::string error;
+    if (!parseProject(body, p, error)) {
+        cawtest::fail(__FILE__, __LINE__, error);
+        return {};
+    }
+    Engine e(48000.0);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProjectOffline(p)));
+    e.play();
+    return run(e, 24000);
+}
+
+double nullDb(const std::vector<float>& a, const std::vector<float>& b) {
+    double d = 0.0, r = 0.0;
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) d += (a[i] - b[i]) * (a[i] - b[i]), r += b[i] * b[i];
+    return r > 0.0 ? 10.0 * std::log10(d / r + 1e-30) : 0.0;
+}
+
+}  // namespace
+
+// 1.1.1: a project link on a choice list a later release appended to (Flagship's tables, warps and filter types,
+// ParameterDescriptor::legacyChoiceCount) moves an old choice in the old list's steps and within it, as 1.0.9 did, so
+// an old project's LFO on its filter type stays out of 1.1.0's comb, phaser and diode models.
+TEST(a_project_link_moves_an_old_choice_within_the_old_list) {
+    // Ladder LP + 7/8 of the travel: Comb (7 of 1.0's 0..8), not Phaser (11 of 0..13).
+    CHECK(nullDb(flagshipFilterType(0, 7.0 / 8.0), flagshipFilterType(7, 0)) < -120.0);
+    // Comb pushed past the old list's end: Formant (8), not Diode LP.
+    CHECK(nullDb(flagshipFilterType(7, 0.6), flagshipFilterType(8, 0)) < -120.0);
+    // On a 1.1.0 choice, the whole list: Diode LP (9) + 4/13 is Vowel (13).
+    CHECK(nullDb(flagshipFilterType(9, 4.0 / 13.0), flagshipFilterType(13, 0)) < -120.0);
+
+    // The rule itself, for a held value (modulatedValue) and a held base under audio-rate offsets (denormalizeOffsets).
+    static const std::string_view labels[14] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"};
+    ParameterDescriptor p;
+    p.minimum = 0, p.maximum = 13, p.step = 1, p.choices = labels, p.choiceCount = 14, p.legacyChoiceCount = 9;
+    CHECK_EQ(modulationTop(p, 4), 8.0);
+    CHECK_EQ(modulationTop(p, 9), 13.0);
+    CHECK_EQ(modulatedValue(p, 0, 7.0 / 8.0), 7.0);
+    CHECK_EQ(modulatedValue(p, 7, 0.6), 8.0);
+    CHECK_EQ(modulatedValue(p, 8, -3.0 / 8.0), 5.0);
+    CHECK_EQ(modulatedValue(p, 9, 4.0 / 13.0), 13.0);
+    const float offsets[3] = {7.0f / 8.0f, 0.6f, -0.25f};
+    double out[3] = {};
+    denormalizeOffsets(p, normalizeParameter(p, 0), offsets, 3, out);
+    CHECK_EQ(out[0], 7.0);
+    CHECK_EQ(out[1], 5.0);
+    CHECK_EQ(out[2], 0.0);
+    p.legacyChoiceCount = 0;  // a list never appended to: the whole travel, as before
+    CHECK_EQ(modulatedValue(p, 0, 7.0 / 8.0), 11.0);
 }
