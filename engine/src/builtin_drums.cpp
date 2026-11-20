@@ -2,6 +2,7 @@
 #include "builtin_drums.h"
 #include "builtin_drums_layout.h"
 #include "component_samples.h"
+#include "drums_acoustic.h"
 #include "quality.h"
 
 #include <algorithm>
@@ -313,7 +314,10 @@ struct PadSettings {
     double swing = 0, humanize = 0, accent = 0, flam = 0, flamTime = 0.02, grooveAmt = 1;
     int swingGrid = 0, accentOn = 0, groove = 0;
     bool groovy = false;  // any of them on: a hit may move, repeat or be accented
-    bool used = false;  // any layer on and the pad not silent
+    // 1.1.2: an Acoustic pad's piece and articulation; a Layers pad's acoustic layer (0: none, else piece + 1)
+    int engine = kEngineLayers, acouPiece = 0, acouArtic = kArtHit, acouLayer = 0;
+    bool layers = false;  // any layer on
+    bool used = false;  // any layer on (or a piece to strike) and the pad not silent
     double raw[kPadParams] = {};  // the knobs these were worked out from
     bool valid = false;
     bool perFrame = false;          // some knob moved within the block it was read in (a ramp, a lane)
@@ -592,8 +596,13 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
     s.groove = clampi(v(kGroove), 0, kGrooveCount - 1);
     s.grooveAmt = clampd(v(kGrooveAmt), 0, 1);
     s.groovy = s.swing > 0.0 || s.humanize > 0.0 || s.accent > 0.0 || s.flam > 0.0 || (s.groove != kGrooveOff && s.grooveAmt > 0.0);
-    s.used = (s.bodyOn || s.subOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn || s.fmOn || s.physOn ||
-              s.texOn) && s.gain > 0.0;
+    s.layers = s.bodyOn || s.subOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn || s.fmOn || s.physOn ||
+               s.texOn;
+    s.engine = clampi(v(kEngine), kEngineLayers, kEngineAcoustic);
+    s.acouPiece = clampi(v(kAcouPiece), 0, static_cast<int>(kPieces) - 1);
+    s.acouArtic = clampi(v(kAcouArtic), 0, kArtCount - 1);
+    s.acouLayer = s.engine == kEngineLayers ? clampi(v(kAcouLayer), 0, static_cast<int>(kPieces)) : 0;
+    s.used = (s.engine == kEngineAcoustic || s.layers || s.acouLayer > 0) && s.gain > 0.0;
 }
 
 // ---------- A voice ----------
@@ -749,6 +758,7 @@ public:
             const size_t echo = static_cast<size_t>(2.0 * sr_) + 8;
             echoL_.assign(echo, 0.0f);
             echoR_.assign(echo, 0.0f);
+            if (!acoustic_.prepare(sr_)) return false;  // 1.1.2: the Acoustic kit's mic delay lines
         } catch (...) {
             return false;
         }
@@ -794,6 +804,8 @@ public:
         left_ = 0;
         clock_ = 0;
         lastPad_ = -1;
+        acoustic_.reset();
+        lastPedal_ = -1.0;
     }
 
     bool quiet() const noexcept override { return settled_ && !lanes_.any() && pending_ == 0; }
@@ -849,6 +861,7 @@ protected:
             case NoteMessageType::Pressure:
                 for (DrumVoice& v : voices_)
                     if (v.active && v.noteId == m.noteId) v.pressure = clampd(m.value, 0, 1);
+                if (acoustic_.awake()) acoustic_.pressure(m.noteId, m.value);  // a cymbal's grab (1.1.2)
                 break;
             default: break;
         }
@@ -924,6 +937,7 @@ private:
     }
 
     void noteOff(const NoteMessage& m, uint32_t at) noexcept {
+        if (acoustic_.awake()) acoustic_.release(m.noteId);  // a roll ends with its note (1.1.2)
         for (uint32_t i = 0; i < pending_; ++i)  // a held-back hit of this note: it ends as soon as it starts
             if (pendingHits_[i].m.noteId == m.noteId) pendingHits_[i].released = true;
         for (uint32_t i = 0; i < live_; ++i) {
@@ -1099,6 +1113,15 @@ private:
         PadSettings& s = settings_[pad];
         readPad(*block_, pad, at, s, blockCount_);
         if (!s.used) return false;
+        // 1.1.2: an Acoustic pad strikes its piece (and a Layers pad its acoustic layer, then plays its layers).
+        if (s.engine == kEngineAcoustic || s.acouLayer > 0) {
+            strikePiece(pad, s, m, at, accent);
+            if (s.engine == kEngineAcoustic || !s.layers) {
+                ++hits_[pad];
+                lastPad_ = static_cast<int>(pad);
+                return true;
+            }
+        }
         const double note = m.pitch;
         if (s.track && !grace) addHeld(pad, m.noteId, note);
         // Mono with pitch tracking: an overlapping note glides the sounding voice there (an 808 slide).
@@ -2021,6 +2044,26 @@ private:
             coefficients(v, settings_[pad], false);
         }
         prune();
+        // 1.1.2: the Acoustic kit's settings while it rings, and the hi-hat pedal (CC 4) always: closing it can
+        // sound the hat on its own (the chick).
+        const double pedal = parameterAt(b, acouParam(kAcouHatPedal), at, 1.0);
+        if (pedal != lastPedal_) {
+            const bool first = lastPedal_ < 0.0;
+            lastPedal_ = pedal;
+            if (!first || acoustic_.awake()) {
+                readAcousticKit(b, at);
+                for (uint32_t pc = 0; pc < kPieces; ++pc)
+                    if (clampi(parameterAt(b, pieceParam(pc, kPcKind), at, 0), 0, kPieceKindCount - 1) == kPieceHiHat) {
+                        readPiece(b, pc, at);
+                        if (acoustic_.wakeHat(pc) && settled_) settled_ = false;
+                    }
+            }
+        }
+        if (acoustic_.awake()) {
+            readAcousticKit(b, at);
+            for (uint32_t pc = 0; pc < kPieces; ++pc)
+                if (acoustic_.piece(pc).awake) readPiece(b, pc, at);
+        }
         // Kit effects' knobs.
         glueAmount_ = clampd(parameterAt(b, kGlue, at, 0), 0, 1);
         if (glueAmount_ > 0.0) {
@@ -2079,7 +2122,7 @@ private:
         echoMix_ = echo;
         // Nothing sounding and the room's tail below -100 dB for half a second: every state goes to exact zero and
         // the instrument says it is quiet (the host may skip it until the next note).
-        if (live_ == 0 && !settled_ && (!roomOn_ || roomQuiet_ >= static_cast<uint32_t>(sr_ * 0.5)) &&
+        if (live_ == 0 && !settled_ && !acoustic_.awake() && (!roomOn_ || roomQuiet_ >= static_cast<uint32_t>(sr_ * 0.5)) &&
             (!echoOn_ || echoQuiet_ >= static_cast<uint32_t>(sr_ * 0.5)) && pending_ == 0) {
             glue_.clear();
             kitDriveL_.clear();
@@ -2183,6 +2226,8 @@ private:
             padLevel_[pad] = peak;
             if (lane) toLane(*lane, laneL, laneR, at, n);
         }
+        if (acoustic_.awake()) acoustic_.process(busL[0], busR[0], roomOn_ ? send : nullptr, n);  // 1.1.2: the kit's pieces
+        const bool quietKit = live_ == 0 && !acoustic_.awake();
         if (lanes_.any()) {  // the host's per-note FX, then each lane into the output its hit plays to
             lanes_.run(at, n);
             for (uint32_t k = 0; k < lanes_.count(); ++k) {
@@ -2226,14 +2271,14 @@ private:
                 room_.process(wl, wr);
                 l += wl * roomMix_;
                 r += wr * roomMix_;
-                if (live_ == 0) roomQuiet_ = std::fabs(wl) + std::fabs(wr) < 1e-5f ? roomQuiet_ + 1 : 0;
+                if (quietKit) roomQuiet_ = std::fabs(wl) + std::fabs(wr) < 1e-5f ? roomQuiet_ + 1 : 0;
             }
             if (echoOn_) {  // the echo: a stereo delay, its feedback low-passed and crossed by `spread` (ping-pong)
                 double el, er;
                 echo(echoIn[k], el, er);
                 l += el * echoMix_;
                 r += er * echoMix_;
-                if (live_ == 0) echoQuiet_ = std::fabs(el) + std::fabs(er) < 1e-5 ? echoQuiet_ + 1 : 0;
+                if (quietKit) echoQuiet_ = std::fabs(el) + std::fabs(er) < 1e-5 ? echoQuiet_ + 1 : 0;
             }
             if (kitClip_ != 0) {
                 const int q = qualityNow(quality_);
@@ -2250,6 +2295,67 @@ private:
             left[k] = static_cast<float>(outL * volume_);
             right[k] = static_cast<float>(outR * volume_);
         }
+    }
+
+    // ---------- The Acoustic kit (1.1.2) ----------
+
+    double knob(const ProcessBlock& b, uint32_t index, uint32_t at) const noexcept {
+        return parameterAt(b, index, at, parameterTable()[index].defaultValue);
+    }
+    void readAcousticKit(const ProcessBlock& b, uint32_t at) noexcept {
+        acoustic::KitSettings k;
+        k.mics = clampi(knob(b, acouParam(kAcouMics), at), 0, kMicsOverheads);
+        k.stick = clampi(knob(b, acouParam(kAcouStick), at), 0, kStickMallets);
+        k.hatPedal = clampd(knob(b, acouParam(kAcouHatPedal), at), 0, 1);
+        k.sympathy = clampd(knob(b, acouParam(kAcouSympathy), at), 0, 1);
+        k.bleed = clampd(knob(b, acouParam(kAcouBleed), at), 0, 1);
+        k.noise = clampd(knob(b, acouParam(kAcouNoise), at), 0, 1);
+        k.level = clampd(knob(b, acouParam(kAcouLevel), at), -60, 12);
+        k.room = clampd(knob(b, acouParam(kAcouRoom), at), 0, 1);
+        acoustic_.setKit(k);
+    }
+    void readPiece(const ProcessBlock& b, uint32_t pc, uint32_t at) noexcept {
+        acoustic::PieceSettings s;
+        auto v = [&](uint32_t p) noexcept { return knob(b, pieceParam(pc, p), at); };
+        s.kind = clampi(v(kPcKind), 0, kPieceKindCount - 1);
+        s.size = clampd(v(kPcSize), 6, 26);
+        s.depth = clampd(v(kPcDepth), 3, 22);
+        s.tune = clampd(v(kPcTune), -24, 24);
+        s.reso = clampd(v(kPcReso), -12, 12);
+        s.head = clampi(v(kPcHead), 0, kHeadCalf);
+        s.shell = clampi(v(kPcShell), 0, kShellAcrylic);
+        s.damp = clampd(v(kPcDamp), 0, 1);
+        s.decay = clampd(v(kPcDecay), 0.25, 4);
+        s.glide = clampd(v(kPcGlide), 0, 1);
+        s.wires = clampd(v(kPcWires), 0, 1);
+        s.wireLevel = clampd(v(kPcWireLevel), -24, 12);
+        s.beater = clampi(v(kPcBeater), 0, kBeaterFleece);
+        s.port = clampi(v(kPcPort), 0, 1);
+        s.air = clampd(v(kPcAir), 0, 1);
+        s.alloy = clampi(v(kPcAlloy), 0, kAlloyDark);
+        s.swell = clampd(v(kPcSwell), 0, 1);
+        s.level = clampd(v(kPcLevel), -60, 12);
+        s.pan = clampd(v(kPcPan), -1, 1);
+        s.dist = clampd(v(kPcDist), 0.3, 2);
+        s.shellLevel = clampd(v(kPcShellLevel), 0, 1);
+        acoustic_.setPiece(pc, s, qualityNow(quality_));
+    }
+    // A stroke on the pad's piece: the velocity as the pad's level and accent scale it, the strike position
+    // varied per hit (rnd_pos) and the velocity (rnd_level), both seeded as the Layers pads' variation is.
+    void strikePiece(uint32_t pad, const PadSettings& s, const NoteMessage& m, uint32_t at, double accent) noexcept {
+        const uint32_t pc = static_cast<uint32_t>(s.engine == kEngineAcoustic ? s.acouPiece : s.acouLayer - 1);
+        const int artic = s.engine == kEngineAcoustic ? s.acouArtic : kArtHit;
+        readAcousticKit(*block_, at);
+        readPiece(*block_, pc, at);
+        double vel = clampd(m.velocity, 0, 1) * s.gain * (1.0 + accent) * (1.0 + 0.25 * s.rndLevel * random(pad, 5));
+        vel = clampd(vel, 0, 1.6);
+        const double jitter = s.rndPos * random(pad, 6);
+        if (settled_) {
+            left_ = 0;
+            settled_ = false;
+        }
+        roomQuiet_ = 0;
+        acoustic_.strike(pc, artic, vel, jitter, m.noteId);
     }
 
     // ---------- The voice bus (#127) ----------
@@ -2462,6 +2568,8 @@ private:
     // display
     DisplayBuffer<kDisplayFloats> display_;
     bool watched_ = true;  // a UI read the display lately (publish): hits capture their waveform
+    acoustic::AcousticKit acoustic_;  // 1.1.2: the Acoustic kit's 16 pieces
+    double lastPedal_ = -1.0;
     DisplayClock displayClock_;
     float frame_[kDisplayFloats] = {};
     float padLevel_[kPads] = {};

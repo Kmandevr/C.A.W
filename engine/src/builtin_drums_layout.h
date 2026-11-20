@@ -224,6 +224,9 @@ const Voice& defaultVoice(uint32_t pad);
 // Renders `voice` as pad A1 in Single mode: one hit at full velocity, mono, until silent or `seconds` (sample layer
 // off). Control thread (allocates).
 bool renderVoice(const Voice& voice, double sampleRate, double seconds, std::vector<float>& out);
+// The randomizer: `start` moved `amount` toward a seeded draw of type `type`'s ranges, level-matched by a render
+// unless `levelMatch` is false (pure).
+Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start, bool levelMatch = true);
 // The names of the drum types (choices of the `type` parameter).
 std::string_view typeName(int type);
 

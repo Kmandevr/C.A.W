@@ -26,6 +26,11 @@ struct KitSettings {
     bool operator==(const KitSettings&) const = default;
 };
 
+// A drum's batter (0,1) mode at tuning 0 (Hz): a kick near 58 Hz at 22", a snare near 190 Hz at 14", toms 1560 / size.
+constexpr double naturalHz(int kind, double size) noexcept {
+    return kind == kPieceKick ? 58.0 * 22.0 / size : (kind == kPieceSnare ? 190.0 * 14.0 / size : 1560.0 / size);
+}
+
 inline constexpr uint32_t kMaxModes = 128;  // per piece: a drum's batter + resonant head + shell, or a cymbal's plates
 inline constexpr uint32_t kMaxWires = 16;
 inline constexpr uint32_t kResoWireModes = 12;  // the snare-side head's modes the wires touch
@@ -134,6 +139,8 @@ public:
     void strike(uint32_t piece, int artic, double velocity, double jitter, uint32_t noteId) noexcept;
     void release(uint32_t noteId) noexcept;
     void pressure(uint32_t noteId, double value) noexcept;
+    // The pedal moved: a configured hi-hat wakes so its plates can meet (the chick). True if it woke.
+    bool wakeHat(uint32_t piece) noexcept;
     // Adds the kit's n (<= 16) frames into left/right (and its room send into `room`, when not null).
     void process(double* left, double* right, double* room, uint32_t n) noexcept;
     bool awake() const noexcept { return awake_ != 0; }

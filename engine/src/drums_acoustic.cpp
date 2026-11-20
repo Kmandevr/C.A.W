@@ -277,7 +277,7 @@ void AcousticKit::configureDrum(Piece& p) noexcept {
     p.seg[2] = {c.batter + c.reso, c.shell, 0, 1};
     const double size = clampd(s.size, 6, 26), depth = clampd(s.depth, 3, 22), a = size * 0.0254 * 0.5;
     // The batter's (0,1) mode: from the size and the tuning (Hz).
-    double f01 = s.kind == kPieceKick ? 58.0 * 22.0 / size : (s.kind == kPieceSnare ? 190.0 * 14.0 / size : 1560.0 / size);
+    double f01 = naturalHz(s.kind, size);
     f01 *= std::exp2(clampd(s.tune, -24, 24) / 12.0);
     const double fReso = f01 * std::exp2(clampd(s.reso, -12, 12) / 12.0) * (s.kind == kPieceSnare ? 1.45 : 1.0);
     // Heads: areal density (kg/m^2), decay and brightness.
@@ -662,10 +662,21 @@ void AcousticKit::strike(uint32_t piece, int artic, double velocity, double jitt
             p.hatV = -static_cast<float>(0.6 + 1.6 * vel);
             noiseBurst(0.025, 0.1, 0.4);
             break;
-        default: startStroke(p, s, vel, pos, a, false, false, 0); break;
+        default:
+            if (p.set.kind == kPieceHiHat) p.hatOverride = -1;  // a plain stroke: the hat is where the pedal holds it
+            startStroke(p, s, vel, pos, a, false, false, 0);
+            break;
     }
     if (p.set.kind == kPieceKick) noiseBurst(0.015, 0.25, 0.3);  // the pedal's mechanism
     if (kit_.stick == kStickBrushes && p.set.kind != kPieceKick && a != kArtChoke) noiseBurst(0.08, 0.5, 0.9);  // the swish
+}
+
+bool AcousticKit::wakeHat(uint32_t piece) noexcept {
+    if (piece >= kPieces) return false;
+    Piece& p = pieces_[piece];
+    if (!p.configured || p.set.kind != kPieceHiHat) return false;
+    if (!p.awake) wake(p);
+    return true;
 }
 
 void AcousticKit::release(uint32_t noteId) noexcept {
