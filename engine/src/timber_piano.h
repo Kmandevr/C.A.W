@@ -56,7 +56,7 @@ struct Piano {
         kSim, kTier, kNoise, kTouch, kAction, kGlide, kSympathy, kPhantom, kModelParams
     };
     static constexpr int kMaxDisp = 12, kSymp = 12;
-    static constexpr int kRes = 32;  // Simulated's register bank (pedal down)
+    static constexpr int kRes = 24;  // Simulated's register bank (pedal down)
 
     struct Voice : VoiceBase {
         int strings = 0, disp = 0;
@@ -90,6 +90,7 @@ struct Piano {
         double rest[3] = {};           // each string's loop delay past its integer part at the glide's zero
         double wrad[3] = {};
         float energy = 0, gE = 0, glideCents = 0, glideScale = 0;
+        uint32_t glideTick = 0;
         float landGap = 0, landGap0 = 0;  // the damper felt's distance from the string while it lands
         bool landing = false;
         float sympC = 0;                // a silently held key's share of the bridge sum (0: the voice was struck)
@@ -508,8 +509,9 @@ struct Piano {
     static constexpr float kGlideRef = 0.02f;      // the mean square of a loud bass string at its strike
     static constexpr float kResDrive = 0.004f, kBoardGain = 1.0f;
 
+    // Fewer stages than Classic: each one's coefficient is fitted to the curve, not set by hand.
     static int simStages(double key, int t) noexcept {
-        int m = key < 40 ? 8 : (key < 60 ? 6 : (key < 80 ? 4 : (key < 96 ? 3 : 2)));
+        int m = key < 40 ? 6 : (key < 60 ? 5 : (key < 80 ? 4 : (key < 96 ? 3 : 2)));
         if (t == kQualityEco) m = std::max(1, m / 2);
         else if (t == kQualityHigh) m = std::min(kMaxDisp, m + 2);
         return m;
@@ -553,8 +555,8 @@ struct Piano {
         board.design(sr, 1, 0);
         tuneRes();
     }
-    // The register bank: 32 modes on the stretched, inharmonic fundamentals of C2..G4 (every pitch class at least
-    // twice), each ringing for half its key's aftersound: what the undamped strings answer with the pedal down.
+    // The register bank: 24 modes on the stretched, inharmonic fundamentals of C2..B3 (every pitch class twice),
+    // each ringing for half its key's aftersound: what the undamped strings answer with the pedal down.
     double resStretch = -1;
     void tuneRes() noexcept {
         resStretch = stretch;
@@ -579,9 +581,17 @@ struct Piano {
         sympathy = clampd(p[kSympathy], 0, 1);
         phantomLevel = clampd(p[kPhantom], 0, 1);
         if (!simMode && !simActive) return;  // Classic: nothing of Simulated runs
+        gridFill = 0;
+        // The bridge sum is kept only while a silently held key listens; otherwise it is all zeros (a key pressed
+        // silently hears it from the next control block on, 0.3-0.7 ms later).
+        bool listening = false;
+        for (uint32_t k = 0; k < voiceCount; ++k) listening = listening || (voices[k].active && voices[k].sim && voices[k].sympC > 0);
+        if (!listening && bridgeNeeded)
+            for (float& b : bridge) b = 0;
+        bridgeNeeded = listening;
         board.design(sr, tier == kQualityEco ? 0 : (tier == kQualityHigh ? 2 : 1), character);
         if (stretch != resStretch) tuneRes();
-        res.groups = tier == kQualityEco ? kRes / 8 : kRes / 4;  // Eco: the lower 16
+        res.groups = tier == kQualityEco ? kRes / 8 : kRes / 4;  // Eco: the lower 12
         // On the control grid only (so any block size gives the same bits): the bank runs while the pedal feeds it
         // or it still rings.
         resRun = (pedal > 0 && resonance > 0) || resEnergy > 1e-14f;
@@ -592,6 +602,9 @@ struct Piano {
             if (simMode && noise > 0) pedalNoise(down);
         }
         board.flush(), res.flush(), keyFrame.flush(), trapwork.flush(), damperRail.flush();
+        // A bank that has rung out is cleared to exact zeros and skipped until it is struck again.
+        if (!keyFrameIdle && keyFrameEnergy < 1e-14f) keyFrame.clear(), keyFrameIdle = true;
+        if (!pedalIdle && pedalEnergy < 1e-14f && !trap.on && liftNext >= liftCount) trapwork.clear(), damperRail.clear(), pedalIdle = true;
         simActive = simMode || !simQuiet;
     }
     // The trapwork's wooden thump, and the dampers leaving (or meeting) the strings: a seeded spread of small
@@ -747,6 +760,7 @@ struct Piano {
         v.finger.start(0.3 + 1.5 * vel, 1.0e7, 0.2, 0.008);
         v.finger.on = false;
         v.energy = v.gE = 0;
+        v.glideTick = 0;
         v.glideScale = (tier == kQualityEco || key >= 72) ? 0.0f : static_cast<float>(glide * 10.0 * detPow((72.0 - key) / 51.0, 1.5));
         v.landing = false, v.landGap = v.landGap0 = 0;
         // Struck strings drive the bridge; strings held down without a strike listen to it. So no string both drives
@@ -758,7 +772,7 @@ struct Piano {
             const double fl2 = psim::longitudinalHz(key);
             v.phantom[0].set(fl2, 0.6, sr), v.phantom[0].clear();
             v.phantom[1].set(std::min(2.0 * fl2, 0.45 * sr), 0.4, sr), v.phantom[1].clear();
-            v.phantomGain = static_cast<float>(phantomLevel * 0.6);
+            v.phantomGain = static_cast<float>(phantomLevel * 0.04);
         }
         static constexpr float kStrike[3] = {1.0f, 0.72f, 0.5f};
         for (int k = 0; k < 3; ++k) v.strike[k] = k < v.strings ? kStrike[k] : 0.0f;
@@ -773,13 +787,16 @@ struct Piano {
         if (std::fabs(v.pitch - v.tunedPitch) > 1e-4) tuneSim(v), v.dampedFor = -1;
         if (s.release != v.dampedFor) dampedLoss(v, s.release), v.dampedFor = s.release;
         // The glide: the pitch offset follows the string's energy (a running mean square), at control rate.
-        if (v.glideScale > 0) {
-            const float E = v.energy * (1.0f / kControlFrames);
-            v.gE += 0.3f * (E - v.gE);
+        // Every fourth control block (1.3 ms at 48 kHz), in steps of at least 0.1 cent: a glide lasts seconds.
+        if (v.glideScale > 0 && (++v.glideTick & 3u) == 0) {
+            const float E = v.energy * (1.0f / (4 * kControlFrames));
+            v.gE += 0.6f * (E - v.gE);
             const float cents = v.glideScale * std::min(3.0f, v.gE / kGlideRef);
-            if (std::fabs(cents - v.glideCents) > 0.03f) v.glideCents = cents, applyGlide(v);
+            if (std::fabs(cents - v.glideCents) > 0.1f) v.glideCents = cents, applyGlide(v);
+            v.energy = 0;
+        } else if (v.glideScale <= 0) {
+            v.energy = 0;
         }
-        v.energy = 0;
         // The dampers: a felt lands over about 18 ms (the loss rises along it; the buzz is the contact with the
         // string's own motion), and lifts in about 4 ms.
         const float target = (!v.held && v.hasDamper) ? static_cast<float>(1.0 - pedal) : 0.0f;
@@ -821,7 +838,11 @@ struct Piano {
     // in a loop's main and remainder bodies).
     void renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexcept;
     void postSim(float* l, float* r, uint32_t n, const Shared& s) noexcept;
-    float resEnergy = 0;  // the register bank's energy at the end of the last block (postSim)
+    float resEnergy = 0, keyFrameEnergy = 0, pedalEnergy = 0;  // the banks' energy at the end of the last block (postSim)
+    bool keyFrameIdle = true, pedalIdle = true;
+    uint32_t gridFill = 0;  // frames postSim has seen since the last control point
+    bool bridgeNeeded = false;  // a silently held key is listening (else the bridge sum is not kept)
+    float gridPeak = 0;
 
     void clearSim() noexcept {
         board.clear(), res.clear(), keyFrame.clear(), trapwork.clear(), damperRail.clear();
@@ -829,7 +850,9 @@ struct Piano {
         liftCount = liftNext = 0;
         for (uint32_t i = 0; i < kControlFrames; ++i) busBoard[i] = busFrame[i] = busBridge[i] = 0;
         for (float& b : bridge) b = 0;
-        simPeak = 0, resEnergy = 0;
+        simPeak = gridPeak = 0, resEnergy = keyFrameEnergy = pedalEnergy = 0;
+        gridFill = 0;
+        keyFrameIdle = pedalIdle = true;
         simQuiet = true;
         simActive = false;
     }

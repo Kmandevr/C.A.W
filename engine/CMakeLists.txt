@@ -485,6 +485,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
+  target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)

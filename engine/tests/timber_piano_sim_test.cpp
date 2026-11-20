@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "presets.h"
 #include "test.h"
 #include "timber_core.h"
 #include "timber_harness.h"
@@ -420,4 +421,24 @@ TEST(timber_piano_simulated_matches_its_reference_render) {
                               {{0.4, 64, 1.0}, {0.8, 64, 0.0}});
         CHECK_REFERENCE(refs, "timber_piano_simulated_tier" + std::to_string(tier), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
     }
+}
+
+TEST(timber_piano_has_a_dozen_simulated_presets_that_play) {
+    int count = 0;
+    for (const BuiltinPreset& b : builtinPresets(kTimber)) {
+        bool piano = false, simulated = false;
+        for (const auto& [id, x] : b.values) piano = piano || (id == fx::kVariantParam && x == 0), simulated = simulated || (id == "sim" && x == 1);
+        if (!piano || !simulated) continue;
+        ++count;
+        Values v;
+        for (const auto& [id, x] : b.values) v.emplace_back(std::string(id), x);
+        auto p = make(v);
+        const std::vector<float> m = play(*p, v, {{0.0, 0.4, 48, 0.8}, {0.05, 0.5, 64, 0.6}, {0.1, 0.6, 79, 0.7}}, 0.8).mono();
+        const double l = rmsDb(m, 0, m.size());
+        bool finite = true;
+        for (float x : m) finite = finite && std::isfinite(x);
+        if (verbose()) std::printf("%s: %.1f dB\n", std::string(b.name).c_str(), l);
+        CHECK(finite && l > -45 && l < -6);
+    }
+    CHECK(count >= 12);
 }

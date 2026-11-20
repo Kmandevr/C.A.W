@@ -192,7 +192,7 @@ inline float fitDispersion(double f1, double B, int stages, double sr) noexcept 
         return e;
     };
     double lo = -0.97, hi = -0.0001;
-    for (int it = 0; it < 48; ++it) {
+    for (int it = 0; it < 36; ++it) {
         const double a = hi - (hi - lo) * 0.6180339887, b = lo + (hi - lo) * 0.6180339887;
         if (err(a) < err(b)) hi = b;
         else lo = a;
