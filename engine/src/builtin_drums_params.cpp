@@ -1,4 +1,4 @@
-// org.caw.drums' parameter table: 24 kit-wide parameters, then 162 per pad for 64 pads, each tagged with its group.
+// org.caw.drums' parameter table: the kit-wide parameters, 217 per pad for 64 pads, then the Acoustic kit (its settings and 16 pieces), each tagged with its group.
 #include "builtin_drums_layout.h"
 
 #include <cmath>
@@ -61,6 +61,26 @@ constexpr std::string_view kSwingGrids[] = {"1/16", "1/8"};
 constexpr std::string_view kAccentOns[] = {"Beats", "Bar starts", "Off-beats", "Loud hits"};
 constexpr std::string_view kGrooves[] = {"Off", "Shuffle", "Laid back", "Gallop", "Broken", "Half-time"};
 constexpr std::string_view kEchoSyncs[] = {"Free", "1/16", "1/8", "1/8 dotted", "1/4", "1/8 triplet"};
+// 1.1.2
+constexpr std::string_view kEngines[] = {"Layers", "Acoustic"};
+constexpr std::string_view kPieceNames[] = {"Piece 1", "Piece 2",  "Piece 3",  "Piece 4",  "Piece 5",  "Piece 6",
+                                            "Piece 7", "Piece 8",  "Piece 9",  "Piece 10", "Piece 11", "Piece 12",
+                                            "Piece 13", "Piece 14", "Piece 15", "Piece 16"};
+constexpr std::string_view kLayerPieces[] = {"Off",      "Piece 1",  "Piece 2",  "Piece 3",  "Piece 4",  "Piece 5",
+                                             "Piece 6",  "Piece 7",  "Piece 8",  "Piece 9",  "Piece 10", "Piece 11",
+                                             "Piece 12", "Piece 13", "Piece 14", "Piece 15", "Piece 16"};
+constexpr std::string_view kArtics[] = {"Hit", "Off-centre", "Edge", "Bell", "Rimshot", "Cross-stick", "Rim click",
+                                        "Flam", "Roll", "Buzz", "Choke", "Closed", "Open", "Foot"};
+static_assert(sizeof(kArtics) / sizeof(kArtics[0]) == kArtCount);
+constexpr std::string_view kKitKinds[] = {"Custom", "Synth", "Produced", "Acoustic"};
+constexpr std::string_view kMicSetups[] = {"Dry close", "Studio", "Room", "Overheads"};
+constexpr std::string_view kSticks[] = {"Sticks", "Hot rods", "Brushes", "Mallets"};
+constexpr std::string_view kPieceKinds[] = {"Off", "Kick", "Snare", "Tom", "Hi-hat", "Crash", "Ride", "Splash", "China"};
+static_assert(sizeof(kPieceKinds) / sizeof(kPieceKinds[0]) == kPieceKindCount);
+constexpr std::string_view kHeads[] = {"Coated", "Clear", "Coated 2-ply", "Clear 2-ply", "Calfskin"};
+constexpr std::string_view kShells[] = {"Maple", "Birch", "Mahogany", "Oak", "Steel", "Brass", "Acrylic"};
+constexpr std::string_view kAlloys[] = {"B20 bronze", "B8 bronze", "Brass", "Dark (lathed)"};
+constexpr std::string_view kBeaters[] = {"Felt", "Plastic", "Wood", "Fleece"};
 
 // The note choices: Auto, Off, Any other, then every MIDI note (C4 = 60).
 struct NoteLabels {
@@ -334,6 +354,55 @@ const Spec* padSpecs() {
         {"flam_time", "Flam time", "groove", Kind::Exp, 0.005, 0.06, 0.02, "s"},
         CHOICE("groove", "Groove", "groove", kGrooveOff, kGrooves),
         {"groove_amt", "Groove amount", "groove", Kind::Num, 0, 1, 1, {}},
+
+        CHOICE("engine", "Engine", "acou", kEngineLayers, kEngines),
+        CHOICE("acou_piece", "Piece", "acou", 0, kPieceNames),
+        CHOICE("acou_artic", "Articulation", "acou", kArtHit, kArtics),
+        CHOICE("acou_layer", "Acoustic layer", "acou", 0, kLayerPieces),
+    };
+    return specs;
+}
+
+// The Acoustic kit's settings ("acou_<suffix>", the kit kind "kit_kind").
+const Spec* acouSpecs() {
+    static const Spec specs[kAcouCount] = {
+        CHOICE("kit_kind", "Kit kind", "kind", kKitCustom, kKitKinds),
+        CHOICE("acou_mics", "Mics", "acoustic", kMicsStudio, kMicSetups),
+        CHOICE("acou_stick", "Sticks", "acoustic", kStickSticks, kSticks),
+        {"acou_hat_pedal", "Hi-hat pedal", "acoustic", Kind::Num, 0, 1, 1, {}},
+        {"acou_sympathy", "Sympathetic ring", "acoustic", Kind::Num, 0, 1, 0.5, {}},
+        {"acou_bleed", "Mic bleed", "acoustic", Kind::Num, 0, 1, 0.5, {}},
+        {"acou_noise", "Mechanical noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
+        {"acou_level", "Acoustic level", "acoustic", Kind::Num, -60, 12, 0, "dB"},
+        {"acou_room", "Room mic", "acoustic", Kind::Num, 0, 1, 0.3, {}},
+    };
+    return specs;
+}
+
+// One piece's parameters ("pc<n>_<suffix>").
+const Spec* pieceSpecs() {
+    static const Spec specs[kPieceParams] = {
+        CHOICE("kind", "Kind", "piece", kPieceOff, kPieceKinds),
+        {"size", "Size", "piece", Kind::Num, 6, 26, 14, "in"},
+        {"depth", "Depth", "piece", Kind::Num, 3, 22, 6.5, "in"},
+        {"tune", "Tuning", "piece", Kind::Num, -24, 24, 0, "st"},
+        {"reso", "Resonant head", "piece", Kind::Num, -12, 12, 0, "st"},
+        CHOICE("head", "Heads", "piece", kHeadCoated, kHeads),
+        CHOICE("shell", "Shell", "piece", kShellMaple, kShells),
+        {"damp", "Damping", "piece", Kind::Num, 0, 1, 0.2, {}},
+        {"decay", "Decay", "piece", Kind::Exp, 0.25, 4, 1, {}},
+        {"glide", "Pitch glide", "piece", Kind::Num, 0, 1, 0.5, {}},
+        {"wires", "Snare wires", "piece", Kind::Num, 0, 1, 0.6, {}},
+        {"wire_level", "Wire level", "piece", Kind::Num, -24, 12, 0, "dB"},
+        CHOICE("beater", "Beater", "piece", kBeaterFelt, kBeaters),
+        CHOICE("port", "Port", "piece", 0, kOffOn),
+        {"air", "Air loading", "piece", Kind::Num, 0, 1, 1, {}},
+        CHOICE("alloy", "Alloy", "piece", kAlloyB20, kAlloys),
+        {"swell", "Swell", "piece", Kind::Num, 0, 1, 0.5, {}},
+        {"level", "Level", "piece", Kind::Num, -60, 12, 0, "dB"},
+        {"pan", "Position", "piece", Kind::Num, -1, 1, 0, {}},
+        {"dist", "Distance to overheads", "piece", Kind::Num, 0.3, 2, 1, "m"},
+        {"shell_level", "Shell ring", "piece", Kind::Num, 0, 1, 0.5, {}},
     };
     return specs;
 }
@@ -430,6 +499,24 @@ struct Table {
                 p.choices = k == kNote ? noteLabels().view : s[k].choices;
             }
         }
+        const Spec* a = acouSpecs();
+        for (uint32_t k = 0; k < kAcouCount; ++k) {
+            fill(d[acouParam(k)], a[k], a[k].suffix, a[k].name, keep("kit/" + std::string(a[k].layer)), a[k].def);
+            d[acouParam(k)].choices = a[k].choices;
+        }
+        d[acouParam(kKitKind)].automatable = false;  // which builder made the kit: metadata, not sound
+        d[acouParam(kKitKind)].modulatable = false;
+        d[acouParam(kKitKind)].midiMappable = false;
+        const Spec* pc = pieceSpecs();
+        for (uint32_t piece = 0; piece < kPieces; ++piece) {
+            const std::string id = "pc" + std::to_string(piece + 1), name = "Piece " + std::to_string(piece + 1);
+            for (uint32_t k = 0; k < kPieceParams; ++k) {
+                ParameterDescriptor& p = d[pieceParam(piece, k)];
+                fill(p, pc[k], keep(id + "_" + std::string(pc[k].suffix)), keep(name + " " + std::string(pc[k].name)),
+                     keep("kit/" + id), pc[k].def);
+                p.choices = pc[k].choices;
+            }
+        }
         for (uint32_t k = 0; k < kParamCount; ++k) index.emplace(d[k].id, static_cast<int>(k));
     }
 };
@@ -463,6 +550,39 @@ std::string_view padParamSuffix(uint32_t p) { return p < kPadParams ? padSpecs()
 const ParameterDescriptor& padParamDescriptor(uint32_t pad, uint32_t p) { return table().d[padParam(pad, p)]; }
 
 const ParameterDescriptor* parameterTable() { return table().d; }
+
+std::string_view acouParamSuffix(uint32_t p) { return p < kAcouCount ? acouSpecs()[p].suffix : std::string_view{}; }
+std::string_view pieceParamSuffix(uint32_t p) { return p < kPieceParams ? pieceSpecs()[p].suffix : std::string_view{}; }
+
+bool articulationApplies(int kind, int a) noexcept {
+    switch (kind) {
+        case kPieceKick: return a == kArtHit || a == kArtOffCenter || a == kArtFlam || a == kArtChoke || a == kArtClosed;
+        case kPieceSnare:
+        case kPieceTom:
+            return a == kArtHit || a == kArtOffCenter || a == kArtEdge || a == kArtRimshot || a == kArtCrossStick ||
+                   a == kArtRimClick || a == kArtFlam || a == kArtRoll || a == kArtBuzz || a == kArtChoke || a == kArtClosed;
+        case kPieceHiHat:
+            return a == kArtHit || a == kArtEdge || a == kArtBell || a == kArtFlam || a == kArtClosed || a == kArtOpen ||
+                   a == kArtFoot;
+        case kPieceCrash:
+        case kPieceRide:
+        case kPieceSplash:
+        case kPieceChina:
+            return a == kArtHit || a == kArtEdge || a == kArtBell || a == kArtFlam || a == kArtRoll || a == kArtChoke;
+        default: return false;
+    }
+}
+
+int articulationFor(int kind, int a) noexcept {
+    if (a < 0 || a >= kArtCount) a = kArtHit;
+    if (articulationApplies(kind, a)) return a;
+    // The nearest one the piece takes: a rim stroke on a cymbal is its edge, a bell on a drum its centre...
+    static constexpr int kNear[kArtCount] = {kArtHit,  kArtHit,  kArtOffCenter, kArtHit,  kArtEdge, kArtEdge, kArtEdge,
+                                             kArtHit,  kArtFlam, kArtRoll,      kArtClosed, kArtHit, kArtHit, kArtClosed};
+    const int b = kNear[a];
+    if (articulationApplies(kind, b)) return b;
+    return kArtHit;
+}
 
 int padParamIndex(std::string_view suffix) {
     static const std::unordered_map<std::string_view, int> m = [] {
@@ -550,8 +670,32 @@ const std::vector<NeedRule>& needs() {
         add(kAccentOn, {nonzero(kAccent)});
         add(kFlamTime, {nonzero(kFlam)});
         add(kGrooveAmt, {in(kGroove, {1, 2, 3, 4, 5})});
+        // 1.1.2: an Acoustic pad's piece and articulation need the engine; the acoustic layer is a Layers pad's.
+        add(kAcouPiece, {in(kEngine, {kEngineAcoustic})});
+        add(kAcouArtic, {in(kEngine, {kEngineAcoustic})});
+        add(kAcouLayer, {in(kEngine, {kEngineLayers})});
         // Kit-wide.
         auto g = [](uint32_t p, std::vector<int> v = {}) { return Need{p, true, std::move(v)}; };
+        // The Acoustic pieces: each setting is heard on the kinds it belongs to.
+        const std::vector<int> drums = {kPieceKick, kPieceSnare, kPieceTom},
+                               cymbals = {kPieceHiHat, kPieceCrash, kPieceRide, kPieceSplash, kPieceChina},
+                               played = {1, 2, 3, 4, 5, 6, 7, 8};
+        for (uint32_t piece = 0; piece < kPieces; ++piece) {
+            auto pk = [&](std::vector<int> kinds) { return Need{pieceParam(piece, kPcKind), true, std::move(kinds)}; };
+            for (uint32_t k = 1; k < kPieceParams; ++k) {
+                std::vector<int> kinds = played;
+                if (k == kPcDepth || k == kPcReso || k == kPcHead || k == kPcShell || k == kPcGlide || k == kPcAir ||
+                    k == kPcShellLevel)
+                    kinds = drums;
+                if (k == kPcWires || k == kPcWireLevel) kinds = {kPieceSnare};
+                if (k == kPcBeater || k == kPcPort) kinds = {kPieceKick};
+                if (k == kPcAlloy || k == kPcSwell) kinds = cymbals;
+                std::vector<Need> all = {pk(kinds)};
+                if (k == kPcWireLevel) all.push_back(Need{pieceParam(piece, kPcWires), true, {}});
+                add(pieceParam(piece, k), all, true);
+            }
+        }
+
         for (uint32_t k : {kGlueThreshold, kGlueRatio, kGlueAttack, kGlueRelease, kGlueMakeup}) add(k, {g(kGlue)}, true);
         for (uint32_t k : {kKitDrive, kKitDriveMix}) add(k, {g(kKitDriveType, {1, 2, 3, 4})}, true);
         for (uint32_t k : {kRoomSize, kRoomDecay, kRoomDamping, kRoomPredelay}) add(k, {g(kRoom)}, true);
