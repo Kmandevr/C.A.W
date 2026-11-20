@@ -11,8 +11,11 @@ Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI
 - 1.1.0-alpha.1 released with APK, Windows zip and update files. The owner's Benchmark after it: the stabilizer on, 0 xruns live, low-latency at 192 frames.
 - CI lessons: bits are per build. The drums compat test has tables for x86-64 Release, Arm64, Windows x64 and x86-64 Debug, each from 20bcb8b's own code. Cost tests run RUN_SERIAL. Carve, Mimic and Raven's files build strict-FP.
 
-## Running (worktrees under .claude/worktrees; push them to caw-backup-* at check-ins)
-- fix-spikes (perf: engine timing, header CPU readout, visuals, menus), fix-raven-echo, bits-modes.
+## State (2026-11-20)
+- Merged on the session branch (pushed): the Raven echo fix (old choices stay in the 1.0 list for slots and project links), 1.1.1 spikes/UI load/heat (fix-spikes: capped tickers, layers, stabilizer by need and thermal, real-world Benchmark; API 45). Engine/app full tests NOT yet run on the merged branch.
+- Bits modes finished but NOT merged: branch caw-backup-bits-modes (worktree .claude/worktrees/bits-modes, cdd1300). Merge, build, ctest, app suite (fixture/goldens), then 1.1.1 bump, CHANGELOG, PR, CI, merge, release.
+- 1.1.2 design written (Hub docs/caw/sound-designs.md "1.1.2: realism"); its owner questions are unanswered (open-questions.md): piano default/budget, Yamaha design-around, Acoustic kit layout, scope.
+- Owner decisions pending from fix-spikes: the 60 fps device-motion cap; stabilizer thresholds 0.5/0.6/0.7 (tune from the next Benchmark).
 
 ## Open (owner)
 - Branch cleanup: this session can't delete branches (the proxy refuses); the owner deletes merged ones on GitHub.
