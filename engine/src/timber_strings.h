@@ -296,18 +296,23 @@ struct Pluck {
             float w = v.z + e;
             if (w < -v.gap && v.gap > 0.0f) w = -v.gap - 0.3f * (w + v.gap);  // the fret: an inelastic stop
             v.line.push(w);
-            float y = w * 0.6f;
-            // The slide's windings, then the finger's touch.
-            v.slideAmp += v.slideStep;
-            v.slidePhase += v.slideInc;
-            float pulse = 0;
-            if (v.slidePhase >= 1.0f) v.slidePhase -= 1.0f, pulse = 1.0f;
-            y += v.longitudinal.run(v.slideAmp * (pulse + 0.15f * v.noise.next()));
-            if (v.touchLeft) {
-                --v.touchLeft;
-                y += v.touchAmp * v.touchLp.run(v.noise.next());
+            out[i] = w * 0.6f;
+        }
+        // The slide's windings and the finger's touch, only while they sound.
+        if (v.slideAmp > 0.0f || v.slideStep != 0.0f) {
+            for (uint32_t i = 0; i < n; ++i) {
+                v.slideAmp = std::max(0.0f, v.slideAmp + v.slideStep);
+                v.slidePhase += v.slideInc;
+                float pulse = 0;
+                if (v.slidePhase >= 1.0f) v.slidePhase -= 1.0f, pulse = 1.0f;
+                out[i] += v.longitudinal.run(v.slideAmp * (pulse + 0.15f * v.noise.next()));
             }
-            out[i] = y;
+            if (v.slideAmp < 1e-6f && v.slideStep <= 0.0f) v.slideAmp = 0, v.slideStep = 0;
+        }
+        if (v.touchLeft) {
+            const uint32_t m = std::min(n, v.touchLeft);
+            for (uint32_t i = 0; i < m; ++i) out[i] += v.touchAmp * v.touchLp.run(v.noise.next());
+            v.touchLeft -= m;
         }
     }
 
@@ -346,7 +351,7 @@ struct Bowed {
         double vib = 0, tunedPitch = -1, baseHz = 440;
         uint32_t age = 0;
         // 1.1.2 Simulated: the bristles' mean deflection z and its rate, and (for tests) the samples sliding / all.
-        float z = 0, zd = 0;
+        float z = 0, zd = 0, invZss = 1e9f;  // 1 / zss at the last sample's sliding speed
         uint32_t sliding = 0, counted = 0;
         Noise noise;
     };
@@ -403,7 +408,7 @@ struct Bowed {
         modWheel = s.modWheel;
         sim = p[kSim] >= 0.5;
         noises = clampd(p[kNoises], 0, 1);
-        iterations = s.quality == kQualityHigh ? 3 : 2;
+        iterations = s.quality == kQualityHigh ? 2 : 1;
         simEco = s.quality == kQualityEco;
         bodyAmount = static_cast<float>(s.body * 1.6);
         if (section != bodyFor) {
@@ -427,6 +432,7 @@ struct Bowed {
         v.age = 0;
         v.tunedPitch = -1;
         v.z = v.zd = 0;
+        v.invZss = 1e9f;
         v.sliding = v.counted = 0;
         v.noise.s = 0xB0A1u + 17u * v.key;
         tune(v, 0.0);
@@ -500,15 +506,25 @@ struct Bowed {
         const float lpk = static_cast<float>(1.0 - detExp(-kTwoPi * (section >= 2 ? 2500.0 : 4000.0) / sr));
         const float dck = static_cast<float>(kTwoPi * 20.0 / sr);
         const float dt = static_cast<float>(1.0 / sr), k2 = 0.5f * dt;
+        const float s0 = sigma0, s1 = sigma1, brk = breakaway;
+        const int iters = iterations;
         const float fn = forceScale * static_cast<float>(0.04 + 0.96 * pressure * pressure) * (1.0f + 0.5f * expr);
-        const float fs = muS * fn, fc = muD * fn, zba = breakaway * fc / sigma0;
+        const float fs = muS * fn, fc = muD * fn;
+        const float invSpan = 1.0f / (1.0f - brk);
         const float invVs2 = 1.0f / (vStribeck * vStribeck);
-        const float B = sigma0 * k2 + sigma1;
-        const float nAmt = static_cast<float>(0.6 * noises);
+        const float B = s0 * k2 + s1, invOneB = 1.0f / (1.0f + B);
+        const float cz = 1.0f - k2 * s0 * invOneB, cg = k2 * invOneB;  // z = zt + k2 zd with zd = (g1 - s0 zt) / (1 + B)
+        const float nAmt = static_cast<float>(0.6 * noises), slideAt = 0.02f * target;
+        // The state in locals: the delay lines' stores cannot then make the compiler reload it every sample.
+        float z = v.z, zdLast = v.zd, invZss = v.invZss, bow = v.bow, lp = v.lp, dc = v.dc;
+        const float bowStep = v.bowStep, dn = v.dn, db = v.db;
+        uint32_t sliding = 0;
+        Noise noise = v.noise;
+        Line neck = v.neck, bridge = v.bridge;
         for (uint32_t i = 0; i < n; ++i) {
-            v.bow = std::clamp(v.bow + v.bowStep, 0.0f, 1.0f);
-            const float vb = v.bow * target;
-            const float nb = v.neck.frac(v.dn), bb = v.bridge.frac(v.db);
+            bow = std::clamp(bow + bowStep, 0.0f, 1.0f);
+            const float vb = bow * target;
+            const float nb = neck.frac(dn), bb = bridge.frac(db);
             const float vh = nb + bb;
             float f, slide;
             if (simEco) {
@@ -517,35 +533,55 @@ struct Bowed {
                 f = dv / (q * q);
                 slide = std::fabs(dv - f);
             } else {
-                const float zt = v.z + k2 * v.zd;
-                const float A = vb - vh - sigma0 * zt;
-                float zd = v.zd;
-                for (int it = 0; it < iterations; ++it) {
-                    const float vr = A - B * zd;
-                    const float z = zt + k2 * zd;
-                    const float e = vr * vr * invVs2;
-                    const float zss = (fc + (fs - fc) / (1.0f + e + 0.5f * e * e)) / sigma0;  // e^-x by its [0/2] Pade
-                    const float a = adhesion(vr, z, zba, zss);
-                    const float g = 1.0f - a * std::fabs(z) / zss;
-                    const float G = vr * g - zd;
-                    const float dG = -B * g - std::fabs(vr) * a * k2 / zss - 1.0f;
-                    zd -= G / dG;
+                const float zt = z + k2 * zdLast;
+                const float g1 = vb - vh;
+                const float A = g1 - s0 * zt;
+                // The elastic (sticking) solution is exact while alpha is 0: most of each period. (z0 is written so
+                // that the sample-to-sample chain through z is two multiply-adds.)
+                float zd = A * invOneB;
+                const float z0 = zt * cz + g1 * cg, vr0 = A - B * zd;
+                float zNew = z0;
+                if ((vr0 > 0) == (z0 > 0) && std::fabs(z0) * invZss > brk) {
+                    // Past the breakaway (a share of zss, from the Stribeck curve at the last sample's sliding speed,
+                    // below): Newton's method from the last sample's rate.
+                    zd = zdLast;
+                    for (int it = 0; it < iters; ++it) {
+                        const float vr = A - B * zd;
+                        const float zz = zt + k2 * zd, ratio = std::fabs(zz) * invZss;
+                        float a = 0;
+                        if ((vr > 0) == (zz > 0) && ratio > brk) {
+                            const float t = std::min(1.0f, (ratio - brk) * invSpan);
+                            a = t * t * (3.0f - 2.0f * t);
+                        }
+                        const float g = 1.0f - a * ratio;
+                        // dG/dzd = -(1 + B g) - |vr| a k2 / zss, the last term under 1 %: 1 / (1 + x) by its series.
+                        const float x = B * g + std::fabs(vr) * a * k2 * invZss;
+                        zd += (vr * g - zd) * (1.0f - x + x * x);
+                    }
+                    zNew = zt + k2 * zd;
                 }
-                v.zd = zd;
-                v.z = zt + k2 * zd;
-                f = sigma0 * v.z + sigma1 * zd;
-                slide = std::fabs(A - B * zd);
+                zdLast = zd;
+                z = zNew;
+                f = s0 * z + s1 * zd;
+                const float vr = g1 - f;
+                slide = std::fabs(vr);
+                // The Stribeck curve for the next sample (off this sample's chain): zss = (fc + (fs - fc) S) / sigma0
+                // with S = 1 / (1 + (v/vs)^2), a Lorentzian in place of the paper's e^-(v/vs)^2 (the same shape near 0).
+                const float e1 = 1.0f + vr * vr * invVs2;
+                invZss = s0 * e1 / (fc * e1 + fs - fc);
             }
-            f += nAmt * slide * v.noise.next();
-            v.sliding += slide > 0.02f * target ? 1u : 0u;
-            ++v.counted;
-            v.neck.push(-(bb + f));
+            if (slide > slideAt) f += nAmt * slide * noise.next(), ++sliding;  // bow noise, only while it slides
+            neck.push(-(bb + f));
             const float toBridge = nb + f;
-            v.lp += lpk * (toBridge - v.lp);
-            v.bridge.push(-0.97f * v.lp);
-            v.dc += dck * (toBridge - v.dc);
-            out[i] = (toBridge - v.dc) * 0.3f;
+            lp += lpk * (toBridge - lp);
+            bridge.push(-0.97f * lp);
+            dc += dck * (toBridge - dc);
+            out[i] = (toBridge - dc) * 0.3f;
         }
+        v.neck.w = neck.w, v.bridge.w = bridge.w;
+        v.z = z, v.zd = zdLast, v.invZss = invZss, v.bow = bow, v.lp = lp, v.dc = dc;
+        v.noise = noise;
+        v.sliding += sliding, v.counted += n;
     }
 
     void post(float* l, float* r, uint32_t n, const Shared&) noexcept { body.run(l, r, n, bodyAmount); }

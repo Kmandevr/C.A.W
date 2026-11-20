@@ -267,7 +267,7 @@ struct Wind {
         double tunedPitch = -1, baseHz = 440;
         // 1.1.2 Simulated: the tongue on the reed (1 closed), the jet's last flow and travel ramp, the sax's apex
         // line length (the jet line serves it), the High reed's mass-spring, the pad clicks, the last turbulence.
-        float coneA = 0, apX = 0, apY = 0, tongue = 0, tongueStep = 0, q1 = 0, djStep = 0, djCur = 2, da = 2, reed1 = 0, reed2 = 0, turb = 0;
+        float jetU = 0, jetUStep = 0, coneA = 0, apX = 0, apY = 0, tongue = 0, tongueStep = 0, q1 = 0, djStep = 0, djCur = 2, da = 2, reed1 = 0, reed2 = 0, turb = 0;
         double clickPitch = -1;
         Click click;
     };
@@ -403,7 +403,7 @@ struct Wind {
             // The tongue holds the reed (the lips, the flute's air) until the note's start, then leaves it in 4-12 ms;
             // the key's pad (the valve) closes first, its click ringing in the new bore.
             v.tongue = 1, v.tongueStep = -static_cast<float>(1.0 / ((0.012 - 0.008 * v.velocity) * sr));
-            v.q1 = v.djStep = v.reed1 = v.reed2 = v.turb = v.apX = v.apY = 0;
+            v.q1 = v.djStep = v.reed1 = v.reed2 = v.turb = v.apX = v.apY = v.jetU = v.jetUStep = 0;
             v.djCur = std::min(static_cast<float>(v.jet.mask - 4), v.dj * 2.5f);
             padClick(v);
         }
@@ -438,6 +438,13 @@ struct Wind {
                 const float p = std::max(0.16f, std::min(1.0f, v.env + v.envStep * kControlFrames) * pressureScale());
                 const float target = std::min(static_cast<float>(v.jet.mask - 4), v.dj / std::sqrt(p));
                 v.djStep = (std::max(2.0f, target) - v.djCur) / kControlFrames;
+                // The jet's speed sqrt(p) now and at the next point, in a line between (the breath moves slowly).
+                static constexpr float kLow = 0.9f, kSpan = 0.4f;
+                const float push = static_cast<float>(0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * static_cast<float>(std::max(v.pressure, modWheel)));
+                const float base = (kLow + kSpan * static_cast<float>(breath)) * push;
+                const float e1 = std::clamp(v.env + v.envStep * kControlFrames, 0.0f, 1.0f);
+                const float u0 = std::sqrt(std::max(0.0f, v.env * base)), u1 = std::sqrt(std::max(0.0f, e1 * base));
+                v.jetU = u0, v.jetUStep = (u1 - u0) / kControlFrames;
             }
         }
     }
@@ -595,7 +602,8 @@ struct Wind {
                     v.dcx = t, v.dcy = d, t = d;
                     v.djCur += v.djStep;
                     const float eta = v.jet.frac(v.djCur);
-                    const float U = std::sqrt(std::max(0.0f, pm)) * open;
+                    const float U = v.jetU * open;
+                    v.jetU += v.jetUStep;
                     v.jet.push(0.5f * t);
                     const float q = 0.5f * U * (1.0f + softClip(jetSharp * (eta - y0)));  // the flux into the pipe
                     const float drive = jetGain * (q - 0.5f * U) - jetDiff * (q - v.q1);
@@ -606,8 +614,9 @@ struct Wind {
                     break;
                 }
                 default: {  // brass
-                    const float b0 = v.bore.frac(v.d);
-                    const float b = ks > 0.0f ? v.bore.frac(std::max(2.0f, v.d - ks * b0)) : b0;
+                    // The crest's own pressure (the last sample's arrival) shortens its delay.
+                    const float b = v.bore.frac(std::max(2.0f, v.d - ks * v.q1));
+                    v.q1 = b;
                     const float dp = pm - 0.85f * b;
                     const float lip = v.lipG * dp + v.lipA1 * v.lip1 + v.lipA2 * v.lip2;
                     v.lip2 = v.lip1, v.lip1 = lip;

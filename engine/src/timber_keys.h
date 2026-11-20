@@ -40,7 +40,7 @@ struct EPiano {
         Contact contact;
         F4 phi, place;
         Mode thunk;
-        uint32_t feltLeft = 0;
+        uint32_t feltLeft = 0, thunkLeft = 0;
         float feltAmp = 0, thunkKick = 0;
         Lp1 felt;
         Noise noise;
@@ -141,6 +141,7 @@ struct EPiano {
         v.thunk.set(110.0, 0.03, sr);
         v.thunk.clear();
         v.thunkKick = static_cast<float>(0.05 * noises * (0.3 + 0.7 * v.velocity));
+        v.thunkLeft = noises > 0.0 ? static_cast<uint32_t>(0.12 * sr) : 0;  // 4 T60s of the 30 ms thunk
         v.feltLeft = 0;
         v.felt.set(500.0, sr);
         v.felt.clear();
@@ -179,22 +180,32 @@ struct EPiano {
         F4 c, sn, zr, zi;
         for (int k = 0; k < 4; ++k) c[k] = v.mode[k].c, sn[k] = v.mode[k].s, zr[k] = v.mode[k].zr, zi[k] = v.mode[k].zi;
         const float invGain = static_cast<float>(1.0 / kSimGain);
-        for (uint32_t i = 0; i < n; ++i) {
-            float f = 0;
-            if (!v.contact.done) {
-                const F4 d = v.place * zi;
-                f = v.contact.step((d[0] + d[1] + d[2] + d[3]) * invGain);
-                zr = zr + v.phi * f4(f);
-            }
+        uint32_t i = 0;
+        for (; i < n && !v.contact.done; ++i) {  // the hammer touching
+            const F4 d = v.place * zi;
+            const float f = v.contact.step((d[0] + d[1] + d[2] + d[3]) * invGain);
+            zr = zr + v.phi * f4(f);
             const F4 r = c * zr - sn * zi, im = sn * zr + c * zi;
             zr = r, zi = im;
-            float y = pickupOf(im[0] + im[1] + im[2] + im[3]);
-            if (v.thunkKick != 0.0f) y += v.thunk.run(v.thunkKick), v.thunkKick = 0;
-            else y += v.thunk.run(0.0f);
-            if (v.feltLeft) --v.feltLeft, y += v.feltAmp * v.felt.run(v.noise.next());
-            out[i] = y;
+            out[i] = pickupOf(im[0] + im[1] + im[2] + im[3]);
+        }
+        for (; i < n; ++i) {
+            const F4 r = c * zr - sn * zi, im = sn * zr + c * zi;
+            zr = r, zi = im;
+            out[i] = pickupOf(im[0] + im[1] + im[2] + im[3]);
         }
         for (int k = 0; k < 4; ++k) v.mode[k].zr = zr[k], v.mode[k].zi = zi[k];
+        // The acoustic noises, while they sound.
+        if (v.thunkLeft) {
+            const uint32_t m = std::min(n, v.thunkLeft);
+            for (uint32_t j = 0; j < m; ++j) out[j] += v.thunk.run(v.thunkKick), v.thunkKick = 0;
+            v.thunkLeft -= m;
+        }
+        if (v.feltLeft) {
+            const uint32_t m = std::min(n, v.feltLeft);
+            for (uint32_t j = 0; j < m; ++j) out[j] += v.feltAmp * v.felt.run(v.noise.next());
+            v.feltLeft -= m;
+        }
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (sim) {

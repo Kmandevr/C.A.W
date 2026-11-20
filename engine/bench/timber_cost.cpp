@@ -123,6 +123,20 @@ int timberCost(double seconds) {
         {"Timber winds: 8 voices (clarinet)", 6, {}, 8, kPoly},
         {"Timber winds: 8 voices (flute, noise, growl)", 6, {{"instrument", 1}, {"noise", 0.5}, {"growl", 0.5}}, 8, kPoly},
         {"Timber winds: 8 voices (brass)", 6, {{"instrument", 3}}, 8, kPoly},
+        // 1.1.2 Simulated, each model at its usual polyphony at Normal (the same ceiling: medium plus 20 %).
+        {"Timber sim electric piano: 16 voices (tine)", 1, {{"sim", 1}}, 16, kPoly},
+        {"Timber sim electric piano: 16 voices (reed)", 1, {{"sim", 1}, {"kind", 1}}, 16, kPoly},
+        {"Timber sim organ: 10 keys, 888, rotary slow", 2, {{"sim", 1}}, 10, kPoly},
+        {"Timber sim plucked: 16 voices (steel guitar)", 3, {{"sim", 1}}, 16, kPoly},
+        {"Timber sim plucked: 16 voices (nylon)", 3, {{"sim", 1}, {"instrument", 1}}, 16, kPoly},
+        {"Timber sim bowed: 8 voices (violin)", 4, {{"sim", 1}}, 8, kPoly},
+        {"Timber sim bowed: 8 voices (cello, vibrato 1)", 4, {{"sim", 1}, {"section", 2}, {"vibrato", 1}}, 8, kPoly},
+        {"Timber sim mallets: 16 voices (marimba)", 5, {{"sim", 1}}, 16, kPoly},
+        {"Timber sim mallets: 16 voices (bell, 8 modes)", 5, {{"sim", 1}, {"instrument", 5}}, 16, kPoly},
+        {"Timber sim winds: 8 voices (clarinet)", 6, {{"sim", 1}}, 8, kPoly},
+        {"Timber sim winds: 8 voices (flute)", 6, {{"sim", 1}, {"instrument", 1}}, 8, kPoly},
+        {"Timber sim winds: 8 voices (sax)", 6, {{"sim", 1}, {"instrument", 2}}, 8, kPoly},
+        {"Timber sim winds: 8 voices (brass)", 6, {{"sim", 1}, {"instrument", 3}}, 8, kPoly},
     };
     int over = 0;
     std::printf("Timber (µs of CPU per second of audio; per voice; bytes per instance; ceiling µs/s):\n");
@@ -134,14 +148,14 @@ int timberCost(double seconds) {
             if (k == "space") v.back().second = x;
         std::unique_ptr<ModuleProcessor> p = createComponent(registry(), "org.caw.timber", v);
         if (!p || !p->activate(kRate, kBlock)) {
-            std::printf("  %-46s  could not be made\n", c.name);
+            std::printf("  %-50s  could not be made\n", c.name);
             ++over;
             continue;
         }
         const double us = cost(*p, v, c.voices, seconds);
         const bool bad = us > c.ceilingUs;
         over += bad;
-        std::printf("  %-46s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, timber::timberBytes(c.model, kRate),
+        std::printf("  %-50s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, timber::timberBytes(c.model, kRate),
                     c.ceilingUs, bad ? "  OVER" : "");
     }
     std::printf("  shared tables: %zu B once per process\n", timber::timberTableBytes());
