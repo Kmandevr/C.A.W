@@ -7,6 +7,7 @@
 #include "builtin_nightingale.h"
 #include "builtin_curlew.h"
 #include "builtin_bittern.h"
+#include "builtin_woodpecker.h"
 #include "builtin_flock.h"
 #include "audio_clips.h"
 #include "builtin_sampler.h"
@@ -23,6 +24,7 @@ void registerBuiltinInstruments(ModuleRegistry& registry) {
     nightingale::registerNightingale(registry);  // org.caw.nightingale (builtin_nightingale.cpp, 1.1.3)
     curlew::registerCurlew(registry);  // org.caw.curlew (builtin_curlew.cpp, 1.1.3)
     bittern::registerBittern(registry);  // org.caw.bittern (builtin_bittern.cpp, 1.1.3)
+    woodpecker::registerWoodpecker(registry);  // org.caw.woodpecker (builtin_woodpecker.cpp, 1.1.3)
     registerSampler(registry);        // org.caw.sampler (builtin_sampler.cpp)
     flock::registerFlock(registry);   // org.caw.flock (builtin_flock.cpp, 1.1.0)
     registerAudioTrack(registry);     // org.caw.audio-track: audio clips and input (audio_clips.cpp)

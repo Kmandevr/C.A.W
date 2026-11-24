@@ -3,3 +3,9 @@ Starling's piano plays recorded parts of the Salamander Grand Piano V3 by Alexan
 Source: https://github.com/sfzinstruments/SalamanderGrandPiano
 
 Changes made for C.A.W: the first 200 ms of 120 notes, 22 key-release noises and 4 pedal noises, trimmed, faded, folded to mono and normalised per clip, and played together with C.A.W's modelled strings.
+
+Woodpecker's tuned percussion plays recorded mallet strokes from the Versilian Community Sample Library (VCSL) by Versilian Studios LLC, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (no credit is required; it is given here with thanks).
+
+Source: https://github.com/sgossner/VCSL (marimba, xylophone, glockenspiel, vibraphone, Tubular Bells 1 and Timpani 1)
+
+Changes made for C.A.W: the first 174 ms (the timpani's 358 ms) of 152 strokes, trimmed, faded, folded to mono and normalised per clip, measured for their modes, and played together with C.A.W's modelled bars, tubes and drums.

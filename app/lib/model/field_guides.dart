@@ -313,6 +313,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Tremulant', 'A pulse in the wind, for a warm, vocal tone.'),
     ('Space', 'The cathedral (on): turn it down for the organ loft.'),
   ], 'Cathedral principal chorus'),
+  'org.caw.woodpecker': FieldGuide('Woodpecker is tuned percussion: marimba, xylophone, glockenspiel, vibraphone, '
+      'tubular bells or timpani, each with its recorded mallet stroke.', [
+    ('Mallet hardness', 'Soft yarn and round, or hard and bright.'),
+    ('Decay', 'How long the bars ring.'),
+    ('Motor rate', 'The vibraphone\'s shimmer (off until you turn it up).'),
+  ], 'Concert marimba'),
   'org.caw.flock': FieldGuide('Flock plays a sample as a cloud of grains, for pads, textures and drones.', [
     ('Position', 'Where in the sample the grains come from.'),
     ('Size', 'How long each grain is.'),

@@ -1,4 +1,4 @@
-// caw_bench's cost of Timber, Starling and Nightingale (`caw_bench SECONDS 300` and `321`): each model with N voices sounding, in µs per second of audio and bytes per instance, against a ceiling, plus µs per voice.
+// caw_bench's cost of Timber and the 1.1.3 instruments (Starling, Nightingale, Curlew, Bittern, Woodpecker) (`caw_bench SECONDS 300` and `321`): each model with N voices sounding, in µs per second of audio and bytes per instance, against a ceiling, plus µs per voice.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -12,6 +12,7 @@
 #include "builtin_nightingale.h"
 #include "builtin_starling.h"
 #include "builtin_timber.h"
+#include "builtin_woodpecker.h"
 #include "caw/instrument.hpp"
 #include "fp_mode.h"
 #include "fx_merged.h"
@@ -196,6 +197,12 @@ int timberCost(double seconds) {
         {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 13000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
         {"org.caw.bittern", "Bittern: 10 keys, principal chorus, room", 0, {}, 10, 24000},  // heavy: the room is part of it
         {"org.caw.bittern", "Bittern: 10 keys, full organ", 0, {{"principal8", 1}, {"octave4", 1}, {"fifteenth2", 1}, {"mixture", 1}, {"trumpet8", 1}, {"subbass32", 1}, {"gamba8", 1}, {"celeste8", 1}}, 10, 24000},
+        // Woodpecker: 8 (High 12) modes a voice and a recorded attack a note; the marimba and vibraphone add the tube.
+        // Measured 9,400 / 8,700 / 7,500 / 7,300 locally (x86-64, 2026-11-24); ceilings about 1.4x.
+        {"org.caw.woodpecker", "Woodpecker marimba: 16 voices", 0, {}, 16, 13500},
+        {"org.caw.woodpecker", "Woodpecker vibraphone: 16 voices, motor, pedal", 3, {{"motor", 5}, {"sustain", 1}}, 16, 13000},
+        {"org.caw.woodpecker", "Woodpecker tubular bells: 16 voices, High", 4, {{"tier", 3}, {"sustain", 1}}, 16, 11000},
+        {"org.caw.woodpecker", "Woodpecker timpani: 16 voices", 5, {}, 16, 10500},
     };
     for (const NewCase& c : more) {
         Values v = c.values;
@@ -213,6 +220,7 @@ int timberCost(double seconds) {
         const size_t bytes = id == "org.caw.starling"      ? starling::starlingBytes(c.model, kRate)
                              : id == "org.caw.nightingale" ? nightingale::nightingaleBytes(c.model, kRate)
                              : id == "org.caw.curlew"      ? curlew::curlewBytes(c.model, kRate)
+                             : id == "org.caw.woodpecker"  ? woodpecker::woodpeckerBytes(c.model, kRate)
                                                            : size_t{0};  // Bittern: its tables are shared
         std::printf("  %-50s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, bytes, c.ceilingUs, bad ? "  OVER" : "");
     }

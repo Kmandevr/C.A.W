@@ -167,6 +167,9 @@ class DeviceNames {
       'saxophone', 'sax', 'trumpet', 'trombone', 'french horn', 'horn', 'realistic'], purposes: {_g}),
     'org.caw.bittern': DeviceName('Bittern', 'Pipe organ', tags: ['organ', 'pipe organ', 'church organ',
       'cathedral', 'principal', 'flute', 'mixture', 'realistic'], purposes: {_g}),
+    'org.caw.woodpecker': DeviceName('Woodpecker', 'Tuned percussion', tags: ['tuned percussion', 'marimba',
+      'xylophone', 'glockenspiel', 'glock', 'vibraphone', 'vibes', 'tubular bells', 'chimes', 'timpani', 'mallets',
+      'orchestral', 'realistic'], purposes: {_g}),
     'org.caw.flock': DeviceName('Flock', 'Granular', tags: ['granular', 'grains', 'cloud', 'texture', 'drone', 'pad'],
       purposes: {_sd}),
     // MIDI effects
