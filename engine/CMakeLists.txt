@@ -571,7 +571,6 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
 set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
-set_source_files_properties(src/builtin_timber.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")  # no fused multiply-adds (x86-64's baseline has none, so its bits are unchanged): the bowed string's stick-slip friction grew Arm64's fusing past every_instrument's 0.1 dB loudness match (PR #261 CI, 2026-11-24)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)
