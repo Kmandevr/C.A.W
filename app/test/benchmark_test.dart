@@ -487,7 +487,7 @@ void main() {
     expect(find.text('Over budget'), findsOneWidget);
     expect(find.byKey(const ValueKey('bench-limits')), findsOneWidget);
     expect(find.text('What\'s holding it back'), findsOneWidget);
-    expect(find.text('Flagship'), findsOneWidget);
+    expect(find.text('Raven · Wavetable synth'), findsOneWidget);  // 1.1.2: the device's shown name
     final row = find.byKey(const ValueKey('bench-row-song8-false'));
     await tester.ensureVisible(row);
     await tester.pumpAndSettle();

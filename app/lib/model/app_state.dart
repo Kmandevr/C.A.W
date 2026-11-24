@@ -509,6 +509,12 @@ class AppState extends ChangeNotifier implements StressHost {
   /// The platform's thermal and power state as it last reported it (the heat banner reads it; nothing changes a
   /// setting on it).
   final ValueNotifier<EnginePressure> pressure = ValueNotifier(EnginePressure.unknown);
+
+  /// The platform's thermal headroom forecast 10 s ahead (1.0: severe throttling starts; null unknown), read about
+  /// every 10 s from launch (1.1.2): information for the Performance sheet only, never an action (the owner: the
+  /// system throttles, not the app).
+  final ValueNotifier<double?> thermalHeadroom = ValueNotifier(null);
+  Timer? _headroomTimer;
   List<LayerMeterValue> layerMeters = const [];
 
   Timer? _saveTimer;
@@ -578,6 +584,14 @@ class AppState extends ChangeNotifier implements StressHost {
         final now = await readPressure();
         EngineExecutionPolicy.updateRuntimeSignals(pressure: now);
         pressure.value = now;
+        if (Platform.isAndroid) {
+          Future<void> readHeadroom() async {
+            final h = (await ResourceSignals.readThermal())['headroom'];
+            if (!_disposed) thermalHeadroom.value = h is num ? h.toDouble() : null;
+          }
+          unawaited(readHeadroom());
+          _headroomTimer = Timer.periodic(const Duration(seconds: 10), (_) => unawaited(readHeadroom()));
+        }
       } catch (_) {
         // The signals are optional: the policy stays conservative without them.
         EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown);
@@ -723,6 +737,8 @@ class AppState extends ChangeNotifier implements StressHost {
     _historyTimer?.cancel();
     masterValueTick.dispose();
     freezeHint.dispose();
+    _headroomTimer?.cancel();
+    thermalHeadroom.dispose();
     pressure.dispose();
     values.dispose();
     tick.dispose();
@@ -745,6 +761,8 @@ class AppState extends ChangeNotifier implements StressHost {
     _readPlayhead();
     if (before.playing != meters.playing) {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
+      // Sustained Performance Mode while playing, where the phone has it (1.1.2; the platform's own steady clock).
+      if (Platform.isAndroid && useAudioDevice) unawaited(ResourceSignals.setSustained(meters.playing));
     }
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;

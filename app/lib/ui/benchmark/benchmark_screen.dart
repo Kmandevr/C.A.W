@@ -49,6 +49,7 @@ StressRunner defaultStressRunner(StressHost? host) {
     pressure: ResourceSignals.changes.handleError((Object _) {}),
     readPressure: ResourceSignals.read,
     readThermal: ResourceSignals.readThermal,
+    readPerformance: ResourceSignals.readPerformance,
     sendTelemetry: (stress) async => Telemetry.current?.sendStressReport(stress),
     workDir: () async {
       try {

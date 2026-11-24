@@ -95,7 +95,7 @@ void main() {
       expect(r.overall, StressTier.tight); // normal comfortable, heavy (song16 at 85%) tight
       expect(r.verdictText, 'Normal projects: comfortable; heavy projects: tight.');
       expect(r.limitsShort, '~23 tracks · ~41 voices · 64 effects');
-      expect(r.biggestCost, 'Biggest cost: instruments and effects (57%), mostly Flagship');
+      expect(r.biggestCost, 'Biggest cost: instruments and effects (57%), mostly Raven · Wavetable synth');  // 1.1.2: shown names
       expect(r.device['name'], 'Samsung SM-S906B');
       final json = jsonDecode(r.toJsonText()) as Map<String, dynamic>;
       expect(json['parts_scenario'], 'song8');

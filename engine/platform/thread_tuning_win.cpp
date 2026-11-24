@@ -219,5 +219,6 @@ void hintThreads(Hint*, const int32_t*, size_t) noexcept {}
 void hintReport(Hint*, int64_t, int64_t) noexcept {}
 bool hintActive(const Hint*) noexcept { return false; }
 HintState hintState(const Hint*) noexcept { return HintState::None; }
+HintDiagnostics hintDiagnostics(const Hint*) noexcept { return {}; }
 
 }  // namespace caw::tuning

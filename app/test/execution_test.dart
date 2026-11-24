@@ -35,8 +35,9 @@ void main() {
     expect(offline.workerThreads, greaterThanOrEqualTo(unknown.workerThreads));
     expect(offline.maxConcurrentJobs, offline.workerThreads);
     expect(offline.preferredBatchFrames, 4096);
-    expect(hot.workerThreads, 1);
-    expect(hot.yieldToForeground, isTrue);
+    // 1.1.2 (owner: the system throttles, not the app): heat changes nothing in the plan.
+    expect(hot.workerThreads, offline.workerThreads);
+    expect(hot.yieldToForeground, offline.yieldToForeground);
 
     EngineExecutionPolicy.updateRuntimeSignals(
       pressure: EnginePressure.thermalCritical,

@@ -19,6 +19,7 @@
 #include <thread>
 
 #if defined(__ANDROID__)
+#include <android/api-level.h>
 #include <dlfcn.h>
 #endif
 
@@ -245,6 +246,8 @@ struct Hint {
     std::atomic<int64_t> target{0};
     std::atomic<bool> active{false};
     std::atomic<uint8_t> state{static_cast<uint8_t>(HintState::Waiting)};
+    std::atomic<int> feature{-1};             // hintDiagnostics: what isFeatureSupported said (-1: not asked)
+    std::atomic<int64_t> preferred{-1};       // ... and the raw preferred update rate
     std::mutex lock;                       // the hint's thread's sleep (never taken on the audio thread)
     std::condition_variable wake;
     bool stop = false;
@@ -264,6 +267,8 @@ struct Hint {
         }
         // APERF_HINT_SESSIONS is 0 in APerformanceHintFeature (NDK r30, android/performance_hint.h).
         const int feature = api.isFeatureSupported ? (api.isFeatureSupported(0) ? 1 : 0) : -1;
+        this->feature.store(feature, std::memory_order_relaxed);
+        this->preferred.store(preferred, std::memory_order_relaxed);
         if (!manager) state.store(static_cast<uint8_t>(HintState::Unsupported), std::memory_order_relaxed);
         // A refused session is asked for again after hintRetryNs (it used to wait for the callback's thread to
         // change, which on one stream it never does), unless the system says it has none.
@@ -385,6 +390,17 @@ HintState hintState(const Hint* h) noexcept {
     return h ? static_cast<HintState>(h->state.load(std::memory_order_relaxed)) : HintState::None;
 }
 
+HintDiagnostics hintDiagnostics(const Hint* h) noexcept {
+    HintDiagnostics d;
+    d.sdk = android_get_device_api_level();
+    d.featureCall = hintApi().isFeatureSupported != nullptr;
+    if (h) {
+        d.feature = h->feature.load(std::memory_order_relaxed);
+        d.preferredRateNs = h->preferred.load(std::memory_order_relaxed);
+    }
+    return d;
+}
+
 #else  // Linux: no performance hint API
 
 struct Hint {};
@@ -394,6 +410,7 @@ void hintThreads(Hint*, const int32_t*, size_t) noexcept {}
 void hintReport(Hint*, int64_t, int64_t) noexcept {}
 bool hintActive(const Hint*) noexcept { return false; }
 HintState hintState(const Hint*) noexcept { return HintState::None; }
+HintDiagnostics hintDiagnostics(const Hint*) noexcept { return {}; }
 
 #endif
 

@@ -725,6 +725,12 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"clock_khz\":" + std::to_string(clock.currentKHz) + ",\"max_khz\":" + std::to_string(clock.maxKHz);
     j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
     j += ",\"hint_state\":\"" + std::string(tuning::hintStateName(pool_ ? pool_->hintState() : tuning::HintState::None)) + "\"";
+    {
+        const tuning::HintDiagnostics d = pool_ ? pool_->hintDiagnostics() : tuning::hintDiagnostics(nullptr);
+        j += ",\"hint_diag\":{\"sdk\":" + std::to_string(d.sdk) + ",\"is_feature_supported_call\":" +
+             (d.featureCall ? "true" : "false") + ",\"is_feature_supported\":" + std::to_string(d.feature) +
+             ",\"preferred_rate_ns\":" + std::to_string(d.preferredRateNs) + "}";
+    }
     j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
     // The callback's scheduling policy (POSIX SCHED_*: 0 time-sharing, 1 FIFO, 2 RR) and nice, as it last described
     // itself: a shared or Bluetooth AAudio stream's is time-sharing, a low-latency (MMAP) one's FIFO (#234).
