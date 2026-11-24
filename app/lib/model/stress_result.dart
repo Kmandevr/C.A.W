@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'cpp_reference.dart';
+import 'device_names.dart';
 
 /// How a tier fared: comfortable (p99 at most 70% of the budget), tight (at most 100%), over budget.
 enum StressTier {
@@ -323,9 +324,11 @@ class StressCost {
   /// How many of it the scenario's project has (the engine's count; 1 for the host).
   final int instances;
 
-  /// Its name in plain words.
+  /// Its name as the app shows the device (1.1.2: "Talon · Compressor", DeviceNames), else in plain words.
   String get name {
     if (id == 'host') return 'The engine itself (mixing, routing, meters)';
+    final shown = DeviceNames.of(id);
+    if (shown != null) return shown.title;
     for (final b in cppBuiltins) {
       if (b.id == id) return b.name;
     }
@@ -333,7 +336,8 @@ class StressCost {
     return last.isEmpty ? id : '${last[0].toUpperCase()}${last.substring(1)}';
   }
 
-  Map<String, Object?> toJson() => {'id': id, 'pct': _r1(pct), 'ran_pct': _r1(ranPct), 'instances': instances};
+  Map<String, Object?> toJson() =>
+      {'id': id, 'name': name, 'pct': _r1(pct), 'ran_pct': _r1(ranPct), 'instances': instances};
 }
 
 /// A sustained run (the heat test): live, in real time, at the playing buffer; the load's trend over the run, the
