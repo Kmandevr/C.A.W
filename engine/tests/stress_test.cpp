@@ -254,7 +254,7 @@ TEST(stress_benchmark_plays_every_registered_builtin) {
     // Names the owner reads: the devices' shown names, not ids.
     for (const SuiteScenario& s : benchmarkScenarios()) CHECK(std::string(s.name).find("org.caw") == std::string::npos);
     CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "drums_kit")->name), std::string("Rook kit, 16 pads busy"));
-    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "flagship_heavy")->name), std::string("Raven heavy, 64 voices held"));
+    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "flagship_heavy")->name), std::string("Kestrel heavy, 64 voices held"));
 }
 
 TEST(stress_benchmark_has_the_ten_scenarios_section_h_names) {

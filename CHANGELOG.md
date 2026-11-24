@@ -14,6 +14,7 @@ Realistic instruments, part one: a piano, bowed strings, winds and a cathedral o
 - **Bittern, a cathedral pipe organ:** 13 stops from a deep 32' to a sparkling mixture and a trumpet, each rank alive with its own tuning and the chiff of real pipes, a living wind, a tremulant and a swell box on the mod wheel, in a cathedral that rings for seconds (turn Space down for the organ loft). 12 registrations.
 
 ### Changed
+- The wavetable synth is now called **Kestrel** (it was Raven).
 - The new piano, strings and winds open dry (no room): add Space or your own reverb. The organ opens in its cathedral.
 - **Knobs turn with a sideways drag**, so swiping up and down over a device page scrolls it. Hold a knob first for fine moves. Prefer the old up-and-down drag? Settings › Haptics and menus › Knobs turn with.
 - While a song plays, the screen runs at 60 Hz to leave the phone's power to the audio.

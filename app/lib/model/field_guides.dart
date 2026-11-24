@@ -267,7 +267,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Shift', 'Moves it up or down.'),
   ], 'Freeze pad'),
   // Instruments
-  'org.caw.synth.flagship': FieldGuide('Raven is a wavetable synth with three oscillators, two filters and a mod '
+  'org.caw.synth.flagship': FieldGuide('Kestrel is a wavetable synth with three oscillators, two filters and a mod '
       'matrix: basses, leads, pads and keys.', [
     ('Osc 1 frame', 'Moves through the wavetable; the main way to change the tone.'),
     ('Filter cutoff', 'Darker or brighter.'),

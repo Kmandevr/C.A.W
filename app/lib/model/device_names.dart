@@ -148,7 +148,7 @@ class DeviceNames {
     'org.caw.pack.spectral': DeviceName('Iris', 'Spectral', tags: ['spectral', 'fft', 'freeze', 'blur', 'smear'],
       purposes: {_sd}),
     // Instruments
-    'org.caw.synth.flagship': DeviceName('Raven', 'Wavetable synth', tags: ['synth', 'synthesizer', 'wavetable',
+    'org.caw.synth.flagship': DeviceName('Kestrel', 'Wavetable synth', tags: ['synth', 'synthesizer', 'wavetable',
       'flagship', 'fm', 'additive', 'subtractive', 'lead', 'pad', 'bass synth', 'vital', 'serum'],
       purposes: {_sd, _b}),
     'org.caw.sampler': DeviceName('Magpie', 'Sampler', tags: ['sampler', 'sample', 'samples', 'multisample', 'chop',

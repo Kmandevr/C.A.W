@@ -378,9 +378,9 @@ extension Templates on AppState {
             synth('tpl-beat-keys', 'Keys', flagship, preset: 'Pluck', volume: 0.6,
                 fx: [fx('org.caw.delay', 'Dotted gallop'), fx('org.caw.reverb', 'Wooden hall')]),
           ], chain('chain:master'))),
-      ('builtin:sound-design', 'Sound design', 'Raven, Flock and Magpie with space and movement, and Lookout on the master',
+      ('builtin:sound-design', 'Sound design', 'Kestrel, Flock and Magpie with space and movement, and Lookout on the master',
           project('Sound design', [
-            synth('tpl-sd-raven', 'Raven', flagship, preset: 'Smeared air pad', volume: 0.6,
+            synth('tpl-sd-raven', 'Kestrel', flagship, preset: 'Smeared air pad', volume: 0.6,
                 fx: [fx('org.caw.filter', 'Slow bloom wah'), fx('org.caw.reverb', 'Octave heaven')]),
             synth('tpl-sd-flock', 'Flock', 'org.caw.flock', preset: 'Glass shimmer', volume: 0.6,
                 fx: [fx('org.caw.delay', 'Shimmer taps')]),

@@ -1,4 +1,4 @@
-// Flagship's (Raven's) 1.1.0 filter models: a diode-ladder-style low-pass, a Sallen-Key low-pass and a phaser (TPT, header-only).
+// Flagship's (Kestrel's) 1.1.0 filter models: a diode-ladder-style low-pass, a Sallen-Key low-pass and a phaser (TPT, header-only).
 #pragma once
 
 #include <cmath>

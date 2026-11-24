@@ -145,7 +145,7 @@ constexpr uint32_t fmRatioParam(uint32_t o) { return kFmRatioBase + o; }
 constexpr uint32_t kFoldModeBase = kFmRatioBase + kOscs;
 constexpr uint32_t foldModeParam(uint32_t o) { return kFoldModeBase + o; }
 static_assert(kFoldModeBase + kOscs == 215, "the 1.0 parameter list's size is part of the documented layout");
-// 1.1.0 (Raven's synthesis), appended after the 215 so every saved index keeps its meaning; none is a mod destination.
+// 1.1.0 (Kestrel's synthesis), appended after the 215 so every saved index keeps its meaning; none is a mod destination.
 // Each oscillator's modulation source, for the warps that hear another oscillator (Osc FM, Osc RM, Osc AM, Osc sync):
 // Prev (round the ring, as Osc FM always did: the default), Osc 1..3 (itself counts as Prev) or Noise.
 constexpr uint32_t kModSrcBase = kFoldModeBase + kOscs;

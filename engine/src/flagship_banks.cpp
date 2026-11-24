@@ -1,4 +1,4 @@
-// Flagship's (Raven's) spectral and additive warp banks: the resynthesis, the shared cache and its builder thread.
+// Flagship's (Kestrel's) spectral and additive warp banks: the resynthesis, the shared cache and its builder thread.
 #include "flagship_banks.h"
 
 #include <algorithm>

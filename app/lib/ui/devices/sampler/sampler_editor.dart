@@ -1,4 +1,4 @@
-// The sampler's editor (org.caw.sampler) in Raven's one-screen layout: the keyboard map on top (drop a sample and it plays on every key), the zone, sound, slicing and recording sections below, the mod-source strip at the bottom; a phone held upright swipes three panels (Zone, Sound, Tools) under the map.
+// The sampler's editor (org.caw.sampler) in Kestrel's one-screen layout: the keyboard map on top (drop a sample and it plays on every key), the zone, sound, slicing and recording sections below, the mod-source strip at the bottom; a phone held upright swipes three panels (Zone, Sound, Tools) under the map.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;

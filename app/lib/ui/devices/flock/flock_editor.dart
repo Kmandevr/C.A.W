@@ -1,4 +1,4 @@
-// Flock's editor (org.caw.flock) in Raven's one-screen layout: the source tiles and the grain cloud drawn live as a flock over the sample or built-in tone (drag it for position and spray; drop or pick a sample), the grain knobs under it, the play, envelope and filter panels below, the mod-source strip at the bottom; a phone held upright swipes three panels (Grains, Play, Shape) under the picture.
+// Flock's editor (org.caw.flock) in Kestrel's one-screen layout: the source tiles and the grain cloud drawn live as a flock over the sample or built-in tone (drag it for position and spray; drop or pick a sample), the grain knobs under it, the play, envelope and filter panels below, the mod-source strip at the bottom; a phone held upright swipes three panels (Grains, Play, Shape) under the picture.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
