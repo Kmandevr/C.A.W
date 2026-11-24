@@ -103,6 +103,7 @@ struct Piece {
     uint16_t ti[96] = {}, tj[96] = {}, tk[96] = {};
     float tc[96] = {};
     float satY = 1;
+    uint32_t satTop = 0;  // the products read sat[0, satTop)
     // Eco cymbal: noise into the high band growing with the low modes' energy squared.
     float swellEnv = 0, swellK = 0, swellGain = 0, swellHp[2] = {}, swellLp = 0;
     // Hi-hat: the top plate's rigid height (the clutch on the rod), the pedal's target, and the plates' contact.
@@ -169,6 +170,9 @@ private:
     void weights(Piece& p, float* phi, float pos, bool bell) noexcept;
     void runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept;
     void ringDrum(Piece& p, uint32_t t0, uint32_t n, uint64_t clock, float* out, float* vel) noexcept;
+    float wireForces(Piece& p, const float* ypR, float* back) noexcept;
+    template <uint32_t NW>
+    float wiresOf(Piece& p, const float* ypR, float* back, float dt) noexcept;
     void runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept;
     void runHat(Piece& p, uint32_t n, uint64_t clock) noexcept;
     float noiseSample(Piece& p) noexcept;

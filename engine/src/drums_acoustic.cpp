@@ -151,6 +151,19 @@ inline float commitAdd(uint32_t n, const float* __restrict yp, const float* __re
     }
     return out;
 }
+// stepModes with a force f[k] added to each mode's displacement (predicted, forced and committed in one pass).
+inline float stepForced(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
+                        float* __restrict y2, const float* __restrict w, const float* __restrict f) noexcept {
+    n &= ~3u;
+    float out = 0.0f;
+    for (uint32_t k = 0; k < n; ++k) {
+        const float y = a1[k] * y1[k] - a2[k] * y2[k] + f[k];
+        out += w[k] * (y - y1[k]);
+        y2[k] = y1[k];
+        y1[k] = y;
+    }
+    return out;
+}
 inline float stepModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
                        float* __restrict y2, const float* __restrict w) noexcept {
     n &= ~3u;
@@ -571,6 +584,10 @@ void AcousticKit::configureCymbal(Piece& p) noexcept {
             p.tc[t] = static_cast<float>(swell * 0.25 * kSwellScale * std::sqrt(ki * kj) / 0.004 * gk);
         }
         p.satY = 0.004f;
+        // The low modes the products read (sat is worked out up to the highest, in fours).
+        uint32_t top = 0;
+        for (uint32_t t = 0; t < p.triplets; ++t) top = std::max<uint32_t>(top, std::max(p.ti[t], p.tj[t]) + 1u);
+        p.satTop = std::min<uint32_t>(p.seg[0].count, (top + 3u) & ~3u);
     }
     // Eco: the cascade's substitute, band-limited noise in the high band growing as E_low^2 (100-300 ms).
     p.swellK = static_cast<float>(1.0 - std::exp(-1.0 / (0.2 * sr_ / 16.0)));
@@ -913,13 +930,68 @@ CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, ui
     for (uint32_t t = 0; t < n; ++t) out[t] = sum4(acc[t]);
 }
 
+// The snare wires against the resonant head: mass-spring each, pressed into the head, a one-sided power-law contact
+// solved per wire with the head's response (all wires at once: they vectorize). ypR: the head's lowest kResoWireModes
+// modes as predicted; back: what their forces take from each of those modes (gr times it is subtracted), set when the
+// return (their total force) is above 0. Steps the wires.
+float AcousticKit::wireForces(Piece& p, const float* __restrict ypR, float* __restrict back) noexcept {
+    // The tiers' wire counts (Normal 8, High 16) as constants: the loops run whole in fours.
+    return p.wires == 16 ? wiresOf<16>(p, ypR, back, static_cast<float>(dt_)) : wiresOf<8>(p, ypR, back, static_cast<float>(dt_));
+}
+template <uint32_t NW>
+float AcousticKit::wiresOf(Piece& p, const float* __restrict ypR, float* __restrict back, float dt) noexcept {
+    static_assert(NW % 4 == 0 && NW <= kMaxWires && kResoWireModes % 4 == 0);
+    // Each wire's head displacement under it, u = sum_k psi[k][w] y_k, four wires at a time.
+    V4 U[NW / 4];
+    for (uint32_t j = 0; j < NW / 4; ++j) U[j] = V4{0.0f, 0.0f, 0.0f, 0.0f};
+    for (uint32_t k = 0; k < kResoWireModes; ++k) {
+        const V4 y = V4{ypR[k], ypR[k], ypR[k], ypR[k]};
+        for (uint32_t j = 0; j < NW / 4; ++j) U[j] = U[j] + load4(p.psiT[k] + 4 * j) * y;
+    }
+    alignas(16) float u[NW], F[NW];
+    for (uint32_t j = 0; j < NW / 4; ++j) store4(u + 4 * j, U[j]);
+    // The wires' state through unaliased pointers (so the loop vectorizes).
+    float* __restrict wx = p.wx;
+    float* __restrict wv = p.wv;
+    float* __restrict wDPrev = p.wDPrev;
+    const float* __restrict wC = p.wC;
+    const float wOm2 = p.wOm2, wRest = p.wRest, wDampK = p.wDampK, wK = p.wK, wMass = p.wMass;
+    float fWires = 0.0f;
+    for (uint32_t w = 0; w < NW; ++w) {
+        const float acc = -wOm2 * (wx[w] - wRest) - wDampK * wv[w];
+        const float vP = wv[w] + acc * dt;
+        const float xP = wx[w] + vP * dt;
+        const float eta = u[w] - xP;  // > 0: the head is past the wire (they touch)
+        const float e = eta > 0.0f ? eta : 0.0f;
+        const float sq = std::sqrt(e);
+        float f = wK * e * sq / (1.0f + 1.5f * wK * sq * wC[w]);
+        f *= 1.0f + 0.2f * (e - wDPrev[w]) / dt;
+        f = f > 0.0f ? f : 0.0f;
+        wDPrev[w] = e - f * wC[w];
+        wv[w] = vP + f * dt / wMass;
+        wx[w] += wv[w] * dt;
+        F[w] = f;
+        fWires += f;
+    }
+    if (fWires > 0.0f) {  // the forces back into the head's modes, a wire at a time (no per-mode sums)
+        V4 B[kResoWireModes / 4];
+        for (uint32_t j = 0; j < kResoWireModes / 4; ++j) B[j] = V4{0.0f, 0.0f, 0.0f, 0.0f};
+        for (uint32_t w = 0; w < NW; ++w) {
+            const V4 f = V4{F[w], F[w], F[w], F[w]};
+            for (uint32_t j = 0; j < kResoWireModes / 4; ++j) B[j] = B[j] + load4(p.psiW[w] + 4 * j) * f;
+        }
+        for (uint32_t j = 0; j < kResoWireModes / 4; ++j) store4(back + 4 * j, B[j]);
+    }
+    p.rattleEnergy += static_cast<double>(fWires) * fWires;
+    return fWires;
+}
+
 void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
     const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
     const uint32_t all = b.count + r.count + sh.count;
     const float gb = b.g, gr = r.g, gs = sh.g;
     const float scale = static_cast<float>(sr_) * p.gain;
     const bool snare = p.set.kind == kPieceSnare, eco = p.quality == 0;
-    const float dt = static_cast<float>(dt_);
     float* const y1 = p.y1;
     float* const y2 = p.y2;
     alignas(32) float yp[kMaxModes];
@@ -969,6 +1041,28 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
         if (!ca && !cb && !rim && !p.wires) {
             // Ringing on its own this frame: the span kernel for one frame (the same bits as a span at a time).
             ringDrum(p, t, 1, clock, &out, snare && eco ? &vel : nullptr);
+        } else if (!ca && !cb && !rim) {
+            // Only the wires touch (most of a snare's frames): the snare-side head's lowest modes are predicted
+            // first, with their point forces, for the wires to press against; then every force goes in as the modes
+            // step, in one pass.
+            // (The forces sit on the batter's first group and the head's first kResoWireModes modes: r.count >= 12
+            // wherever there are wires.)
+            alignas(16) float fb[4] = {symB - gb * fAir, symB, 0.0f, 0.0f}, fr[kResoWireModes], ypR[kResoWireModes], back[kResoWireModes];
+            for (uint32_t j = 0; j < kResoWireModes; j += 4) {
+                const uint32_t i = r.at + j;
+                const V4 F = j == 0 ? V4{gr * fAir + symR, 0.0f, 0.6f * symR, 0.0f} : V4{0.0f, 0.0f, 0.0f, 0.0f};
+                store4(fr + j, F);
+                store4(ypR + j, load4(p.a1 + i) * load4(y1 + i) - load4(p.a2 + i) * load4(y2 + i) + F);
+            }
+            fWires = wireForces(p, ypR, back);
+            if (fWires > 0.0f)
+                for (uint32_t j = 0; j < kResoWireModes; j += 4) store4(fr + j, load4(fr + j) - V4{gr, gr, gr, gr} * load4(back + j));
+            out = stepForced(4, p.a1, p.a2, y1, y2, p.w, fb);
+            out += stepModes(r.at - 4, p.a1 + 4, p.a2 + 4, y1 + 4, y2 + 4, p.w + 4);
+            out += stepForced(kResoWireModes, p.a1 + r.at, p.a2 + r.at, y1 + r.at, y2 + r.at, p.w + r.at, fr);
+            const uint32_t past = r.at + kResoWireModes;
+            out += stepModes(all - past, p.a1 + past, p.a2 + past, y1 + past, y2 + past, p.w + past);
+            vel = std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1]);
         } else {
             // A stick, the rim or the wires may touch: every force is solved with the response it causes.
             predictModes(all, p.a1, p.a2, y1, y2, yp);
@@ -988,42 +1082,10 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
             if (fShell != 0.0f)
                 for (uint32_t k = 0; k < sh.count; ++k) yp[sh.at + k] += fShell;
             if (p.wires) {
-                // The snare wires against the resonant head: mass-spring each, pressed into the head, a one-sided
-                // power-law contact solved per wire with the head's response (all wires at once: they vectorize).
-                float* const ypR = yp + r.at;
-                alignas(32) float u[kMaxWires] = {}, F[kMaxWires];
-                const uint32_t nw = p.wires;
-                for (uint32_t k = 0; k < kResoWireModes; ++k) {
-                    const float y = ypR[k];
-                    const float* __restrict row = p.psiT[k];
-                    for (uint32_t w = 0; w < nw; ++w) u[w] += row[w] * y;
-                }
-                for (uint32_t w = 0; w < nw; ++w) {
-                    const float acc = -p.wOm2 * (p.wx[w] - p.wRest) - p.wDampK * p.wv[w];
-                    const float vP = p.wv[w] + acc * dt;
-                    const float xP = p.wx[w] + vP * dt;
-                    const float eta = u[w] - xP;  // > 0: the head is past the wire (they touch)
-                    const float e = eta > 0.0f ? eta : 0.0f;
-                    const float sq = std::sqrt(e);
-                    float f = p.wK * e * sq / (1.0f + 1.5f * p.wK * sq * p.wC[w]);
-                    f *= 1.0f + 0.2f * (e - p.wDPrev[w]) / dt;
-                    f = f > 0.0f ? f : 0.0f;
-                    p.wDPrev[w] = e - f * p.wC[w];
-                    p.wv[w] = vP + f * dt / p.wMass;
-                    p.wx[w] += p.wv[w] * dt;
-                    F[w] = f;
-                    fWires += f;
-                }
-                if (fWires > 0.0f) {  // the forces back into the head's modes, a wire at a time (no per-mode sums)
-                    alignas(16) float back[kResoWireModes] = {};
-                    for (uint32_t w = 0; w < nw; ++w) {
-                        const float f = F[w];
-                        const float* __restrict col = p.psiW[w];
-                        for (uint32_t k = 0; k < kResoWireModes; ++k) back[k] += col[k] * f;
-                    }
-                    for (uint32_t k = 0; k < kResoWireModes; ++k) ypR[k] -= gr * back[k];
-                }
-                p.rattleEnergy += static_cast<double>(fWires) * fWires;
+                alignas(16) float back[kResoWireModes];
+                fWires = wireForces(p, yp + r.at, back);
+                if (fWires > 0.0f)
+                    for (uint32_t k = 0; k < kResoWireModes; ++k) yp[r.at + k] -= gr * back[k];
             }
             out = commitModes(all, yp, y1, y2, p.w);
             vel = std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1]);
@@ -1071,12 +1133,23 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
             V4 acc[1] = {V4{0.0f, 0.0f, 0.0f, 0.0f}};
             ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, 1);
             out = sum4(acc[0]);
+        } else if (!ca && !cb) {
+            // Only the cascade (most of a ringing cymbal's frames): its forces come from the last frame's motion,
+            // so they are worked out first and go in as the modes step, in one pass.
+            alignas(32) float fz[kMaxModes];
+            const uint32_t lo = p.tk[0], hi = lo + p.triplets;  // the driven modes (multiples of 4)
+            const float inv = 1.0f / p.satY;
+            for (uint32_t k = 0; k < p.satTop; ++k) sat[k] = p.y1[k] / (1.0f + std::fabs(p.y1[k]) * inv);
+            for (uint32_t q = 0; q < p.triplets; ++q) fz[q] = p.tc[q] * sat[p.ti[q]] * sat[p.tj[q]];
+            out = stepModes(lo, p.a1, p.a2, p.y1, p.y2, p.w);
+            out += stepForced(hi - lo, p.a1 + lo, p.a2 + lo, p.y1 + lo, p.y2 + lo, p.w + lo, fz);
+            out += stepModes(s.count - hi, p.a1 + hi, p.a2 + hi, p.y1 + hi, p.y2 + hi, p.w + hi);
         } else {
             predictModes(s.count, p.a1, p.a2, p.y1, p.y2, yp);
             if (p.triplets) {
                 // the cascade: F_k = c s_i s_j (s: the low modes, softly limited), already scaled by g
                 const float inv = 1.0f / p.satY;
-                for (uint32_t k = 0; k < s.count; ++k) sat[k] = p.y1[k] / (1.0f + std::fabs(p.y1[k]) * inv);
+                for (uint32_t k = 0; k < p.satTop; ++k) sat[k] = p.y1[k] / (1.0f + std::fabs(p.y1[k]) * inv);
                 float* const high = yp + p.tk[0];
                 for (uint32_t q = 0; q < p.triplets; ++q) high[q] += p.tc[q] * sat[p.ti[q]] * sat[p.tj[q]];
             }
