@@ -295,6 +295,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Noise', 'The keys and pedal you hear, up close or none.'),
     ('Space', 'A room around it (off by default: add your own reverb).'),
   ], 'Grand piano'),
+  'org.caw.nightingale': FieldGuide('Nightingale is a bowed string: violin, viola, cello or double bass, played by a '
+      'modelled bow.', [
+    ('Bow pressure', 'Light and airy, or digging in.'),
+    ('Bow position', 'Glassy at the bridge, soft over the fingerboard.'),
+    ('Vibrato', 'How much the finger rocks the pitch.'),
+  ], 'Solo violin'),
   'org.caw.flock': FieldGuide('Flock plays a sample as a cloud of grains, for pads, textures and drones.', [
     ('Position', 'Where in the sample the grains come from.'),
     ('Size', 'How long each grain is.'),

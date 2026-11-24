@@ -245,6 +245,7 @@ add_custom_command(OUTPUT "${_caw_embed_piano}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/piano.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
   COMMENT "Embedding Starling's recorded piano parts" VERBATIM)
 target_sources(caw_core PRIVATE src/builtin_starling.cpp src/recorded_bank.cpp "${_caw_embed_piano}")
+target_sources(caw_core PRIVATE src/builtin_nightingale.cpp src/nightingale_bodies.cpp)  # 1.1.3: Nightingale (org.caw.nightingale), the bowed strings
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -339,6 +340,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/timber_piano_compat_test.cpp)  # 1.1.2: the piano's 1.1.0 presets bit-identical
   target_sources(caw_tests PRIVATE tests/timber_piano_sim_test.cpp)  # 1.1.2: the Simulated piano's realism, noises, patents guard
   target_sources(caw_tests PRIVATE tests/starling_piano_test.cpp)
+  target_sources(caw_tests PRIVATE tests/nightingale_test.cpp)  # 1.1.3: Nightingale, the bowed strings
   # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
   add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
@@ -503,6 +505,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
   target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
   target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
+  target_sources(caw_rt_tests PRIVATE tests/nightingale_rt_test.cpp)  # 1.1.3: Nightingale
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)

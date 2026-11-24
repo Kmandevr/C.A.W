@@ -240,32 +240,43 @@ struct PianoModel : timber::Piano {
         Base::post(l, r, n, s);
         for (Player& p : players) {
             if (!p.on) continue;
-            for (uint32_t i = 0; i < n; ++i) {
-                if (p.delay > 0) {
-                    --p.delay;
-                    continue;
-                }
-                const uint32_t at = static_cast<uint32_t>(p.pos);
-                if (at + 1 >= p.frames) {
-                    p.on = false;
+            // In straight runs: the wait before it starts, the frames at full level, then the fade (no per-frame tests).
+            uint32_t i = std::min(p.delay, n);
+            p.delay -= i;
+            const float* d = p.data;
+            const double last = static_cast<double>(p.frames) - 1.0;
+            double pos = p.pos;
+            const float gl = p.gl, gr = p.gr;
+            bool ended = false;
+            const uint32_t full = p.fadeStep > 0 ? std::min(n - i, p.hold) : n - i;
+            for (const uint32_t end = i + full; i < end; ++i) {
+                if (pos >= last) {
+                    ended = true;
                     break;
                 }
-                const float f = static_cast<float>(p.pos - at);
-                float x = p.data[at] + (p.data[at + 1] - p.data[at]) * f;
-                if (p.fadeStep > 0) {  // the attack fades as the model fades in: cos(pi t / 2)
-                    if (p.hold > 0) {
-                        --p.hold;
-                    } else {
-                        p.fadeT = std::min(1.0f, p.fadeT + p.fadeStep);
-                        const float u = 1.0f - p.fadeT;
-                        x *= u * (1.5704f + u * u * (0.0723f * u * u - 0.6427f));
-                        if (p.fadeT >= 1.0f) p.on = false;
-                    }
-                }
-                l[i] += x * p.gl;
-                r[i] += x * p.gr;
-                p.pos += p.step;
+                const uint32_t at = static_cast<uint32_t>(pos);
+                const float f = static_cast<float>(pos - at);
+                const float x = d[at] + (d[at + 1] - d[at]) * f;
+                l[i] += x * gl, r[i] += x * gr;
+                pos += p.step;
             }
+            if (p.fadeStep > 0) p.hold -= std::min(p.hold, full);
+            float t = p.fadeT;
+            for (; !ended && i < n; ++i) {  // the attack fades as the model fades in: cos(pi t / 2)
+                if (pos >= last || t >= 1.0f) {
+                    ended = true;
+                    break;
+                }
+                t = std::min(1.0f, t + p.fadeStep);
+                const float u = 1.0f - t;
+                const uint32_t at = static_cast<uint32_t>(pos);
+                const float f = static_cast<float>(pos - at);
+                const float x = (d[at] + (d[at + 1] - d[at]) * f) * (u * (1.5704f + u * u * (0.0723f * u * u - 0.6427f)));
+                l[i] += x * gl, r[i] += x * gr;
+                pos += p.step;
+            }
+            p.fadeT = t, p.pos = pos;
+            if (ended || (p.fadeStep > 0 && t >= 1.0f)) p.on = false;
         }
     }
     bool postQuiet() const noexcept {

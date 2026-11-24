@@ -4,6 +4,7 @@
 #include "builtin_fx_voice.h"
 #include "builtin_timber.h"
 #include "builtin_starling.h"
+#include "builtin_nightingale.h"
 
 #include <cmath>
 #include <deque>
@@ -23,7 +24,7 @@ const std::vector<const MergedDevice*>& mergedDevices() {
                                                      mergedStereoModDevices(), mergedSpaceDevices(),
                                                      mergedMeterDevices(), mergedVoiceDevices(), mergedPreenDevices(),
                                                      mergedHushDevices(), timber::mergedTimberDevices(),
-                                                     starling::mergedStarlingDevices()})
+                                                     starling::mergedStarlingDevices(), nightingale::mergedNightingaleDevices()})
             for (const MergedDevice& d : family) v.push_back(&d);
         return v;
     }();

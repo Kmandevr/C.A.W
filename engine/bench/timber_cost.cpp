@@ -1,4 +1,4 @@
-// caw_bench's cost of Timber (org.caw.timber, `caw_bench SECONDS 300` and `321`): each model with N voices sounding, in µs per second of audio and bytes per instance, against a ceiling, plus µs per voice.
+// caw_bench's cost of Timber, Starling and Nightingale (`caw_bench SECONDS 300` and `321`): each model with N voices sounding, in µs per second of audio and bytes per instance, against a ceiling, plus µs per voice.
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -8,6 +8,8 @@
 
 #include "reference_cost.h"
 #include "builtin_components.h"
+#include "builtin_nightingale.h"
+#include "builtin_starling.h"
 #include "builtin_timber.h"
 #include "caw/instrument.hpp"
 #include "fp_mode.h"
@@ -165,5 +167,40 @@ int timberCost(double seconds) {
                     c.ceilingUs, bad ? "  OVER" : "");
     }
     std::printf("  shared tables: %zu B once per process\n", timber::timberTableBytes());
+    // 1.1.3: the realistic instruments (Nightingale at its polyphony: medium plus 20 %, as Timber's bowed strings).
+    // Starling's recordings are shared, not counted per instance.
+    struct NewCase {
+        const char* id;
+        const char* name;
+        uint32_t model;
+        Values values;
+        int voices;
+        double ceilingUs;
+    };
+    const NewCase more[] = {
+        // Starling: Timber's Simulated piano plus its recordings (two attack layers and a release a note: about 10 % more
+        // in this case, 32 notes struck a second), so heavy plus 10 % (Claude's call, docs/decisions.md, 2026-11-24).
+        {"org.caw.starling", "Starling piano Normal: 16 voices", 0, {{"tier", 2}}, 16, 26500},
+        {"org.caw.starling", "Starling piano Normal: 16 voices, pedal down", 0, {{"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 26500},
+        {"org.caw.starling", "Starling piano Eco: 16 voices", 0, {{"tier", 1}}, 16, 20000},
+        {"org.caw.nightingale", "Nightingale violin: 8 voices", 0, {}, 8, kPoly},
+        {"org.caw.nightingale", "Nightingale cello: 8 voices, vibrato 1", 2, {{"vibrato", 1}}, 8, kPoly},
+        {"org.caw.nightingale", "Nightingale bass: 8 voices, High", 3, {{"tier", 3}}, 8, 12000},  // High: exports, 1.25x medium
+    };
+    for (const NewCase& c : more) {
+        Values v = c.values;
+        v.emplace_back("variant", c.model);
+        std::unique_ptr<ModuleProcessor> p = createComponent(registry(), c.id, v);
+        if (!p || !p->activate(kRate, kBlock)) {
+            std::printf("  %-50s  could not be made\n", c.name);
+            ++over;
+            continue;
+        }
+        const double us = cost(*p, v, c.voices, seconds);
+        const bool bad = us > c.ceilingUs;
+        over += bad;
+        const size_t bytes = c.id[8] == 's' ? starling::starlingBytes(c.model, kRate) : nightingale::nightingaleBytes(c.model, kRate);
+        std::printf("  %-50s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, bytes, c.ceilingUs, bad ? "  OVER" : "");
+    }
     return over;
 }

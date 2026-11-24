@@ -184,8 +184,8 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         // 1.1.2: generated from the engine's list of built-ins (every instrument in each model and kit kind, every
         // effect in each variant; the owner: "make sure the benchmark actually tests all of the plugins"), an
         // intended change of both projects and their sound (were 3ab70624484ac6bd and 872fde1013543d13). 1.1.3: with
-        // Starling (was 5b2dd89ace6ad650).
-        {"every_instrument", "18eede1bdfb88a5b"},
+        // Starling and Nightingale (was 5b2dd89ace6ad650).
+        {"every_instrument", "2d2d5077922bb9cf"},
         {"every_effect", "bade933ee53725fc"},
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},

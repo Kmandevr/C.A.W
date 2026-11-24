@@ -160,6 +160,8 @@ class DeviceNames {
       purposes: {_g}),
     'org.caw.starling': DeviceName('Starling', 'Piano', tags: ['piano', 'grand piano', 'acoustic piano', 'realistic',
       'keys', 'upright', 'felt piano', 'struck strings'], purposes: {_g}),
+    'org.caw.nightingale': DeviceName('Nightingale', 'Bowed strings', tags: ['strings', 'violin', 'viola', 'cello',
+      'double bass', 'contrabass', 'bowed', 'orchestral', 'realistic'], purposes: {_g}),
     'org.caw.flock': DeviceName('Flock', 'Granular', tags: ['granular', 'grains', 'cloud', 'texture', 'drone', 'pad'],
       purposes: {_sd}),
     // MIDI effects
