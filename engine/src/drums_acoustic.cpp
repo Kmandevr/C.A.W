@@ -110,6 +110,16 @@ const MembraneTable& membrane() {
 #define CAW_ACOU_KERNEL
 #endif
 
+// A loop whose one body serves every trip count (no unrolled or vectorized copies that a compiler free to reassociate
+// could round differently): the kernels' frame loops, so one frame and a span give the same bits.
+#if defined(__clang__)
+#define CAW_ONE_BODY _Pragma("clang loop unroll(disable) vectorize(disable) interleave(disable)")
+#elif defined(__GNUC__)
+#define CAW_ONE_BODY _Pragma("GCC unroll 1")
+#else
+#define CAW_ONE_BODY
+#endif
+
 // Four modes as one SIMD value (GCC and Clang vector extensions: SSE on x86-64, NEON on Arm64; else a plain struct).
 #if defined(__GNUC__) || defined(__clang__)
 typedef float V4 __attribute__((vector_size(16)));
@@ -213,6 +223,7 @@ CAW_ACOU_KERNEL void ringGroups(const float* __restrict a1, const float* __restr
     for (uint32_t k = from; k < to; k += 4) {
         const V4 A1 = load4(a1 + k), A2 = load4(a2 + k), W = load4(w + k);
         V4 Y1 = load4(y1 + k), Y2 = load4(y2 + k);
+        CAW_ONE_BODY
         for (uint32_t t = 0; t < n; ++t) {
             const V4 Y = A1 * Y1 - A2 * Y2;
             acc[t] = acc[t] + W * (Y - Y1);
@@ -220,6 +231,12 @@ CAW_ACOU_KERNEL void ringGroups(const float* __restrict a1, const float* __restr
         }
         store4(y1 + k, Y1), store4(y2 + k, Y2);
     }
+}
+
+// Each frame's sum of its four lanes (the same kernel for one frame and a span).
+CAW_ACOU_KERNEL void sumAcc(const V4* __restrict acc, float* __restrict out, uint32_t n) noexcept {
+    CAW_ONE_BODY
+    for (uint32_t t = 0; t < n; ++t) out[t] = sum4(acc[t]);
 }
 
 // Whether a stick stays still for the next n frames: idle, or a delayed one whose wait outlasts them.
@@ -905,6 +922,7 @@ CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, ui
         const V4 A1r = load4(p.a1 + kr), A2r = load4(p.a2 + kr), Wr = load4(p.w + kr);
         V4 Y1b = load4(y1 + kb), Y2b = load4(y2 + kb), Y1r = load4(y1 + kr), Y2r = load4(y2 + kr);
         const float airK = p.airK;
+        CAW_ONE_BODY
         for (uint32_t t = 0; t < n; ++t) {
             const float fAir = airK * (Y1b[0] - Y1r[0]);
             const float symB = kB * drive[t], symR = kR * drive[t];
@@ -921,7 +939,7 @@ CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, ui
     }
     ringGroups(p.a1, p.a2, y1, y2, p.w, b.at + 4, r.at, acc, n);
     ringGroups(p.a1, p.a2, y1, y2, p.w, r.at + 4, all, acc, n);
-    for (uint32_t t = 0; t < n; ++t) out[t] = sum4(acc[t]);
+    sumAcc(acc, out, n);
 }
 
 // The snare wires against the resonant head: mass-spring each, pressed into the head, a one-sided power-law contact
@@ -981,14 +999,8 @@ float AcousticKit::wiresOf(Piece& p, const float* __restrict ypR, float* __restr
 }
 
 void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
-    const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
-    const uint32_t all = b.count + r.count + sh.count;
-    const float gb = b.g, gr = r.g, gs = sh.g;
     const float scale = static_cast<float>(sr_) * p.gain;
     const bool snare = p.set.kind == kPieceSnare, eco = p.quality == 0;
-    float* const y1 = p.y1;
-    float* const y2 = p.y2;
-    alignas(32) float yp[kMaxModes];
     // The rattle (the collisions' force changing: radiated sound goes with its rate), high-passed (two poles at 3 kHz):
     // the wires' clicks against the head; Eco: noise gated by the snare-side head's motion (`vel`).
     auto rattleOf = [&](float fWires, float vel) {
@@ -1007,17 +1019,32 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
         }
         return rattle;
     };
-    // Nothing can touch it this span (no stick due, no rim, no wires): it rings a span at a time.
+    // The modes first (each frame's radiated sum, the wires' force and the snare-side head's speed), then the rattle
+    // and the noises over the span, one loop whichever way the modes ran.
+    float mo[kCell], fw[kCell], vs[kCell];
+    for (uint32_t t = 0; t < n; ++t) fw[t] = vs[t] = 0.0f;
     if (!p.wires && !p.rim.active && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
+        // Nothing can touch it this span (no stick due, no rim, no wires): it rings a span at a time.
         waitOut(p.stick[0], n), waitOut(p.stick[1], n);
-        float out[kCell], vel[kCell];
-        ringDrum(p, 0, n, clock, out, snare && eco ? vel : nullptr);
-        for (uint32_t t = 0; t < n; ++t) {
-            const float rattle = rattleOf(0.0f, vel[t]);
-            p.out[t] = out[t] * scale + rattle + noiseSample(p);
-        }
-        return;
+        ringDrum(p, 0, n, clock, mo, snare && eco ? vs : nullptr);
+    } else {
+        modesDrum(p, n, clock, mo, fw, vs);
     }
+    for (uint32_t t = 0; t < n; ++t) {
+        const float rattle = rattleOf(fw[t], vs[t]);
+        p.out[t] = mo[t] * scale + rattle + noiseSample(p);
+    }
+}
+
+// A drum frame by frame (a stick, the rim or the wires may touch): mo, fw and vs as runDrum keeps them.
+void AcousticKit::modesDrum(Piece& p, uint32_t n, uint64_t clock, float* mo, float* fw, float* vs) noexcept {
+    const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
+    const uint32_t all = b.count + r.count + sh.count;
+    const float gb = b.g, gr = r.g, gs = sh.g;
+    const bool snare = p.set.kind == kPieceSnare, eco = p.quality == 0;
+    float* const y1 = p.y1;
+    float* const y2 = p.y2;
+    alignas(32) float yp[kMaxModes];
     for (uint32_t t = 0; t < n; ++t) {
         // The rest of the kit, kLag frames back: it drives the snare-side head (the wires buzz with the kick) and a
         // tom's lowest modes (sympathetic ring).
@@ -1084,17 +1111,14 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
             out = commitModes(all, yp, y1, y2, p.w);
             vel = std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1]);
         }
-        const float rattle = rattleOf(fWires, vel);
-        p.out[t] = out * scale + rattle + noiseSample(p);
+        mo[t] = out, fw[t] = fWires, vs[t] = vel;
     }
 }
 
 void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
     (void)clock;
     const Segment s = p.seg[0];
-    const float g = s.g;
     const float scale = static_cast<float>(sr_) * p.gain;
-    alignas(32) float yp[kMaxModes], sat[kMaxModes];
     // Eco's substitute for the cascade: band-limited noise growing with the low modes' energy.
     auto swellOf = [&]() {
         float x = unit(p.rng) * std::sqrt(std::max(0.0f, p.swellEnv)) * p.swellGain;
@@ -1104,19 +1128,31 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
         p.swellLp += 0.6f * (x - p.swellLp);
         return p.swellLp;
     };
-    // No cascade and nothing touching it this span: it rings a span at a time (the same kernel as a single frame).
+    // The modes first (each frame's radiated sum), then the swell and the noises over the span, one loop whichever
+    // way the modes ran.
+    float mo[kCell];
     if (!p.triplets && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
+        // No cascade and nothing touching it this span: it rings a span at a time (the same kernel as one frame).
         waitOut(p.stick[0], n), waitOut(p.stick[1], n);
         V4 acc[kCell];
         for (uint32_t t = 0; t < n; ++t) acc[t] = V4{0.0f, 0.0f, 0.0f, 0.0f};
         ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, n);
-        for (uint32_t t = 0; t < n; ++t) {
-            float out = sum4(acc[t]) * scale;
-            if (p.swellGain > 0.0f) out += swellOf();
-            p.out[t] = out + noiseSample(p);
-        }
-        return;
+        sumAcc(acc, mo, n);
+    } else {
+        modesCymbal(p, n, mo);
     }
+    for (uint32_t t = 0; t < n; ++t) {
+        float out = mo[t] * scale;
+        if (p.swellGain > 0.0f) out += swellOf();  // Eco's substitute for the cascade
+        p.out[t] = out + noiseSample(p);
+    }
+}
+
+// A cymbal frame by frame (a stick may touch, or the cascade drives it): mo as runCymbal keeps it.
+void AcousticKit::modesCymbal(Piece& p, uint32_t n, float* mo) noexcept {
+    const Segment s = p.seg[0];
+    const float g = s.g;
+    alignas(32) float yp[kMaxModes], sat[kMaxModes];
     for (uint32_t t = 0; t < n; ++t) {
         Striker& sa = p.stick[0];
         Striker& sb = p.stick[1];
@@ -1126,7 +1162,7 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
         if (!ca && !cb && !p.triplets) {
             V4 acc[1] = {V4{0.0f, 0.0f, 0.0f, 0.0f}};
             ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, 1);
-            out = sum4(acc[0]);
+            sumAcc(acc, &out, 1);
         } else if (!ca && !cb) {
             // Only the cascade (most of a ringing cymbal's frames): its forces come from the last frame's motion,
             // so they are worked out first and go in as the modes step, in one pass.
@@ -1157,9 +1193,7 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
             }
             out = commitModes(s.count, yp, p.y1, p.y2, p.w);
         }
-        out *= scale;
-        if (p.swellGain > 0.0f) out += swellOf();  // Eco's substitute for the cascade
-        p.out[t] = out + noiseSample(p);
+        mo[t] = out;
     }
 }
 

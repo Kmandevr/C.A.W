@@ -174,6 +174,8 @@ private:
     template <uint32_t NW>
     float wiresOf(Piece& p, const float* ypR, float* back, float dt) noexcept;
     void runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept;
+    void modesDrum(Piece& p, uint32_t n, uint64_t clock, float* mo, float* fw, float* vs) noexcept;
+    void modesCymbal(Piece& p, uint32_t n, float* mo) noexcept;
     void runHat(Piece& p, uint32_t n, uint64_t clock) noexcept;
     float noiseSample(Piece& p) noexcept;
     float stickForce(Striker& s, float uPred) noexcept;
