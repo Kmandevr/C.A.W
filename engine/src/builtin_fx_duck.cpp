@@ -1,4 +1,4 @@
-// Duck's "Duck" variant (org.caw.duck variant 0; 1.0.8-1.0.9 the Compressor's variant 4): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
+// Swoop's "Duck" variant (org.caw.duck variant 0; 1.0.8-1.0.9 the Compressor's variant 4): a ducker and leveller that follows a key's level (or its own input's) with RMS, Peak or ISP detection.
 #include "builtin_effects.h"
 
 #include <algorithm>

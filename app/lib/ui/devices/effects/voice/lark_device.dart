@@ -1,4 +1,4 @@
-// Lark's page (org.caw.pitchfix, live pitch correction; 1.1.0, Pitch family pink): the note line with snapping (the pitch in, the corrected pitch out, on a keyboard axis whose lit keys are the scale), key and scale, Speed, Humanize, Keep vibrato, Formant and Mix, and the clip pitch editor's button.
+// Chirp's page (org.caw.pitchfix, live pitch correction; 1.1.0, Pitch family pink): the note line with snapping (the pitch in, the corrected pitch out, on a keyboard axis whose lit keys are the scale), key and scale, Speed, Humanize, Keep vibrato, Formant and Mix, and the clip pitch editor's button.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';

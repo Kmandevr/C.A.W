@@ -1,4 +1,4 @@
-// The clip pitch editor (Lark, 1.1.0; owner 2026-11-19, "note blobs"): an audio clip's notes as blobs on a piano-roll grid, each shaped by its loudness with the pitch line through it; drag a blob up or down to retune it, sideways or at its edges for timing; knobs for the chosen note's drift, vibrato and transition, and Snap; rendered off the UI isolate as a new take or in place of the clip, one undo step. One voice only (the design's patent line: no polyphonic editing).
+// The clip pitch editor (Chirp, 1.1.0; owner 2026-11-19, "note blobs"): an audio clip's notes as blobs on a piano-roll grid, each shaped by its loudness with the pitch line through it; drag a blob up or down to retune it, sideways or at its edges for timing; knobs for the chosen note's drift, vibrato and transition, and Snap; rendered off the UI isolate as a new take or in place of the clip, one undo step. One voice only (the design's patent line: no polyphonic editing).
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -18,7 +18,7 @@ import '../theme.dart';
 import 'freeze_ui.dart';
 import 'knob.dart';
 
-/// The editor's colours: Lark's (the Pitch family's pink) and its second voice.
+/// The editor's colours: Chirp's (the Pitch family's pink) and its second voice.
 Color get _accent => Neon.pink;
 Color get _second => Neon.violet;
 

@@ -1,4 +1,4 @@
-// The presets of 1.1.0's new dynamics variants (Talon's Up and Bus, Hatch's Expand and Pedal gate, Duck's Level and Carve) and Duck's own, listed with the 1.1.0 effect modes' presets by fx::newVariantPresets.
+// The presets of 1.1.0's new dynamics variants (Talon's Up and Bus, Hatch's Expand and Pedal gate, Swoop's Level and Carve) and Duck's own, listed with the 1.1.0 effect modes' presets by fx::newVariantPresets.
 #include "fx_clean.h"
 #include <span>
 #include <vector>

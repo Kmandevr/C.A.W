@@ -585,7 +585,7 @@ Future<void> showAudioClipMenu(BuildContext context, AppState s, LayerDoc layer,
   final v = await showLongPressMenu<String>(context, at: at, title: s.audioClipName(clip), style: s.settings.longPressMenu,
       actions: [
         if (onOpen != null) const MenuAction('open', 'Clip settings…', Icons.tune),
-        // The clip pitch editor (Lark, 1.1.0): one voice's notes, full screen.
+        // The clip pitch editor (Chirp, 1.1.0): one voice's notes, full screen.
         MenuAction('pitch', 'Edit pitch…', Icons.multiline_chart, enabled: s.project.asset(clip.assetId) != null,
             hint: s.project.asset(clip.assetId) == null ? 'Its audio file is missing' : null),
         if (canSplit) const MenuAction('split', 'Split at the playhead', Icons.content_cut),

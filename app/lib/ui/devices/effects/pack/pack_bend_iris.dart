@@ -1,4 +1,4 @@
-// The AutoStacc pack's Bend (a bending grid whose curve points drag) and Iris (a frozen spectrum painted through the device's state) pages.
+// The AutoStacc pack's Bend (a bending grid whose curve points drag) and Molt (a frozen spectrum painted through the device's state) pages.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -221,13 +221,13 @@ class BendPainter extends CustomPainter {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Iris
+// Molt
 
 const irisBands = 64;
 const _irisMagic = 0x53495249;  // "IRIS"
 const _irisHeader = 20;
 
-/// The painted curve (64 bands, dB) in Iris state [bytes], or null when they are no Iris state.
+/// The painted curve (64 bands, dB) in Molt state [bytes], or null when they are no Molt state.
 List<double>? irisPaintOf(Uint8List? bytes) {
   if (bytes == null || bytes.length < _irisHeader + 4 * irisBands) return null;
   final b = ByteData.sublistView(bytes);
@@ -235,8 +235,8 @@ List<double>? irisPaintOf(Uint8List? bytes) {
   return [for (var k = 0; k < irisBands; k++) b.getFloat32(_irisHeader + 4 * k, Endian.little).clamp(-60.0, 12.0)];
 }
 
-/// Iris state [base] (as the engine saved it: its frozen spectrum kept) with [paint] as its painted curve; with no
-/// usable base, a state of the curve alone (no spectrum: the next freeze captures one). docs/engine.md, "Iris".
+/// Molt state [base] (as the engine saved it: its frozen spectrum kept) with [paint] as its painted curve; with no
+/// usable base, a state of the curve alone (no spectrum: the next freeze captures one). docs/engine.md, "Molt".
 Uint8List irisStateWith(Uint8List? base, List<double> paint) {
   final out = irisPaintOf(base) != null ? Uint8List.fromList(base!) : Uint8List(_irisHeader + 4 * irisBands);
   final b = ByteData.sublistView(out);
@@ -250,7 +250,7 @@ Uint8List irisStateWith(Uint8List? base, List<double> paint) {
   return out;
 }
 
-/// Iris: the frozen spectrum as a row of chunky bars (as it plays: the capture times the painted curve; its outline
+/// Molt: the frozen spectrum as a row of chunky bars (as it plays: the capture times the painted curve; its outline
 /// unpainted), the input's spectrum as a line over it, and the painted curve, which a finger paints (dragging across
 /// the bands, up to +12 dB, down to −60); double-tap: flat. Freeze and the stages under it.
 class IrisPage extends StatelessWidget {
@@ -280,7 +280,7 @@ class IrisPage extends StatelessWidget {
   }
 }
 
-/// The plot inside Iris's hero of [size] (the painter's and the brush's).
+/// The plot inside Molt's hero of [size] (the painter's and the brush's).
 Rect irisPlot(Size size) => Rect.fromLTRB(14, 24, size.width - 30, size.height - 20);
 
 class _IrisHero extends StatefulWidget {

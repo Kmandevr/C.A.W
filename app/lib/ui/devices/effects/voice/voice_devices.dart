@@ -1,4 +1,4 @@
-// 1.1.0's voice devices' pages: the Exciter (Glint: harmonics bars), the Vocoder (Mimic: band bars, the carrier choice and the formant shift) and Lark's registration (lark_device.dart), and the drag hero they and the clean-up pages share.
+// 1.1.0's voice devices' pages: the Exciter (Glint: harmonics bars), the Vocoder (Mimic: band bars, the carrier choice and the formant shift) and Chirp's registration (lark_device.dart), and the drag hero they and the clean-up pages share.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -29,7 +29,7 @@ final Map<String, DeviceEditorEntry> voiceEditors = {
       (_) => const MimicPage())], family: DeviceFamily.creative),
   'org.caw.clean': _cards('clean', 'CLEAN', Icons.cleaning_services_outlined, DeviceFamily.utility, () => const PreenPage()),
   'org.caw.vocalclean': _cards('vocalclean', 'VOCAL', Icons.mic_none, DeviceFamily.utility, () => const HushPage()),
-  // Lark (pitch correction): the Pitch family's pink.
+  // Chirp (pitch correction): the Pitch family's pink.
   'org.caw.pitchfix': DeviceEditorEntry((_) => [DeviceSection('pitchfix', 'PITCH', Icons.multiline_chart,
       (_) => const LarkPage())], family: DeviceFamily.creative, accent: pitchAccent),
 };

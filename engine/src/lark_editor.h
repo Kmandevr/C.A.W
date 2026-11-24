@@ -1,4 +1,4 @@
-// Lark's clip editor engine (1.1.0, one voice): an offline analysis of a clip into note objects and a non-destructive TD-PSOLA render of per-note edits; the C API (capi_pitch_clip.cpp) wraps it for the app's workers.
+// Chirp's clip editor engine (1.1.0, one voice): an offline analysis of a clip into note objects and a non-destructive TD-PSOLA render of per-note edits; the C API (capi_pitch_clip.cpp) wraps it for the app's workers.
 #pragma once
 
 #include <cstddef>

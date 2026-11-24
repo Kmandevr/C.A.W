@@ -163,7 +163,7 @@ class NativeComponentInfo {
   /// The pack a built-in belongs to (`"autostacc-beta"`: the AutoStacc beta pack, 1.1.0), or '' for none.
   final String pack;
 
-  /// One of the AutoStacc beta pack's devices (Murmur, Peck, Bend, Iris): the AutoStacc badge marks it.
+  /// One of the AutoStacc beta pack's devices (Murmur, Peck, Bend, Molt): the AutoStacc badge marks it.
   bool get isAutoStacc => pack.startsWith('autostacc');
 
   /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.

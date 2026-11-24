@@ -1,4 +1,4 @@
-// The AutoStacc beta pack (1.1.0, built in for now; an AutoStacc download from 1.2.0): Murmur, Peck, Bend and Iris, their registration, presets and pack mark.
+// The AutoStacc beta pack (1.1.0, built in for now; an AutoStacc download from 1.2.0): Murmur, Peck, Bend and Molt, their registration, presets and pack mark.
 #pragma once
 
 #include <cstddef>

@@ -183,7 +183,7 @@ extern "C" {
    CAW_MIDI_COMPONENT | k addresses MIDI effect k in caw_engine_set_component_param, _bypass, _display, _states and
    _set_component_state; automation lanes "target_type":"midiComponent" with "component" k. New devices
    org.caw.meters, org.caw.lofi and org.caw.phasealign (docs/engine.md).
-   42 (2026-11-19, 1.1.0): the clip pitch editor's engine (Lark, one voice): caw_pitch_clip_analyse,
+   42 (2026-11-19, 1.1.0): the clip pitch editor's engine (Chirp, one voice): caw_pitch_clip_analyse,
    caw_pitch_clip_curve, caw_pitch_clip_render and caw_pitch_clip_free (below). New device org.caw.pitchfix (live
    pitch correction). Nothing else changes.
    43 (2026-11-19, 1.1.0): the sampler's tools (docs/engine.md "Sampler tools"): caw_sampler_map (drop and play:
@@ -1143,7 +1143,7 @@ typedef struct CawComponentBenchRequest {
    plug-in benchmark". A failed job's caw_job_error says why ("cancelled" when cancelled); its progress is 0..1000. */
 CAW_API CawJob* caw_worker_pool_submit_component_bench(CawWorkerPool* pool, const CawComponentBenchRequest* request);
 
-/* API 42: the clip pitch editor's engine (Lark; docs/engine.md "Lark"). Monophonic. Call these off the audio thread
+/* API 42: the clip pitch editor's engine (Chirp; docs/engine.md "Chirp"). Monophonic. Call these off the audio thread
    (a worker isolate); they allocate, take no lock the audio thread holds, and are deterministic: the same audio,
    options and edits give the same notes and the same samples on every run.
    caw_pitch_clip_analyse: `frames` (1..30 minutes) of `left` and `right` (NULL: mono) at `sample_rate`

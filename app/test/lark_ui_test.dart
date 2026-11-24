@@ -1,4 +1,4 @@
-// Lark's page and the clip pitch editor (1.1.0) with a fake engine: the note line drags Speed and Humanize, Custom shows its notes, Edit pitch… opens the editor; the editor analyses with progress and cancel, draws the notes, a blob drags up (snapped) and sideways and at its edge, the knobs shape the chosen note, its own undo, and a render lands as a new take or in place of the clip, one project undo step; the audio clip's hold menu has Edit pitch…. With CAW_PITCH_SCREENS=<dir>, phone PNGs at 2x.
+// Chirp's page and the clip pitch editor (1.1.0) with a fake engine: the note line drags Speed and Humanize, Custom shows its notes, Edit pitch… opens the editor; the editor analyses with progress and cancel, draws the notes, a blob drags up (snapped) and sideways and at its edge, the knobs shape the chosen note, its own undo, and a render lands as a new take or in place of the clip, one project undo step; the audio clip's hold menu has Edit pitch…. With CAW_PITCH_SCREENS=<dir>, phone PNGs at 2x.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -78,7 +78,7 @@ class FakePitchBackend implements PitchClipBackend {
   void release(PitchClipSession session) => released.add(session);
 }
 
-ProjectDoc vocalProject() => ProjectDoc(id: 'p', name: 'Lark', bpm: 120, assets: [
+ProjectDoc vocalProject() => ProjectDoc(id: 'p', name: 'Chirp', bpm: 120, assets: [
       AudioAssetDoc(id: 'a1', path: '/abs/vox.wav', name: 'vox', seconds: 2.4, channels: 1, sourceRate: _rate),
     ], layers: [
       LayerDoc(id: 't1', name: 'Vox', color: 0, audioClips: [AudioClipDoc(id: 'c1', assetId: 'a1', startSteps: 0, lengthSeconds: 2.4)]),
@@ -166,7 +166,7 @@ void main() {
     });
   });
 
-  group("Lark's page", () {
+  group("Chirp's page", () {
     late DeviceDisplaySource source;
     setUp(() {
       source = DeviceDisplaySource.current;

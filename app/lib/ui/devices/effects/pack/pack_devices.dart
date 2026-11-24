@@ -1,4 +1,4 @@
-// The AutoStacc beta pack's device pages (1.1.0): Murmur (grains drifting over the recording), Peck (a slice grid lighting up), Bend (a bending grid) and Iris (a frozen spectrum you paint); their browser entries and the toy-like pieces they share.
+// The AutoStacc beta pack's device pages (1.1.0): Murmur (grains drifting over the recording), Peck (a slice grid lighting up), Bend (a bending grid) and Molt (a frozen spectrum you paint); their browser entries and the toy-like pieces they share.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -29,7 +29,7 @@ const packCatalog = <FxCatalogEntry>[
       'Glitch on the grid: seeded repeats, stutters, reverses, gates and pitch jumps per slice.', Icons.grid_view),
   FxCatalogEntry(bendId, 'Bend', 'AutoStacc pack',
       'Warp: a drawn curve bends time or speed through each cycle, from gentle wow to tape spins.', Icons.waves),
-  FxCatalogEntry(irisId, 'Iris', 'AutoStacc pack',
+  FxCatalogEntry(irisId, 'Molt', 'AutoStacc pack',
       'Spectral: freeze a spectrum and paint it, blur, shift and gate the partials.', Icons.blur_circular),
 ];
 

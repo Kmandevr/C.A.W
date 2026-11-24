@@ -15,7 +15,7 @@
 #include "presets.h"
 
 // Original code (C.A.W. is Apache-2.0); the channel vocoder is Dudley's (1939), its band design the shared
-// filterbank's (fx_bandbank.h, the same as Duck's Carve). No latency, so it is safe on an armed track.
+// filterbank's (fx_bandbank.h, the same as Swoop's Carve). No latency, so it is safe on an armed track.
 // - The modulator is the input's mid: Bands log-spaced 4th-order band-passes from Low to High (12, 20 or 32; Auto
 //   follows the quality, Eco 12, Normal 20, High 32), each followed with Attack and Release.
 // - The carrier runs through the same bands; each band is weighted by the modulator's level in the band Formant

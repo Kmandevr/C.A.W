@@ -50,7 +50,7 @@ void main() {
     Motion.setting = MotionLevel.full;
   });
 
-  // Flock's birds, Rook's pads, Lark's note line, the Limiter's loudness area and Raven (the flagship).
+  // Flock's birds, Rook's pads, Chirp's note line, the Limiter's loudness area and Raven (the flagship).
   for (final id in ['org.caw.flock', 'org.caw.drums', 'org.caw.pitchfix', 'org.caw.limiter', 'org.caw.synth.flagship']) {
     testWidgets('$id page while playing, and its ⋯ menu', (tester) async {
       tester.view.physicalSize = const Size(390, 844);

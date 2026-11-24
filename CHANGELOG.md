@@ -15,6 +15,7 @@ Realistic instruments, part one: a piano, bowed strings, winds and a cathedral o
 
 ### Changed
 - The wavetable synth is now called **Kestrel** (it was Raven).
+- More devices have new names (search still finds the old ones): the ducker is **Swoop** (was Duck), the transient shaper **Stoop** (was Swoop), pitch correction **Chirp** (was Lark), note echo **Mock** (was Ricochet), the formant filter **Coo** (was Syrinx), the limiter **Hover** (was Canopy), the meters **Spot** (was Lookout), the convolver **Call** (was Hollow), the spectral effect **Molt** (was Iris), multiband dynamics **Puff** (was Pinion) and the trance gate **Blink** (was Strobe).
 - The new piano, strings and winds open dry (no room): add Space or your own reverb. The organ opens in its cathedral.
 - **Knobs turn with a sideways drag**, so swiping up and down over a device page scrolls it. Hold a knob first for fine moves. Prefer the old up-and-down drag? Settings › Haptics and menus › Knobs turn with.
 - While a song plays, the screen runs at 60 Hz to leave the phone's power to the audio.

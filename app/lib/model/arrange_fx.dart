@@ -249,7 +249,7 @@ extension ArrangeFx on AppState {
     return kept == null || kept.isEmpty ? null : base64Decode(kept);
   }
 
-  /// Writes a state the device's own page made (Iris's painted curve) to native effect [index]: to the engine at
+  /// Writes a state the device's own page made (Molt's painted curve) to native effect [index]: to the engine at
   /// once (when there is one; it rebuilds the chain off the UI thread), and with [keep] into the project as one
   /// undo step, so a reload starts from it. Unlike [loadNativeEffectState] the project keeps it without an engine:
   /// the page built it, so it is valid.

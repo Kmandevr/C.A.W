@@ -201,7 +201,7 @@ TEST(armed_preen_and_pitch_fix_use_their_monitoring_windows) {
 }
 
 TEST(armed_talon_up_drops_its_look_ahead_and_its_latency_follows) {
-    // Up (org.caw.compressor variant 2) at 5 ms of look-ahead: 240 frames at 48 kHz, none while armed, as Duck's Level.
+    // Up (org.caw.compressor variant 2) at 5 ms of look-ahead: 240 frames at 48 kHz, none while armed, as Swoop's Level.
     const Values values = {{"variant", 2}, {"lookahead", 5}};
     for (bool arm : {false, true}) {
         auto p = make("org.caw.compressor", values);

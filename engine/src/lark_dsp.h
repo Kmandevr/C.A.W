@@ -1,4 +1,4 @@
-// Lark's shared DSP (org.caw.pitchfix and the clip editor): scales and target notes, the YIN detector on a decimated copy, its full-rate refinement, and the Hann table TD-PSOLA grains read.
+// Chirp's shared DSP (org.caw.pitchfix and the clip editor): scales and target notes, the YIN detector on a decimated copy, its full-rate refinement, and the Hann table TD-PSOLA grains read.
 #pragma once
 
 #include <algorithm>

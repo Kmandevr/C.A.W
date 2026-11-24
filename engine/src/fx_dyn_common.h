@@ -1,4 +1,4 @@
-// What 1.1.0's dynamics variants share (Talon's Up and Bus, Hatch's Expand and Pedal gate, Duck's Level): the key filter, the detectors and the warm character.
+// What 1.1.0's dynamics variants share (Talon's Up and Bus, Hatch's Expand and Pedal gate, Swoop's Level): the key filter, the detectors and the warm character.
 #pragma once
 
 #include <cmath>

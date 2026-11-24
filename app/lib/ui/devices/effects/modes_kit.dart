@@ -73,7 +73,7 @@ class LitPill extends StatelessWidget {
           boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 8)] : null),
         child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
           if (icon != null) ...[Icon(icon, size: 14, color: on ? c : Neon.dim), const SizedBox(width: 4)],
-          // Ellipsized rather than overflowing a phone-width pill (Lark's "Edit pitch… (put an audio clip on this
+          // Ellipsized rather than overflowing a phone-width pill (Chirp's "Edit pitch… (put an audio clip on this
           // track)" ran 132 px past a 390 dp screen).
           Flexible(child: Text(label.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 9.5, letterSpacing: 0.8, fontWeight: FontWeight.w800,

@@ -50,7 +50,7 @@ class MergedDevices {
   /// id's own variant 0.
   static const variants = <MergedVariant>[
     // 1.1.0's split (engine/src/builtin_fx_merged_dynamics.cpp): Compressor (Talon) Down, Dynamics, Up, Bus; Gate
-    // (Hatch) Gate, Expand, Pedal gate; Ducker (Duck) Duck, Level, Carve; Shape went to Tremolo/Pan.
+    // (Hatch) Gate, Expand, Pedal gate; Ducker (Swoop) Duck, Level, Carve; Shape went to Tremolo/Pan.
     MergedVariant('org.caw.compressor', 'org.caw.compressor', 0),
     MergedVariant('org.caw.dynamics', 'org.caw.compressor', 1),
     MergedVariant('org.caw.compressor.up', 'org.caw.compressor', 2, retired: false),
