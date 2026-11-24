@@ -102,6 +102,10 @@ struct Piano {
         float phantomGain = 0;
         uint64_t simFrames = 0;
         double strikeFrame = -1, keybedFrame = -1;  // when each began (frames from note-on; the tests read them)
+        // ---- Starling's hybrid (1.1.3, starling_piano.h): the model fades in under a recorded attack ----
+        bool gated = false;         // this voice's output is still crossing from the recording into the model
+        uint32_t gateHold = 0;      // frames of the model held silent (the recording alone)
+        float gateT = 0, gateStep = 0;  // the crossfade's progress 0..1 and its step per frame
     };
 
     // Shared by every voice of the instance (read at control points).
@@ -149,6 +153,11 @@ struct Piano {
     // into the board, and strings switched off (to hear the noises alone).
     double resInputEnergy = 0, buzzEnergy = 0, lastStrikeAt = -1, lastKeybedAt = -1;
     bool testMuteStrings = false, testMuteKeys = false;
+    // ---- Starling's hybrid (1.1.3, starling_piano.h); Timber never sets these, so its sound is unchanged ----
+    const float* f1Cents = nullptr;  // the measured tuning: the fundamental's cents against equal temperament, 89 keys
+    bool recordedPedal = false;      // the pedal's noise is recorded: report pedal moves instead of simulating them
+    float buzzSound = 1.0f;          // the dampers' buzz into the board (0: its sound is recorded; it still damps the string)
+    int pedalEvent = 0;              // 1 down, 2 up: the last pedal move, for the recorded noise (read and cleared)
 
     static uint32_t lineSize(double sr, double lowestHz) noexcept { return pow2At(static_cast<uint32_t>(sr / lowestHz) + 64); }
     // Floats per voice and for the bank at `sr` (the lowest string of each slot: A0, A#0..A2, A#2 up; C2 for the bank).
@@ -218,6 +227,12 @@ struct Piano {
 
     // Stretch tuning, in cents: a Railsback-like curve (flat in the middle, the bass down, the treble up).
     double stretchCents(double pitch) const noexcept {
+        if (f1Cents) {  // Starling: `stretch` scales the measured tuning; the string's own inharmonicity is taken off
+            const double k = clampd(pitch, 21.0, 108.0) - 21.0;
+            const int i = std::min(static_cast<int>(k), 87);
+            const double c = f1Cents[i] + (f1Cents[i + 1] - f1Cents[i]) * (k - i);
+            return stretch * c - 600.0 * detLog(1.0 + piano_curves::inharmonicity(std::min(pitch, 108.0))) / detLog(2.0);
+        }
         const double x = pitch - 69.0;
         const double c = x > 0 ? 30.0 * detPow(std::min(x, 48.0) / 39.0, 3.0) : -25.0 * detPow(std::min(-x, 60.0) / 48.0, 3.0);
         return stretch * c;
@@ -599,7 +614,10 @@ struct Piano {
         const bool down = pedalDown ? pedal > 0.25 : pedal > 0.35;
         if (down != pedalDown) {
             pedalDown = down;
-            if (simMode && noise > 0) pedalNoise(down);
+            if (simMode && noise > 0) {
+                if (recordedPedal) pedalEvent = down ? 1 : 2;
+                else pedalNoise(down);
+            }
         }
         board.flush(), res.flush(), keyFrame.flush(), trapwork.flush(), damperRail.flush();
         // A bank that has rung out is cleared to exact zeros and skipped until it is struck again.

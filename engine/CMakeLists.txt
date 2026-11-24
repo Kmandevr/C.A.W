@@ -235,6 +235,16 @@ target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_de
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
 target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
 target_sources(caw_core PRIVATE src/timber_piano_tables.cpp src/timber_piano_sim.cpp)  # 1.1.2: Timber's Simulated piano: its tables (generated: tools/timber_piano_gen.cpp) and per-sample code
+# 1.1.3: Starling (org.caw.starling) and the recorded parts built into the engine (engine/assets/, embedded by
+# cmake/EmbedFile.cmake; decoded on first use by recorded_bank.cpp).
+set(_caw_assets_out "${CMAKE_CURRENT_BINARY_DIR}/assets")
+set(_caw_embed_piano "${_caw_assets_out}/starling_piano_flac.cpp")
+add_custom_command(OUTPUT "${_caw_embed_piano}"
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/piano.flac -DOUTPUT=${_caw_embed_piano}
+    -DSYMBOL=starling_piano_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/piano.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  COMMENT "Embedding Starling's recorded piano parts" VERBATIM)
+target_sources(caw_core PRIVATE src/builtin_starling.cpp src/recorded_bank.cpp "${_caw_embed_piano}")
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -328,6 +338,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
   target_sources(caw_tests PRIVATE tests/timber_piano_compat_test.cpp)  # 1.1.2: the piano's 1.1.0 presets bit-identical
   target_sources(caw_tests PRIVATE tests/timber_piano_sim_test.cpp)  # 1.1.2: the Simulated piano's realism, noises, patents guard
+  target_sources(caw_tests PRIVATE tests/starling_piano_test.cpp)
   # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
   add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
@@ -491,6 +502,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
   target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
+  target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
