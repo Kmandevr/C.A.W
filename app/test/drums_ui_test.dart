@@ -530,10 +530,10 @@ void main() {
         expect([for (final n in e.value as List) '${n['param']}|${n['kit']}|${(n['in'] as List?)?.join(',')}'],
           [for (final n in drumNeeds[e.key]!) '${n.param}|${n.kit}|${n.only?.join(',')}'], reason: e.key);
       }
-      expect(drums.parameters.length, 13662);
+      expect(drums.parameters.length, 14263);  // 1.1.2 appended 4 a pad and the Acoustic kit
       // Randomize and explode through the real engine.
       final r = const EngineDrumsApi().randomize(0, 3, 1, 5, null)!;
-      expect(r.keys.where((k) => k.startsWith('a6_')).length, 213);
+      expect(r.keys.where((k) => k.startsWith('a6_')).length, 217);
       final x = const EngineDrumsApi().explode({'id': id, 'params': <String, double>{}})!;
       expect((x['tracks'] as List).length, greaterThan(1));
       expect(const EngineDrumsApi().builtinSamples(), contains('808 Kick'));

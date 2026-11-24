@@ -853,6 +853,7 @@ std::string drumsInfoJson() {
                     ",\"outputs\":" + std::to_string(kOutputs) + ",\"globals\":[";
     const ParameterDescriptor* t = parameterTable();
     for (uint32_t k = 0; k < kGlobalCount; ++k) j += (k ? ",\"" : "\"") + std::string(t[k].id) + "\"";
+    for (uint32_t k = kAcouBase; k < kParamCount; ++k) j += ",\"" + std::string(t[k].id) + "\"";  // 1.1.2: the Acoustic kit
     j += "],\"layers\":[";
     bool firstLayer = true;
     for (const auto& layer : kLayerNames) {
