@@ -86,8 +86,10 @@ Strike strike(double key, double speed) {
     const double damp3 = 2.0 * b3 * dt / (dx * dx), d1 = b1 * dt;
     std::vector<double> y0(N + 3, 0.0), y1(N + 3, 0.0), y2(N + 3, 0.0);  // index i + 1 for point i (ghosts at 0 and N + 2)
     // The hammer's width (about 1 cm at the crown's contact) as a Hann window over the string's points.
-    const int centre = static_cast<int>(std::lround(beta * N));
-    const int half = std::max(1, static_cast<int>(std::lround(0.005 / dx)));
+    // The window stays on the string's inner points (1..N-1): on the shortest treble strings 1 cm is wider than
+    // the strike point's distance from the end, and a wider window read before the grid (found by the sanitizers).
+    const int centre = std::clamp(static_cast<int>(std::lround(beta * N)), 2, N - 2);
+    const int half = std::clamp(static_cast<int>(std::lround(0.005 / dx)), 1, std::min(centre - 1, N - 1 - centre));
     std::vector<double> g(2 * half + 1);
     double gs = 0;
     for (int k = -half; k <= half; ++k) gs += g[k + half] = 0.5 + 0.5 * std::cos(kPi * k / (half + 1));

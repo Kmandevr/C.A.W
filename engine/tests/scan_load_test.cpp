@@ -3,6 +3,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -146,6 +147,14 @@ TEST(scan_libcaw_itself_parses_and_shows_what_an_engine_does) {
     const FileScan s = scanFile(CAW_TEST_LIBCAW_PATH);
     CHECK(s.ok);
     if (!s.ok) return;
+    // A Debug sanitizer build of the engine is larger than any file the scan reads (277 MB in 1.1.2): there the
+    // scan must call it malformed for its size, as it would any component that large.
+    if (fs::file_size(CAW_TEST_LIBCAW_PATH) > Limits{}.maxFileBytes) {
+        CHECK(s.report->malformed);
+        CHECK(std::any_of(s.report->findings.begin(), s.report->findings.end(),
+                          [](const Finding& f) { return f.kind == FindingKind::Malformed; }));
+        return;
+    }
     CHECK(!s.report->malformed);
     CHECK(s.report->imports > 0);
     // The engine loads components and starts its mix pool: as a component it would have to declare both.
