@@ -25,6 +25,7 @@
 #include "fx_merged.h"
 #include "graph.h"
 #include "mix_pool.h"
+#include "presets.h"
 #include "project.h"
 #include "render.h"
 #include "stress_scenarios.h"
@@ -950,6 +951,43 @@ int runDrift(double secs, int argc, char** argv) {
     return 0;
 }
 
+// A built-in preset's values (empty when it has no such preset).
+Values builtinPresetValues(const char* id, std::string_view name) {
+    Values v;
+    for (const BuiltinPreset& b : builtinPresets(id))
+        if (b.name == name)
+            for (const auto& [k, x] : b.values) v.emplace_back(std::string(k), x);
+    return v;
+}
+
+// 1.1.2 (the owner's spikes on 1.1.1, 2026-11-24): a song on the devices 1.1.0-1.1.2 added, which no Benchmark
+// scenario plays: Rook's Acoustic kit, Timber's Simulated piano and cello (the cello through Lark), Flock, Talon's
+// Bus and Up compressors and Plume's Linear EQ. caw_bench's spike rows only (not one of the app's Benchmark's).
+ProjectSpec devices112() {
+    ProjectSpec p;
+    p.name = "1.1.2 devices";
+    p.bpm = 120;
+    p.loopBars = 2;
+    std::string drums, piano, cello, flock;
+    for (int at = 0; at < 32; ++at)
+        drums += std::to_string(at) + (at % 8 == 0 ? " C2,F#2" : at % 8 == 4 ? " D2,F#2" : at % 2 ? " F#2" : " F#2,C2") + " 1 0.9\n";
+    const char* chords[] = {"A3,C4,E4,G4", "F3,A3,C4,E4", "C3,E3,G3,B3", "G3,B3,D4,F4"};
+    for (int at = 0; at < 8; ++at) piano += std::to_string(at * 4) + " " + chords[at % 4] + " 3 0.7\n";
+    const char* line[] = {"A2", "C3", "E3", "G3", "F3", "E3", "D3", "C3"};
+    for (int at = 0; at < 8; ++at) cello += std::to_string(at * 4) + " " + line[at] + " 4 0.8\n";
+    for (int at = 0; at < 4; ++at) flock += std::to_string(at * 8) + " " + chords[at] + " 8 0.6\n";
+    p.modules = {{"drums", patternSource("Drums", "2 bars", drums)}, {"piano", patternSource("Piano", "2 bars", piano)},
+                 {"cello", patternSource("Cello", "2 bars", cello)}, {"flock", patternSource("Flock", "2 bars", flock)}};
+    addInstrumentLayer(p, "Drums", "org.caw.drums", builtinPresetValues("org.caw.drums", "Acoustic kit: Rock"), "drums", 0.7,
+                       {component("org.caw.compressor", {{"variant", 3}}), component("org.caw.eq", {{"variant", 4}})});
+    addInstrumentLayer(p, "Piano", "org.caw.timber", builtinPresetValues("org.caw.timber", "Real grand"), "piano", 0.5,
+                       {component("org.caw.compressor", {{"variant", 2}})});
+    addInstrumentLayer(p, "Cello", "org.caw.timber", builtinPresetValues("org.caw.timber", "Real cello"), "cello", 0.5,
+                       {component("org.caw.pitchfix"), component("org.caw.eq", {{"variant", 4}})});
+    addInstrumentLayer(p, "Flock", "org.caw.flock", {}, "flock", 0.4);
+    return p;
+}
+
 // `caw_bench SECONDS 602 [--only ID[,ID]] [--runs N] [--threads 0|auto] [--frames N] [--cost]`: where the one-off slow
 // callbacks come from. Plays each Benchmark scenario as the Benchmark's DSP rows do (0.25 s stopped, Play, 1.7 s
 // untimed, then SECONDS timed; --threads auto: the mix pool on Auto as Engine::useBenchmarkMixPool, the default 0:
@@ -984,7 +1022,13 @@ int runSpikes(double secs, int argc, char** argv) {
     const int64_t calls = static_cast<int64_t>(secs * kRate / frames);
     std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
     std::printf("%-18s %3s %8s %8s %8s  slowest callbacks (index:us)\n", "scenario", "run", "p50 us", "p99 us", "worst");
-    for (const SuiteScenario& sc : benchmarkScenarios()) {
+    std::vector<SuiteScenario> all = benchmarkScenarios();
+    SuiteScenario extra;
+    extra.id = "devices_112";
+    extra.name = "1.1.2 devices";
+    extra.make = [](const std::string&) { return devices112(); };
+    all.push_back(extra);
+    for (const SuiteScenario& sc : all) {
         if (!only.empty() && only.find(std::string(",") + sc.id + ",") == std::string::npos) continue;
         ProjectSpec project;
         std::string error;

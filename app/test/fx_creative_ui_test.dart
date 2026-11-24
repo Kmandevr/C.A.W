@@ -161,10 +161,11 @@ void main() {
     await tester.tapAt(step(0, 0.5));
     await tester.pumpAndSettle();
     expect(t.value('s1'), 1);
-    // Paint across steps 2..4 at about half height.
-    final g = await tester.startGesture(step(1, 0.5));
-    for (var k = 1; k <= 3; k++) {
-      await g.moveTo(step(k, 0.5));
+    // Paint across steps 2..4 at about half height, a finger's few pixels a frame (a sideways move claims the hero
+    // within the first step).
+    final g = await tester.startGesture(step(1, 0.5) - Offset(sw / 3, 0));
+    for (var x = 0.0; x <= sw * 2 + sw / 3; x += sw / 6) {
+      await g.moveTo(step(1, 0.5) + Offset(x - sw / 3, 0));
       await tester.pump();
     }
     await g.up();

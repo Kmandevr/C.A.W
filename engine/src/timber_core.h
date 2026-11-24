@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <new>
 
@@ -57,6 +58,16 @@ struct VoiceBase {
 //   start(v, shared), release(v, shared), voiceControl(v, shared) (each sounding voice, each control point),
 //   render(v, out, n) (one voice, mono, writes n <= 16 frames), post(l, r, n, shared) (after the voices' sum),
 //   bool postQuiet(), clearPost(), display(out) (up to 7 floats).
+// A model may also render its voices four at a time (GroupedModel): while grouped() is true the frame hands it up
+// to four voices at once, renderGroup(voices, count, out, n), so their sample-to-sample chains (a friction's
+// Newton step, a bore's filters) overlap instead of waiting on each other one voice at a time. Each voice is
+// computed as if alone, so its bits never depend on which voices share its group.
+template <class M>
+concept GroupedModel = requires(M& m, typename M::Voice* const* v, float (*o)[kControlFrames]) {
+    { m.grouped() } -> std::convertible_to<bool>;
+    m.renderGroup(v, 1u, o, 1u);
+};
+
 template <class M>
 class Instrument final : public InstrumentProcessor {
 public:
@@ -66,6 +77,7 @@ public:
     bool activate(double sampleRate, uint32_t) noexcept override {
         sr_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
         shared_.sr = sr_;
+        toneK_ = static_cast<float>(1.0 - detExp(-kTwoPi * 700.0 / sr_));  // the tone's corner (control() reads it)
         quality_ = buildingQuality();
         try {
             room_.prepare(sr_, 64, 0.05);
@@ -230,11 +242,15 @@ private:
         for (uint32_t k = 0; k < M::kModelParams; ++k) p_[k] = param(kSharedCount + k, at);
         model_.control(p_, shared_);
         pool_.forEachActive([&](typename M::Voice& v) { model_.voiceControl(v, shared_); });
-        // The tone: a tilt around 700 Hz, +-6 dB at each end.
-        toneK_ = static_cast<float>(1.0 - detExp(-kTwoPi * 700.0 / sr_));
-        toneLo_ = static_cast<float>(lib::dbToGain(-6.0 * shared_.tone));
-        toneHi_ = static_cast<float>(lib::dbToGain(6.0 * shared_.tone));
-        const double g = lib::dbToGain(shared_.levelDb);
+        // The tone: a tilt around 700 Hz (toneK_, from activate()), +-6 dB at each end. The gains are worked out
+        // again only when their knob moved (the same values: a control point no longer pays three exponentials).
+        if (!(shared_.tone == toneFor_)) {
+            toneFor_ = shared_.tone;
+            toneLo_ = static_cast<float>(lib::dbToGain(-6.0 * shared_.tone));
+            toneHi_ = static_cast<float>(lib::dbToGain(6.0 * shared_.tone));
+        }
+        if (!(shared_.levelDb == levelFor_)) levelFor_ = shared_.levelDb, levelTarget_ = lib::dbToGain(shared_.levelDb);
+        const double g = levelTarget_;
         if (levelFresh_) levelGain_ = g, levelFresh_ = false;
         levelStep_ = (g - levelGain_) / kControlFrames;
         toneL_ = flushf(toneL_), toneR_ = flushf(toneR_);
@@ -242,9 +258,9 @@ private:
     }
 
     void chunk(float* left, float* right, uint32_t n) noexcept {
-        float mixL[kControlFrames] = {}, mixR[kControlFrames] = {}, voice[kControlFrames];
-        pool_.forEachActive([&](typename M::Voice& v) {
-            model_.render(v, voice, n);
+        float mixL[kControlFrames] = {}, mixR[kControlFrames] = {};
+        // A voice's output into the mix (its fade, peak and pan), in the pool's order either way.
+        auto mix = [&](typename M::Voice& v, float* voice) {
             float peak = 0;
             if (v.fading) {
                 for (uint32_t i = 0; i < n; ++i) {
@@ -259,7 +275,33 @@ private:
             }
             v.acc = peak == peak ? std::max(v.acc, peak) : 1e30f;
             v.frames += n;
-        });
+        };
+        bool done = false;
+        if constexpr (GroupedModel<M>) {
+            if (model_.grouped()) {
+                typename M::Voice* group[4];
+                float out[4][kControlFrames];
+                uint32_t g = 0;
+                auto flush = [&] {
+                    model_.renderGroup(group, g, out, n);
+                    for (uint32_t j = 0; j < g; ++j) mix(*group[j], out[j]);
+                    g = 0;
+                };
+                pool_.forEachActive([&](typename M::Voice& v) {
+                    group[g++] = &v;
+                    if (g == 4) flush();
+                });
+                if (g) flush();
+                done = true;
+            }
+        }
+        if (!done) {
+            float voice[kControlFrames];
+            pool_.forEachActive([&](typename M::Voice& v) {
+                model_.render(v, voice, n);
+                mix(v, voice);
+            });
+        }
         model_.post(mixL, mixR, n, shared_);
         const bool roomOn = shared_.space > 0.0;
         float outPeak = 0;
@@ -342,6 +384,7 @@ private:
     double p_[static_cast<uint32_t>(M::kModelParams)] = {};
     lib::Reverb room_;
     float toneK_ = 0, toneLo_ = 1, toneHi_ = 1, toneL_ = 0, toneR_ = 0;
+    double toneFor_ = std::nan(""), levelFor_ = std::nan(""), levelTarget_ = 1;  // what toneLo_/Hi_ and levelTarget_ are for
     double levelGain_ = 0, levelStep_ = 0;
     bool levelFresh_ = true;
     bool settled_ = true;

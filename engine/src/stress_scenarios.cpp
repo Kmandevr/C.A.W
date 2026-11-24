@@ -8,9 +8,12 @@
 #include <memory>
 
 #include "audio_clips.h"
+#include "builtin_components.h"
 #include "builtin_flagship.h"
 #include "caw/detmath.hpp"
 #include "json.h"
+#include "module_registry.h"
+#include "presets.h"
 #include "wav.h"
 
 namespace caw::stress {
@@ -855,6 +858,74 @@ ProjectSpec sampleStream(const std::string& dir, int tracks, bool mixedRates, st
     return p;
 }
 
+std::vector<BenchmarkDevice> benchmarkInstruments() {
+    // 1.1.2 (the owner: "make sure the benchmark actually tests all of the plugins"): the engine's own list of
+    // built-ins (ModuleRegistry::builtinComponents: the retired ids are not in it, so an old project's synth is not
+    // played twice), each instrument with each of its models (`variant`), Timber's in both Classic and Simulated, and
+    // Rook in each of its kit kinds (the first preset of each). Generated, so a new instrument is played the day it
+    // is registered (stress_test.cpp checks it).
+    ModuleRegistry registry;
+    registerBuiltinComponents(registry);
+    std::vector<BenchmarkDevice> out;
+    for (const ModuleDescriptor* d : registry.builtinComponents()) {
+        if (d->role != ModuleRole::Instrument) continue;
+        const std::string id(d->id), name = d->name.empty() ? id : std::string(d->name);
+        const ParameterDescriptor* variant = nullptr;
+        bool sim = false;
+        for (uint32_t k = 0; k < d->parameterCount; ++k) {
+            if (d->parameters[k].id == "variant" && d->parameters[k].choiceCount > 1) variant = &d->parameters[k];
+            if (d->parameters[k].id == "sim") sim = true;
+        }
+        if (variant) {
+            for (uint32_t v = 0; v < variant->choiceCount; ++v) {
+                const std::string label(variant->choices[v]);
+                out.push_back({id, name + " · " + label, {{"variant", variant->minimum + v}}, false});
+                if (sim) out.push_back({id, name + " · " + label + ", Simulated", {{"variant", variant->minimum + v}, {"sim", 1}}, false});
+            }
+        } else {
+            out.push_back({id, name, {}, false});
+        }
+        if (id == "org.caw.drums") {
+            for (const char* kind : {"Synth kit: ", "Produced kit: ", "Acoustic kit: "}) {
+                for (const BuiltinPreset& b : builtinPresets(id)) {
+                    if (b.name.rfind(kind, 0) != 0) continue;
+                    Values v;
+                    for (const auto& [k, x] : b.values) v.emplace_back(std::string(k), x);
+                    out.push_back({id, name + " · " + std::string(b.name), std::move(v), false});
+                    break;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+std::vector<BenchmarkDevice> benchmarkEffects() {
+    // Every built-in effect (and analyzer: an insert too) with each of its variants, as the engine lists them; one
+    // with a second audio input (a key) is keyed by the first track.
+    ModuleRegistry registry;
+    registerBuiltinComponents(registry);
+    std::vector<BenchmarkDevice> out;
+    for (const ModuleDescriptor* d : registry.builtinComponents()) {
+        if (d->role != ModuleRole::Effect && d->role != ModuleRole::Analyzer) continue;
+        const std::string id(d->id), name = d->name.empty() ? id : std::string(d->name);
+        int audioIns = 0;
+        for (uint32_t k = 0; k < d->portCount; ++k)
+            if (d->ports[k].type == PortType::Audio && d->ports[k].input) ++audioIns;
+        const bool keyedIn = audioIns > 1;
+        const ParameterDescriptor* variant = nullptr;
+        for (uint32_t k = 0; k < d->parameterCount; ++k)
+            if (d->parameters[k].id == "variant" && d->parameters[k].choiceCount > 1) variant = &d->parameters[k];
+        if (!variant) {
+            out.push_back({id, name, {}, keyedIn});
+            continue;
+        }
+        for (uint32_t v = 0; v < variant->choiceCount; ++v)
+            out.push_back({id, name + " · " + std::string(variant->choices[v]), {{"variant", variant->minimum + v}}, keyedIn});
+    }
+    return out;
+}
+
 ProjectSpec everyInstrument(const std::string& dir, std::string* error) {
     ProjectSpec p;
     p.name = "Every instrument";
@@ -862,108 +933,38 @@ ProjectSpec everyInstrument(const std::string& dir, std::string* error) {
     p.loopBars = 1;
     std::string drums;
     for (int at = 0; at < 16; ++at) drums += std::to_string(at) + (at % 4 == 0 ? " C2,F#2" : at % 4 == 2 ? " D2,A#2" : " F#2") + " 1 1\n";
-    std::string line;
-    const char* keys[] = {"A1", "A2", "C2", "E2"};
-    for (int at = 0; at < 16; ++at) line += std::to_string(at) + " " + keys[at % 4] + " 1/2 1\n";
-    p.modules = {{"chords", patternSource("Chords", "16", chordBar())}, {"drums", patternSource("Drums", "16", drums)},
-                 {"line", patternSource("Line", "16", line)}};
-    // The built-ins, then the retired synths' ids (Flagship patches now) and drum voices.
-    addInstrumentLayer(p, "Flagship", "org.caw.synth.flagship", {}, "chords", 0.4);
-    addInstrumentLayer(p, "Drums", "org.caw.drums", {}, "drums", 0.5);
-    addInstrumentLayer(p, "Sampler", "org.caw.sampler", {{"release", 0.3}}, "chords", 0.4);
-    samplerState(p.layers.back().instrument, dir, error);
-    addInstrumentLayer(p, "Morph", "org.caw.synth.morph", {}, "chords", 0.3);
-    addInstrumentLayer(p, "Basic", "org.caw.synth.basic", {}, "chords", 0.3);
-    addInstrumentLayer(p, "Bass", "org.caw.bass", {}, "line", 0.4);
-    addInstrumentLayer(p, "Acid", "org.caw.synth.acid", {}, "line", 0.3);
-    addInstrumentLayer(p, "Kick", "org.caw.drum.kick", {}, "drums", 0.4);
-    addInstrumentLayer(p, "Snare", "org.caw.drum.snare", {}, "drums", 0.3);
-    addInstrumentLayer(p, "Hats", "org.caw.drum.hats", {}, "drums", 0.3);
+    p.modules = {{"chords", patternSource("Chords", "16", chordBar())}, {"drums", patternSource("Drums", "16", drums)}};
+    // Every built-in instrument in every model and kit kind (benchmarkInstruments), then an audio clip.
+    int n = 0;
+    for (BenchmarkDevice& d : benchmarkInstruments()) {
+        const bool kit = d.id == "org.caw.drums";
+        addInstrumentLayer(p, "I" + std::to_string(++n), d.id, std::move(d.params), kit ? "drums" : "chords", kit ? 0.3 : 0.2);
+        p.layers.back().name = d.name;
+        if (d.id == "org.caw.sampler") samplerState(p.layers.back().instrument, dir, error);
+    }
     addClipTrack(p, dir, "Audio", "every_audio.wav", 44100, 4.0, 0, 16, false, 0, error);
     return p;
 }
 
 ProjectSpec everyEffect() {
-    // Every built-in effect as registered on 2026-11-13 (keyed ones keyed by the first track), a dozen or so on each
-    // of five Flagship chord tracks, in that order. Since the FX consolidation (1.0.8) an old effect is its merged
-    // device's variant (fx_merged.h; its old id in the comment): one entry per old effect, the same coverage and
-    // sound. `variant` -1: a device with none.
-    struct Entry {
-        const char* id;
-        int variant;
-        bool keyed;
-    };
-    const Entry entries[] = {
-        {"org.caw.utility", 2, false},  // stereo.balance
-        {"org.caw.utility", 1, false},  // stereo.width
-        {"org.caw.drive", 0, false},  // distortion
-        {"org.caw.delay", 1, false},  // delay.pingpong
-        {"org.caw.chorus", 0, false},
-        {"org.caw.tremolo", 1, false},  // autopan
-        {"org.caw.bits", 0, false},  // bitcrush
-        {"org.caw.utility", 5, false},  // channelmixer
-        {"org.caw.drive", 2, false},  // clipper
-        {"org.caw.comb", -1, false},
-        {"org.caw.convolver", -1, false},
-        {"org.caw.deesser", -1, false},
-        {"org.caw.delay", 0, false},  // delay.pro
-        {"org.caw.disperser", -1, false},
-        {"org.caw.chorus", 2, false},  // doubler
-        {"org.caw.compressor", 1, false},  // dynamics
-        {"org.caw.chorus", 1, false},  // ensemble
-        {"org.caw.eq", 0, false},
-        {"org.caw.eq", 2, false},  // eq.dj
-        {"org.caw.filter", 0, false},
-        {"org.caw.chorus", 3, false},  // flanger
-        {"org.caw.formant", -1, false},
-        {"org.caw.shift", 1, false},  // freqshift
-        {"org.caw.eq", 1, false},  // geq
-        {"org.caw.utility", 4, false},  // haas
-        {"org.caw.utility", 3, false},  // imager
-        {"org.caw.filter", 1, false},  // ladder
-        {"org.caw.limiter", 0, false},
-        {"org.caw.multiband", -1, false},
-        {"org.caw.filter", 2, false},  // nlfilter
-        {"org.caw.drive", 3, false},  // phasedist
-        {"org.caw.phaser", 0, false},
-        {"org.caw.shift", 0, false},  // pitchshift
-        {"org.caw.rack.multiband", -1, false},
-        {"org.caw.resonator", -1, false},
-        {"org.caw.reverb", 0, false},  // reverb.pro
-        {"org.caw.reverser", -1, false},
-        {"org.caw.chorus", 5, false},  // rotary
-        {"org.caw.drive", 1, false},  // saturator
-        {"org.caw.reverb", 1, false},  // shimmer
-        {"org.caw.stutter", -1, false},
-        {"org.caw.tapestop", -1, false},
-        {"org.caw.eq", 3, false},  // tilt
-        {"org.caw.trancegate", -1, false},
-        {"org.caw.transient", 0, false},
-        {"org.caw.tremolo", 0, false},
-        {"org.caw.utility", 0, false},
-        {"org.caw.chorus", 4, false},  // vibrato
-        {"org.caw.compressor", 0, true},
-        {"org.caw.compressor", 3, true},  // ducker
-        {"org.caw.compressor", 2, true},  // gate
-        {"org.caw.rack.fx", -1, false},
-        {"org.caw.ringmod", -1, true},
-    };
-    constexpr int kTracks = 5;
+    // Every built-in effect with each of its variants (benchmarkEffects: generated from the engine's list since
+    // 1.1.2; the hand list of 2026-11-13 had fallen behind), in the engine's order, a dozen on each Flagship chord
+    // track; a keyed one is keyed by the first track.
+    constexpr size_t kPerTrack = 12;
+    const std::vector<BenchmarkDevice> entries = benchmarkEffects();
+    const int tracks = static_cast<int>((entries.size() + kPerTrack - 1) / kPerTrack);
     ProjectSpec p;
     p.name = "Every effect";
     p.bpm = 120;
     p.loopBars = 1;
     p.modules = {{"chords", patternSource("Chords", "16", chordBar())}};
-    std::vector<std::vector<ComponentSpec>> chains(kTracks);
+    std::vector<std::vector<ComponentSpec>> chains(static_cast<size_t>(tracks));
     int k = 0;
-    for (const Entry& e : entries) {
-        const int t = k++ % kTracks;
-        Values params;
-        if (e.variant >= 0) params.emplace_back("variant", e.variant);
-        chains[static_cast<size_t>(t)].push_back(e.keyed && t != 0 ? keyed(e.id, std::move(params), "FX1")
-                                                                  : component(e.id, std::move(params)));
+    for (const BenchmarkDevice& e : entries) {
+        const int t = k++ % tracks;
+        chains[static_cast<size_t>(t)].push_back(e.keyed && t != 0 ? keyed(e.id, e.params, "FX1") : component(e.id, e.params));
     }
-    for (int t = 0; t < kTracks; ++t)
+    for (int t = 0; t < tracks; ++t)
         addInstrumentLayer(p, "FX" + std::to_string(t + 1), "org.caw.synth.flagship", {{"osc1_unison", 2}}, "chords", 0.3,
                            std::move(chains[static_cast<size_t>(t)]));
     return p;
@@ -1027,9 +1028,9 @@ std::vector<SuiteScenario> suiteScenarios() {
         {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 96, "all"},
         {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 112, "all",
          [](const std::string& d, std::string* e) { return typicalSong(true, d, e); }},
-        {"flagship_heavy", "Flagship heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32, "instrument"},
-        {"flagship_heavy16", "Flagship heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32, "instrument"},
-        {"drums_kit", "Drums kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32, "instrument"},
+        {"flagship_heavy", "Raven heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32, "instrument"},
+        {"flagship_heavy16", "Raven heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32, "instrument"},
+        {"drums_kit", "Rook kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32, "instrument"},
         {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 176, "all"},
         {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 384, "all"},
         {"tail", "Tail", [](const std::string&) { return tailSong(true); }, true, Tier::Idle, true, 64, "baseline"},
@@ -1044,10 +1045,10 @@ std::vector<SuiteScenario> featureScenarios() {
     using E = std::string*;
     return {
         {"empty", "Empty project", [](D) { return emptyProject(); }, false, Tier::Idle, false, 8, "baseline"},
-        {"single_synth", "One Flagship", [](D) { return singleSynth(); }, false, Tier::Normal, false, 24, "instrument"},
-        {"single_sampler", "One sampler", [](D d) { return singleSampler(d, nullptr); }, false, Tier::Normal, false, 24, "instrument",
+        {"single_synth", "One Raven", [](D) { return singleSynth(); }, false, Tier::Normal, false, 24, "instrument"},
+        {"single_sampler", "One Magpie", [](D d) { return singleSampler(d, nullptr); }, false, Tier::Normal, false, 24, "instrument",
          [](D d, E e) { return singleSampler(d, e); }},
-        {"single_drums", "One drum kit", [](D) { return singleDrums(); }, false, Tier::Normal, false, 32, "instrument"},
+        {"single_drums", "One Rook kit", [](D) { return singleDrums(); }, false, Tier::Normal, false, 32, "instrument"},
         {"single_audio", "One audio clip", [](D d) { return singleAudio(d, nullptr); }, false, Tier::Normal, false, 24, "audio",
          [](D d, E e) { return singleAudio(d, e); }},
         {"folders_shallow", "Folders, one level", [](D) { return folders(1, 4); }, false, Tier::Normal, false, 16, "routing"},
@@ -1063,7 +1064,7 @@ std::vector<SuiteScenario> featureScenarios() {
          [](D d, E e) { return sampleStream(d, 8, false, e); }},
         {"resample", "Mixed-rate audio", [](D d) { return sampleStream(d, 8, true, nullptr); }, false, Tier::Heavy, false, 64, "samples",
          [](D d, E e) { return sampleStream(d, 8, true, e); }},
-        {"every_instrument", "Every instrument", [](D d) { return everyInstrument(d, nullptr); }, false, Tier::Heavy, false, 96, "instrument",
+        {"every_instrument", "Every instrument", [](D d) { return everyInstrument(d, nullptr); }, false, Tier::Heavy, false, 128, "instrument",
          [](D d, E e) { return everyInstrument(d, e); }},
         {"every_effect", "Every effect", [](D) { return everyEffect(); }, false, Tier::Heavy, false, 160, "effect"},
         {"metering_heavy", "Many meters", [](D) { return meteringHeavy(); }, false, Tier::Normal, false, 32, "metering"},

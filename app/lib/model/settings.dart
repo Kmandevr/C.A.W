@@ -493,10 +493,12 @@ class Settings extends ChangeNotifier {
   static const sampleRates = [44100, 48000, 88200, 96000];
   int bufferFrames = 0;
 
-  /// The AAudio output's buffer sized automatically (#236, caw_audio_tune_buffer): off by default until it has run on
-  /// phones (Settings › Sound › Quality and buffer, "Find the smallest stable buffer", #244), and the size it settled on per kind of output (AudioDeviceKind's name → frames),
-  /// where the next stream on that kind starts.
-  bool bufferTuning = false;
+  /// The AAudio output's buffer sized automatically (#236, caw_audio_tune_buffer; Settings › Sound › Quality and
+  /// buffer, "Find the smallest stable buffer"): on by default since 1.1.2 (the platform's own answer to dropouts, as
+  /// Oboe's LatencyTuner: a burst more at each underrun; a fixed size only grows), and the size it settled on per kind
+  /// of output (AudioDeviceKind's name → frames), where the next stream on that kind starts. Saved under a new key,
+  /// so the old default's saved "off" (#244: off until it had run on phones) does not carry over.
+  bool bufferTuning = true;
   final Map<String, int> tunedBufferFrames = {};
   /// Settings › Sound (#244, owner 2026-11-18): playback stops when headphones or a Bluetooth device disconnect
   /// (Android's "becoming noisy" broadcast; a removed output on desktop). On by default.
@@ -719,7 +721,8 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
-        'buffer_tuning': bufferTuning,
+        'buffer_tuning': bufferTuning, // retained for older builds that read settings.json
+        'buffer_tuning_on': bufferTuning,
         'tuned_buffer_frames': tunedBufferFrames,
         'light_by_self': lightBySelf,
         'frame_rate': frameRate,
@@ -856,7 +859,7 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
-    bufferTuning = j['buffer_tuning'] == true;
+    bufferTuning = (j['buffer_tuning_on'] as bool?) ?? true;
     if (j['tuned_buffer_frames'] case final Map m) {
       tunedBufferFrames.clear();
       for (final e in m.entries.take(16)) {

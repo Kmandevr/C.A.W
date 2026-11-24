@@ -100,32 +100,15 @@ public:
     static constexpr double kOnWork = 0.16, kOffWork = 0.04;
     static constexpr int64_t kWorkTauNs = 500'000'000, kHoldNs = 2'000'000'000;
 
-    // Heat (1.1.1): the share spun to is only as much as the clock needs. Below kShare the governor lowers the
-    // clock (1.25 b f, above), which makes the same work a bigger share of the period; so while the callback's
-    // recent peak work (peakWork: up at once, down over kPeakTauNs) is under kWorkTarget of the period, it spins to
-    // kShare scaled by peak / target (never below kMinShareRatio of kShare, so one governor step lowers the clock
-    // to no less than 0.6 of what it was), and from the target up to the full kShare, which holds the clock where it
-    // is. The clock then settles where the slowest callbacks of the last few seconds take about kWorkTarget of their
-    // period: a clock a burst raised comes down to what the music needs instead of being held there. With the
-    // platform's thermal state (CAW_PRESSURE_*, caw_audio_set_thermal) the target rises (warm 0.6, hot 0.7: less headroom,
-    // less heat), and at critical it does not spin at all. [Assumption] targets to check with the owner's
-    // Benchmark (docs/performance.md, "The load stabilizer").
-    static constexpr double kWorkTarget = 0.5, kWorkTargetWarm = 0.6, kWorkTargetHot = 0.7, kMinShareRatio = 0.6;
-    static constexpr int64_t kPeakTauNs = 3'000'000'000;
-    static constexpr int kThermalWarm = 2, kThermalHot = 3, kThermalCritical = 4;  // CAW_PRESSURE_THERMAL_*
-
-    // The share of its period the callback spins to now (at most kShare; 0: none, at critical heat), under the
-    // platform's thermal pressure `thermal` (CAW_PRESSURE_*; anything else counts as normal).
-    double spinShare(int thermal = 0) const noexcept {
-        const int t = thermal;
-        if (t == kThermalCritical) return 0.0;
-        const double target = t == kThermalHot ? kWorkTargetHot : t == kThermalWarm ? kWorkTargetWarm : kWorkTarget;
-        double ratio = peak_ / target;
-        ratio = ratio < kMinShareRatio ? kMinShareRatio : (ratio > 1.0 ? 1.0 : ratio);
-        return kShare * ratio;
-    }
-    // The recent peak work share spinShare follows.
-    double peakWork() const noexcept { return peak_; }
+    // Heat (1.1.2, replacing 1.1.1's "only as far as the clock needs" and its heat backoff): the full kShare
+    // whenever it is wanted, whatever the heat. 1.1.1 spun proportionally less while the recent peak work was under
+    // a target of the period (0.5; 0.6 warm, 0.7 hot; none at critical), and by schedutil's 1.25 b f (above) that let
+    // the governor lower the clock until the slowest callbacks took the target, so a burst of 2x (1.67x warm, 1.43x
+    // hot) over the last few seconds' peak dropped out, and the meter swung as the clock moved (the owner's S22+ on
+    // 1.1.1, 2026-11-24: dropouts at a 20-30 % meter, worse once warm; one track swinging 9-35 %). The governor model
+    // in load_stabilizer_test.cpp shows the trade-off. Heat is the platform's to handle: it throttles the clock
+    // itself (owner, 2026-11-24: "the system throttles, not the app"; docs/decisions.md).
+    static constexpr double spinShare() noexcept { return kShare; }
 
     // The callback's own work this time (steady-clock ns from its start to before the spin): whether to spin.
     bool wanted(int64_t workNs, int frames, int rate) noexcept {
@@ -136,9 +119,6 @@ public:
         share = share < 0.0 ? 0.0 : (share > 4.0 ? 4.0 : share);
         const double a = static_cast<double>(period) / static_cast<double>(kWorkTauNs);
         work_ = seeded_ ? work_ + (a > 1.0 ? 1.0 : a) * (share - work_) : share;
-        const double pa = static_cast<double>(period) / static_cast<double>(kPeakTauNs);
-        const double fallen = seeded_ ? peak_ - (pa > 1.0 ? 1.0 : pa) * peak_ : share;
-        peak_ = share > fallen ? share : fallen;
         seeded_ = true;
         holdNs_ = holdNs_ > period ? holdNs_ - period : 0;
         if (share >= 1.0 || (!on_ && work_ > kOnWork)) {
@@ -154,7 +134,7 @@ public:
     // Nothing sounds: the next callback's work decides afresh, starting off.
     void resetLoad() noexcept {
         seeded_ = on_ = false;
-        work_ = peak_ = 0.0;
+        work_ = 0.0;
         holdNs_ = 0;
     }
 
@@ -186,7 +166,6 @@ private:
     int window_ = 0;      // callbacks into this drift window
     int64_t minLate_ = INT64_MAX;  // the earliest lateness in it
     double work_ = 0.0;     // wanted: the smoothed share of each period the callback's own work took
-    double peak_ = 0.0;     // wanted: its recent peak (spinShare)
     int64_t holdNs_ = 0;    // stays on at least this much longer
     bool seeded_ = false, on_ = false;
 };

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 45;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 46;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -348,6 +348,10 @@ class Bindings {
             Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>)>('caw_drums_randomize'),
         drumsExplode = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
             'caw_drums_explode'),
+        drumsKitBuild = lib.lookupFunction<Pointer<Utf8> Function(Int32, Int32, Uint32, Int32, Int32),
+            Pointer<Utf8> Function(int, int, int, int, int)>('caw_drums_kit_build'),
+        drumsKitTool = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_drums_kit_tool'),
         setQuality = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
             'caw_engine_set_quality'),
         audioSetBufferMode = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Int32),
@@ -614,6 +618,9 @@ class Bindings {
   final Pointer<Utf8> Function() drumsInfo;
   final Pointer<Utf8> Function(int, int, double, int, Pointer<Utf8>) drumsRandomize;
   final Pointer<Utf8> Function(Pointer<Utf8>) drumsExplode;
+  /// caw_drums_kit_build and caw_drums_kit_tool (API 46): Rook's Synth, Produced and Acoustic kit builders.
+  final Pointer<Utf8> Function(int, int, int, int, int) drumsKitBuild;
+  final Pointer<Utf8> Function(Pointer<Utf8>) drumsKitTool;
   final void Function(Pointer<Void>, int) setQuality;
   final void Function(Pointer<Void>, int, int) audioSetBufferMode;
   final int Function(Pointer<Void>) audioBufferFrames;

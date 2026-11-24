@@ -29,6 +29,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'device_ui_fixture.dart' show restDrag;
 import 'flagship_fixture.dart';
 import 'live_midi_test.dart' show FakeMidi;
 import 'golden_util.dart';
@@ -181,7 +182,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('device-bypass')));
       await tester.pump(const Duration(seconds: 1));
       final before = synth().value('osc1_level');
-      await tester.drag(find.byKey(const ValueKey('dknob-osc1_level')), const Offset(0, -40));
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      await tester.pump(const Duration(milliseconds: 150)); // a finger rests first, or the swipe scrolls the page
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(0, -5));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
       await tester.pump(const Duration(seconds: 1));
       expect(synth().value('osc1_level'), greaterThan(before));
       s.undo();
@@ -200,6 +207,130 @@ void main() {
       await tester.tap(knob);
       await tester.pumpAndSettle();
       expect(synth().value('osc1_level'), 0.7);
+    });
+  });
+
+  // The owner (1.1.2): "The plug-in UI takes over scrolling on mobile". A quick swipe over a knob or a visual scrolls
+  // the page; a finger that rests a moment (kit/touch_engage.dart) or a mouse still drags the control.
+  group('scrolling over controls', () {
+    Future<ScrollPosition> top(WidgetTester tester) async {
+      await openSynth(tester);
+      final pos = tester.state<ScrollableState>(synthScroll()).position;
+      pos.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(pos.maxScrollExtent, greaterThan(100), reason: 'the panel scrolls');
+      return pos;
+    }
+
+    wtest('a fling that starts on a knob scrolls the page and leaves the knob', (tester) async {
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      await tester.fling(find.byKey(const ValueKey('dknob-osc1_level')), const Offset(0, -200), 1500);
+      await tester.pumpAndSettle();
+      expect(pos.pixels, greaterThan(50));
+      expect(synth().value('osc1_level'), before);
+    });
+
+    wtest('a quick swipe that starts on a knob scrolls the page', (tester) async {
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      await tester.drag(find.byKey(const ValueKey('dknob-osc1_level')), const Offset(0, -80));
+      await tester.pumpAndSettle();
+      expect(pos.pixels, greaterThan(20));
+      expect(synth().value('osc1_level'), before);
+    });
+
+    wtest('a finger that rests on a knob, then drags, turns it and not the page', (tester) async {
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      await tester.pump(const Duration(milliseconds: 150));
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(0, -6));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_level'), greaterThan(before));
+      expect(pos.pixels, 0);
+    });
+
+    wtest('a drag that starts slowly turns the knob', (tester) async {
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await g.moveBy(const Offset(0, -3)); // 150 px a second
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_level'), greaterThan(before));
+      expect(pos.pixels, 0);
+    });
+
+    wtest('a mouse drags a knob at once, as before', (tester) async {
+      await top(tester);
+      final before = synth().value('osc1_level');
+      await tester.drag(find.byKey(const ValueKey('dknob-osc1_level')), const Offset(0, -40), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_level'), greaterThan(before));
+    });
+
+    wtest('a fling over a visual scrolls the page; resting first drags its handle', (tester) async {
+      await pumpStack(tester, size: const Size(412, 560)); // a short phone, so the Modulation panel scrolls
+      await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
+      await tester.pumpAndSettle();
+      await panel(tester, 2);
+      final view = find.byKey(const ValueKey('env-env1_'));
+      await reveal(tester, view);
+      final pos = tester.state<ScrollableState>(synthScroll()).position;
+      expect(pos.maxScrollExtent, greaterThan(60), reason: 'the panel scrolls');
+      final t = synth();
+      final sus = t.value('env1_sustain');
+      Rect rect = tester.getRect(view);
+      Taper taper(String id) => Taper(t.param(id)!.min, t.param(id)!.max, exponential: true);
+      EnvelopeGeometry geometry() => EnvelopeGeometry(rect.size, taper('env1_attack').position(t.value('env1_attack')),
+          taper('env1_decay').position(t.value('env1_decay')), t.value('env1_sustain'),
+          taper('env1_release').position(t.value('env1_release')));
+      final at = pos.pixels;
+      // From the decay handle (the part that grabs), towards the side with more room.
+      final up = at < pos.maxScrollExtent / 2;
+      await tester.flingFrom(rect.topLeft + geometry().decay, Offset(0, up ? -150 : 150), 1500);
+      await tester.pumpAndSettle();
+      expect((pos.pixels - at).abs(), greaterThan(30), reason: 'the page scrolled');
+      expect(t.value('env1_sustain'), sus, reason: 'the envelope is untouched');
+      await tester.ensureVisible(view);
+      await tester.pumpAndSettle();
+      rect = tester.getRect(view);
+      final scrolled = pos.pixels;
+      final g = await tester.startGesture(rect.topLeft + geometry().decay);
+      await tester.pump(const Duration(milliseconds: 150));
+      for (var i = 0; i < 5; i++) {
+        await g.moveBy(const Offset(0, 5));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(t.value('env1_sustain'), lessThan(sus), reason: 'the handle moved');
+      expect(pos.pixels, scrolled, reason: 'and the page did not');
+    });
+
+    wtest('a sideways drag on a visual takes it at once', (tester) async {
+      await openSynth(tester);
+      await panel(tester, 2);
+      final view = find.byKey(const ValueKey('env-env1_'));
+      await reveal(tester, view);
+      final rect = tester.getRect(view);
+      final t = synth();
+      Taper taper(String id) => Taper(t.param(id)!.min, t.param(id)!.max, exponential: true);
+      final g = EnvelopeGeometry(rect.size, taper('env1_attack').position(t.value('env1_attack')),
+          taper('env1_decay').position(t.value('env1_decay')), t.value('env1_sustain'),
+          taper('env1_release').position(t.value('env1_release')));
+      final before = t.value('env1_attack');
+      await tester.dragFrom(rect.topLeft + g.attack, const Offset(40, 0));
+      await tester.pumpAndSettle();
+      expect(t.value('env1_attack'), greaterThan(before));
     });
   });
 
@@ -224,7 +355,7 @@ void main() {
       final sus = t.value('env1_sustain');
       final g2 = EnvelopeGeometry(rect.size, taper('env1_attack').position(t.value('env1_attack')),
           taper('env1_decay').position(t.value('env1_decay')), sus, taper('env1_release').position(t.value('env1_release')));
-      await tester.dragFrom(rect.topLeft + g2.decay, const Offset(0, 20));
+      await restDrag(tester, rect.topLeft + g2.decay, const Offset(0, 20));
       await tester.pumpAndSettle();
       expect(t.value('env1_sustain'), lessThan(sus));
     });
@@ -254,7 +385,7 @@ void main() {
       // The ring: a drag starting on the knob's outer edge sets the route's amount, not the knob.
       final level = synth().value('osc1_level');
       final r = tester.getRect(find.byKey(const ValueKey('dknob-osc1_level')));
-      await tester.dragFrom(Offset(r.center.dx, r.top + 2), const Offset(0, -40));
+      await restDrag(tester, Offset(r.center.dx, r.top + 2), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(synth().value('mod${slot}_amt'), greaterThan(0.25));
       expect(synth().value('osc1_level'), level);

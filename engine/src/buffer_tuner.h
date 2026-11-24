@@ -69,11 +69,21 @@ private:
     bool started_ = false;
 };
 
-// Whether caw_audio_tune_buffer tunes at all: only where the output is opened without a size of its own, in Low
-// latency or while recording in Auto (the review of #236). Auto while not recording and Battery open a fixed
-// 1024-frame buffer, which the tuner must leave alone (and whose size must not be kept as the output's).
-inline bool tunesBuffer(bool lowLatency, bool autoMode, bool recording) noexcept {
-    return lowLatency || (autoMode && recording);
+// Whether caw_audio_tune_buffer runs the full tuning (from two bursts): only where the output was opened without a
+// size of its own (`openedFrames` 0: Low latency, Auto while recording). A fixed size (Auto's and Battery's 1024
+// frames, a size the user chose) only grows (growOnlyStart), and its size is not kept as the output's.
+inline bool tunesBuffer(int openedFrames) noexcept { return openedFrames == 0; }
+
+// Grow only (1.1.2): every other output (a fixed 1024-frame buffer, or the full tuning not asked for) starts at
+// the size its stream opened with, which is then the floor: an underrun adds a burst (up to the capacity), and a
+// long quiet stretch takes one off again, never below the opened size. Returns the size to set (0: leave it).
+inline int32_t growOnlyStart(BufferTuner& t, int32_t burst, int32_t opened, int32_t ceiling, int64_t xruns) noexcept {
+    const int32_t b = std::max<int32_t>(1, burst);
+    // The tuner counts from the opened size rounded up to whole bursts (the audio review of 1.1.2): the first
+    // underrun then sets a full burst more than the stream has, and nothing under the opened size is ever set.
+    const int32_t open = std::max(b, opened);
+    t.start(b, open, std::max(ceiling, open), open, xruns);
+    return 0;  // the stream keeps the size it opened with until it underruns
 }
 
 }  // namespace caw

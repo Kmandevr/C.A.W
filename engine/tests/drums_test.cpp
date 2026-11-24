@@ -229,13 +229,18 @@ const char* kBusy =
 
 }  // namespace
 
-TEST(drums_descriptor_has_64_pads_of_213_grouped_parameters) {
+TEST(drums_descriptor_has_64_pads_of_217_grouped_parameters_and_16_pieces) {
     std::unique_ptr<ModuleProcessor> p = makeDrums();
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.drums"));
     CHECK_EQ(d.name, std::string_view("Drums"));
-    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 213u);
+    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 217u + kAcouCount + 16u * kPieceParams);  // 1.1.2 appended
+    CHECK_EQ(d.parameters[padParam(0, kEngine)].id, std::string_view("a1_engine"));
+    CHECK_EQ(d.parameters[padParam(63, kAcouLayer)].id, std::string_view("d16_acou_layer"));
+    CHECK_EQ(d.parameters[acouParam(kAcouMics)].id, std::string_view("acou_mics"));
+    CHECK_EQ(d.parameters[pieceParam(15, kPcShellLevel)].id, std::string_view("pc16_shell_level"));
+    CHECK_EQ(d.parameters[pieceParam(2, kPcKind)].group, std::string_view("kit/pc3"));
     CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
     CHECK_EQ(d.parameters[0].id, std::string_view("mode"));
     CHECK_EQ(d.parameters[padParam(0, kBodyFreq)].id, std::string_view("a1_body_freq"));
@@ -629,10 +634,11 @@ TEST(drums_info_and_explode) {
     CHECK(parseJson(info, j, err));
     caw_free(info);
     CHECK_EQ(j.number("pads", 0), 64.0);
-    CHECK_EQ(j.number("pad_parameters", 0), 213.0);
+    CHECK_EQ(j.number("pad_parameters", 0), 217.0);
     CHECK(j.get("sounds") && j.get("sounds")->arr.size() >= 40);
     CHECK(j.get("kits") && j.get("kits")->arr.size() == 22);
-    CHECK(j.get("layers") && j.get("layers")->arr.size() == 22);
+    CHECK(j.get("layers") && j.get("layers")->arr.size() == 23);
+    CHECK(j.get("builders") && j.get("builders")->get("acoustic") && j.get("builders")->get("acoustic")->arr.size() == 8);
     CHECK(j.get("gm") && j.get("gm")->arr.front().number("note", 0) == 35.0);
     // The default kit explodes into its 16 bank-A pads, each a Single-mode Drums with that pad's sound on A1.
     char* x = caw_drums_explode(R"({"id":"org.caw.drums","params":{"a3_note":3,"a5_level":-60},"samples":[{"slot":2,"builtin":"Clap"}]})");

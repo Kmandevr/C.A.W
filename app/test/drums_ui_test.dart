@@ -254,7 +254,7 @@ void main() {
       final before = t.value(first), other = t.value('a1_${first.substring(3)}');
       await tester.ensureVisible(knobs.first);
       await tester.pumpAndSettle();
-      await tester.drag(knobs.first, Offset(0, before >= t.param(first)!.max ? 60 : -60));
+      await restDrag(tester, tester.getCenter(knobs.first), Offset(0, before >= t.param(first)!.max ? 60 : -60));
       await tester.pumpAndSettle();
       expect(t.value(first), isNot(before), reason: first);
       expect(t.value('a1_${first.substring(3)}'), other, reason: first);
@@ -411,7 +411,7 @@ void main() {
     // The start point sets the depth.
     final start = rect.topLeft + drumHeroPoint(shape, 0, rect.size, drumHeroAxis(shape));
     final depth = t.value('a1_body_pitch');
-    await tester.dragFrom(start + const Offset(-3, 0), const Offset(0, -30));
+    await restDrag(tester, start + const Offset(-3, 0), const Offset(0, -30));
     await tester.pumpAndSettle();
     expect(t.value('a1_body_pitch'), greaterThan(depth));
     // Curve mode: the left quarter drags the sweep, the rest the decay.
@@ -530,10 +530,10 @@ void main() {
         expect([for (final n in e.value as List) '${n['param']}|${n['kit']}|${(n['in'] as List?)?.join(',')}'],
           [for (final n in drumNeeds[e.key]!) '${n.param}|${n.kit}|${n.only?.join(',')}'], reason: e.key);
       }
-      expect(drums.parameters.length, 13662);
+      expect(drums.parameters.length, 14263);  // 1.1.2 appended 4 a pad and the Acoustic kit
       // Randomize and explode through the real engine.
       final r = const EngineDrumsApi().randomize(0, 3, 1, 5, null)!;
-      expect(r.keys.where((k) => k.startsWith('a6_')).length, 213);
+      expect(r.keys.where((k) => k.startsWith('a6_')).length, 217);
       final x = const EngineDrumsApi().explode({'id': id, 'params': <String, double>{}})!;
       expect((x['tracks'] as List).length, greaterThan(1));
       expect(const EngineDrumsApi().builtinSamples(), contains('808 Kick'));

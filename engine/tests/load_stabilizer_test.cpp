@@ -157,29 +157,86 @@ TEST(load_stabilizer_is_wanted_only_when_the_work_share_says_the_clock_matters) 
     CHECK_NEAR(s.workShare(), 0.1, 0.001);
 }
 
-// Heat (1.1.1): it spins only as far as the clock needs. Peak work at or over the target holds the full 0.8; less
-// spins proportionally less (never under 0.6 of 0.8); one slow callback raises it at once and it comes down over a
-// few seconds; warm and hot raise the target, critical stops it.
-TEST(load_stabilizer_spins_only_as_far_as_the_clock_needs) {
+namespace {
+// A model of the phone's clock under the stabilizer, for the trade-off between 1.1.1's rule and 1.1.2's. The
+// governor: schedutil's f = 1.25 b f_now ([Fact, docs.kernel.org/scheduler/schedutil.html, read 2026-11-19] with
+// frequency-invariant utilisation), the lowest step at or over it, once per callback. [Assumption] steps of a
+// Cortex-A710-class big core, 634 MHz to 2.5 GHz (the S22+'s range in the owner's Benchmark, 2026-11-19); the
+// work's cycles fixed per callback. A callback whose work takes more than its period is a dropout.
+struct ModelRun {
+    int dropouts = 0;
+    double meanClock = 0, busy = 0;  // GHz, and the core's mean busy share (the heat's proxy)
+};
+enum class Rule { None, Clock111, Full112 };
+
+// 1.1.1's rule, kept here only for the comparison: the share follows the recent peak work against a target of
+// the period (0.5; 0.6 warm, 0.7 hot), never under 0.6 of the full share.
+double share111(double peak, int thermal) {
+    const double target = thermal == 3 ? 0.7 : thermal == 2 ? 0.6 : 0.5;
+    double r = peak / target;
+    r = r < 0.6 ? 0.6 : (r > 1.0 ? 1.0 : r);
+    return LoadStabilizer::kShare * r;
+}
+
+// `base`: the work's share of a period at the top clock; every `every`-th callback takes `burst` times that.
+ModelRun governorModel(Rule rule, int thermal, double base, double burst, int every, int callbacks) {
+    static constexpr double kSteps[] = {0.634, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5};
+    constexpr int kTop = 9;
+    int f = 0;  // the phone's callback core sat at its floor (2026-11-19)
     LoadStabilizer s;
-    const auto work = [](double share) { return static_cast<int64_t>(share * kPeriod); };
-    for (int c = 0; c < 200; ++c) s.wanted(work(0.30), 1024, kRate);
-    CHECK_NEAR(s.peakWork(), 0.30, 1e-6);
-    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare * 0.30 / LoadStabilizer::kWorkTarget, 1e-6);  // 0.48
-    for (int c = 0; c < 200; ++c) s.wanted(work(0.10), 1024, kRate);
-    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare * LoadStabilizer::kMinShareRatio, 1e-6);  // the floor, 0.48
-    s.wanted(work(0.70), 1024, kRate);  // one slow callback: the full share at once
-    CHECK_NEAR(s.spinShare(), LoadStabilizer::kShare, 1e-6);
-    for (int c = 0; c < 47; ++c) s.wanted(work(0.10), 1024, kRate);  // about a second later: still up
-    CHECK(s.peakWork() > 0.45);
-    for (int c = 0; c < 470; ++c) s.wanted(work(0.10), 1024, kRate);  // ten seconds later: back down
-    CHECK_NEAR(s.peakWork(), 0.10, 1e-6);
-    for (int c = 0; c < 400; ++c) s.wanted(work(0.55), 1024, kRate);
-    CHECK_NEAR(s.spinShare(0), LoadStabilizer::kShare, 1e-6);           // over 0.5: hold the clock
-    CHECK_NEAR(s.spinShare(LoadStabilizer::kThermalWarm), LoadStabilizer::kShare * 0.55 / 0.6, 1e-6);
-    CHECK_NEAR(s.spinShare(LoadStabilizer::kThermalHot), LoadStabilizer::kShare * 0.55 / 0.7, 1e-6);
-    CHECK_EQ(s.spinShare(LoadStabilizer::kThermalCritical), 0.0);
-    CHECK_NEAR(s.spinShare(99), LoadStabilizer::kShare, 1e-6);           // unknown pressure: normal
-    s.resetLoad();
-    CHECK_EQ(s.peakWork(), 0.0);
+    double peak = 0;
+    const double pa = static_cast<double>(kPeriod) / 3e9;  // 1.1.1's peak fell over 3 s
+    ModelRun out;
+    for (int c = 0; c < callbacks; ++c) {
+        const double work = base * (c % every == every - 1 ? burst : 1.0) * kSteps[kTop] / kSteps[f];
+        if (work > 1.0) ++out.dropouts;
+        peak = std::max(work, peak - pa * peak);
+        const bool on = s.wanted(static_cast<int64_t>(work * kPeriod), 1024, kRate);
+        double share = 0;
+        if (on && rule == Rule::Full112) share = LoadStabilizer::spinShare();
+        if (on && rule == Rule::Clock111) share = share111(peak, thermal);
+        const double b = std::min(1.0, std::max(work, share));
+        out.meanClock += kSteps[f];
+        out.busy += b;
+        const double want = 1.25 * b * kSteps[f];
+        int next = kTop;
+        for (int k = 0; k <= kTop; ++k)
+            if (kSteps[k] >= want - 1e-9) { next = k; break; }
+        f = next;
+    }
+    out.meanClock /= callbacks;
+    out.busy /= callbacks;
+    return out;
+}
+}  // namespace
+
+// The owner's 1.1.1 report (S22+, 2026-11-24): dropouts at a 20-30 % meter, worse once warm. In the model (the
+// clock starts at its floor, as the phone's did) a song8-like load, 0.075 of the period at the top clock (0.30 at
+// the floor: a 30 % meter), with a burst of 3.5 times that: 1.1.1's rule lets the clock sit lower than 1.1.2's full
+// share holds it, so more bursts drop out, warm and hot most; without the stabilizer the clock never leaves the
+// floor. [Assumption] schedutil's rule: the owner's Benchmark of the same day had the callback's core at 0.5-0.6
+// of its top clock with the 1.1.1 stabilizer on, so the phone's governor does not follow the model closely, and
+// the stabilizer is off by default since 1.1.2 (the buffer tuner gives the headroom instead).
+TEST(load_stabilizer_governor_model_full_share_has_no_dropouts) {
+    static_assert(LoadStabilizer::spinShare() == LoadStabilizer::kShare, "1.1.2: the full share, whatever the heat");
+    const int minute = static_cast<int>(60LL * 1'000'000'000 / kPeriod);
+    // A burst every 8 s: 1.1.1 7 dropouts a minute at any heat, 1.1.2 1 (measured 2026-11-24).
+    for (int thermal : {0, 2, 3}) {
+        const ModelRun full = governorModel(Rule::Full112, thermal, 0.075, 3.5, 375, minute);
+        const ModelRun old = governorModel(Rule::Clock111, thermal, 0.075, 3.5, 375, minute);
+        CHECK(full.dropouts <= 1);
+        CHECK(old.dropouts > 3 * full.dropouts);
+        CHECK(old.meanClock < full.meanClock);
+        CHECK(old.busy < full.busy);  // what 1.1.1 saved: a less busy core
+    }
+    // A burst every second, warm: 1.1.1 20 a minute, 1.1.2 1, none 59 (the clock stays at its floor).
+    const ModelRun warmOld = governorModel(Rule::Clock111, 2, 0.075, 3.5, 47, minute);
+    const ModelRun warmFull = governorModel(Rule::Full112, 2, 0.075, 3.5, 47, minute);
+    const ModelRun none = governorModel(Rule::None, 2, 0.075, 3.5, 47, minute);
+    CHECK(warmFull.dropouts <= 1);
+    CHECK(warmOld.dropouts >= 10);
+    CHECK(none.dropouts > warmOld.dropouts);
+    // Light bursts drop out under no rule.
+    for (const Rule r : {Rule::None, Rule::Clock111, Rule::Full112})
+        CHECK_EQ(governorModel(r, 3, 0.075, 2.5, 47, minute).dropouts, 0);
 }

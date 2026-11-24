@@ -44,7 +44,7 @@ import 'glass.dart';
 import 'haptics.dart';
 import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
-import 'frame/headroom_notices.dart';
+import 'frame/performance_status.dart';
 import 'frame/live_keys.dart';
 import 'frame/record_tools.dart';
 import 'frame/sections.dart';
@@ -406,7 +406,6 @@ class _ShellState extends State<Shell> {
           child: Column(children: [
             Selected(select: _transportLook, builder: (_) => _TransportBar(state: s, dock: _dock)),
             ?_banner(),
-            HeadroomNotices(state: s),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, box) => Stack(children: [
@@ -512,8 +511,7 @@ class _ShellState extends State<Shell> {
             child: Column(children: [
               SizedBox(height: pad.top),
               ?_banner(),
-              HeadroomNotices(state: s),
-              Expanded(child: Padding(padding: lefty ? EdgeInsets.only(left: pad.left) : EdgeInsets.only(right: pad.right),
+                Expanded(child: Padding(padding: lefty ? EdgeInsets.only(left: pad.left) : EdgeInsets.only(right: pad.right),
                   child: body)),
               if (!keyboard)
                 Selected(select: () => (_transportLook(), pad), builder: (_) => BottomTransport(
@@ -547,7 +545,6 @@ class _ShellState extends State<Shell> {
           child: status,
         ),
       ?_banner(),
-      HeadroomNotices(state: s),
       Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
@@ -603,13 +600,13 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
-/// The engine's CPU load, in percent; pink over 85%.
+/// The engine's CPU load, in percent; pink over 85%. A tap opens the Performance sheet (performance_status.dart).
 class _CpuReadout extends StatelessWidget {
   const _CpuReadout({required this.state});
   final AppState state;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
+  Widget build(BuildContext context) => PerformanceStatus(state: state, child: SizedBox(
         // A live island (widgets.dart) of a fixed size: read about 30 times a second while playing, it rebuilds, lays
         // out and repaints alone, not the bar around it.
         width: 58,
@@ -627,7 +624,7 @@ class _CpuReadout extends StatelessWidget {
             },
           ),
         ),
-      );
+      ));
 }
 
 /// The layout menu: the presets, and every panel (tap to show it).
@@ -708,7 +705,8 @@ class _TransportBar extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
             _BpmButton(state: state),
             // The position and CPU change about 30 times a second while playing: a live island (widgets.dart).
-            SizedBox(width: 170, height: 15, child: LiveIsland(child: ValueListenableBuilder<int>(
+            // A tap on it opens the Performance sheet (performance_status.dart).
+            PerformanceStatus(state: state, child: SizedBox(width: 170, height: 15, child: LiveIsland(child: ValueListenableBuilder<int>(
               valueListenable: state.tick,
               builder: (context, _, _) {
                 final m = state.meters;
@@ -722,7 +720,7 @@ class _TransportBar extends StatelessWidget {
                     : 'CPU $cpu%',
                     style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)));
               },
-            ))),
+            )))),
           ]),
           // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
           Pressable(child: IconButton(

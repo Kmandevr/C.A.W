@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of the implemented music-workflow capabilities by area, and the constraints new work keeps; open gaps are tracked privately.
 covers: [app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, app/lib/model/storage.dart]
-updated: 2026-11-20
+updated: 2026-11-24
 ---
 
 # Music workflow implementation gaps
@@ -73,3 +73,5 @@ This note records what C.A.W.'s music-production workflows can do today, area by
 - Keep audio callback work bounded, allocation-free, lock-free and free of I/O, logging, UI calls and unbounded loops.
 - Perform file access, waveform generation, analysis, stretching and export off the audio callback using bounded background work.
 - Verify current code and tests before opening implementation work. A listed gap is not permission to invent a parallel architecture; follow the private plan.
+
+Re-checked 2026-11-24 against `project.dart` after 1.1.2 (a new Timber starts Simulated, `LayerDoc.newInstrumentValues`; Rook's kit builders): nothing in this plan changes.

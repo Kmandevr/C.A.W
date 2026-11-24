@@ -306,7 +306,7 @@ void main() {
         expect(find.byKey(const ValueKey('fx-inline-0')), findsOneWidget);
         await tester.ensureVisible(find.byKey(const ValueKey('dknob-rate')));
         await tester.pumpAndSettle();
-        await tester.drag(find.byKey(const ValueKey('dknob-rate')), const Offset(0, -40));
+        await restDrag(tester, tester.getCenter(find.byKey(const ValueKey('dknob-rate'))), const Offset(0, -40));
         await tester.pumpAndSettle();
         expect(pad.components.first.params['rate'], isNotNull, reason: 'the inline knob edits the chorus');
         list.jumpTo(0);

@@ -73,6 +73,16 @@ ProjectSpec voiceStorm();
 // 96 kHz, played at the engine's rate (resampled).
 ProjectSpec sampleStream(const std::string& dir, int tracks, bool mixedRates, std::string* error);
 // Every built-in instrument on its own track; every built-in effect on a few tracks.
+// A built-in as the Benchmark plays it (1.1.2): its id, display name (with its model, variant or kit kind), the values
+// that select that, and whether it takes a key (a second audio input).
+struct BenchmarkDevice {
+    std::string id, name;
+    Values params;
+    bool keyed = false;
+};
+// Every built-in instrument in each model and kit kind, and every effect in each variant, from the engine's own list.
+std::vector<BenchmarkDevice> benchmarkInstruments();
+std::vector<BenchmarkDevice> benchmarkEffects();
 ProjectSpec everyInstrument(const std::string& dir, std::string* error);
 ProjectSpec everyEffect();
 // Many tracks and buses whose meters, scopes and correlation are all running (cheap instruments).

@@ -14,8 +14,10 @@ import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/devices/device_editor.dart';
+import 'package:caw/ui/devices/kit/touch_engage.dart' show touchEngageHold;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'flagship_fixture.dart';
 
@@ -154,4 +156,16 @@ DeviceTarget targetOf(AppState s, String id) =>
 void openDevice(BuildContext context, AppState s, String id) {
   final t = targetOf(s, id);
   openDeviceEditor(context, s, s.project.layers.first, t.slot);
+}
+
+/// A deliberate drag on a device control from [from] by [by]: the finger rests past [touchEngageHold] (a quick swipe
+/// would scroll the page, kit/touch_engage.dart), then moves in [steps] frames.
+Future<void> restDrag(WidgetTester tester, Offset from, Offset by, {int steps = 8}) async {
+  final g = await tester.startGesture(from);
+  await tester.pump(touchEngageHold + const Duration(milliseconds: 20));
+  for (var i = 0; i < steps; i++) {
+    await g.moveBy(by / steps.toDouble());
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+  await g.up();
 }

@@ -83,13 +83,34 @@ enum PadParam : uint32_t {
     kRingMix, kRingFreq, kEchoSend, kBusSend,
     // groove: timing and dynamics, seeded and deterministic
     kSwing, kSwingGrid, kHumanize, kAccent, kAccentOn, kFlam, kFlamTime, kGroove, kGrooveAmt,
+    // ---- 1.1.2, appended: which engine plays the pad; an Acoustic pad's piece and articulation; a Layers pad's
+    // acoustic layer (a piece struck with each hit, 0 = none) ----
+    kEngine, kAcouPiece, kAcouArtic, kAcouLayer,
     kPadParams
 };
-static_assert(kPadParams == 213, "the pad layout is documented in docs/engine.md");
-inline constexpr uint32_t kPadParams110 = kRndPos + 1;  // the pad's parameters before 1.1.0 (162)
-inline constexpr uint32_t kParamCount = kGlobalCount + kPads * kPadParams;
+static_assert(kPadParams == 217, "the pad layout is documented in docs/engine.md");
+inline constexpr uint32_t kPadParams110 = kRndPos + 1;     // the pad's parameters before 1.1.0 (162)
+inline constexpr uint32_t kPadParams111 = kGrooveAmt + 1;  // before 1.1.2 (213)
+
+// 1.1.2: the Acoustic kit, after the pads: its kit-wide settings ("acou_*", and the kit's kind), then 16 pieces
+// ("pc1_*" .. "pc16_*"). Pads name a piece; the piece is one persistent physical object (docs/engine.md, "Drums",
+// Acoustic).
+enum AcouParam : uint32_t {
+    kKitKind, kAcouMics, kAcouStick, kAcouHatPedal, kAcouSympathy, kAcouBleed, kAcouNoise, kAcouLevel, kAcouRoom,
+    kAcouCount
+};
+enum PieceParam : uint32_t {
+    kPcKind, kPcSize, kPcDepth, kPcTune, kPcReso, kPcHead, kPcShell, kPcDamp, kPcDecay, kPcGlide, kPcWires,
+    kPcWireLevel, kPcBeater, kPcPort, kPcAir, kPcAlloy, kPcSwell, kPcLevel, kPcPan, kPcDist, kPcShellLevel,
+    kPieceParams
+};
+inline constexpr uint32_t kPieces = 16;
+inline constexpr uint32_t kAcouBase = kGlobalCount + kPads * kPadParams;
+inline constexpr uint32_t kParamCount = kAcouBase + kAcouCount + kPieces * kPieceParams;
 
 constexpr uint32_t padParam(uint32_t pad, uint32_t p) noexcept { return kGlobalCount + pad * kPadParams + p; }
+constexpr uint32_t acouParam(uint32_t p) noexcept { return kAcouBase + p; }
+constexpr uint32_t pieceParam(uint32_t piece, uint32_t p) noexcept { return kAcouBase + kAcouCount + piece * kPieceParams + p; }
 
 // Choice values the DSP and the sound library share.
 enum Mode : int { kModeKit, kModeSingle };
@@ -122,6 +143,24 @@ enum AccentOn : int { kAccentBeats, kAccentBars, kAccentOffbeats, kAccentLoud };
 enum GrooveKind : int { kGrooveOff, kGrooveShuffle, kGrooveLaidBack, kGrooveGallop, kGrooveBroken, kGrooveHalfTime,
                         kGrooveCount };
 enum EchoSync : int { kEchoFree, kEcho16, kEcho8, kEcho8Dotted, kEcho4, kEcho8Triplet };
+// 1.1.2: kits of three kinds, and the Acoustic engine's choices.
+enum PadEngine : int { kEngineLayers, kEngineAcoustic };
+enum KitKind : int { kKitCustom, kKitSynth, kKitProduced, kKitAcoustic };
+enum PieceKind : int { kPieceOff, kPieceKick, kPieceSnare, kPieceTom, kPieceHiHat, kPieceCrash, kPieceRide, kPieceSplash,
+                       kPieceChina, kPieceKindCount };
+enum Artic : int { kArtHit, kArtOffCenter, kArtEdge, kArtBell, kArtRimshot, kArtCrossStick, kArtRimClick, kArtFlam,
+                   kArtRoll, kArtBuzz, kArtChoke, kArtClosed, kArtOpen, kArtFoot, kArtCount };
+enum Mics : int { kMicsDry, kMicsStudio, kMicsRoom, kMicsOverheads };
+enum Stick : int { kStickSticks, kStickRods, kStickBrushes, kStickMallets };
+enum HeadType : int { kHeadCoated, kHeadClear, kHeadCoated2, kHeadClear2, kHeadCalf };
+enum ShellType : int { kShellMaple, kShellBirch, kShellMahogany, kShellOak, kShellSteel, kShellBrass, kShellAcrylic };
+enum Alloy : int { kAlloyB20, kAlloyB8, kAlloyBrass, kAlloyDark };
+enum Beater : int { kBeaterFelt, kBeaterPlastic, kBeaterWood, kBeaterFleece };
+constexpr bool isDrumPiece(int kind) noexcept { return kind == kPieceKick || kind == kPieceSnare || kind == kPieceTom; }
+constexpr bool isCymbalPiece(int kind) noexcept { return kind >= kPieceCrash && kind <= kPieceChina; }
+// Whether a piece of `kind` takes articulation `a` (others play as the nearest one it takes: articulationFor).
+bool articulationApplies(int kind, int a) noexcept;
+int articulationFor(int kind, int a) noexcept;
 
 // When a setting is heard (the app dims it otherwise; drums_audit_test checks both ways): every condition must hold.
 // A condition is on a pad parameter (or, `global`, a kit-wide one): non-zero, or one of `in`.
@@ -157,6 +196,9 @@ int padParamIndex(std::string_view suffix);
 // The descriptor index of `id` (a global or "<pad>_<suffix>"), or -1.
 int parameterIndex(std::string_view id);
 double constrainPad(uint32_t p, double v);
+// The Acoustic kit's parameter suffixes ("mics", "kind") and full ids ("acou_mics", "pc3_kind").
+std::string_view acouParamSuffix(uint32_t p);
+std::string_view pieceParamSuffix(uint32_t p);
 
 // The sound library: a named voice and its drum type.
 struct Sound {
@@ -182,6 +224,9 @@ const Voice& defaultVoice(uint32_t pad);
 // Renders `voice` as pad A1 in Single mode: one hit at full velocity, mono, until silent or `seconds` (sample layer
 // off). Control thread (allocates).
 bool renderVoice(const Voice& voice, double sampleRate, double seconds, std::vector<float>& out);
+// The randomizer: `start` moved `amount` toward a seeded draw of type `type`'s ranges, level-matched by a render
+// unless `levelMatch` is false (pure).
+Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start, bool levelMatch = true);
 // The names of the drum types (choices of the `type` parameter).
 std::string_view typeName(int type);
 

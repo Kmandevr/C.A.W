@@ -19,6 +19,7 @@
 #include <thread>
 
 #if defined(__ANDROID__)
+#include <android/api-level.h>
 #include <dlfcn.h>
 #endif
 
@@ -168,8 +169,12 @@ uint32_t tuneWorker(const CallbackThread& cb, WorkerState& state) noexcept {
             }
         }
     }
-    // The fast cores only, on a hybrid machine (a mask of cores, never one core: the kernel can still move a
-    // worker the callback preempts). The callback itself is never pinned.
+    // The fast cores only, on a hybrid desktop (a mask of cores, never one core: the kernel can still move a
+    // worker the callback preempts). The callback itself is never pinned. Not on Android since 1.1.2: [Fact,
+    // source.android.com "Performance Hint API", read 2026-11-24] "Your app shouldn't try to set the CPU core
+    // affinity ... devices often ignore an app's processor affinity"; placement is the scheduler's (and the hint
+    // session's), the nice above is the documented lever.
+#if !defined(__ANDROID__)
     const Topology& t = topology();
     if (!(state.applied & kAppliedAffinity) && t.hybrid && t.fastMask != 0 && t.fast < t.cores) {
         cpu_set_t set;
@@ -178,6 +183,7 @@ uint32_t tuneWorker(const CallbackThread& cb, WorkerState& state) noexcept {
             if (t.fastMask & (uint64_t{1} << cpu)) CPU_SET(cpu, &set);
         if (sched_setaffinity(0, sizeof set, &set) == 0) state.applied |= kAppliedAffinity;
     }
+#endif
     return state.applied;
 }
 
@@ -240,6 +246,8 @@ struct Hint {
     std::atomic<int64_t> target{0};
     std::atomic<bool> active{false};
     std::atomic<uint8_t> state{static_cast<uint8_t>(HintState::Waiting)};
+    std::atomic<int> feature{-1};             // hintDiagnostics: what isFeatureSupported said (-1: not asked)
+    std::atomic<int64_t> preferred{-1};       // ... and the raw preferred update rate
     std::mutex lock;                       // the hint's thread's sleep (never taken on the audio thread)
     std::condition_variable wake;
     bool stop = false;
@@ -259,6 +267,8 @@ struct Hint {
         }
         // APERF_HINT_SESSIONS is 0 in APerformanceHintFeature (NDK r30, android/performance_hint.h).
         const int feature = api.isFeatureSupported ? (api.isFeatureSupported(0) ? 1 : 0) : -1;
+        this->feature.store(feature, std::memory_order_relaxed);
+        this->preferred.store(preferred, std::memory_order_relaxed);
         if (!manager) state.store(static_cast<uint8_t>(HintState::Unsupported), std::memory_order_relaxed);
         // A refused session is asked for again after hintRetryNs (it used to wait for the callback's thread to
         // change, which on one stream it never does), unless the system says it has none.
@@ -380,6 +390,17 @@ HintState hintState(const Hint* h) noexcept {
     return h ? static_cast<HintState>(h->state.load(std::memory_order_relaxed)) : HintState::None;
 }
 
+HintDiagnostics hintDiagnostics(const Hint* h) noexcept {
+    HintDiagnostics d;
+    d.sdk = android_get_device_api_level();
+    d.featureCall = hintApi().isFeatureSupported != nullptr;
+    if (h) {
+        d.feature = h->feature.load(std::memory_order_relaxed);
+        d.preferredRateNs = h->preferred.load(std::memory_order_relaxed);
+    }
+    return d;
+}
+
 #else  // Linux: no performance hint API
 
 struct Hint {};
@@ -389,6 +410,7 @@ void hintThreads(Hint*, const int32_t*, size_t) noexcept {}
 void hintReport(Hint*, int64_t, int64_t) noexcept {}
 bool hintActive(const Hint*) noexcept { return false; }
 HintState hintState(const Hint*) noexcept { return HintState::None; }
+HintDiagnostics hintDiagnostics(const Hint*) noexcept { return {}; }
 
 #endif
 

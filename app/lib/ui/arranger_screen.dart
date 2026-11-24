@@ -1473,7 +1473,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStat
         }
       },
       child: Column(children: [
-        if (s.meters.overloaded > 0) _OverloadBanner(state: s),
         // The toolbar tucks away with the status row while the tracks scroll down (owner, 2026-11-10).
         _tucked(Column(mainAxisSize: MainAxisSize.min, children: [
           _toolbar(context, focused),
@@ -3508,29 +3507,6 @@ class _GhostView extends StatelessWidget {
             ]))),
       ]))));
     });
-}
-
-class _OverloadBanner extends StatelessWidget {
-  const _OverloadBanner({required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: NeonPanel(
-          color: Neon.pink,
-          child: Row(children: [
-            const Icon(Icons.speed, color: Neon.pink),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                  'Out of headroom: the newest layer${state.meters.overloaded > 1 ? 's were' : ' was'} muted to keep audio clean.'
-                  '${state.lightTurnedOnBySelf ? ' Lightweight profile is now active (Settings).' : ''}'),
-            ),
-            TextButton(onPressed: state.clearOverload, child: const Text('Unmute')),
-          ]),
-        ),
-      );
 }
 
 class _ProjectSettings extends StatefulWidget {

@@ -56,6 +56,16 @@ class MainActivity : FlutterActivity() {
                     result.success(readDeviceFacts())
                 } else if (call.method == "thermal") {
                     result.success(readThermal())
+                } else if (call.method == "sustained") {
+                    // 1.1.2: Sustained Performance Mode while playing, where the device has it ([Fact,
+                    // developer.android.com PowerManager.isSustainedPerformanceModeSupported, API 24, read
+                    // 2026-11-24] "Applications should check ... before using Window.setSustainedPerformanceMode").
+                    // Returns whether it is supported; asks for it only then.
+                    val supported = sustainedSupported()
+                    if (supported) window.setSustainedPerformanceMode(call.argument<Boolean>("on") == true)
+                    result.success(supported)
+                } else if (call.method == "performance") {
+                    result.success(mapOf("sdk" to Build.VERSION.SDK_INT, "sustainedPerformance" to sustainedSupported()))
                 } else {
                     result.notImplemented()
                 }
@@ -229,6 +239,9 @@ class MainActivity : FlutterActivity() {
             "batterySaver" to power?.isPowerSaveMode,
         )
     }
+
+    private fun sustainedSupported(): Boolean =
+        (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isSustainedPerformanceModeSupported == true
 
     // The Benchmark's heat test: the thermal status and the headroom forecast 10 s ahead (1.0: severe throttling
     // starts; NaN where unsupported or asked again within about a second, then left out).

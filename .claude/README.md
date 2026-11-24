@@ -51,3 +51,10 @@ They answer different questions, so don't use both for the same one.
 - The project's memory stays in `docs/`. Serena's own memory and onboarding tools are off, so there's no second source of truth.
 - `.mcp.json` registers Serena as a project-scoped MCP server; `enabledMcpjsonServers` in `settings.json` approves it.
 - Graphify and Serena install through [uv](https://docs.astral.sh/uv/).
+
+## Session quirks (cloud container, 2026-11-24)
+
+- Push after every commit, and push an agent's worktree branch to `caw-backup-<name>` now and then: worker restarts and usage limits have ended sessions mid-task. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
+- Scratch builds are about 2 GB each and the disk fills: delete old ones before a new build.
+- Parallel branches collide in `docs/app.md`, both CHANGELOGs, `docs/decisions.md`, `cawApiVersion` and the bench mode numbers: expect to resolve these when merging.
+- Narrowing or removing a test needs the owner's explicit OK first; the permission check blocks it otherwise.

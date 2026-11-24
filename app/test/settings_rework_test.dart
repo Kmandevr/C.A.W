@@ -81,7 +81,7 @@ void main() {
     expect((d.pauseOnUnplug, d.safetyLimiter, d.monoCheck, d.keepAwake, d.newTrackMonitor, d.rememberZoom, d.leftHanded),
         (true, true, false, KeepAwake.playing, 'auto', true, false));
     expect(d.newTrackInstrument, kRecordTrackInstrument);
-    expect(d.bufferTuning, isFalse, reason: 'the buffer tuner stays off by default');
+    expect(d.bufferTuning, isTrue, reason: 'the buffer tuner is on by default since 1.1.2');
   });
 
   test('damaged values are refused, and only the newest 64 project views are kept', () {

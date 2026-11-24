@@ -3,6 +3,32 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.2-alpha.1 (2026-11-24)
+
+Realism: Timber's instruments and Rook's drums are now simulated, the way the real instruments work, mechanical noises and all.
+
+### New
+- **Timber, Simulated mode** for every instrument (old projects keep their Classic sound):
+  - **Piano:** a simulated felt hammer striking stiff strings, a shared soundboard, sympathetic resonance, the bass notes' pitch glide, and the mechanical noises (hammer thump, keybed, dampers, pedal), subtle by default with a Noise knob. Checked against measurements of a real grand. New pianos open Simulated.
+  - **Flute** (jet and breath), **clarinet and sax** (reed and tonguing), **brass** (lips, brightening when loud), **bowed strings** (bow friction), **plucked strings** (fret buzz, slide noise), **mallets and electric piano** (real contact), **organ** (key-contact click).
+  - Eco, Normal and High quality.
+- **Rook, three kinds of kit:**
+  - **Synth:** a whole kit from one seed and a style.
+  - **Produced:** EDM-ready kicks in three layers, tune the kit to your key, finishing chains, loudness match.
+  - **Acoustic:** a new simulated drum kit: real drum pieces that keep ringing, rimshots, flams, rolls, brushes, snare wires that buzz with the kick, cymbals, a pedal hi-hat, close and overhead mics with bleed. Pads follow General MIDI, Roland V-Drums or Alesis layouts.
+  - A **Build a kit** card to make any of them in a few taps.
+
+### Changed
+- The new instruments were optimised to fit their CPU budgets.
+- **Steadier playback on phones:** C.A.W now lets Android manage the CPU clock and heat instead of fighting it. The output buffer grows by itself after a dropout (Find the smallest stable buffer is on by default).
+- **Load never stops playback:** when the phone can't keep up, C.A.W mutes tracks one at a time but always keeps one playing, and a stream the system stops is reopened within a second.
+- The smart-freeze suggestion now appears only after real dropouts, never on the CPU figure alone.
+- The Benchmark plays every instrument and effect, with each model and variant, under the names the app shows.
+
+### For contributors
+- Engine C API 46: `caw_drums_kit_build`, `caw_drums_kit_tool`.
+- `caw_audio_status` reports the stream's path (`mmap`, `fast`, `normal`), buffer, burst and capacity; the load stabilizer is off unless `CAW_LOAD_STABILIZER=1`; `caw_audio_set_thermal` no longer acts.
+
 ## 1.1.1-alpha.1 (2026-11-20)
 
 Fixes after 1.1.0: smoother playback, a cooler phone, older Flagship sounds back as they were, and new glitch modes in Bits.

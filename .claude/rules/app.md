@@ -14,3 +14,4 @@ paths:
 - Phone screens first: compact panels, sensible defaults, the symbol key row for code entry, errors on one line next to the code. Desktop gets keyboard shortcuts on top, not a different app.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
 - Every visible state change animates to its new state, in and out, through the theme's motion tokens (`lib/ui/motion.dart`) and respecting Off/Reduced; a drag follows the finger with no lag (owner, 2026-11-11).
+- After an engine change, regenerate the engine-fed fixtures (`test/fixtures/builtin_components.json` and the like, through the built `libcaw.so`) and the goldens it moves; every version bump moves the version-string goldens.

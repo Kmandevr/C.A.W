@@ -1,4 +1,4 @@
-// Smart freeze (1.1.0, suggest only): when the CPU meter stays near the phone's limit while playing, measure each track once and suggest freezing the heaviest, once; it never freezes by itself.
+// Smart freeze (1.1.0, suggest only): after real trouble while playing (repeated dropouts, or a track shed for overload; 1.1.2: never the CPU figure alone), measure each track once and suggest freezing the heaviest, once; it never freezes by itself.
 import 'package:flutter/foundation.dart';
 
 import 'app_state.dart';
@@ -14,45 +14,84 @@ class FreezeSuggestion {
   final double? share;
 }
 
-/// Watches the meters ([poll], from the app's meter poller) and, once the CPU has stayed at or above [near] (or the
-/// engine muted a track for an overload) for [hold] while playing, reads each candidate track's cost for [measure]
-/// a few times a second (each read keeps the engine timing that track's slots for 2 s), then offers the heaviest
-/// in [suggestion]. Without measurements it ranks by the components' cost hints. Shown once per run of the app:
-/// [dismiss] (or a freeze from it) ends it for good. It never freezes: the screens ask, and only a tap freezes.
+/// The output's dropouts while playing (1.1.2): the platform's underrun count (AAudio's xruns, in the audio status's
+/// clock diagnostic), read once a second while playing, summed over streams (a reopened stream counts from 0 again).
+class DropoutWatch {
+  int _readUs = -1 << 62;
+  int? _last;
+
+  /// Dropouts heard while playing since the app started.
+  int count = 0;
+
+  /// From the meter poll: [read] gives the output's underruns since it opened (-1: unknown), called at most once a
+  /// second while playing.
+  void poll(int nowUs, {required bool playing, required int Function() read}) {
+    if (!playing || nowUs - _readUs < 1000000) return;
+    _readUs = nowUs;
+    final x = read();
+    if (x < 0) {
+      _last = null;
+      return;
+    }
+    final last = _last;
+    if (last != null && x > last) count += x - last;
+    _last = x;  // a smaller count is a new stream: it counts from here
+  }
+}
+
+/// Watches playback ([poll], from the app's meter poller) for real trouble and, once it is seen, reads each
+/// candidate track's cost for [measure] a few times a second (each read keeps the engine timing that track's slots
+/// for 2 s), then offers the heaviest in [suggestion]. Trouble (1.1.2, the owner: the hint came at about 40 % with no
+/// dropout) is never the CPU figure: it is [dropouts] dropouts heard within [window], in at least two separate
+/// moments (one glitch is not a pattern), or the engine shedding a track for overload for [hold] on end. Without
+/// measurements it ranks by the components' cost hints. Shown once per run of the app: [dismiss] (or a freeze from
+/// it) ends it for good. It never freezes: the screens ask, and only a tap freezes.
 class FreezeHint {
-  FreezeHint({this.near = 0.85, this.calm = 0.75, this.hold = const Duration(seconds: 4),
+  FreezeHint({this.dropouts = 3, this.window = const Duration(seconds: 10), this.hold = const Duration(seconds: 4),
       this.measure = const Duration(milliseconds: 1500)});
 
-  /// The CPU share of the callback's budget counted as near the limit, and the one below which it has calmed.
-  final double near, calm;
-  final Duration hold, measure;
+  /// Dropouts within [window] that count as trouble.
+  final int dropouts;
+  final Duration window, hold, measure;
 
   final ValueNotifier<FreezeSuggestion?> suggestion = ValueNotifier(null);
 
   bool _done = false;
-  int? _highSinceUs, _measureFromUs;
+  int? _shedSinceUs, _measureFromUs, _lastCount;
   int _lastReadUs = 0;
+  final List<int> _dropUs = [];  // when each dropout was seen, within the window
   final Map<String, double> _shares = {};
 
   /// Whether it has been shown and dismissed (or acted on): it says nothing again this run.
   bool get done => _done;
 
-  /// One meter reading at [nowUs]. [tracks] gives the tracks that may be frozen now; [share] a track's measured share
-  /// of one core (null until measured); [hint] its components' cost hints (any scale; larger is heavier).
-  void poll(int nowUs, {required double cpu, required bool playing, required bool overloaded,
+  /// One meter reading at [nowUs]: [dropouts], the output's dropouts so far ([DropoutWatch.count]); [overloaded],
+  /// whether the engine has a track shed for overload now. [tracks] gives the tracks that may be frozen now; [share]
+  /// a track's measured share of one core (null until measured); [hint] its components' cost hints (any scale;
+  /// larger is heavier).
+  void poll(int nowUs, {required bool playing, required int dropouts, required bool overloaded,
       required List<LayerDoc> Function() tracks, required double? Function(LayerDoc) share,
       required double Function(LayerDoc) hint}) {
+    final last = _lastCount;
+    _lastCount = dropouts;
     if (_done || suggestion.value != null) return;
-    final high = playing && (cpu >= near || overloaded);
-    if (!playing || (!high && cpu < calm)) {
-      _highSinceUs = _measureFromUs = null;
+    if (!playing) {
+      _shedSinceUs = _measureFromUs = null;
+      _dropUs.clear();
       _shares.clear();
       return;
     }
-    if (!high && _measureFromUs == null) return;
-    _highSinceUs ??= nowUs;
+    if (last != null && dropouts > last) {
+      for (var k = 0; k < dropouts - last && k < this.dropouts; ++k) {
+        _dropUs.add(nowUs);
+      }
+    }
+    _dropUs.removeWhere((t) => nowUs - t > window.inMicroseconds);
+    _shedSinceUs = overloaded ? (_shedSinceUs ?? nowUs) : null;
+    final repeated = _dropUs.length >= this.dropouts && _dropUs.toSet().length >= 2;
+    final shedding = _shedSinceUs != null && nowUs - _shedSinceUs! >= hold.inMicroseconds;
     if (_measureFromUs == null) {
-      if (nowUs - _highSinceUs! < hold.inMicroseconds) return;
+      if (!repeated && !shedding) return;
       _measureFromUs = nowUs;
     }
     final list = tracks();
@@ -80,7 +119,8 @@ class FreezeHint {
         if (v > most) (best, most) = (l, v);
       }
     }
-    _measureFromUs = _highSinceUs = null;
+    _measureFromUs = _shedSinceUs = null;
+    _dropUs.clear();
     _shares.clear();
     if (best != null) suggestion.value = FreezeSuggestion(layerId: best.id, name: best.name, share: bestShare);
   }

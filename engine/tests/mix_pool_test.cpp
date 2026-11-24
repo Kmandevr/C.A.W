@@ -20,6 +20,9 @@
 #include "graph.h"
 #include "load_stabilizer.h"
 #include "mix_pool.h"
+#if defined(__linux__)
+#include <sys/resource.h>
+#endif
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
@@ -270,6 +273,34 @@ TEST(mix_pool_live_pool_notes_the_callback_and_runs) {
     CHECK(pool.workers() == 2u);
     pool.stop();
 }
+
+#if defined(__linux__)
+// A2 (the 1.1.2 audit): AudioFlinger gives a fast track's callback its real-time priority after its first callbacks,
+// so the pool reads the callback's scheduling again now and then, not only at its first callback. Here its nice
+// rises on a callback thread of the test's own (raising one's nice needs no privilege).
+TEST(mix_pool_reads_the_callbacks_scheduling_again_when_it_changes) {
+    std::thread cb([] {
+        MixPool pool;
+        CHECK(pool.start(1, MixPool::Kind::Live));
+        auto callbacks = [&](int n) {
+            for (int k = 0; k < n; ++k) {
+                pool.beginCallback(false);
+                pool.endCallback();
+            }
+        };
+        callbacks(4);
+        const int before = pool.callbackNice();
+        const int raised = before < 19 ? before + 1 : before;
+        setpriority(PRIO_PROCESS, 0, raised);
+        callbacks(4);
+        CHECK_EQ(pool.callbackNice(), before);  // not between two reads
+        callbacks(600);
+        CHECK_EQ(pool.callbackNice(), raised);  // read again within a few hundred callbacks
+        pool.stop();
+    });
+    cb.join();
+}
+#endif
 
 // ---- the executor's levels on the pool ----
 

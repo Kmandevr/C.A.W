@@ -320,7 +320,7 @@ void main() {
   Future<void> drag(WidgetTester tester, Key key, Offset by, {Offset at = Offset.zero}) async {
     final c = tester.getCenter(find.byKey(key)) + at;
     final g = await tester.startGesture(c);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(c + by * (i / 8));
       await tester.pump(const Duration(milliseconds: 16));
@@ -357,7 +357,7 @@ void main() {
     final ux = (math.log(x1 / 20) / math.log(1000));
     final at = Offset(box.left + 8 + ux * (box.width - 16), box.center.dy + 8);
     final g = await tester.startGesture(at);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(at + Offset(40.0 * i / 8, 0));
       await tester.pump(const Duration(milliseconds: 16));
@@ -436,7 +436,7 @@ void main() {
     // Straight: tap 1 at 1 step of 4.48 across the plot.
     final at = Offset(box.left + 14 + (box.width - 28) / 4.48, box.top + 26 + (box.height - 38) / 2);
     final g = await tester.startGesture(at);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(at + Offset(0, 30.0 * i / 8));
       await tester.pump(const Duration(milliseconds: 16));
@@ -479,7 +479,7 @@ void main() {
     final box = tester.getRect(find.byKey(const ValueKey('match-hero')));
     final at = Offset(box.left + 10 + 0.0 * (box.width - 20) + 2, box.top + 24 + 14);
     final g = await tester.startGesture(at);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(at + Offset(60.0 * i / 8, 0));
       await tester.pump(const Duration(milliseconds: 16));
@@ -642,7 +642,7 @@ void main() {
     final p2 = t.value('p2'), p3 = t.value('p3');
     final at = box.topLeft + Offset(plot.left + plot.width * 2 / 8, plot.center.dy);
     final g = await tester.startGesture(at);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 8; i++) {
       await g.moveTo(at + Offset(0, -60.0 * i / 8));
       await tester.pump(const Duration(milliseconds: 16));
@@ -661,7 +661,7 @@ void main() {
     // Paint the low half up near +12 dB.
     final from = ibox.topLeft + Offset(ip.left + 2, ip.top + 3), to = ibox.topLeft + Offset(ip.center.dx, ip.top + 3);
     final h = await tester.startGesture(from);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 120)); // past the touch hold (kit/touch_engage.dart)
     for (var i = 1; i <= 12; i++) {
       await h.moveTo(Offset.lerp(from, to, i / 12)!);
       await tester.pump(const Duration(milliseconds: 16));

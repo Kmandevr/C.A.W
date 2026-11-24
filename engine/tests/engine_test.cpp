@@ -822,9 +822,10 @@ TEST(overload_shedding_goes_by_time_not_callbacks) {
     Engine f(48000);
     for (int i = 0; i < 32; ++i) f.reportLoad(1.5, 16);  // 10.7 ms: one 512-frame callback's worth
     CHECK_NEAR(f.meters().cpu, 0.15, 0.01);
-    // The cooldown is time too: still overloaded after shedding, the next layer goes about 1.07 s later.
+    // The cooldown is time too: still overloaded after shedding, the next layer goes about 1.07 s later (three
+    // layers: the last one still sounding is never shed, 1.1.2).
     Engine g(48000);
-    g.setProject(p);
+    g.setProject(project({dc(0.25), dc(0.5), dc(0.1)}));
     g.play();
     run(g, 1000);
     for (int i = 0; i < 300; ++i) g.reportLoad(1.5, 64);  // 0.4 s: the first layer
@@ -907,15 +908,51 @@ TEST(a_layer_the_device_can_only_just_not_carry_does_not_come_and_go) {
     }, 2);
     CHECK(f.sheddingStats().shed >= uint64_t{2});  // it did come back at least once
     CHECK(f.sheddingStats().shed <= uint64_t{6});
-    // A song shed to silence (the cost of the last layer looked like the whole load) comes back on trial.
+    // Throttled whatever is shed: one layer goes, the last one still sounding never does (1.1.2: load never
+    // silences the song; before, both went and came back on trial), and the shed one comes back.
     Engine g(48000);
     g.setProject(p);
     g.play();
     run(g, 1000);
-    simulateLoad(g, 2.0, [](int) { return 1.4; }, 2);  // throttled: both shed
-    CHECK_EQ(g.meters().overloaded, 2);
+    simulateLoad(g, 4.0, [](int) { return 1.4; }, 2);
+    CHECK_EQ(g.meters().overloaded, 1);
     simulateLoad(g, 30.0, [](int on) { return 0.05 + 0.1 * on; }, 2);  // the device recovers
     CHECK_EQ(g.meters().overloaded, 0);
+}
+
+// The owner's 1.1.1 report (S22+, 2026-11-24): "whenever the phone warms up or takes significant load, playback
+// stops". However long and however far the device is over budget, the transport plays on and the last layer still
+// sounding keeps sounding; a short stall (a heat step) sheds nothing.
+TEST(load_never_stops_playback) {
+    for (const int frames : {96, 512, 1024}) {
+        Engine e(48000);
+        e.setMasterBypass(true);
+        e.setProject(project({dc(0.1), dc(0.1), dc(0.1), dc(0.1)}));
+        e.play();
+        run(e, 1000);
+        std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
+        // A heat step: 0.15 s at three times the budget, then light.
+        for (int k = 0, n = static_cast<int>(0.15 * 48000 / frames); k < n; ++k) {
+            e.process(l.data(), r.data(), frames);
+            e.reportLoad(3.0, frames);
+        }
+        for (int k = 0, n = 48000 / frames; k < n; ++k) {
+            e.process(l.data(), r.data(), frames);
+            e.reportLoad(0.3, frames);
+        }
+        CHECK_EQ(e.sheddingStats().shed, 0u);
+        // Thirty seconds at twice the budget, whatever is shed.
+        float loud = 0;
+        for (int k = 0, n = 30 * 48000 / frames; k < n; ++k) {
+            e.process(l.data(), r.data(), frames);
+            e.reportLoad(2.0, frames);
+            CHECK(e.meters().playing);
+            if (k > n - 48000 / frames) loud = std::max(loud, std::fabs(l[static_cast<size_t>(frames) - 1]));
+        }
+        CHECK_EQ(e.meters().overloaded, 3);  // three of four went, one a second; the last never does
+        CHECK(loud > 0.05f);                 // and it is heard
+        CHECK(e.meters().playing);
+    }
 }
 
 TEST(a_single_late_callback_sheds_nothing) {
@@ -1071,15 +1108,36 @@ TEST(the_buffer_tuner_grows_on_underruns_and_shrinks_only_to_sizes_that_held) {
     CHECK_EQ(t.update(2, 1.0), 384);
 }
 
-// The review of #236: the tuner runs only where the output has no size of its own (Low latency, or Auto while
-// recording); Auto while not recording and Battery keep their fixed 1024 frames, and caw_audio_tune_buffer returns 0.
-TEST(the_buffer_tuner_runs_only_in_low_latency_or_while_recording) {
-    CHECK(tunesBuffer(true, false, false));   // Low latency
-    CHECK(tunesBuffer(true, false, true));    // Low latency, recording
-    CHECK(tunesBuffer(false, true, true));    // Auto while recording: no size asked
-    CHECK(!tunesBuffer(false, true, false));  // Auto, not recording: 1024 frames
-    CHECK(!tunesBuffer(false, false, false)); // Battery: 1024 frames
-    CHECK(!tunesBuffer(false, false, true));  // Battery while recording: still 1024 frames
+// The review of #236, and 1.1.2: the full tuning where the output was opened without a size of its own (Low latency,
+// Auto while recording); a fixed size (Auto's and Battery's 1024 frames, a chosen size) only grows, and
+// caw_audio_tune_buffer returns 0.
+TEST(the_buffer_tuner_tunes_fully_only_an_output_opened_without_a_size) {
+    CHECK(tunesBuffer(0));
+    CHECK(!tunesBuffer(1024));  // Auto while not recording, Battery
+    CHECK(!tunesBuffer(256));   // a size the user chose
+}
+
+// 1.1.2 (the owner's dropouts at a 20-30 % meter): every other output only grows, from the size its stream opened
+// with, a burst at each underrun (Oboe's LatencyTuner), and never goes below that size.
+TEST(the_buffer_tuner_only_grows_a_fixed_buffer_from_its_opened_size) {
+    BufferTuner t;
+    CHECK_EQ(growOnlyStart(t, 192, 3072, 3072 * 2, 5), 0);  // nothing set at the start: it keeps its size
+    CHECK_EQ(t.size(), 3072);
+    CHECK_EQ(t.update(5, 1.0), 0);
+    CHECK_EQ(t.update(6, 1.0), 3264);  // an underrun: a burst more
+    for (int s = 0; s < 59; ++s) CHECK_EQ(t.update(6, 1.0), 0);
+    CHECK_EQ(t.update(6, 1.0), 0);  // quiet for a minute: never back to the size that underran
+    for (int s = 0; s < 600; ++s) CHECK_EQ(t.update(6, 1.0), 0);
+    CHECK_EQ(t.size(), 3264);
+    // An opened size that is not whole bursts: the first growth is still above it, never under.
+    BufferTuner u;
+    CHECK_EQ(growOnlyStart(u, 192, 1000, 4000, 0), 0);
+    CHECK(u.update(1, 1.0) > 1000);
+    // At the capacity: nothing to give, and nothing smaller is ever set.
+    BufferTuner w;
+    CHECK_EQ(growOnlyStart(w, 192, 3072, 3072, 0), 0);
+    CHECK_EQ(w.update(3, 1.0), 0);
+    CHECK_EQ(w.size(), 3072);
 }
 
 TEST(odd_callback_sizes_through_the_device_fifo_shed_nothing_under_the_threshold) {

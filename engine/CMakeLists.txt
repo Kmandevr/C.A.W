@@ -168,7 +168,7 @@ endif()
 
 add_library(caw_core STATIC
   src/pattern.cpp
-  src/engine.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/component_samples.cpp src/builtin_flagship.cpp src/flagship_banks.cpp src/builtin_flagship_presets.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/drums_acoustic.cpp src/drums_kits.cpp src/component_samples.cpp src/builtin_flagship.cpp src/flagship_banks.cpp src/builtin_flagship_presets.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
@@ -234,6 +234,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
 target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
+target_sources(caw_core PRIVATE src/timber_piano_tables.cpp src/timber_piano_sim.cpp)  # 1.1.2: Timber's Simulated piano: its tables (generated: tools/timber_piano_gen.cpp) and per-sample code
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -306,6 +307,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/drums_test.cpp)  # org.caw.drums: 64 pads, layers, presets, samples, migration
   target_sources(caw_tests PRIVATE tests/drums_audit_test.cpp)  # org.caw.drums: every setting moves the sound; 1.1.0's groove
   target_sources(caw_tests PRIVATE tests/drums_compat_test.cpp)  # org.caw.drums: old presets bit-identical after 1.1.0
+  target_sources(caw_tests PRIVATE tests/drums_acoustic_test.cpp)  # Rook 1.1.2: the Acoustic engine's realism, kits and builders
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
@@ -324,6 +326,16 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
   target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
+  target_sources(caw_tests PRIVATE tests/timber_piano_compat_test.cpp)  # 1.1.2: the piano's 1.1.0 presets bit-identical
+  target_sources(caw_tests PRIVATE tests/timber_piano_sim_test.cpp)  # 1.1.2: the Simulated piano's realism, noises, patents guard
+  # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
+  # regenerates them and fails if the committed file differs (beyond the last rounding step).
+  add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
+  target_include_directories(timber_piano_gen PRIVATE src include)
+  target_compile_options(timber_piano_gen PRIVATE ${_caw_fp_strict})
+  add_test(NAME timber_piano_tables_current COMMAND timber_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/timber_piano_tables.inc)
+  target_sources(caw_tests PRIVATE tests/timber_sim_test.cpp)  # 1.1.2: Timber's Simulated models (realism checks, block sizes, tiers, references)
+  target_sources(caw_tests PRIVATE tests/timber_compat_test.cpp)  # 1.1.2: Timber's 1.1.0 presets render bit-identically (models other than the piano)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
@@ -446,6 +458,7 @@ target_include_directories(caw_cli PRIVATE src)
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
+  target_sources(caw_rt_tests PRIVATE tests/drums_acoustic_rt_test.cpp)  # Rook 1.1.2: Acoustic kits, no allocation
   target_sources(caw_rt_tests PRIVATE tests/flagship_raven_rt_test.cpp)  # Flagship's 1.1.0 synthesis (Raven)
   target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_rt_test.cpp)  # FX consolidation: a variant change while playing
@@ -457,6 +470,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
   target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
+  target_sources(caw_rt_tests PRIVATE tests/timber_sim_rt_test.cpp)  # 1.1.2: Timber's Simulated models while playing
   target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
@@ -476,6 +490,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
+  target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
@@ -555,6 +570,7 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 # engine's deterministic sine, not libm.
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
+set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

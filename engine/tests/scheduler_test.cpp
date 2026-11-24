@@ -205,10 +205,13 @@ TEST(adaptive_worker_pool_applies_thermal_and_idle_limits) {
     request.workload = WorkloadClass::BackgroundGeneration;
     const ExecutionPlan normal = pool.apply(request);
     CHECK_EQ(normal.workerThreads, 7);
+    // Heat changes nothing (1.1.2, owner: the platform throttles, not the app; execution.cpp).
     request.pressure = DevicePressure::ThermalCritical;
     const ExecutionPlan hot = pool.apply(request);
-    CHECK_EQ(hot.workerThreads, 1);
-    CHECK_EQ(pool.currentPlan().workerThreads, 1);
+    CHECK_EQ(hot.workerThreads, 7);
+    CHECK_EQ(pool.currentPlan().workerThreads, 7);
+    request.pressure = DevicePressure::BatterySaver;
+    CHECK(pool.apply(request).workerThreads < 7);  // battery saver still halves background work
     request.workload = WorkloadClass::Idle;
     const ExecutionPlan idle = pool.apply(request);
     CHECK_EQ(idle.workerThreads, 0);

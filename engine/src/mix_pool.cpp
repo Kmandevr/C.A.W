@@ -32,6 +32,7 @@ std::atomic<uint64_t> gStarts{0};
 
 constexpr uint64_t kIndexMask = 0xFFFFu;
 constexpr uint32_t kCoreSampleEvery = 32;  // callbacks between two reads of the callback's core
+constexpr uint32_t kPolicyEvery = 256;     // callbacks between two reads of its policy (about 1-5 s; A2)
 
 int64_t nowNs() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
@@ -185,6 +186,14 @@ void MixPool::beginCallback(bool wake) noexcept {
         if (tNotedStart != startId_) {
             tNotedStart = startId_;
             noteCallbackThread();
+        } else if (callbacks_ % kPolicyEvery == kPolicyEvery - 1) {
+            // A2 (the 1.1.2 audit): AudioFlinger grants a fast track's callback its real-time priority
+            // asynchronously, so the first callback's reading can be stale; looked at again now and then (a few
+            // cheap system calls), and the workers retune at their next idle point when it changed.
+            const tuning::CallbackThread t = tuning::describeCallbackThread();
+            if (t.policy != cbPolicy_.load(std::memory_order_relaxed) ||
+                t.priority != cbPriority_.load(std::memory_order_relaxed) || t.nice != cbNice_.load(std::memory_order_relaxed))
+                noteCallbackThread();
         }
         if (callbacks_++ % kCoreSampleEvery == 0) callbackCpu_.store(tuning::currentCpu(), std::memory_order_relaxed);
     }

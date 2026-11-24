@@ -1,6 +1,7 @@
 // org.caw.drums' sound library, kits, presets, randomize/mutate, explode-to-tracks and the old drums' migration.
 #include "builtin_drums.h"
 #include "builtin_drums_layout.h"
+#include "drums_kits.h"
 #include "presets.h"
 
 #include <algorithm>
@@ -629,6 +630,7 @@ std::vector<BuiltinPreset> makePresets() {
         pads[0] = &s.voice;
         out.push_back({s.name, s.description, presetValues(pads, {{kMode, kModeSingle}})});
     }
+    appendBuiltKitPresets(out);  // 1.1.2: 8 Synth, 8 Produced and 8 Acoustic kits, after every older preset
     return out;
 }
 
@@ -758,7 +760,7 @@ const Kit& defaultKit() { return kits().front(); }
 // each knob of the type's rule within its range and moves it `amount` of the way there (in the knob's own taper),
 // switches each listed choice with probability amount / 3, turns the type's layers on, and clamps every drawn
 // knob into its range again: a random kick is still a kick.
-Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start) {
+Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start, bool levelMatch) {
     const TypeRule& r = rule(type);
     Stream rng{seed};
     Voice v = start;
@@ -779,7 +781,7 @@ Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start)
     v[kType] = type;
     // Level-matched: a hit (its first 0.4 s, rendered here) peaks near -1 dBFS whatever the draw did to its gain.
     std::vector<float> hit;
-    if (renderVoice(v, 48000.0, 0.4, hit)) {
+    if (levelMatch && renderVoice(v, 48000.0, 0.4, hit)) {
         float peak = 0.0f;
         for (float x : hit) peak = std::max(peak, std::fabs(x));
         if (peak > 1e-4f) v[kLevel] = constrainPad(kLevel, v[kLevel] + std::clamp(db(0.89 / peak), -24.0, 24.0));
@@ -831,7 +833,7 @@ constexpr const char* kLayerNames[][2] = {
     {"click", "Click"},   {"noise", "Noise"},    {"metal", "Metal"},   {"res", "Resonator"},    {"smp", "Sample"},
     {"drive", "Drive"},   {"filter", "Filter"},  {"eq", "EQ"},         {"dyn", "Dynamics"},     {"space", "Space"},
     {"macro", "Character"}, {"var", "Variation"}, {"fm", "FM"}, {"phys", "Physical"}, {"tex", "Texture"},
-    {"fx", "Pad FX"},     {"groove", "Groove"}};
+    {"fx", "Pad FX"},     {"groove", "Groove"}, {"acou", "Acoustic"}};
 // The General MIDI percussion names of keys 35..81 (GM 1 Sound Set; docs/engine.md "Drums", MIDI map).
 constexpr const char* kGmNames[] = {
     "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare", "Low Floor Tom",
@@ -851,6 +853,7 @@ std::string drumsInfoJson() {
                     ",\"outputs\":" + std::to_string(kOutputs) + ",\"globals\":[";
     const ParameterDescriptor* t = parameterTable();
     for (uint32_t k = 0; k < kGlobalCount; ++k) j += (k ? ",\"" : "\"") + std::string(t[k].id) + "\"";
+    for (uint32_t k = kAcouBase; k < kParamCount; ++k) j += ",\"" + std::string(t[k].id) + "\"";  // 1.1.2: the Acoustic kit
     j += "],\"layers\":[";
     bool firstLayer = true;
     for (const auto& layer : kLayerNames) {
@@ -911,7 +914,7 @@ std::string drumsInfoJson() {
         if (n >= 36 && n < 36 + static_cast<int>(kPads)) j += ",\"pad\":\"" + padId(static_cast<uint32_t>(n - 36)) + "\"";
         j += "}";
     }
-    j += "],\"display\":{\"version\":2,\"floats\":656,\"header\":16,\"pad_levels\":16,\"wave_max\":80,\"wave_min\":336,\"wave_bins\":256,"
+    j += "],\"builders\":" + drumsBuildersJson() + ",\"display\":{\"version\":2,\"floats\":656,\"header\":16,\"pad_levels\":16,\"wave_max\":80,\"wave_min\":336,\"wave_bins\":256,"
          "\"pitch\":592,\"pitch_points\":64}}";
     return j;
 }
@@ -970,9 +973,11 @@ std::string drumsExplodeJson(std::string_view entryJson) {
         const Voice v = voiceFrom(params, pad, defaultVoice(pad));
         const int note = static_cast<int>(v[kNote]);
         const bool used = v[kBodyOn] + v[kSubOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] + v[kFmOn] + v[kPhysOn] + v[kTexOn] > 0.0 &&
-                          v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff);
+                          v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff) &&
+                          v[kEngine] < 0.5;  // 1.1.2: an Acoustic pad stays with its pieces (shared objects) on the kit's track
         if (!used) continue;
         Voice single = v;
+        single[kAcouLayer] = 0;  // the pieces stay on the kit's track
         single[kNote] = kNoteAuto;
         single[kChan] = 1;  // Any: the track's own notes
         single[kChoke] = 0;

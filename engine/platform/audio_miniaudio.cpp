@@ -65,6 +65,14 @@ struct Audio {
     // stabilizer follows this; the S22+ granted no low-latency mode at 960-1024 frames, where it is needed most
     // (Benchmark, 2026-11-19: "stabilizer":"off" with the callback core at 634 MHz).
     bool lowLatencyAsked = false;
+    // The load stabilizer, retired in 1.1.2 (off unless CAW_LOAD_STABILIZER=1 is in the environment at open: a hidden
+    // switch for comparison runs; docs/decisions.md): [Fact, source.android.com "Performance Hint API", read
+    // 2026-11-24] Google calls a busy loop to raise the clock "a bad practice as it wastes power and increases the
+    // thermal load"; the platform's levers (the fast path's real-time callback, a larger buffer on underruns, the
+    // ADPF hint where there is one) do its job.
+    bool stabilizerAsked = false;
+    // A3: "" (no retry: the fast path came, or was not asked), "granted" or "refused" (startLocked).
+    const char* fastRetry = "";
     // The chosen device, size or exclusive mode did not open, so the system default did (shared, its own size).
     bool fallback = false;
     std::string fallbackReason;
@@ -95,6 +103,7 @@ struct Audio {
     caw::BufferTuner tuner;
     std::atomic<uint32_t> streams{0};
     uint32_t tunedStreams = 0;
+    bool tunedFull = false;  // the tuner runs the full tuning (else it only grows)
     uint64_t tunedPlays = 0;
     std::chrono::steady_clock::time_point tunedAt{};
 #if defined(_WIN32)
@@ -146,6 +155,12 @@ struct Audio {
 // wakes about 47 times a second instead of a few hundred (a low-latency burst is 96 to 192 frames on most phones).
 constexpr ma_uint32 kLargeBufferFrames = 1024;
 
+//
+// Kept on AAudio in 1.1.2 against the advice to ask no size ([Fact, NDK AAudio reference,
+// AAudioStreamBuilder_setFramesPerDataCallback, read 2026-11-24] "For the lowest possible latency, do not call this
+// function"): [Fact, the owner's S22+ Benchmark on 1.1.1, 2026-11-24] Auto's 1024 frames ran the callback at
+// SCHED_FIFO (callback_policy 1), while the no-size open (Low latency) got 960-frame bursts at policy 0, the
+// mixer's ordinary path. Its headroom grows on underruns (caw_audio_tune_buffer's grow-only tuning).
 bool wantsLarge(const CawEngine* e) {
     return e->bufferMode == CAW_BUFFER_BATTERY || (e->bufferMode == CAW_BUFFER_AUTO && !e->recording);
 }
@@ -488,7 +503,7 @@ constexpr bool kStabilizerPlatform = false;
 #endif
 
 // The load stabilizer, at the callback's end, after its timing (the meter, the performance hint and the Benchmark
-// see only the real work): on where the platform takes it, with the low-latency profile asked (not Battery: the user
+// see only the real work): off unless asked for (stabilizerAsked, 1.1.2); then on where the platform takes it, with the low-latency profile asked (not Battery: the user
 // chose the power; whatever performance mode AAudio granted), no hint session open (the system then knows the deadline itself), something sounding, the app in
 // front and the callback's own work a big enough share of its period for the clock to matter (LoadStabilizer::
 // wanted); idle otherwise, its epoch reset so it starts afresh.
@@ -496,17 +511,16 @@ void stabilize(Audio* a, std::chrono::steady_clock::time_point start, ma_uint32 
     caw::Engine& e = *a->owner->engine;
     caw::StabilizerState state = caw::StabilizerState::Off;
     int64_t spun = 0;
-    if (kStabilizerPlatform && a->lowLatencyAsked && !e.hintOn()) {
+    if (kStabilizerPlatform && a->stabilizerAsked && a->lowLatencyAsked && !e.hintOn()) {
         state = caw::StabilizerState::Idle;
         if (e.audible() && !a->owner->behind.load(std::memory_order_relaxed)) {
             auto now = [] {
                 return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             };
             const int64_t from = std::chrono::duration_cast<std::chrono::nanoseconds>(start.time_since_epoch()).count();
-            // The share it spins to follows the recent peak work and the heat (LoadStabilizer::spinShare); none
-            // at critical heat.
+            // The full share whatever the heat (LoadStabilizer::spinShare, 1.1.2): the platform throttles.
             const double share = a->stabilizer.wanted(now() - from, static_cast<int>(frames), static_cast<int>(rate))
-                                     ? a->stabilizer.spinShare(a->owner->thermal.load(std::memory_order_relaxed))
+                                     ? caw::LoadStabilizer::spinShare()
                                      : 0.0;
             if (share > 0.0) {
                 spun = caw::LoadStabilizer::spinUntil(
@@ -751,6 +765,7 @@ ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_ui
     // on Android 11 and older the chosen size is ignored and the device picks its own; the status shows what it gave.
     a->lowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
     a->lowLatencyAsked = a->lowLatency;
+    if (const char* v = std::getenv("CAW_LOAD_STABILIZER"); v && v[0] == '1') a->stabilizerAsked = true;
     // AAUDIO_USAGE_GAME (#236): [Fact, developer.android.com/games/sdk/oboe/low-latency-audio, read 2026-11-17] the
     // low-latency guide asks for it "to take full advantage of latency optimizations, especially when connected to
     // Bluetooth headsets". [Fact, AOSP AudioAttributes.java main, read 2026-11-17] USAGE_GAME's volume stream is
@@ -1064,7 +1079,34 @@ ma_result openOnContext(CawEngine* e, Audio* a, std::string& why) {
     return r;
 }
 
+int32_t startOnce(CawEngine* e, char* error, int32_t error_len);
+
+// A3 (the 1.1.2 audit): a low-latency open that came up on AAudio's normal mixer (low latency asked, not granted:
+// no real-time callback; the owner's S22+ Low-latency rows, 960-frame bursts at callback_policy 0) is closed and
+// opened once more, as a route still settling can refuse the fast path to the first open; what the second open got
+// is kept for the status ("fast_path_retry").
 int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
+    const bool wasOpen = e->audio != nullptr;
+    const int32_t r = startOnce(e, error, error_len);
+    auto* a = static_cast<Audio*>(e->audio);
+    // Only the Low-latency mode's no-size open is retried (the audio review of 1.1.2): Auto's 1024 frames never get
+    // the fast path, so retrying them would cut a playing stream on every open, reroute and mode change.
+    if (r != 0 || wasOpen || !a || a->context.backend != ma_backend_aaudio || e->bufferMode != CAW_BUFFER_LOW_LATENCY ||
+        !a->lowLatencyAsked || !a->modesReadBack || a->lowLatency)
+        return r;
+    stopLocked(e);
+    int32_t again = startOnce(e, error, error_len);
+    if (again != 0) {
+        // The retry failed (a route still settling): open as before rather than leave a playing device closed.
+        again = startOnce(e, error, error_len);
+        if (auto* b = static_cast<Audio*>(e->audio)) b->fastRetry = "failed";
+        return again;
+    }
+    if (auto* b = static_cast<Audio*>(e->audio)) b->fastRetry = b->lowLatency ? "granted" : "refused";
+    return again;
+}
+
+int32_t startOnce(CawEngine* e, char* error, int32_t error_len) {
     if (e->audio) {
         // Open and playing: nothing to do. Stopped behind our back (miniaudio stops a device whose AAudio stream
         // could not be reopened after a disconnect): closed, so it opens again below.
@@ -1650,9 +1692,10 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
     auto* a = static_cast<Audio*>(e->audio);
     if (!a || a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio) return 0;
     if (a->background) return a->bufferFrames;  // behind the app the buffer is at its capacity (setBackground)
-    // Only where the output has no size of its own (Low latency, or Auto while recording): a fixed 1024-frame
-    // buffer is left as it is, and 0 says nothing was tuned, so the app keeps no size for the output.
-    if (!caw::tunesBuffer(e->bufferMode == CAW_BUFFER_LOW_LATENCY, e->bufferMode == CAW_BUFFER_AUTO, e->recording)) return 0;
+    // The full tuning (from two bursts) where the output was opened without a size of its own (Low latency, Auto
+    // while recording); a fixed size (Auto's and Battery's 1024 frames, or one the user chose) only grows: from the size its stream opened
+    // with, a burst at each underrun, never below that size; 0 says nothing is to be kept as this output's size.
+    const bool full = caw::tunesBuffer(a->frames);
     using SetSize = int32_t (*)(void*, int32_t);
     using Int = int32_t (*)(void*);
     auto setSize = reinterpret_cast<SetSize>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_setBufferSizeInFrames"));
@@ -1669,10 +1712,14 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
         int32_t want = 0;
         const uint32_t streams = a->streams.load(std::memory_order_acquire);
         const uint64_t plays = e->engine->playsSent();
-        if (streams != a->tunedStreams || !a->tuner.started()) {  // a new stream (an open or a reroute): start again
+        if (streams != a->tunedStreams || !a->tuner.started() || full != a->tunedFull) {
+            // A new stream (an open or a reroute), or the other kind of tuning: start again.
             const int32_t b = burst(stream);
-            if (b > 0) want = a->tuner.start(b, caw::BufferTuner::kFloorBursts * b, capacity(stream), start_frames, x);
+            const int32_t opened = getSize(stream);
+            if (b > 0 && full) want = a->tuner.start(b, caw::BufferTuner::kFloorBursts * b, capacity(stream), start_frames, x);
+            else if (b > 0 && opened > 0) want = caw::growOnlyStart(a->tuner, b, opened, capacity(stream), x);
             a->tunedStreams = streams;
+            a->tunedFull = full;
         } else {
             // A new playback starts the quiet time again from now: a pause is not time without underruns.
             const double quiet = plays != a->tunedPlays ? 0.0 : std::chrono::duration<double>(t - a->tunedAt).count();
@@ -1685,7 +1732,7 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
         if (now > 0) a->bufferFrames = now;
     }
     ma_mutex_unlock(&a->device.aaudio.rerouteLock);
-    return now > 0 ? now : 0;
+    return full && now > 0 ? now : 0;
 #else
     (void)e;
     (void)start_frames;
@@ -1694,7 +1741,8 @@ int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames) {
 }
 
 void caw_audio_set_thermal(CawEngine* e, int32_t pressure) {
-    if (e) e->thermal.store(pressure, std::memory_order_relaxed);  // read by the load stabilizer (spinShare)
+    // Since 1.1.2 nothing acts on it (the platform throttles; LoadStabilizer::spinShare): kept for the API.
+    if (e) e->thermal.store(pressure, std::memory_order_relaxed);
 }
 
 int32_t caw_audio_set_background(CawEngine* e, int32_t background) {
@@ -1722,6 +1770,31 @@ char* caw_audio_status(CawEngine* e) {
     const auto& p = a->device.playback;
     // Not started: the system stopped it (a disconnect miniaudio could not reopen); caw_audio_start opens it again.
     const bool started = ma_device_get_state(&a->device) == ma_device_state_started;
+    // 1.1.2: the stream's buffer (frames queued ahead of the speaker, what the buffer tuner sets) and its burst, read
+    // now under the reroute lock (0 off AAudio): an underrun with no late callback of ours is a buffer too small for
+    // the system's own scheduling (the owner's idle S22+, 2026-11-24: 256-frame callbacks, 1 xrun, 0 late).
+    // Also its capacity and which path it got (A1, the 1.1.2 audit): AAudioStream_isMMapUsed (exported by
+    // libaaudio, in the NDK's headers from API 36; looked up, -1 where it is missing or nothing was asked), else the
+    // granted low-latency mode, which off MMAP means AudioFlinger's fast mixer (and its real-time callback) and
+    // otherwise its normal mixer.
+    int32_t streamBuffer = 0, streamBurst = 0, streamCapacity = 0, mmap = -1;
+#if defined(__ANDROID__)
+    if (a->context.backend == ma_backend_aaudio) {
+        ma_mutex_lock(&a->device.aaudio.rerouteLock);
+        streamBuffer = aaudioBufferFrames(a);
+        streamBurst = aaudioBurst(a);
+        if (void* stream = a->device.aaudio.pStreamPlayback; stream && a->context.aaudio.hAAudio) {
+            using Int = int32_t (*)(void*);
+            using Bool = bool (*)(void*);
+            if (auto cap = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferCapacityInFrames")))
+                streamCapacity = std::max(0, cap(stream));
+            if (auto used = reinterpret_cast<Bool>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_isMMapUsed")))
+                mmap = used(stream) ? 1 : 0;
+        }
+        ma_mutex_unlock(&a->device.aaudio.rerouteLock);
+    }
+#endif
+    const char* path = a->context.backend != ma_backend_aaudio ? "" : mmap == 1 ? "mmap" : a->lowLatency ? "fast" : "normal";
     return dup(std::string("{\"running\":") + (started ? "true" : "false") + ",\"stopped_by_system\":" +
                (started ? "false" : "true") + ",\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
@@ -1734,6 +1807,9 @@ char* caw_audio_status(CawEngine* e) {
                ",\"period_frames\":" + std::to_string(reportedPeriod(a)) +
                ",\"periods\":" + std::to_string(reportedPeriods(a)) +
                ",\"device_sizes\":" + (a->deviceSizes ? "true" : "false") +
+               ",\"buffer_frames\":" + std::to_string(streamBuffer) + ",\"burst_frames\":" + std::to_string(streamBurst) +
+               ",\"capacity_frames\":" + std::to_string(streamCapacity) + ",\"mmap\":" + std::to_string(mmap) +
+               ",\"path\":" + quoted(path) + ",\"fast_path_retry\":" + quoted(a->fastRetry) +
                ",\"exclusive\":" + (a->exclusive ? "true" : "false") +
                ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +

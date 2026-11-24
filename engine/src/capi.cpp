@@ -10,6 +10,7 @@
 
 #include "caw.h"
 #include "builtin_drums.h"
+#include "drums_kits.h"
 #include "presets.h"
 #include "fx_migrate.h"
 #include "capi_internal.h"
@@ -599,6 +600,19 @@ extern "C" char* caw_drums_randomize(int32_t type, uint32_t seed, double amount,
 extern "C" char* caw_drums_explode(const char* entry_json) try {
     if (!entry_json) return dup("{\"ok\":false,\"error\":\"missing entry\"}");
     return dup(caw::drumsExplodeJson(entry_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_kit_build(int32_t kind, int32_t style, uint32_t seed, int32_t key, int32_t map) try {
+    return dup(caw::drumsKitBuildJson(kind, style, seed, key, map));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+extern "C" char* caw_drums_kit_tool(const char* request_json) try {
+    if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
+    return dup(caw::drumsKitToolJson(request_json));
 } catch (...) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }
