@@ -42,7 +42,7 @@ const timberPanels = ['Model', 'Sound', 'Space'];
 /// The model's own choices (shown as switches) and knobs, in the order the engine declares them; the envelope's
 /// `attack` and `decay` go to the Envelope panel, the organ's drawbars are drawn (and dragged) in the picture.
 const Map<int, ({List<String> choices, List<String> knobs})> timberControls = {
-  TimberModel.piano: (choices: ['character'], knobs: ['hammer', 'unison', 'stretch', 'sustain', 'soft', 'resonance']),
+  TimberModel.piano: (choices: ['character', 'sim', 'tier'], knobs: ['hammer', 'unison', 'stretch', 'sustain', 'soft', 'resonance', 'noise']),
   TimberModel.epiano: (choices: ['kind'], knobs: ['pickup', 'symmetry', 'bell', 'bark', 'tremolo', 'rate']),
   TimberModel.organ: (choices: ['perc', 'perc_decay', 'vibrato', 'rotary'], knobs: ['click', 'drive']),
   TimberModel.plucked: (choices: ['instrument'], knobs: ['position', 'pick', 'damping', 'brightness']),
@@ -224,7 +224,13 @@ class TimberModelControls extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = DeviceScope.of(context).target;
     final model = timberModelOf(context);
-    final c = timberControls[model]!;
+    final all = timberControls[model]!;
+    // The piano's Quality and Noise act only in Simulated: Classic (the 1.1.0 piano) leaves them out.
+    final simulated = model != TimberModel.piano || t.value('sim').round() == 1;
+    final c = (
+      choices: [for (final id in all.choices) if (simulated || id != 'tier') id],
+      knobs: [for (final id in all.knobs) if (simulated || id != 'noise') id],
+    );
     return AnimatedSwitcher(
       duration: Motion.fade(Motion.small, Motion.of(context)),
       child: Column(key: ValueKey('timber-controls-$model'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -233,9 +239,12 @@ class TimberModelControls extends StatelessWidget {
         LayoutBuilder(builder: (context, box) {
           final cols = box.maxWidth >= 600 ? c.choices.length : c.choices.length.clamp(1, 2);
           final w = (box.maxWidth - 8 * (cols - 1)) / cols;
+          // A last choice alone on its row takes the row (the piano's four-way Quality on a phone).
+          final alone = c.choices.length % cols == 1 && c.choices.length > 1;
           return Wrap(spacing: 8, runSpacing: 6, children: [
-            for (final id in c.choices)
-              SizedBox(width: w, child: DeviceChoice(id, maxSegments: 4, label: t.param(id)?.label)),
+            for (final (i, id) in c.choices.indexed)
+              SizedBox(width: alone && i == c.choices.length - 1 ? box.maxWidth : w,
+                  child: DeviceChoice(id, maxSegments: 4, label: t.param(id)?.label)),
           ]);
         }),
         FKnobRow(c.knobs, size: knob, labels: _labelsFor(t, model)),
@@ -245,16 +254,20 @@ class TimberModelControls extends StatelessWidget {
   }
 }
 
-/// The piano's voice caps follow Settings › Sound › Quality (the engine has no per-device setting): says which.
+/// The piano's voice caps follow Settings › Sound › Quality; its Quality choice (Simulated, 1.1.2) can hold the
+/// sound itself at one tier: says which.
 class _PianoQualityNote extends StatelessWidget {
   const _PianoQualityNote();
 
   @override
   Widget build(BuildContext context) {
-    final q = DeviceScope.of(context).target.state.settings.soundQuality;
+    final t = DeviceScope.of(context).target;
+    final q = t.state.settings.soundQuality;
     final (name, cap) = switch (q) { SoundQuality.eco => ('Eco', 16), SoundQuality.normal => ('Normal', 32), _ => ('High', 48) };
+    final tier = t.value('tier').round();
+    final own = t.value('sim').round() == 1 && tier > 0 ? ' This piano plays at ${const ['', 'Eco', 'Normal', 'High'][tier.clamp(0, 3)]}.' : '';
     return Padding(padding: const EdgeInsets.only(top: 6), child: Text(
-      'Quality $name: up to $cap piano voices${q == SoundQuality.eco ? '' : '. Eco (Settings › Sound) plays 16 for less CPU'}.',
+      'Quality $name: up to $cap piano voices${q == SoundQuality.eco ? '' : '. Eco (Settings › Sound) plays 16 for less CPU'}.$own',
       key: const ValueKey('timber-quality'), textAlign: TextAlign.center,
       style: const TextStyle(fontSize: 10, color: Neon.dim)));
   }

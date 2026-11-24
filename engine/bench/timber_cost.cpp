@@ -108,6 +108,11 @@ int timberCost(double seconds) {
         {"Timber piano: 8 voices", 0, {}, 8, 24000},
         {"Timber piano: 32 voices, pedal down", 0, {{"sustain", 1}, {"resonance", 0.6}}, 32, 56000},  // Normal's cap, a stress case: over 2x heavy
         {"Timber piano: 16 voices, room 0.3 (the room: a light reverb)", 0, {{"space", 0.3}}, 16, 28000},
+        // 1.1.2: Simulated (the shared board, contacts and banks; noises at their default level)
+        {"Timber piano Simulated Normal: 16 voices", 0, {{"sim", 1}, {"tier", 2}}, 16, 24000},  // the design point: heavy
+        {"Timber piano Simulated Normal: 16 voices, pedal down", 0, {{"sim", 1}, {"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 24000},
+        {"Timber piano Simulated Eco: 16 voices", 0, {{"sim", 1}, {"tier", 1}}, 16, 18000},  // about 0.7 heavy (measured 15,300-16,600)
+        {"Timber piano Simulated High: 32 voices, pedal down", 0, {{"sim", 1}, {"tier", 3}, {"sustain", 1}}, 32, 64000},  // exports
         {"Timber electric piano: 16 voices (tine)", 1, {}, 16, kPoly},
         {"Timber electric piano: 32 voices, reed, tremolo", 1, {{"kind", 1}, {"tremolo", 0.5}}, 32, 24000},  // Normal's cap: heavy
         {"Timber organ: 10 keys, 888, rotary slow", 2, {}, 10, kPoly},

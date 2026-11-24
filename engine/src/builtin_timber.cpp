@@ -74,6 +74,23 @@ const ModuleDescriptor& modelDescriptor(uint32_t index, double release, double b
 
 // ---------- Piano ----------
 constexpr std::string_view kCharacters[] = {"Grand", "Upright", "Felt"};
+constexpr std::string_view kPianoModes[] = {"Classic", "Simulated"};
+constexpr std::string_view kPianoTiers[] = {"Setting", "Eco", "Normal", "High"};
+constexpr std::string_view kOffOn[] = {"Off", "On"};
+// 1.1.2's Simulated piano: Classic (the 1.1.0 piano, bit for bit) stays the default; `tier` "Setting" follows
+// Settings > Sound > Quality, the others hold this piano at one tier (its voice cap still follows the setting).
+void simulatedPianoParams(fx::ParamTable& t) {
+    ParameterDescriptor& sim = t.pick("sim", "Mode", 0.0, kPianoModes);
+    sim.group = "piano", sim.automatable = false, sim.modulatable = false;
+    ParameterDescriptor& tier = t.pick("tier", "Quality", 0.0, kPianoTiers);
+    tier.group = "piano", tier.automatable = false, tier.modulatable = false;
+    t.num("noise", "Noise", 0.35, 0.0, 1.0).group = "piano";  // the mechanical noises: 0.35 a listener's, 1 close-miked
+    t.num("touch", "Touch", 0.0, 0.0, 1.0).group = "piano";   // pressed .. struck (the finger on the key)
+    t.pick("action", "Action delay", 0.0, kOffOn).group = "piano";
+    t.num("glide", "Pitch glide", 0.5, 0.0, 1.0).group = "piano";
+    t.num("sympathy", "Sympathy", 0.5, 0.0, 1.0).group = "piano";
+    t.num("phantom", "Phantom partials", 0.5, 0.0, 1.0).group = "piano";  // High only
+}
 void pianoParams(fx::ParamTable& t) {
     t.num("hammer", "Hammer", 0.5, 0.0, 1.0).group = "piano";
     t.pick("character", "Character", 0.0, kCharacters).group = "piano";
@@ -83,12 +100,13 @@ void pianoParams(fx::ParamTable& t) {
     t.num("sustain", "Sustain pedal", 0.0, 0.0, 1.0).group = "piano";
     t.num("soft", "Soft pedal", 0.0, 0.0, 1.0).group = "piano";
     t.num("resonance", "Resonance", 0.3, 0.0, 1.0).group = "piano";
+    simulatedPianoParams(t);  // 1.1.2: Simulated's choice and knobs, appended (timber_piano.h)
 }
 const ModuleDescriptor& pianoDescriptor() {
     static const ModuleDescriptor& d = modelDescriptor<Piano>(0, 0.25, 0.75, 0.15, CpuClass::Heavy, &pianoParams);
     return d;
 }
-static_assert(Piano::kModelParams == 8);
+static_assert(Piano::kModelParams == 16);
 
 // ---------- Electric piano ----------
 constexpr std::string_view kKinds[] = {"Tine", "Reed"};
@@ -243,6 +261,6 @@ size_t timberBytes(uint32_t variant, double sampleRate) noexcept {
         default: return 0;
     }
 }
-size_t timberTableBytes() noexcept { return sizeof(Tables); }
+size_t timberTableBytes() noexcept { return sizeof(Tables) + psim::tableBytes(); }  // 1.1.2: and the Simulated piano's
 
 }  // namespace caw::timber
