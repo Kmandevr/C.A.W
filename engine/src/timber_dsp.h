@@ -7,6 +7,10 @@
 
 #include "caw/detmath.hpp"
 
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__SSE__)
+#include <xmmintrin.h>
+#endif
+
 namespace caw::timber {
 
 inline constexpr double kPi = 3.14159265358979323846;
@@ -16,7 +20,9 @@ inline double clampd(double v, double lo, double hi) noexcept {
     if (!(v == v)) return lo;
     return v < lo ? lo : (v > hi ? hi : v);
 }
-inline float flushf(float v) noexcept { return (v > -1e-20f && v < 1e-20f) ? 0.0f : v; }
+// A value under 1e-20 to exact zero (a denormal guard). Written on |v| so it compiles to a mask, not a branch on the
+// sign (a branch the predictor misses half the time on a ringing state).
+inline float flushf(float v) noexcept { return std::fabs(v) < 1e-20f ? 0.0f : v; }
 // Hz of a (fractional) MIDI note at A4 = 440.
 inline double noteHz(double note) noexcept { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
@@ -76,6 +82,16 @@ inline F4 min4(F4 a, F4 b) noexcept { return sel4(lt4(b, a), b, a); }
 inline F4 max4(F4 a, F4 b) noexcept { return sel4(lt4(a, b), b, a); }
 inline F4 clamp4(F4 x, F4 lo, F4 hi) noexcept { return sel4(lt4(x, lo), lo, sel4(lt4(hi, x), hi, x)); }
 inline bool any4(I4 m) noexcept { return (m[0] | m[1] | m[2] | m[3]) != 0; }
+// The square root lane by lane (SSE's sqrtps on x86, as exact as sqrtss; elsewhere each lane's std::sqrt).
+inline F4 sqrt4(F4 a) noexcept {
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__SSE__)
+    return _mm_sqrt_ps(a);
+#else
+    F4 r;
+    for (int k = 0; k < 4; ++k) r[k] = std::sqrt(a[k]);
+    return r;
+#endif
+}
 
 // A cheap soft clip: the [3/2] Pade form of tanh, x (27 + x^2) / (27 + 9 x^2), held to +-1 past |x| = 3.
 inline float softClip(float x) noexcept {

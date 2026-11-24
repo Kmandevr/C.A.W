@@ -424,11 +424,12 @@ struct Wind {
         v.vib -= std::floor(v.vib);
         tune(v, 8.0 * vibrato * lib::fastSinCycles(v.vib));
         // The growl (about 35 Hz): its gain now and at the next control point, in a line between.
+        // No growl: exactly 1 and no step, without the two sines.
         const double amt = 0.4 * growl;
-        v.g = static_cast<float>(1.0 + amt * lib::fastSinCycles(v.growl));
+        v.g = amt > 0.0 ? static_cast<float>(1.0 + amt * lib::fastSinCycles(v.growl)) : 1.0f;
         v.growl += 35.0 * dt;
         v.growl -= std::floor(v.growl);
-        v.gStep = static_cast<float>((1.0 + amt * lib::fastSinCycles(v.growl) - v.g) / kControlFrames);
+        v.gStep = amt > 0.0 ? static_cast<float>((1.0 + amt * lib::fastSinCycles(v.growl) - v.g) / kControlFrames) : 0.0f;
         v.lp = flushf(v.lp), v.dcx = flushf(v.dcx), v.dcy = flushf(v.dcy), v.ox = flushf(v.ox), v.oy = flushf(v.oy);
         v.lip1 = flushf(v.lip1), v.lip2 = flushf(v.lip2);
         if (sim) {
@@ -452,7 +453,10 @@ struct Wind {
     // pressure within that window, and the velocity, poly pressure and mod wheel set the loudness.
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (sim) {
-            renderSim(v, out, n);
+            Voice* one[1] = {&v};
+            float buf[1][kControlFrames];
+            renderSim(one, 1, buf, n);
+            std::copy(buf[0], buf[0] + n, out);
             return;
         }
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
@@ -532,130 +536,158 @@ struct Wind {
     // and Wijnands, JASA 99(3), 1996): the wave toward the bell travels faster where its pressure is high, so its
     // crests arrive early and it steepens with level (a read of the bore at a delay shortened by its own value).
     // Pad, key and valve clicks are half-sine forces into the bore at each note and slur (`noises`).
-    CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
-        // The filters' state in locals (the bore's stores cannot then make the compiler reload it every sample); the
-        // ramps (breath, tongue, growl, jet) stay in the voice, so -fassociative-math cannot turn their running sums
-        // into closed forms whose rounding would depend on where a block starts.
-        float lp_ = v.lp, dcx_ = v.dcx, dcy_ = v.dcy, lip1_ = v.lip1, lip2_ = v.lip2, reed1_ = v.reed1, reed2_ = v.reed2, apX_ = v.apX, apY_ = v.apY, turb_ = v.turb, q1_ = v.q1;
-        const float expr = static_cast<float>(std::max(v.pressure, modWheel));
+    // Voices run four at a time (GroupedModel, timber_core.h): each lane is one voice, so four voices' bore and lip
+    // chains overlap instead of waiting on each other. Lanes past `count` repeat the first voice and are thrown away
+    // (they never write its lines or its state).
+    bool grouped() const noexcept { return sim; }
+    void renderGroup(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept { renderSim(vs, count, out, n); }
+    CAW_TIMBER_NOINLINE void renderSim(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept {
+        switch (instrument) {
+            case 0: simKind<0>(vs, count, out, n); break;
+            case 1: simKind<1>(vs, count, out, n); break;
+            case 2: simKind<2>(vs, count, out, n); break;
+            default: simKind<3>(vs, count, out, n); break;
+        }
+    }
+    // One kind's loop (K: 0 clarinet, 1 flute, 2 sax, 3 brass), four voices a lane each.
+    template <int K>
+    void simKind(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept {
+        Voice* lane[4];
+        for (uint32_t l = 0; l < 4; ++l) lane[l] = vs[l < count ? l : 0];
         static constexpr float kOut[4] = {0.5f, 0.25f, 0.45f, 0.45f};
         static constexpr float kLow[4] = {0.5f, 0.9f, 0.55f, 0.3f}, kSpan[4] = {0.5f, 0.4f, 0.45f, 0.15f};
-        // The player blows harder for a louder note: the velocity and expression move the mouth pressure (so a
-        // brass note brightens with level), the rest of the loudness is the gain.
-        const float push = static_cast<float>(instrument == 3 ? 0.75 + 0.5 * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
-        const float base = (kLow[instrument] + kSpan[instrument] * static_cast<float>(breath)) * push;
-        const float loud = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
-        const float vibAm = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
         const float turbAmt = static_cast<float>(0.5 * noise + turbFloor);
-        const float slope = -static_cast<float>(0.19 + 0.06 * reed) / base;
         const float y0 = static_cast<float>(jetOffset + 0.15 * (reed - 0.5));
         const float ks = steep ? static_cast<float>(steepK * sr / 48000.0) : 0.0f;
+        // Each lane's constants and state, in locals (the bore's stores cannot then make the compiler reload the
+        // state every sample). The ramps' running sums are four-lane values: no closed form can stand in for them.
+        F4 base, loud, vibAm, slope, env, envStep, tongue, tongueStep, g, gStep, lp, dcx, dcy, lip1, lip2, reed1, reed2, apX, apY,
+            turb, q1, ox, oy, coneA, lipG, lipA1, lipA2, djCur, djStep, jetU, jetUStep;
+        float d[4];
+        Line bore[4], jet[4];
+        Noise nzs[4];
+        Click click[4];
+        for (uint32_t l = 0; l < 4; ++l) {
+            const Voice& v = *lane[l];
+            const float expr = static_cast<float>(std::max(v.pressure, modWheel));
+            // The player blows harder for a louder note: the velocity and expression move the mouth pressure (so a
+            // brass note brightens with level), the rest of the loudness is the gain.
+            const float push = static_cast<float>(K == 3 ? 0.75 + 0.5 * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
+            base[l] = (kLow[K] + kSpan[K] * static_cast<float>(breath)) * push;
+            loud[l] = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
+            vibAm[l] = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
+            slope[l] = -static_cast<float>(0.19 + 0.06 * reed) / base[l];
+            env[l] = v.env, envStep[l] = v.envStep, tongue[l] = v.tongue, tongueStep[l] = v.tongueStep, g[l] = v.g, gStep[l] = v.gStep;
+            lp[l] = v.lp, dcx[l] = v.dcx, dcy[l] = v.dcy, lip1[l] = v.lip1, lip2[l] = v.lip2, reed1[l] = v.reed1, reed2[l] = v.reed2;
+            apX[l] = v.apX, apY[l] = v.apY, turb[l] = v.turb, q1[l] = v.q1, ox[l] = v.ox, oy[l] = v.oy;
+            coneA[l] = v.coneA, lipG[l] = v.lipG, lipA1[l] = v.lipA1, lipA2[l] = v.lipA2;
+            djCur[l] = v.djCur, djStep[l] = v.djStep, jetU[l] = v.jetU, jetUStep[l] = v.jetUStep;
+            d[l] = v.d;
+            bore[l] = v.bore, jet[l] = v.jet;
+            nzs[l] = v.noise;
+            click[l] = v.click;
+        }
+        const F4 zero = f4(0.0f), one = f4(1.0f);
         for (uint32_t i = 0; i < n; ++i) {
-            v.env = std::clamp(v.env + v.envStep, 0.0f, 1.0f);
-            v.tongue = std::clamp(v.tongue + v.tongueStep, 0.0f, 1.0f);
-            const float open = 1.0f - v.tongue;
-            const float pm = v.env * base * (1.0f + vibAm);
-            v.g += v.gStep;
-            const float nz = v.noise.next();
-            const float click = v.click.next();
-            float w, y;
-            switch (instrument) {
-                case 0: {  // clarinet
-                    const float b = v.bore.frac(v.d);
-                    lp_ += 0.5f * (b - lp_);
-                    float dp = -0.95f * lp_ - pm;
-                    if (dynamicReed) {
-                        const float r2 = reedG * dp + reedA1 * reed1_ + reedA2 * reed2_;
-                        reed2_ = reed1_, reed1_ = r2, dp = r2;
-                    }
-                    const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
-                    const float re = r + (1.0f - r) * v.tongue;
-                    const float flow = (1.0f - re) * (pm + dp);
-                    turb_ = turbAmt * flow * nz;
-                    w = re * (-0.95f * lp_) + (1.0f - re) * pm + turb_ + click;
-                    y = w;
-                    break;
+            env = clamp4(env + envStep, zero, one);
+            tongue = clamp4(tongue + tongueStep, zero, one);
+            const F4 open = one - tongue;
+            const F4 pm = env * base * (one + vibAm);
+            g = g + gStep;
+            F4 nz, clk, b;
+            for (uint32_t l = 0; l < 4; ++l) nz[l] = nzs[l].next(), clk[l] = l < count ? click[l].next() : 0.0f, b[l] = bore[l].frac(d[l]);
+            F4 w, y;
+            if constexpr (K == 0) {  // clarinet
+                lp = lp + f4(0.5f) * (b - lp);
+                F4 dp = f4(-0.95f) * lp - pm;
+                if (dynamicReed) {
+                    const F4 r2 = f4(reedG) * dp + f4(reedA1) * reed1 + f4(reedA2) * reed2;
+                    reed2 = reed1, reed1 = r2, dp = r2;
                 }
-                case 2: {  // sax: the cone
-                    const float a = v.bore.frac(v.d);
-                    lp_ += saxLp * (a - lp_);
-                    const float h = -0.95f * lp_;
-                    // The truncated cone's closed end: (a - z^-1) / (1 - a z^-1), -1 at low frequencies (as an apex)
-                    // and +1 at high ones (as a closed cylinder).
-                    const float ap0 = v.coneA * h - apX_ + v.coneA * apY_;
-                    apX_ = h, apY_ = ap0;
-                    const float ap = ap0 - dcx_ + 0.995f * dcy_;  // the bore passes no DC back (the mean flow leaves)
-                    dcx_ = ap0, dcy_ = ap;
-                    float dp = ap - pm;
-                    if (dynamicReed) {
-                        const float r2 = reedG * dp + reedA1 * reed1_ + reedA2 * reed2_;
-                        reed2_ = reed1_, reed1_ = r2, dp = r2;
-                    }
-                    const float r = std::clamp(0.7f + slope * dp, -1.0f, 1.0f);
-                    const float re = r + (1.0f - r) * v.tongue;
-                    const float flow = (1.0f - re) * (pm - ap);
-                    turb_ = turbAmt * flow * nz;
-                    w = re * ap + (1.0f - re) * pm + turb_ + click;
-                    y = w;
-                    break;
+                const F4 r = clamp4(f4(0.7f) + slope * dp, f4(-1.0f), one);
+                const F4 re = r + (one - r) * tongue;
+                const F4 flow = (one - re) * (pm + dp);
+                turb = f4(turbAmt) * flow * nz;
+                w = re * (f4(-0.95f) * lp) + (one - re) * pm + turb + clk;
+                y = w;
+            } else if constexpr (K == 2) {  // sax: the cone
+                lp = lp + f4(saxLp) * (b - lp);
+                const F4 h = f4(-0.95f) * lp;
+                // The truncated cone's closed end: (a - z^-1) / (1 - a z^-1), -1 at low frequencies (as an apex)
+                // and +1 at high ones (as a closed cylinder).
+                const F4 ap0 = coneA * h - apX + coneA * apY;
+                apX = h, apY = ap0;
+                const F4 ap = ap0 - dcx + f4(0.995f) * dcy;  // the bore passes no DC back (the mean flow leaves)
+                dcx = ap0, dcy = ap;
+                F4 dp = ap - pm;
+                if (dynamicReed) {
+                    const F4 r2 = f4(reedG) * dp + f4(reedA1) * reed1 + f4(reedA2) * reed2;
+                    reed2 = reed1, reed1 = r2, dp = r2;
                 }
-                case 1: {  // flute
-                    const float b = v.bore.frac(v.d);
-                    lp_ += boreLp * (b - lp_);
-                    float t = lp_;
-                    const float d = t - dcx_ + 0.995f * dcy_;
-                    dcx_ = t, dcy_ = d, t = d;
-                    v.djCur += v.djStep;
-                    const float eta = v.jet.frac(v.djCur);
-                    const float U = v.jetU * open;
-                    v.jetU += v.jetUStep;
-                    v.jet.push(0.5f * t);
-                    const float q = 0.5f * U * (1.0f + softClip(jetSharp * (eta - y0)));  // the flux into the pipe
-                    const float drive = jetGain * (q - 0.5f * U) - jetDiff * (q - q1_);
-                    q1_ = q;
-                    turb_ = turbAmt * 0.6f * U * q * nz;  // turbulence ~ U^2, entering with the flux
-                    w = drive + 0.5f * t + turb_ + click;
-                    y = b;
-                    break;
-                }
-                default: {  // brass
-                    const float b = v.bore.frac(v.d);
-                    const float dp = pm - 0.85f * b;
-                    const float lip = v.lipG * dp + v.lipA1 * lip1_ + v.lipA2 * lip2_;
-                    lip2_ = lip1_, lip1_ = lip;
-                    const float hgt = std::clamp(0.02f + lipOpen * lip, 0.0f, lipMax) * open;  // the lips part only so far
-                    const float flow = hgt * (dp > 0 ? std::sqrt(dp) : -std::sqrt(-dp));
-                    turb_ = turbAmt * 0.5f * std::fabs(flow) * nz;
-                    const float x = 0.85f * b + lipFlow * flow + turb_ + click;
-                    const float dd = x - dcx_ + 0.995f * dcy_;
-                    dcx_ = x, dcy_ = dd;
-                    w = y = std::clamp(dd, -4.0f, 4.0f);
-                    if (ks > 0.0f) {
-                        // Brassiness: on the way out to the bell (not in the loop: Hirschberg et al. find it matters
-                        // for the radiated sound, not for the oscillation) a crest travels faster than a trough, so
-                        // the wave steepens as it gets louder: a short line read earlier by the wave's own pressure.
-                        v.jet.push(y);
-                        y = v.jet.frac(std::clamp(kRadiate - ks * y, 1.0f, 2.0f * kRadiate - 1.0f));
-                    }
-                    break;
+                const F4 r = clamp4(f4(0.7f) + slope * dp, f4(-1.0f), one);
+                const F4 re = r + (one - r) * tongue;
+                const F4 flow = (one - re) * (pm - ap);
+                turb = f4(turbAmt) * flow * nz;
+                w = re * ap + (one - re) * pm + turb + clk;
+                y = w;
+            } else if constexpr (K == 1) {  // flute
+                lp = lp + f4(boreLp) * (b - lp);
+                const F4 dd = lp - dcx + f4(0.995f) * dcy;
+                dcx = lp, dcy = dd;
+                const F4 t = dd;
+                djCur = djCur + djStep;
+                F4 eta;
+                for (uint32_t l = 0; l < 4; ++l) eta[l] = jet[l].frac(djCur[l]);
+                const F4 U = jetU * open;
+                jetU = jetU + jetUStep;
+                const F4 half = f4(0.5f) * t;
+                for (uint32_t l = 0; l < count; ++l) jet[l].push(half[l]);
+                // The flux into the pipe: softClip, lane by lane.
+                const F4 sx = clamp4(f4(jetSharp) * (eta - f4(y0)), f4(-3.0f), f4(3.0f)), s2 = sx * sx;
+                const F4 sc = div4(sx * (f4(27.0f) + s2), f4(27.0f) + f4(9.0f) * s2);
+                const F4 q = f4(0.5f) * U * (one + sc);
+                const F4 drive = f4(jetGain) * (q - f4(0.5f) * U) - f4(jetDiff) * (q - q1);
+                q1 = q;
+                turb = f4(turbAmt) * f4(0.6f) * U * q * nz;  // turbulence ~ U^2, entering with the flux
+                w = drive + f4(0.5f) * t + turb + clk;
+                y = b;
+            } else {  // brass
+                const F4 dp = pm - f4(0.85f) * b;
+                const F4 lip = lipG * dp + lipA1 * lip1 + lipA2 * lip2;
+                lip2 = lip1, lip1 = lip;
+                const F4 hgt = clamp4(f4(0.02f) + f4(lipOpen) * lip, zero, f4(lipMax)) * open;  // the lips part only so far
+                const F4 root = sqrt4(abs4(dp));
+                const F4 flow = hgt * sel4(gt4(dp, zero), root, zero - root);
+                turb = f4(turbAmt) * f4(0.5f) * abs4(flow) * nz;
+                const F4 x = f4(0.85f) * b + f4(lipFlow) * flow + turb + clk;
+                const F4 dd = x - dcx + f4(0.995f) * dcy;
+                dcx = x, dcy = dd;
+                w = y = clamp4(dd, f4(-4.0f), f4(4.0f));
+                if (ks > 0.0f) {
+                    // Brassiness: on the way out to the bell (not in the loop: Hirschberg et al. find it matters
+                    // for the radiated sound, not for the oscillation) a crest travels faster than a trough, so
+                    // the wave steepens as it gets louder: a short line read earlier by the wave's own pressure.
+                    const F4 at = clamp4(f4(kRadiate) - f4(ks) * y, one, f4(2.0f * kRadiate - 1.0f));
+                    for (uint32_t l = 0; l < count; ++l) jet[l].push(y[l]);
+                    for (uint32_t l = 0; l < 4; ++l) y[l] = jet[l].frac(at[l]);
                 }
             }
-            v.bore.push(w);
-            const float o = y - v.ox + 0.995f * v.oy;
-            v.ox = y, v.oy = o;
-            out[i] = o * loud * v.g * kOut[instrument];
+            for (uint32_t l = 0; l < count; ++l) bore[l].push(w[l]);
+            const F4 o = y - ox + f4(0.995f) * oy;
+            ox = y, oy = o;
+            const F4 s = o * loud * g * f4(kOut[K]);
+            for (uint32_t l = 0; l < count; ++l) out[l][i] = s[l];
         }
-        v.lp = lp_;
-        v.dcx = dcx_;
-        v.dcy = dcy_;
-        v.lip1 = lip1_;
-        v.lip2 = lip2_;
-        v.reed1 = reed1_;
-        v.reed2 = reed2_;
-        v.apX = apX_;
-        v.apY = apY_;
-        v.turb = turb_;
-        v.q1 = q1_;
+        for (uint32_t l = 0; l < count; ++l) {
+            Voice& v = *lane[l];
+            v.env = env[l], v.tongue = tongue[l], v.g = g[l];
+            v.lp = lp[l], v.dcx = dcx[l], v.dcy = dcy[l], v.lip1 = lip1[l], v.lip2 = lip2[l], v.reed1 = reed1[l], v.reed2 = reed2[l];
+            v.apX = apX[l], v.apY = apY[l], v.turb = turb[l], v.q1 = q1[l], v.ox = ox[l], v.oy = oy[l];
+            v.djCur = djCur[l], v.jetU = jetU[l];
+            v.bore.w = bore[l].w, v.jet.w = jet[l].w;
+            v.noise = nzs[l];
+            v.click = click[l];
+        }
     }
 
     void post(float*, float*, uint32_t, const Shared&) noexcept {}

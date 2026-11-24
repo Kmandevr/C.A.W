@@ -165,51 +165,79 @@ struct EPiano {
         if (sim) v.thunk.flush(), v.felt.flush();
     }
     static constexpr double kSimGain = 4000.0;  // the modes' displacement to the 1.1.0 strike's (measured)
-    float pickupOf(float x) const noexcept {
-        float y;
+    // The pickup (a far pickup nearly linear, a close one bending hard; the reed's cubic), four voices at once.
+    F4 pickupOf4(F4 x) const noexcept {
+        F4 y;
         if (kind == 0) {
-            const float u = x + sym;
-            y = h2 * u / (h2 + u * u) - offset;
+            const F4 u = x + f4(sym);
+            y = div4(f4(h2) * u, f4(h2) + u * u) - f4(offset);
         } else {
-            const float u = std::clamp(x, -1.5f, 1.5f);
-            y = u - 0.15f * u * u * u + 0.25f * sym * u * u;
+            const F4 u = clamp4(x, f4(-1.5f), f4(1.5f));
+            y = u - f4(0.15f) * u * u * u + f4(0.25f * sym) * u * u;
         }
-        return softClip(y * drive) * norm * 0.45f;
+        F4 d = clamp4(y * f4(drive), f4(-3.0f), f4(3.0f));  // softClip, lane by lane
+        const F4 q = d * d;
+        d = div4(d * (f4(27.0f) + q), f4(27.0f) + f4(9.0f) * q);
+        return d * f4(norm) * f4(0.45f);
     }
-    CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
-        F4 c, sn, zr, zi;
-        for (int k = 0; k < 4; ++k) c[k] = v.mode[k].c, sn[k] = v.mode[k].s, zr[k] = v.mode[k].zr, zi[k] = v.mode[k].zi;
+    // Voices run four at a time (GroupedModel, timber_core.h): each voice's four modes are one SIMD value as before,
+    // four voices' chains overlap, and the pickup's divisions are shared by the four. Lanes past `count` repeat the
+    // first voice and are thrown away.
+    bool grouped() const noexcept { return sim; }
+    void renderGroup(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept { renderSim(vs, count, out, n); }
+    CAW_TIMBER_NOINLINE void renderSim(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept {
+        Voice* lane[4];
+        for (uint32_t l = 0; l < 4; ++l) lane[l] = vs[l < count ? l : 0];
+        F4 c[4], sn[4], zr[4], zi[4];
+        bool touching = false;
+        for (uint32_t l = 0; l < 4; ++l) {
+            const Voice& v = *lane[l];
+            for (int k = 0; k < 4; ++k) c[l][k] = v.mode[k].c, sn[l][k] = v.mode[k].s, zr[l][k] = v.mode[k].zr, zi[l][k] = v.mode[k].zi;
+            touching = touching || (l < count && !v.contact.done);
+        }
         const float invGain = static_cast<float>(1.0 / kSimGain);
-        uint32_t i = 0;
-        for (; i < n && !v.contact.done; ++i) {  // the hammer touching
-            const F4 d = v.place * zi;
-            const float f = v.contact.step((d[0] + d[1] + d[2] + d[3]) * invGain);
-            zr = zr + v.phi * f4(f);
-            const F4 r = c * zr - sn * zi, im = sn * zr + c * zi;
-            zr = r, zi = im;
-            out[i] = pickupOf(im[0] + im[1] + im[2] + im[3]);
+        for (uint32_t i = 0; i < n; ++i) {
+            if (touching) {  // a hammer touching: its force into its voice's modes first
+                for (uint32_t l = 0; l < count; ++l) {
+                    Voice& v = *lane[l];
+                    if (v.contact.done) continue;
+                    const F4 d = v.place * zi[l];
+                    const float f = v.contact.step((d[0] + d[1] + d[2] + d[3]) * invGain);
+                    zr[l] = zr[l] + v.phi * f4(f);
+                }
+            }
+            F4 x;
+            for (uint32_t l = 0; l < 4; ++l) {
+                const F4 r = c[l] * zr[l] - sn[l] * zi[l], im = sn[l] * zr[l] + c[l] * zi[l];
+                zr[l] = r, zi[l] = im;
+                x[l] = im[0] + im[1] + im[2] + im[3];
+            }
+            const F4 y = pickupOf4(x);
+            for (uint32_t l = 0; l < count; ++l) out[l][i] = y[l];
         }
-        for (; i < n; ++i) {
-            const F4 r = c * zr - sn * zi, im = sn * zr + c * zi;
-            zr = r, zi = im;
-            out[i] = pickupOf(im[0] + im[1] + im[2] + im[3]);
-        }
-        for (int k = 0; k < 4; ++k) v.mode[k].zr = zr[k], v.mode[k].zi = zi[k];
-        // The acoustic noises, while they sound.
-        if (v.thunkLeft) {
-            const uint32_t m = std::min(n, v.thunkLeft);
-            for (uint32_t j = 0; j < m; ++j) out[j] += v.thunk.run(v.thunkKick), v.thunkKick = 0;
-            v.thunkLeft -= m;
-        }
-        if (v.feltLeft) {
-            const uint32_t m = std::min(n, v.feltLeft);
-            for (uint32_t j = 0; j < m; ++j) out[j] += v.feltAmp * v.felt.run(v.noise.next());
-            v.feltLeft -= m;
+        for (uint32_t l = 0; l < count; ++l) {
+            Voice& v = *lane[l];
+            for (int k = 0; k < 4; ++k) v.mode[k].zr = zr[l][k], v.mode[k].zi = zi[l][k];
+            float* o = out[l];
+            // The acoustic noises, while they sound.
+            if (v.thunkLeft) {
+                const uint32_t m = std::min(n, v.thunkLeft);
+                for (uint32_t j = 0; j < m; ++j) o[j] += v.thunk.run(v.thunkKick), v.thunkKick = 0;
+                v.thunkLeft -= m;
+            }
+            if (v.feltLeft) {
+                const uint32_t m = std::min(n, v.feltLeft);
+                for (uint32_t j = 0; j < m; ++j) o[j] += v.feltAmp * v.felt.run(v.noise.next());
+                v.feltLeft -= m;
+            }
         }
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (sim) {
-            renderSim(v, out, n);
+            Voice* one[1] = {&v};
+            float buf[1][kControlFrames];
+            renderSim(one, 1, buf, n);
+            std::copy(buf[0], buf[0] + n, out);
             return;
         }
         F4 c, sn, zr, zi;
