@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `118ac5967543b7b9c2468afcc6c80c7ca34bb5dd` on the default branch at 2026-11-18T14:51:04Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `69acc1af84b745afac1eabee6cb8067cec881ccb` on the default branch at 2026-11-24T19:29:21Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`118ac59`).
+1. The commit this file was generated from (`69acc1a`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -273,6 +273,7 @@ paths:
 - Phone screens first: compact panels, sensible defaults, the symbol key row for code entry, errors on one line next to the code. Desktop gets keyboard shortcuts on top, not a different app.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
 - Every visible state change animates to its new state, in and out, through the theme's motion tokens (`lib/ui/motion.dart`) and respecting Off/Reduced; a drag follows the finger with no lag (owner, 2026-11-11).
+- After an engine change, regenerate the engine-fed fixtures (`test/fixtures/builtin_components.json` and the like, through the built `libcaw.so`) and the goldens it moves; every version bump moves the version-string goldens.
 
 ---
 
@@ -291,6 +292,8 @@ paths:
 - Apple targets (iOS, macOS) need macOS runners, which cost more: build them on release branches or on demand, not on every push.
 - Android debug APKs are signed with one fixed keystore kept in repository secrets, so each build installs over the last. Never commit a keystore.
 - Start each file with a one-line `#` comment saying what it is for (the repo map reads it).
+- The Dart test summary doesn't name a failing test: download the job log (`get_job_logs` without content, then the URL) and search for `❌`. A failure gets one re-run, and only after the test passes locally alone and with its file (known timing-sensitive: the startup reveal, Arrange's focus double tap).
+- `flutter analyze && flutter test` skips the tests when analyze finds anything: check that the tests ran.
 
 ---
 
@@ -353,6 +356,9 @@ The design is in `docs/architecture.md` ("Audio and code execution"); this is th
 - **Defined arithmetic.** Outputs are sanitised (NaN/Inf become 0) and the safety limiter is always last. Same project and settings sound perceptually identical on every device, live and in export, checked by tolerance tests against reference renders; note, clip and automation timing, seeded random choices and discrete behaviour stay exact (owner, 2026-11-12, `docs/decisions.md`).
 - **Tests.** Every DSP built-in gets a unit test and, where it makes sound, a reference render: a tolerance test (`engine/tests/tolerance.h`; stable paths null below −120 dBFS, chaotic ones match in loudness, spectrum and onsets), re-recorded with `caw_tests --update-references` only for an intended sound change; engine tests play `org.caw.test.osc` (`engine/tests/test_signal.h`) or a built-in. A bug fix starts with a failing test. Never skip or weaken a test to get green.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
+- **Bits are per build** (fast-math flags: Arm64 fuses multiply-adds, x86-64's baseline has none, Clang and GCC reassociate differently). Bit-exact compat tables need one per build (x86-64, Arm64, win64, x64 Debug; a missing one only prints). `_caw_fp_strict` on a file makes it identical everywhere but changes its x86-64 bits, breaking those tables; `-ffp-contract=off` alone keeps x86-64's bits but changes Arm64's. Chaotic devices (Timber's bowed string) differ by up to ~1 dB between compilers whatever the flags: compare per-device loudness before spending time on flags.
+- **Reproduce off-CI:** `aarch64-linux-gnu-g++` + `qemu-aarch64` (a static Release build of `caw_core` and a small render harness) and `clang++` (its RelWithDebInfo `caw_core` is LTO bitcode: link with `-flto -fuse-ld=lld`) both work in the cloud container.
+- **Cost ceilings:** cost tests are `RUN_SERIAL`; CI runners read 10–20 % slower than a local x86 box, Arm64 more: set a new ceiling about 1.4× the local x86 figure. A Debug sanitizer `libcaw` is over the pre-load scan's 256 MiB limit.
 
 ---
 
