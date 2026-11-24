@@ -27,7 +27,12 @@ struct Job {
     int32_t deviceFrames = 0, deviceRate = 0;  // live: the callback size and rate the device ran at
     int32_t xruns = -1;                        // live: underruns the platform reported during the timed span (-1: none)
     int32_t warmupXruns = -1;
-    bool deviceSizes = false;                  // live: the device took its own callback sizes (status device_sizes)                  // live: those during the warm-up after Play (-1: none)
+    bool deviceSizes = false;                  // live: the device took its own callback sizes (status device_sizes)
+    // live (1.1.2): what the stream was granted, from the status at the run's end: its own rate against the
+    // engine's (miniaudio resamples between them; a rate other than the device's loses AAudio's fast path), the
+    // low-latency mode and exclusive sharing as read back from the stream
+    int32_t streamRate = 0, engineRate = 0;
+    bool lowLatencyGranted = false, exclusiveGranted = false, modesReadBack = false;                  // live: those during the warm-up after Play (-1: none)
     int32_t callbackCore = -1;                 // live: the core the last callback ran on (-1: unknown)
 };
 

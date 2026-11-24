@@ -420,6 +420,12 @@ TEST(stress_ramp_stops_capped_at_the_engines_component_cap) {
     CHECK(rampCapRefusal("native component chains exceed this Engine's project-state memory budget"));
     CHECK(!rampCapRefusal("the project did not load: {\"ok\":false,\"error\":\"line 3, col 1: unknown note\"}"));
     CHECK(!rampCapRefusal(""));
+    // 1.1.2: what the Benchmark shows is the engine's limit, not a failed load.
+    const std::string why = rampCapReason("the project did not load: " + warn.substr(0, 300), 96);
+    CHECK(why.find("did not load") == std::string::npos);
+    CHECK(why.find("{") == std::string::npos);
+    CHECK(why.find("at most 256 can run") != std::string::npos);
+    CHECK(why.find("at 96") != std::string::npos);
 }
 
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.

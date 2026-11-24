@@ -91,13 +91,10 @@ ExecutionPlan makeExecutionPlan(const HardwareProfile& hardware, const Execution
             plan.yieldToForeground = true;
             break;
         case DevicePressure::ThermalWarm:
-            plan.workerThreads = std::max<uint16_t>(1, static_cast<uint16_t>(plan.workerThreads - 1));
-            plan.yieldToForeground = true;
-            break;
         case DevicePressure::ThermalHot:
         case DevicePressure::ThermalCritical:
-            plan.workerThreads = 1;
-            plan.yieldToForeground = true;
+            // No heat action (owner, 2026-11-24: "the system throttles, not the app"; docs/decisions.md): fewer
+            // workers on cores the platform has already slowed only piles the same work onto fewer of them.
             break;
     }
 
@@ -110,8 +107,6 @@ ExecutionPlan makeExecutionPlan(const HardwareProfile& hardware, const Execution
                              request.workload == WorkloadClass::OfflineRender;
     plan.allowGpu = request.allowGpu && hardware.supportsGpuCompute && gpuWorkload &&
                     hardware.memoryBudgetMiB >= 1024 &&
-                    request.pressure != DevicePressure::ThermalHot &&
-                    request.pressure != DevicePressure::ThermalCritical &&
                     request.pressure != DevicePressure::BatterySaver &&
                     request.pressure != DevicePressure::Unknown;
     return plan;

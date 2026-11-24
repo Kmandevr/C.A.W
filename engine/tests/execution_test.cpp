@@ -54,7 +54,8 @@ TEST(execution_small_device_never_oversubscribes_memory_or_cores) {
     CHECK(!p.useSimd);
 }
 
-TEST(execution_thermal_and_battery_pressure_reduce_background_work) {
+// Battery saver halves background work; heat changes nothing (1.1.2, owner: the platform throttles, not the app).
+TEST(execution_battery_saver_reduces_background_work_and_heat_does_not) {
     HardwareProfile hw{8, 8192, true, true};
     ExecutionRequest req;
     req.workload = WorkloadClass::OfflineRender;
@@ -62,11 +63,16 @@ TEST(execution_thermal_and_battery_pressure_reduce_background_work) {
     const ExecutionPlan battery = makeExecutionPlan(hw, req);
     CHECK_EQ(battery.workerThreads, 4);
     CHECK(!battery.allowGpu);
-    req.pressure = DevicePressure::ThermalCritical;
-    const ExecutionPlan hot = makeExecutionPlan(hw, req);
-    CHECK_EQ(hot.workerThreads, 1);
-    CHECK(!hot.allowGpu);
-    CHECK(hot.yieldToForeground);
+    req.pressure = DevicePressure::Normal;
+    const ExecutionPlan normal = makeExecutionPlan(hw, req);
+    for (const DevicePressure t : {DevicePressure::ThermalWarm, DevicePressure::ThermalHot, DevicePressure::ThermalCritical}) {
+        req.pressure = t;
+        const ExecutionPlan hot = makeExecutionPlan(hw, req);
+        CHECK_EQ(hot.workerThreads, normal.workerThreads);
+        CHECK_EQ(hot.maxConcurrentJobs, normal.maxConcurrentJobs);
+        CHECK_EQ(hot.allowGpu, normal.allowGpu);
+        CHECK_EQ(hot.yieldToForeground, normal.yieldToForeground);
+    }
 }
 
 TEST(execution_unknown_pressure_reserves_one_host_core_for_offline_work) {

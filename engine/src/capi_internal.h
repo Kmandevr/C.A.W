@@ -61,7 +61,7 @@ struct CawEngine {
     // The app is behind another (caw_audio_set_background), kept across device reopens: the device callback's
     // load stabilizer (load_stabilizer.h) does not run then.
     std::atomic<bool> behind{false};
-    std::atomic<int32_t> thermal{0};  // caw_audio_set_thermal: CAW_PRESSURE_*, for the load stabilizer
+    std::atomic<int32_t> thermal{0};  // caw_audio_set_thermal: CAW_PRESSURE_* (information only since 1.1.2)
     // The device buffer (caw_audio_set_buffer_mode): CAW_BUFFER_*, and whether the app is recording. Only the
     // control thread touches them, under engine/platform's device lock.
     int bufferMode = 0;

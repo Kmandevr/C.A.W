@@ -168,8 +168,12 @@ uint32_t tuneWorker(const CallbackThread& cb, WorkerState& state) noexcept {
             }
         }
     }
-    // The fast cores only, on a hybrid machine (a mask of cores, never one core: the kernel can still move a
-    // worker the callback preempts). The callback itself is never pinned.
+    // The fast cores only, on a hybrid desktop (a mask of cores, never one core: the kernel can still move a
+    // worker the callback preempts). The callback itself is never pinned. Not on Android since 1.1.2: [Fact,
+    // source.android.com "Performance Hint API", read 2026-11-24] "Your app shouldn't try to set the CPU core
+    // affinity ... devices often ignore an app's processor affinity"; placement is the scheduler's (and the hint
+    // session's), the nice above is the documented lever.
+#if !defined(__ANDROID__)
     const Topology& t = topology();
     if (!(state.applied & kAppliedAffinity) && t.hybrid && t.fastMask != 0 && t.fast < t.cores) {
         cpu_set_t set;
@@ -178,6 +182,7 @@ uint32_t tuneWorker(const CallbackThread& cb, WorkerState& state) noexcept {
             if (t.fastMask & (uint64_t{1} << cpu)) CPU_SET(cpu, &set);
         if (sched_setaffinity(0, sizeof set, &set) == 0) state.applied |= kAppliedAffinity;
     }
+#endif
     return state.applied;
 }
 

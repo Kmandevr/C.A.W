@@ -75,6 +75,14 @@ std::string resultJson(const Job& j) {
                     // Live: the device called back with its own sizes, not the size asked (AAudio given none, or
                     // Android 11 and older, where a size never reaches the stream): a 1024 run is then not 1024.
                     ",\"device_sizes\":" + (live && j.deviceSizes ? "true" : "false") +
+                    // Live (1.1.2): what the stream was granted (the fast path needs the device's own rate and
+                    // the low-latency mode; callback_policy in audio_threads says whether it ran real-time).
+                    (live ? ",\"stream\":{\"sample_rate\":" + std::to_string(j.streamRate) +
+                                ",\"engine_sample_rate\":" + std::to_string(j.engineRate) +
+                                ",\"low_latency\":" + (j.lowLatencyGranted ? "true" : "false") +
+                                ",\"exclusive\":" + (j.exclusiveGranted ? "true" : "false") +
+                                ",\"read_back\":" + (j.modesReadBack ? "true" : "false") + "}"
+                          : std::string()) +
                     // Live: each callback's budget is its own length, not its real deadline (the frames the device
                     // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
                     ",\"budget_basis\":" + str(live ? "callback_length" : "callback") +
@@ -209,9 +217,19 @@ RunResult runLive(Job& j) {
     }
     const int32_t xrunsTo = cawAudioXruns(e);
     const int32_t deviceFrames = caw_audio_buffer_frames(e);
-    bool deviceSizes = false;
+    bool deviceSizes = false, lowLatencyGranted = false, exclusiveGranted = false, readBack = false;
+    int32_t streamRate = 0, engineRate = 0;
     if (char* status = caw_audio_status(e)) {
         deviceSizes = std::strstr(status, "\"device_sizes\":true") != nullptr;
+        lowLatencyGranted = std::strstr(status, "\"low_latency\":true") != nullptr;
+        exclusiveGranted = std::strstr(status, "\"exclusive\":true") != nullptr;
+        readBack = std::strstr(status, "\"modes_read_back\":true") != nullptr;
+        auto number = [status](const char* key) {
+            const char* at = std::strstr(status, key);
+            return at ? static_cast<int32_t>(std::strtol(at + std::strlen(key), nullptr, 10)) : 0;
+        };
+        streamRate = number("\"sample_rate\":");
+        engineRate = number("\"engine_sample_rate\":");
         caw_free(status);
     }
     {
@@ -259,6 +277,11 @@ RunResult runLive(Job& j) {
         j.deviceRate = r.rate;
         j.xruns = xrunsFrom >= 0 && xrunsTo >= xrunsFrom ? xrunsTo - xrunsFrom : -1;
         j.deviceSizes = deviceSizes;
+        j.streamRate = streamRate;
+        j.engineRate = engineRate;
+        j.lowLatencyGranted = lowLatencyGranted;
+        j.exclusiveGranted = exclusiveGranted;
+        j.modesReadBack = readBack;
         j.warmupXruns = xrunsPlay >= 0 && xrunsFrom >= xrunsPlay ? xrunsFrom - xrunsPlay : -1;
         j.callbackCore = meter->core.load(std::memory_order_relaxed);
     }
