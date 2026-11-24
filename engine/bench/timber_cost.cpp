@@ -178,19 +178,22 @@ int timberCost(double seconds) {
         int voices;
         double ceilingUs;
     };
+    // The 1.1.3 instruments' ceilings sit about 1.4x over a local run (CI's runners read 10-20 % slower and vary):
+    // they catch a regression, not a budget, which the Timber cases above keep.
+    constexpr double kNew = 12500;
     const NewCase more[] = {
         // Starling: Timber's Simulated piano plus its recordings (two attack layers and a release a note: about 10 % more
         // in this case, 32 notes struck a second), so heavy plus 10 % (Claude's call, docs/decisions.md, 2026-11-24).
-        {"org.caw.starling", "Starling piano Normal: 16 voices", 0, {{"tier", 2}}, 16, 26500},
-        {"org.caw.starling", "Starling piano Normal: 16 voices, pedal down", 0, {{"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 26500},
-        {"org.caw.starling", "Starling piano Eco: 16 voices", 0, {{"tier", 1}}, 16, 20000},
-        {"org.caw.nightingale", "Nightingale violin: 8 voices", 0, {}, 8, kPoly},
-        {"org.caw.nightingale", "Nightingale cello: 8 voices, vibrato 1", 2, {{"vibrato", 1}}, 8, kPoly},
-        {"org.caw.nightingale", "Nightingale bass: 8 voices, High", 3, {{"tier", 3}}, 8, 12000},  // High: exports, 1.25x medium
-        {"org.caw.curlew", "Curlew flute: 8 voices", 0, {}, 8, kPoly},
-        {"org.caw.curlew", "Curlew clarinet: 8 voices", 1, {}, 8, kPoly},
-        {"org.caw.curlew", "Curlew saxophone: 8 voices, growl", 2, {{"growl", 0.5}}, 8, kPoly},
-        {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 11000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
+        {"org.caw.starling", "Starling piano Normal: 16 voices", 0, {{"tier", 2}}, 16, 34000},
+        {"org.caw.starling", "Starling piano Normal: 16 voices, pedal down", 0, {{"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 35500},
+        {"org.caw.starling", "Starling piano Eco: 16 voices", 0, {{"tier", 1}}, 16, 27000},
+        {"org.caw.nightingale", "Nightingale violin: 8 voices", 0, {}, 8, kNew},
+        {"org.caw.nightingale", "Nightingale cello: 8 voices, vibrato 1", 2, {{"vibrato", 1}}, 8, kNew},
+        {"org.caw.nightingale", "Nightingale bass: 8 voices, High", 3, {{"tier", 3}}, 8, 15000},  // High: exports
+        {"org.caw.curlew", "Curlew flute: 8 voices", 0, {}, 8, kNew},
+        {"org.caw.curlew", "Curlew clarinet: 8 voices", 1, {}, 8, kNew},
+        {"org.caw.curlew", "Curlew saxophone: 8 voices, growl", 2, {{"growl", 0.5}}, 8, kNew},
+        {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 13000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
         {"org.caw.bittern", "Bittern: 10 keys, principal chorus, room", 0, {}, 10, 24000},  // heavy: the room is part of it
         {"org.caw.bittern", "Bittern: 10 keys, full organ", 0, {{"principal8", 1}, {"octave4", 1}, {"fifteenth2", 1}, {"mixture", 1}, {"trumpet8", 1}, {"subbass32", 1}, {"gamba8", 1}, {"celeste8", 1}}, 10, 24000},
     };

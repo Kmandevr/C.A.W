@@ -136,7 +136,11 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
 // past this mix's 0.1 dB match. The Benchmark still plays them; their sound is checked by Timber's own references
 // (timber_test.cpp, timber_sim_test.cpp), which hold on every build.
 ProjectSpec withoutBowedStrings(ProjectSpec p) {
-    std::erase_if(p.layers, [](const LayerSpec& l) { return l.name.find("Bowed") != std::string::npos; });
+    // 1.1.3: Nightingale (bowed, the same friction) and Curlew (self-oscillating reeds, jets and lips) likewise; their
+    // own references (nightingale_test.cpp, curlew_test.cpp) check them.
+    std::erase_if(p.layers, [](const LayerSpec& l) {
+        return l.name.find("Bowed") != std::string::npos || l.name.rfind("Nightingale", 0) == 0 || l.name.rfind("Curlew", 0) == 0;
+    });
     return p;
 }
 

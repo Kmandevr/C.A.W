@@ -329,7 +329,9 @@ struct Bowed {
             u = timber::clamp4(u + uStep, zero, one);
             const F4 sh = u * u * (timber::f4(3.0f) - timber::f4(2.0f) * u);
             const F4 vb = target * sh;
-            const F4 fn = kF * vb;
+            // The force follows the bow's speed, but never under 2 % of the note's full-speed force (a bow resting lightly):
+            // at zero force the bristles' limit zss goes to 0 and Newton's step diverged as a released bow stopped.
+            const F4 fn = kF * timber::max4(vb, target * timber::f4(0.02f));
             const F4 fs = muS4 * fn, fc = muD4 * fn;
             F4 nb, bb, w;
             for (uint32_t l = 0; l < 4; ++l) nb[l] = tn[l].read(neck[l]), bb[l] = tb[l].read(bridge[l]), w[l] = noise[l].next();
@@ -348,7 +350,8 @@ struct Bowed {
                     const I4 on = timber::and4(timber::and4(timber::gt4(vr, zero), timber::gt4(zz, zero)), timber::gt4(ratio, brk));
                     const F4 a = timber::sel4(on, t * t * (timber::f4(3.0f) - timber::f4(2.0f) * t), zero);
                     const F4 g = one - a * ratio;
-                    const F4 x = B * g + timber::abs4(vr) * a * k2 * invZss;
+                    // 1 / (1 + x) by its series, which holds only for small x: x kept within [0, 1].
+                    const F4 x = timber::clamp4(B * g + timber::abs4(vr) * a * k2 * invZss, zero, one);
                     zn = zn + (vr * g - zn) * (one - x + x * x);
                 }
                 zd = timber::sel4(slips, zn, zd);

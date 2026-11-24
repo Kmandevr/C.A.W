@@ -6,6 +6,7 @@ updated: 2026-11-24
 
 # Log
 
+- 2026-11-24: Nightingale no longer blows up as a bow lifts (the bow force keeps a 2 % floor and Newton's step is bounded); its and Curlew's references compare the held sound up to the last release, and the stress mix's sound check leaves them out as it does Timber's bowed strings (chaotic across compilers); the new instruments' cost ceilings sit about 1.4x over a local run.
 - 2026-11-24: the wavetable synth is shown as **Kestrel** (was Raven, which clashed with Feral-Aud.io RAVEN: the owner's rename, Hub sound-plan.md); the theme Raven and the internal ids stay.
 - 2026-11-24: knobs turn with a sideways drag (an up-and-down swipe scrolls; Settings › Haptics and menus › Knobs turn with: Sideways or Up and down) and the UI is held to 60 Hz while a song plays (1.1.3, [app](app.md), the owner's 2026-11-24 decisions).
 - 2026-11-24: Bittern, the pipe organ (1.1.3 step 4, [engine](engine.md#bittern-the-pipe-organ-113)): `org.caw.bittern` with 13 stops as shared rank tables, chiff, living wind, tremulant, swell box and the cathedral room on by default; tests, reference, rt and cost cases; in the app on the fallback page. 1.1.3-alpha.1's version and changelog.
