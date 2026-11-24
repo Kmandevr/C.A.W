@@ -39,11 +39,11 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
 
-**Parallel by default.** Independent tool calls go in one message. Spawn subagents only for several sizeable independent parts or an independent review; do small or single-area work inline. Parallel subagents work on disjoint files, each in a worktree from the current branch (`git worktree add -b <name> .claude/worktrees/<name> HEAD`), briefed with what you already know (changed files, findings, checks and results) so they don't re-explore.
+**Parallel by default.** Spawn subagents only for several sizeable independent parts or an independent review; do small or single-area work inline. Parallel subagents work on disjoint files, each in a worktree from the current branch (`git worktree add -b <name> .claude/worktrees/<name> HEAD`), briefed with what you already know (changed files, findings, checks and results) so they don't re-explore.
 
 ## Context
 
-Keep context while it helps; clean up only at a task boundary (task done, PR opened or merged, before `/clear`) or when crowded. Drop the superseded (stale reads, re-run outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
+Keep context while it helps; clean up only at a task boundary or when crowded. Drop the superseded (stale reads, re-run outputs, finished subtasks). Carry into any compaction or summary: the owner's requirements and decisions, security constraints, unresolved issues, verified results (with the command that showed them), branch and next step. Multi-step task at a boundary: the `handoff` skill. A handoff is never the only copy of a requirement or decision (those go in `docs/` or Issues first).
 
 ## Checking changes
 
@@ -51,4 +51,4 @@ Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md
 
 ## Git
 
-Develop on the branch the session names. Put `Closes #N` in pull requests that finish an issue.
+Develop on the branch the session names. Put `Closes #N` in pull requests that finish an issue. Never link Claude Code or a claude.ai session in commits, PRs, comments or files (owner).
