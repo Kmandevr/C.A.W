@@ -1,36 +1,36 @@
 # Handoff
 
-Commit: 5065ba9 + this note. PR #261 is open for 1.1.2-alpha.1 on the session branch.
-Branch: ccr-56285e11-0xrj3h. Main is protected, so changes go in by PR only; merge it yourself once CI is green. **The owner's standing instructions and the full plan** are in the private Kmandevr/AutoStacc-Hub: docs/caw/sound-plan.md ("After 1.1.1 (owner, 2026-11-24)"), docs/caw/roadmap.md and docs/caw/phone-performance-research.md. Read those first.
+Commit: Main after 1.1.2-alpha.1 (PR #261, released 2026-11-24) and #256.
+Branch: start your own from Main. Main is protected, so changes go in by PR only; merge it yourself once CI is green. **The plan and the owner's decisions** are in the private Kmandevr/AutoStacc-Hub: docs/caw/decisions.md ("2026-11-24: realism after 1.1.2, and compatibility in the alpha"), docs/caw/realism-research.md, docs/caw/roadmap.md (1.1.3) and Hub issues #30 (realism) and #29 (maintenance). Read those first.
 
 ## Goal
-Release **1.1.2** (realism plus playback fixes): merge PR #261, then dispatch app.yml on Main with installables and release.
+Build **1.1.3**, the realistic instruments, one instrument per step, and let the owner listen after each.
+- Timber splits into Starling (piano, guitar, harp), Nightingale (bowed strings), Curlew (winds), Woodpecker (percussion) and Bittern (pipe organ).
+- Each is a synthesized source with recorded bodies and noises (CC0/CC-BY, about 15 MB bundled), dry by default, with only the noises the real instrument makes.
+- Start with Starling's piano: the hybrid from the Salamander Grand, about 1.5 MB.
 
 ## Done and verified
-- 1.1.2 contents:
-  - Timber Simulated (all models) and Rook's Synth, Produced and Acoustic kits.
-  - Playback on the phone, applying the Hub research: no heat action, the busy-spin retired, workers unpinned, the buffer tuner on, path diagnostics, a Low-latency-only fast-path retry, and a device reopen within 1 s.
-  - Freeze hint only on real dropouts; heat shown as a plain reading.
-  - The Performance sheet (look approved by the owner) and scroll-safe device controls.
-  - The Benchmark generated from the registry; the piano generator's overflow fixed.
-- Local checks: ctest 24/24 and flutter test 2819 pass.
-- The every_instrument cross-build match leaves out the bowed strings (owner OK, 2026-11-24).
+- 1.1.2-alpha.1 is released (app.yml run 2278 succeeded).
+- The lessons from 1.1.2 are in .claude/rules (engine, ci, app) and .claude/README.md ("Session quirks").
 
 ## State
-- **CI on 5065ba9:** Arm64 and x64 engine tests pass. The Dart job hit the timing-flaky startup reveal test (it passes locally alone and with its file), and its one re-run was triggered. The rest was still running.
-- Lessons are saved in .claude/rules (engine, ci, app) and .claude/README.md ("Session quirks").
-- 1.1.3 maintenance (big files and CI broken down, tooling) is Hub issue #29 and on the roadmap.
+- Nothing for 1.1.3 is built yet. The research names the causes:
+  - the bowed strings' force is not tied to bow speed;
+  - the winds' bore click is the "piano on the flute";
+  - every model has a heavy default room;
+  - Rook's kit presets are buried at positions 93–116;
+  - Randomize draws its values uniformly.
+- The name check of the new names was run on 2026-11-24; see the Hub decisions for its result.
 
 ## Open (owner)
-- Optional: lower the UI to 60 Hz while playing (always, as a setting, or no).
-- Rook "Build a kit" card look; Acoustic piece and mic screens not designed.
-- Branch cleanup: the proxy refuses branch deletes, so the owner deletes them on GitHub.
+- Branch cleanup: the proxy refuses branch deletes, so the owner deletes merged branches on GitHub.
+- Before any new UI look (the four instruments' pages, Rook's kit kinds, the Randomness knob), ask the owner.
 
 ## Rules for continuing
 - **No lost work:** push after every commit, and back up agent worktrees to `caw-backup-*`.
-- **Loop guard:** one CI re-run per failure; never repeat a failed attempt.
+- **Loop guard:** one CI re-run per failure.
 - **Efficiency:** 2–3 agents at a time, short output, a recommendation with every question.
+- **No Claude Code or claude.ai session links** anywhere (owner).
 
 ## Next
-- When #261 is green: merge it, dispatch the 1.1.2 release, and ask the owner for a Full Benchmark (stream.path, callback_policy, buffer_frames growing).
-- Follow-ups: the motion cap follows the Frame rate setting; the compat tables still to record (Hub #29).
+Starling's piano first. Plan its build against the research (Part B piano, recorded parts list), then the shared recordings loader with load-on-use, the knob gesture, and Rook's presets and Randomize.
