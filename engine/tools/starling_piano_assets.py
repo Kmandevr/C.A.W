@@ -1,0 +1,120 @@
+# Development-time preparation of Starling's recorded piano parts from the Salamander Grand Piano V3 (CC-BY 3.0): trims, folds to mono and writes engine/assets/starling/piano.flac and src/starling_piano_bank.inc.
+#
+# Not part of the build or CI: it needs the full Salamander set (about 700 MB, github.com/sfzinstruments/
+# SalamanderGrandPiano) and Python 3 with numpy and soundfile (BSD licences; development tools only, nothing of them
+# ships). Run it again only to change what is recorded; the build reads its two outputs.
+#
+#   python3 engine/tools/starling_piano_assets.py <SalamanderGrandPiano checkout> <engine dir>
+#
+# What it keeps (docs/engine.md, "Starling"):
+# - attacks: the first 150 ms of 30 zones (every minor third, A0..C8, as Salamander itself) x 4 velocity layers (v3,
+#   v7, v11, v15), from Salamander's own onset offsets less 2 ms. The voice crossfades from these into the model
+#   over 70..140 ms.
+# - releases: the key-release noise of every 4th key (rel1, rel5, .. rel85; 22 clips), 350 ms.
+# - pedal: down (pedalD1, pedalD2) 1.2 s, and up (pedalU1, pedalU2) 0.7 s.
+# Each clip is folded to mono (the right channel shifted onto the left by their cross-correlation's lag, then
+# averaged, so the AB pair's spacing does not comb), faded at its end, normalised to its own peak and stored as
+# 16-bit at 48 kHz; its scale back to the recorded level is in the manifest.
+import os
+import sys
+
+import numpy as np
+import soundfile as sf
+
+SR = 48000
+ZONES = ['A0', 'C1', 'D#1', 'F#1', 'A1', 'C2', 'D#2', 'F#2', 'A2', 'C3', 'D#3', 'F#3', 'A3', 'C4', 'D#4', 'F#4',
+         'A4', 'C5', 'D#5', 'F#5', 'A5', 'C6', 'D#6', 'F#6', 'A6', 'C7', 'D#7', 'F#7', 'A7', 'C8']
+LAYERS = [3, 7, 11, 15]
+# The layers' velocity ranges in Salamander's SFZ (Data/notes.txt): the middle of each, as MIDI velocity.
+LAYER_VEL = {3: 35.5, 7: 53.5, 11: 84.5, 15: 116.5}
+ATTACK_S, ATTACK_FADE_S = 0.150, 0.010
+RELEASE_S, PEDAL_DOWN_S, PEDAL_UP_S = 0.350, 1.2, 0.7
+
+
+def midi(name):
+    n = {'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11}
+    return 12 * (int(name[-1]) + 1) + n[name[:-1]]
+
+
+def defines(path):
+    out = {}
+    for line in open(path):
+        p = line.split()
+        if len(p) == 3 and p[0] == '#define':
+            out[p[1]] = p[2]
+    return out
+
+
+def mono(x):
+    if x.ndim == 1:
+        return x
+    l, r = x[:, 0], x[:, 1]
+    n = min(len(l), 4096)
+    best, lag = -1.0, 0
+    for d in range(-24, 25):
+        a = l[max(0, d):n + min(0, d)]
+        b = r[max(0, -d):n - max(0, d)]
+        m = min(len(a), len(b))
+        c = float(np.dot(a[:m], b[:m]))
+        if c > best:
+            best, lag = c, d
+    r = np.roll(r, lag)
+    return 0.5 * (l + r)
+
+
+def clip(x, start, seconds, fade):
+    n = int(round(seconds * SR))
+    y = np.zeros(n)
+    seg = x[start:start + n]
+    y[:len(seg)] = seg
+    f = int(round(fade * SR))
+    y[n - f:] *= 0.5 + 0.5 * np.cos(np.linspace(0, np.pi, f))
+    return y
+
+
+def main():
+    src, eng = sys.argv[1], sys.argv[2]
+    tune = defines(os.path.join(src, 'Data', 'tune_ret.txt'))
+    clips = []  # (kind, key, cents, layer velocity, samples)
+    for layer in LAYERS:
+        off = defines(os.path.join(src, 'Data', 'vel_%02d.txt' % layer))
+        for z, name in enumerate(ZONES):
+            x, sr = sf.read(os.path.join(src, 'Samples', '%sv%d.flac' % (name, layer)))
+            assert sr == SR
+            start = max(0, int(off['$OFF%02d' % (z + 1)]) - int(0.002 * SR))
+            cents = float(tune.get('$TUNE%02d' % (z + 1), '0'))
+            clips.append((0, midi(name), cents, LAYER_VEL[layer], clip(mono(x), start, ATTACK_S, ATTACK_FADE_S)))
+    for k in range(1, 89, 4):
+        x, _ = sf.read(os.path.join(src, 'Samples', 'rel%d.flac' % k))
+        clips.append((1, 20 + k, 0.0, 0.0, clip(mono(x), 0, RELEASE_S, 0.05)))
+    for kind, name, secs in ((2, 'pedalD1', PEDAL_DOWN_S), (2, 'pedalD2', PEDAL_DOWN_S), (3, 'pedalU1', PEDAL_UP_S),
+                             (3, 'pedalU2', PEDAL_UP_S)):
+        x, _ = sf.read(os.path.join(src, 'Samples', name + '.flac'))
+        clips.append((kind, 0, 0.0, 0.0, clip(mono(x), 0, secs, 0.2)))
+
+    data, rows, at = [], [], 0
+    for kind, key, cents, vel, y in clips:
+        peak = float(np.max(np.abs(y))) or 1.0
+        q = np.round(y / peak * 32767.0).astype(np.int16)
+        # The RMS of the attack's crossfade window (70..140 ms) at the recorded level: what the calibration matches.
+        w = y[int(0.070 * SR):int(0.140 * SR)]
+        rms = float(np.sqrt(np.mean(w * w))) if kind == 0 else 0.0
+        rows.append((kind, key, cents, vel, at, len(q), peak, rms))
+        data.append(q)
+        at += len(q)
+    os.makedirs(os.path.join(eng, 'assets', 'starling'), exist_ok=True)
+    sf.write(os.path.join(eng, 'assets', 'starling', 'piano.flac'), np.concatenate(data), SR, subtype='PCM_16',
+             format='FLAC')
+    with open(os.path.join(eng, 'src', 'starling_piano_bank.inc'), 'w') as f:
+        f.write('// Generated by tools/starling_piano_assets.py from the Salamander Grand Piano V3 (Alexander Holm, CC-BY 3.0):\n')
+        f.write('// the clips in assets/starling/piano.flac. {kind (0 attack, 1 release, 2 pedal down, 3 pedal up), key, cents,\n')
+        f.write('// layer velocity (MIDI), first frame, frames, scale to the recorded level, the attack\'s 70..140 ms RMS}\n')
+        f.write('// clang-format off\n')
+        for r in rows:
+            f.write('{%d, %d, %.1ff, %.1ff, %du, %du, %.9gf, %.9gf},\n' % r)
+        f.write('// clang-format on\n')
+    print('%d clips, %d frames (%.2f s)' % (len(rows), at, at / SR))
+
+
+if __name__ == '__main__':
+    main()
