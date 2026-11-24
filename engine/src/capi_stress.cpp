@@ -81,7 +81,13 @@ std::string resultJson(const Job& j) {
                                 ",\"engine_sample_rate\":" + std::to_string(j.engineRate) +
                                 ",\"low_latency\":" + (j.lowLatencyGranted ? "true" : "false") +
                                 ",\"exclusive\":" + (j.exclusiveGranted ? "true" : "false") +
-                                ",\"read_back\":" + (j.modesReadBack ? "true" : "false") + "}"
+                                ",\"read_back\":" + (j.modesReadBack ? "true" : "false") +
+                                // A1: which path it got ("mmap", "fast", "normal": the normal mixer, no real-time
+                                // callback; "" off AAudio), MMAP (-1 unknown) and its buffer, burst and capacity.
+                                ",\"path\":" + str(j.streamPath) + ",\"mmap\":" + std::to_string(j.streamMmap) +
+                                ",\"buffer_frames\":" + std::to_string(j.streamBuffer) +
+                                ",\"burst_frames\":" + std::to_string(j.streamBurst) +
+                                ",\"capacity_frames\":" + std::to_string(j.streamCapacity) + "}"
                           : std::string()) +
                     // Live: each callback's budget is its own length, not its real deadline (the frames the device
                     // has queued), so over_budget overstates; the platform's xruns are the dropouts heard.
@@ -218,7 +224,8 @@ RunResult runLive(Job& j) {
     const int32_t xrunsTo = cawAudioXruns(e);
     const int32_t deviceFrames = caw_audio_buffer_frames(e);
     bool deviceSizes = false, lowLatencyGranted = false, exclusiveGranted = false, readBack = false;
-    int32_t streamRate = 0, engineRate = 0;
+    int32_t streamRate = 0, engineRate = 0, streamBuffer = 0, streamBurst = 0, streamCapacity = 0, streamMmap = -1;
+    std::string streamPath;
     if (char* status = caw_audio_status(e)) {
         deviceSizes = std::strstr(status, "\"device_sizes\":true") != nullptr;
         lowLatencyGranted = std::strstr(status, "\"low_latency\":true") != nullptr;
@@ -230,6 +237,15 @@ RunResult runLive(Job& j) {
         };
         streamRate = number("\"sample_rate\":");
         engineRate = number("\"engine_sample_rate\":");
+        streamBuffer = number("\"buffer_frames\":");
+        streamBurst = number("\"burst_frames\":");
+        streamCapacity = number("\"capacity_frames\":");
+        streamMmap = std::strstr(status, "\"mmap\":") ? number("\"mmap\":") : -1;
+        if (const char* at = std::strstr(status, "\"path\":\"")) {
+            at += std::strlen("\"path\":\"");
+            const char* end = std::strchr(at, '"');
+            streamPath.assign(at, end ? static_cast<size_t>(end - at) : 0);
+        }
         caw_free(status);
     }
     {
@@ -282,6 +298,11 @@ RunResult runLive(Job& j) {
         j.lowLatencyGranted = lowLatencyGranted;
         j.exclusiveGranted = exclusiveGranted;
         j.modesReadBack = readBack;
+        j.streamBuffer = streamBuffer;
+        j.streamBurst = streamBurst;
+        j.streamCapacity = streamCapacity;
+        j.streamMmap = streamMmap;
+        j.streamPath = streamPath;
         j.warmupXruns = xrunsPlay >= 0 && xrunsFrom >= xrunsPlay ? xrunsFrom - xrunsPlay : -1;
         j.callbackCore = meter->core.load(std::memory_order_relaxed);
     }

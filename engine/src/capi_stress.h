@@ -32,7 +32,9 @@ struct Job {
     // engine's (miniaudio resamples between them; a rate other than the device's loses AAudio's fast path), the
     // low-latency mode and exclusive sharing as read back from the stream
     int32_t streamRate = 0, engineRate = 0;
-    bool lowLatencyGranted = false, exclusiveGranted = false, modesReadBack = false;                  // live: those during the warm-up after Play (-1: none)
+    bool lowLatencyGranted = false, exclusiveGranted = false, modesReadBack = false;
+    int32_t streamBuffer = 0, streamBurst = 0, streamCapacity = 0, streamMmap = -1;
+    std::string streamPath;  // "mmap", "fast", "normal" ("" off AAudio)                  // live: those during the warm-up after Play (-1: none)
     int32_t callbackCore = -1;                 // live: the core the last callback ran on (-1: unknown)
 };
 

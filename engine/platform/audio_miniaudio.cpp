@@ -71,6 +71,8 @@ struct Audio {
     // thermal load"; the platform's levers (the fast path's real-time callback, a larger buffer on underruns, the
     // ADPF hint where there is one) do its job.
     bool stabilizerAsked = false;
+    // A3: "" (no retry: the fast path came, or was not asked), "granted" or "refused" (startLocked).
+    const char* fastRetry = "";
     // The chosen device, size or exclusive mode did not open, so the system default did (shared, its own size).
     bool fallback = false;
     std::string fallbackReason;
@@ -1077,7 +1079,26 @@ ma_result openOnContext(CawEngine* e, Audio* a, std::string& why) {
     return r;
 }
 
+int32_t startOnce(CawEngine* e, char* error, int32_t error_len);
+
+// A3 (the 1.1.2 audit): a low-latency open that came up on AAudio's normal mixer (low latency asked, not granted:
+// no real-time callback; the owner's S22+ Low-latency rows, 960-frame bursts at callback_policy 0) is closed and
+// opened once more, as a route still settling can refuse the fast path to the first open; what the second open got
+// is kept for the status ("fast_path_retry").
 int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
+    const bool wasOpen = e->audio != nullptr;
+    const int32_t r = startOnce(e, error, error_len);
+    auto* a = static_cast<Audio*>(e->audio);
+    if (r != 0 || wasOpen || !a || a->context.backend != ma_backend_aaudio || !a->lowLatencyAsked || !a->modesReadBack ||
+        a->lowLatency)
+        return r;
+    stopLocked(e);
+    const int32_t again = startOnce(e, error, error_len);
+    if (auto* b = static_cast<Audio*>(e->audio)) b->fastRetry = b->lowLatency ? "granted" : "refused";
+    return again;
+}
+
+int32_t startOnce(CawEngine* e, char* error, int32_t error_len) {
     if (e->audio) {
         // Open and playing: nothing to do. Stopped behind our back (miniaudio stops a device whose AAudio stream
         // could not be reopened after a disconnect): closed, so it opens again below.
@@ -1437,7 +1458,7 @@ int32_t setBackground(Audio* a, bool on) {
         if (now > 0) a->bufferFrames = now;
     }
     ma_mutex_unlock(&a->device.aaudio.rerouteLock);
-    return full && now > 0 ? now : 0;
+    return now > 0 ? now : 0;
 #else
     (void)a;
     (void)on;
@@ -1744,15 +1765,28 @@ char* caw_audio_status(CawEngine* e) {
     // 1.1.2: the stream's buffer (frames queued ahead of the speaker, what the buffer tuner sets) and its burst, read
     // now under the reroute lock (0 off AAudio): an underrun with no late callback of ours is a buffer too small for
     // the system's own scheduling (the owner's idle S22+, 2026-11-24: 256-frame callbacks, 1 xrun, 0 late).
-    int32_t streamBuffer = 0, streamBurst = 0;
+    // Also its capacity and which path it got (A1, the 1.1.2 audit): AAudioStream_isMMapUsed (exported by
+    // libaaudio, in the NDK's headers from API 36; looked up, -1 where it is missing or nothing was asked), else the
+    // granted low-latency mode, which off MMAP means AudioFlinger's fast mixer (and its real-time callback) and
+    // otherwise its normal mixer.
+    int32_t streamBuffer = 0, streamBurst = 0, streamCapacity = 0, mmap = -1;
 #if defined(__ANDROID__)
     if (a->context.backend == ma_backend_aaudio) {
         ma_mutex_lock(&a->device.aaudio.rerouteLock);
         streamBuffer = aaudioBufferFrames(a);
         streamBurst = aaudioBurst(a);
+        if (void* stream = a->device.aaudio.pStreamPlayback; stream && a->context.aaudio.hAAudio) {
+            using Int = int32_t (*)(void*);
+            using Bool = bool (*)(void*);
+            if (auto cap = reinterpret_cast<Int>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getBufferCapacityInFrames")))
+                streamCapacity = std::max(0, cap(stream));
+            if (auto used = reinterpret_cast<Bool>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_isMMapUsed")))
+                mmap = used(stream) ? 1 : 0;
+        }
         ma_mutex_unlock(&a->device.aaudio.rerouteLock);
     }
 #endif
+    const char* path = a->context.backend != ma_backend_aaudio ? "" : mmap == 1 ? "mmap" : a->lowLatency ? "fast" : "normal";
     return dup(std::string("{\"running\":") + (started ? "true" : "false") + ",\"stopped_by_system\":" +
                (started ? "false" : "true") + ",\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
                ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
@@ -1766,6 +1800,8 @@ char* caw_audio_status(CawEngine* e) {
                ",\"periods\":" + std::to_string(reportedPeriods(a)) +
                ",\"device_sizes\":" + (a->deviceSizes ? "true" : "false") +
                ",\"buffer_frames\":" + std::to_string(streamBuffer) + ",\"burst_frames\":" + std::to_string(streamBurst) +
+               ",\"capacity_frames\":" + std::to_string(streamCapacity) + ",\"mmap\":" + std::to_string(mmap) +
+               ",\"path\":" + quoted(path) + ",\"fast_path_retry\":" + quoted(a->fastRetry) +
                ",\"exclusive\":" + (a->exclusive ? "true" : "false") +
                ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
                ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +

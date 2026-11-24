@@ -770,7 +770,10 @@ CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_id, const c
    "exclusive_requested"); with no device running, {"running": false} and the request. On AAudio "exclusive" and
    "low_latency" (the fast path) are read from the stream at open ("modes_read_back": true; a later reroute may
    change them); on WASAPI "exclusive" is what opened (it refuses rather than share); elsewhere they are what was
-   asked. Free with caw_free. */
+   asked. Since 1.1.2 also (0 off AAudio) "buffer_frames", "burst_frames" and "capacity_frames" (the stream's queue,
+   burst and capacity), "mmap" (AAudioStream_isMMapUsed: 1, 0, -1 unknown), "path" ("mmap", "fast": AudioFlinger's
+   fast mixer, "normal": its normal mixer, no real-time callback; "" off AAudio) and "fast_path_retry" ("" none,
+   "granted" or "refused": a low-latency open on the normal mixer is opened once more). Free with caw_free. */
 CAW_API char* caw_audio_status(CawEngine* e);
 /* API version 23. How late the running device is, as JSON: {"running", "sample_rate" (the engine's), "output":
    {"running", "frames" (engine frames from a sample leaving the engine to the speaker), "ms", "source", "device_id"},
