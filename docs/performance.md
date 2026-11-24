@@ -15,7 +15,7 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 
 **Native component measurement still required:** add a `caw_bench` scenario that runs a trusted test component in `ProjectDoc.masterComponents`, then record mean/p99/max callback time, component-chain count scaling, project-state memory and retained memory after clearing/unloading the chain. The two preallocated stereo scratch stages live inside MasterChain and are included in the project-state estimate, so projects without native effects do not pay their baseline memory cost. ABI v1 does not report plugin-private heap/state size, so that portion is currently unknown rather than silently treated as zero.
 
-- **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports:
+- **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports: Device costs against ceilings are its 300-series modes (Rook's drums: 323, the 1.1.2 Acoustic kit per quality, [engine](engine.md#performance)).
   - the mean, p99 and maximum time per callback, and the load (mean time ÷ budget)
   - the time `setProject` takes
   - the cost of a pattern edit every 0.25 s while 16 tracks play, the time to re-send an unchanged project, the speed of a loop export, and memory (RSS)

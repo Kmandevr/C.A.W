@@ -1,4 +1,4 @@
-// org.caw.drums' 1.1.0 additions are append-only: every kit and sound that existed before renders bit-identically.
+// org.caw.drums' 1.1.0 and 1.1.2 additions are append-only: every kit and sound that existed before renders bit-identically.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -74,6 +74,10 @@ struct Known {
 #include "drums_compat_hashes_x64_debug.inc"  // -O0 (Debug, the sanitizer job) rounds differently from Release
 #else
 #include "drums_compat_hashes.inc"
+// 1.1.2 (Synth, Produced and Acoustic kits) appends again: the presets 1.1.0 and 1.1.1 added keep their bits.
+// Recorded at 1.1.1 (2a9934c) on x86-64 Release; the other builds' tables come from 2a9934c built so, as above.
+#define CAW_DRUMS_HASHES_111 1
+#include "drums_compat_hashes_111.inc"
 #endif
 
 }  // namespace
@@ -100,3 +104,16 @@ TEST(drums_presets_from_before_1_1_render_bit_identically) {
     }
     if (!print) CHECK(i >= 60);
 }
+
+#ifdef CAW_DRUMS_HASHES_111
+TEST(drums_presets_from_before_1_1_2_render_bit_identically) {
+    size_t i = 0;
+    for (const Known& k : kKnown111) {
+        std::vector<std::pair<std::string, double>> values;
+        CHECK(applyBuiltinPreset("org.caw.drums", k.preset, values));
+        if (renderHash(values) != k.hash) cawtest::fail(__FILE__, __LINE__, std::string(k.preset) + " renders differently from 1.1.1");
+        ++i;
+    }
+    CHECK(i >= 30);
+}
+#endif

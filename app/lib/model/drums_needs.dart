@@ -1,4 +1,4 @@
-// When each drums setting is heard (caw_drums_info's "needs", 1.1.0): the conditions a setting needs, so the editor dims one that does nothing now and says what turns it on.
+// When each drums setting is heard (caw_drums_info's "needs", 1.1.0 and 1.1.2's Acoustic kit): the conditions a setting needs, so the editor dims one that does nothing now and says what turns it on.
 import 'device_target.dart';
 import 'drums.dart';
 
@@ -12,7 +12,28 @@ class DrumNeed {
 
 /// Every setting heard only in some context, by pad suffix or kit-wide id: all of its conditions must hold. The same
 /// table as the engine's `drums::needs()` (the CAW_LIB test checks they agree).
-const Map<String, List<DrumNeed>> drumNeeds = {
+final Map<String, List<DrumNeed>> drumNeeds = {..._needs, ..._acousticNeeds()};
+
+/// 1.1.2: each Acoustic piece's settings, heard on the kinds they belong to (`pc<n>_kind`: 1 Kick, 2 Snare, 3 Tom,
+/// 4 Hi-hat, 5 Crash, 6 Ride, 7 Splash, 8 China), as the engine builds them.
+Map<String, List<DrumNeed>> _acousticNeeds() {
+  const played = {1, 2, 3, 4, 5, 6, 7, 8}, drums = {1, 2, 3}, cymbals = {4, 5, 6, 7, 8};
+  const kinds = <String, Set<int>>{
+    'size': played, 'depth': drums, 'tune': played, 'reso': drums, 'head': drums, 'shell': drums, 'damp': played,
+    'decay': played, 'glide': drums, 'wires': {2}, 'wire_level': {2}, 'beater': {1}, 'port': {1}, 'air': drums,
+    'alloy': cymbals, 'swell': {5, 6, 7, 8}, 'level': played, 'pan': played, 'dist': played, 'shell_level': drums,
+  };
+  return {
+    for (var p = 1; p <= 16; p++)
+      for (final e in kinds.entries)
+        'pc${p}_${e.key}': [
+          DrumNeed('pc${p}_kind', kit: true, only: e.value),
+          if (e.key == 'wire_level') DrumNeed('pc${p}_wires', kit: true),
+        ],
+  };
+}
+
+const Map<String, List<DrumNeed>> _needs = {
   'body_wave': [DrumNeed('body_on', only: {1})],
   'body_shape': [DrumNeed('body_on', only: {1})],
   'body_fold': [DrumNeed('body_on', only: {1})],
@@ -166,6 +187,9 @@ const Map<String, List<DrumNeed>> drumNeeds = {
   'accent_on': [DrumNeed('accent')],
   'flam_time': [DrumNeed('flam')],
   'groove_amt': [DrumNeed('groove', only: {1, 2, 3, 4, 5})],
+  'acou_piece': [DrumNeed('engine', only: {1})],
+  'acou_artic': [DrumNeed('engine', only: {1})],
+  'acou_layer': [DrumNeed('engine', only: {0})],
   'glue_threshold': [DrumNeed('glue', kit: true)],
   'glue_ratio': [DrumNeed('glue', kit: true)],
   'glue_attack': [DrumNeed('glue', kit: true)],

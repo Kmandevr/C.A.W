@@ -197,8 +197,12 @@ extern "C" {
    the Limiter appends target_on and target (a loudness target it reports against; docs/engine.md).
    45 (2026-11-20, 1.1.1): caw_audio_set_thermal tells the device callback's load stabilizer the platform's thermal
    state; the stabilizer spins only as far as the clock needs (its recent peak work against a target that rises
-   with the heat) and not at all at CAW_PRESSURE_THERMAL_CRITICAL. Nothing else changes. */
-#define CAW_API_VERSION 45
+   with the heat) and not at all at CAW_PRESSURE_THERMAL_CRITICAL. Nothing else changes.
+   46 (2026-11-20, 1.1.2): Rook's kits of three kinds. org.caw.drums appends engine, acou_piece, acou_artic and
+   acou_layer to every pad and, after the pads, the Acoustic kit (kit_kind, acou_*, and 16 pieces pc1_* .. pc16_*);
+   caw_drums_kit_build and caw_drums_kit_tool build and finish kits; caw_drums_info gains "builders". Old kits render
+   the same bits. */
+#define CAW_API_VERSION 46
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -683,6 +687,21 @@ CAW_API char* caw_migrate_component(const char* entry_json);
 CAW_API char* caw_drums_info(void);
 CAW_API char* caw_drums_randomize(int32_t type, uint32_t seed, double amount, int32_t pad, const char* current_json);
 CAW_API char* caw_drums_explode(const char* entry_json);
+
+/* Rook's kit builders (API version 46; docs/engine.md "Drums", Kits). Pure functions: no engine needed (render_pad
+   writes the file it is given); free each result with caw_free.
+   caw_drums_kit_build: a whole kit of `kind` (0 Synth, 1 Produced, 2 Acoustic) in `style` (an index of caw_drums_info's
+   "builders" list for the kind), from `seed`, tuned to `key` (0 = C .. 11 = B, natural minor; -1 leaves it), an
+   Acoustic kit's pads laid out for e-drum `map` (0 General MIDI, 1 Roland V-Drums, 2 Alesis). Returns {"ok", "name",
+   "description", "params": {id: value}}: every value the kit moves from the defaults (an entry's whole "params").
+   The same arguments always give the same kit.
+   caw_drums_kit_tool: request {"tool", "entry": {"params"}, ...} -> {"ok", "params"} (the entry's new "params"):
+   "mutate" (amount, seed: every Layers pad a little), "tune_to_key" (key), "match_loudness", "layer" (pad, sound:
+   a library sound's layers the pad lacks join it), "finish" (chain, pad; pad -1: the kit's bus), "map" (map: an
+   Acoustic kit's pads again), "render_pad" (pad, path: the pad rendered to a mono WAV at path, its layers off and its
+   sample on; adds "path", "frames" and "sample": {"slot", "path"} for the entry's samples). */
+CAW_API char* caw_drums_kit_build(int32_t kind, int32_t style, uint32_t seed, int32_t key, int32_t map);
+CAW_API char* caw_drums_kit_tool(const char* request_json);
 
 /* Sound quality, for the device's budget: Eco lowers oversampling, caps unison copies at 4, halves display
    updates and thins the built-in reverbs; High raises oversampling where a built-in has it. Takes effect at

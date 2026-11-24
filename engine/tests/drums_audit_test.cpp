@@ -153,6 +153,19 @@ Probe probeFor(const std::string& suffix, const std::string& layer) {
         p.base = single(with(tone, {{"a1_drive_type", kDriveSoft}, {"a1_flt", kVfLp12}, {"a1_cutoff", 3000},
                                     {"a1_body_decay", 1}, {"a1_noise_decay", 1}}));
         p.events.push_back(notes::notePressure(2400, 1, 60, 0.9));
+    } else if (layer == "acou") {
+        // 1.1.2: sixteen different pieces (kinds and sizes), pad A1 an Acoustic pad on a snare, or a Layers pad with
+        // a body whose acoustic layer names a piece.
+        Values v = {{"a1_engine", kEngineAcoustic}};
+        static constexpr int kKinds[] = {kPieceSnare, kPieceKick, kPieceTom, kPieceHiHat, kPieceCrash, kPieceRide, kPieceSplash, kPieceChina};
+        for (uint32_t pc = 0; pc < kPieces; ++pc) {
+            const std::string id = "pc" + std::to_string(pc + 1) + "_";
+            v.push_back({id + "kind", kKinds[pc % 8]});
+            v.push_back({id + "size", 10.0 + pc});
+        }
+        if (suffix == "acou_layer") v[0].second = kEngineLayers, v.push_back({"a1_body_on", 1}), v.push_back({"a1_body_level", -12});
+        p.base = single(v);
+        p.frames = 24000;
     } else if (layer == "fm") p.base = single({{"a1_fm_on", 1}, {"a1_fm_pitch", 12}});
     else if (layer == "phys") p.base = single({{"a1_phys_on", 1}, {"a1_click_on", 1}});
     else if (layer == "tex") p.base = single({{"a1_tex_on", 1}});
@@ -238,6 +251,12 @@ std::vector<double> movesFor(const ParameterDescriptor& d) {
     if (id == "a1_chan") return {4};
     if (id == "a1_choke") return {1};
     if (id == "a1_out") return {1};
+    // An articulation is a snare's here (the probe's piece 1); each kind's own are audited in drums_acoustic_test.
+    if (id == "a1_acou_artic") {
+        for (int a = 0; a < kArtCount; ++a)
+            if (articulationApplies(kPieceSnare, a)) v.push_back(a);
+        return v;
+    }
     if (d.choiceCount > 0) {
         for (uint32_t c = 0; c < d.choiceCount; ++c) v.push_back(c);
         return v;
