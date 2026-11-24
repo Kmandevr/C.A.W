@@ -482,14 +482,14 @@ std::string compareStable(const Audio& reference, const Audio& render) {
     return buf;
 }
 
-std::string compareChaotic(const Features& reference, const Features& render) {
+std::string compareChaotic(const Features& reference, const Features& render, double loudnessDb, double bandDb) {
     if (reference.frames != render.frames)
         return "length " + std::to_string(render.frames) + " frames, reference " + std::to_string(reference.frames);
     const double window = static_cast<double>(tol::kWindowFrames);
     for (int c = 0; c < 2; ++c) {
-        std::string why = compareCurve("loudness, frame", c, reference.loud[c], render.loud[c], tol::kLoudnessDb, window);
-        if (why.empty()) why = compareCurve("difference loudness, frame", c, reference.bright[c], render.bright[c], tol::kLoudnessDb, window);
-        if (why.empty()) why = compareCurve("1/3-octave band", c, reference.bands[c], render.bands[c], tol::kBandDb, 1);
+        std::string why = compareCurve("loudness, frame", c, reference.loud[c], render.loud[c], loudnessDb, window);
+        if (why.empty()) why = compareCurve("difference loudness, frame", c, reference.bright[c], render.bright[c], loudnessDb, window);
+        if (why.empty()) why = compareCurve("1/3-octave band", c, reference.bands[c], render.bands[c], bandDb, 1);
         bool onsetsMatch = reference.onsets[c].size() == render.onsets[c].size();
         for (size_t i = 0; onsetsMatch && i < reference.onsets[c].size(); ++i) {
             const uint32_t x = reference.onsets[c][i], y = render.onsets[c][i];
@@ -666,7 +666,7 @@ std::string References::compare(const std::string& name, const Audio& render, Cl
         e.name = name;
         e.cls = c;
         e.frames = frames;
-        if (c == Class::Chaotic) {
+        if (c != Class::Stable) {
             e.features = measureFeatures(render);
         } else {
             e.wave = encodeAudio(render);
@@ -687,12 +687,13 @@ std::string References::compare(const std::string& name, const Audio& render, Cl
     if (e->cls != c) return "recorded as another class; re-record the references";
     if (e->frames != frames) return std::to_string(frames) + " frames, reference " + std::to_string(e->frames);
     const bool report = std::getenv("CAW_REFERENCE_REPORT") != nullptr;
-    if (c == Class::Chaotic) {
+    if (c != Class::Stable) {
         const Features now = measureFeatures(render);
-        const std::string why = compareChaotic(e->features, now);
+        const bool friction = c == Class::Friction;
+        const std::string why = friction ? compareChaotic(e->features, now, tol::kFrictionDb, tol::kFrictionDb) : compareChaotic(e->features, now);
         if (report)
-            std::printf("REF %s|chaotic|-|%s|%s\n", label.c_str(), featureDeltas(e->features, now).c_str(), why.empty() ? "ok" : why.c_str());
-        return why.empty() ? std::string() : "(chaotic) " + why;
+            std::printf("REF %s|%s|-|%s|%s\n", label.c_str(), friction ? "friction" : "chaotic", featureDeltas(e->features, now).c_str(), why.empty() ? "ok" : why.c_str());
+        return why.empty() ? std::string() : (friction ? "(friction) " : "(chaotic) ") + why;
     }
     const Entry* w = e->alias.empty() ? e : find(e->alias);
     Audio ref;
@@ -733,8 +734,8 @@ bool References::load() {
             e.alias = in.s();
             const Entry* target = find(e.alias);
             if (!target || !target->alias.empty() || target->cls != Class::Stable || target->frames != e.frames) return false;
-        } else if (kind == 1) {
-            e.cls = Class::Chaotic;
+        } else if (kind == 1 || kind == 3) {
+            e.cls = kind == 1 ? Class::Chaotic : Class::Friction;
             e.features.frames = e.frames;
             for (int c = 0; c < 2; ++c)
                 in.floats(e.features.loud[c], kMaxFrames), in.floats(e.features.bright[c], kMaxFrames),
@@ -756,7 +757,7 @@ bool References::save() const {
     putU(b, entries_.size(), 4);
     for (const Entry& e : entries_) {
         putS(b, e.name);
-        const int kind = e.cls == Class::Chaotic ? 1 : e.alias.empty() ? 0 : 2;
+        const int kind = e.cls == Class::Chaotic ? 1 : e.cls == Class::Friction ? 3 : e.alias.empty() ? 0 : 2;
         putU(b, static_cast<uint64_t>(kind), 1);
         putU(b, e.frames, 4);
         if (kind == 0) {

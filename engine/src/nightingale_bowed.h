@@ -329,9 +329,11 @@ struct Bowed {
             u = timber::clamp4(u + uStep, zero, one);
             const F4 sh = u * u * (timber::f4(3.0f) - timber::f4(2.0f) * u);
             const F4 vb = target * sh;
-            // The force follows the bow's speed, but never under 2 % of the note's full-speed force (a bow resting lightly):
-            // at zero force the bristles' limit zss goes to 0 and Newton's step diverged as a released bow stopped.
-            const F4 fn = kF * timber::max4(vb, target * timber::f4(0.02f));
+            // The force rises behind the bow's speed (as the square of its shape): a force leading the speed started C#4
+            // on its octave (double slipping) for 140 ms; this way every key settles into one slip a period within 110 ms
+            // (nightingale_onsets). Never under 2 % of the note's full-speed force (a bow resting lightly): at zero force
+            // the bristles' limit zss goes to 0 and Newton's step diverged as a released bow stopped.
+            const F4 fn = kF * target * timber::max4(sh * sh, timber::f4(0.02f));
             const F4 fs = muS4 * fn, fc = muD4 * fn;
             F4 nb, bb, w;
             for (uint32_t l = 0; l < 4; ++l) nb[l] = tn[l].read(neck[l]), bb[l] = tb[l].read(bridge[l]), w[l] = noise[l].next();

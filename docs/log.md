@@ -6,6 +6,7 @@ updated: 2026-11-24
 
 # Log
 
+- 2026-11-24: Nightingale's bow force rises behind its speed (C#4 had started on its octave for 140 ms; every key now settles within 110 ms), and its references use the new **Friction** class (chaotic within 1 dB: bowed strings differ that much between compilers).
 - 2026-11-24: Nightingale no longer blows up as a bow lifts (the bow force keeps a 2 % floor and Newton's step is bounded); its and Curlew's references compare the held sound up to the last release, and the stress mix's sound check leaves them out as it does Timber's bowed strings (chaotic across compilers); the new instruments' cost ceilings sit about 1.4x over a local run.
 - 2026-11-24: the wavetable synth is shown as **Kestrel** (was Raven, which clashed with Feral-Aud.io RAVEN: the owner's rename, Hub sound-plan.md); the theme Raven and the internal ids stay.
 - 2026-11-24: knobs turn with a sideways drag (an up-and-down swipe scrolls; Settings › Haptics and menus › Knobs turn with: Sideways or Up and down) and the UI is held to 60 Hz while a song plays (1.1.3, [app](app.md), the owner's 2026-11-24 decisions).

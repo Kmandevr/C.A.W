@@ -285,6 +285,7 @@ TEST(nightingale_onsets_settle_within_the_attack) {
                 if (std::fabs(1200.0 * std::log2(bl / T)) > 30 || best < 0.8) settled = static_cast<double>(at) / 48000;  // the window's start
             }
             worst = std::max(worst, settled);
+            if (verbose()) std::printf("  key %d: %.0f ms\n", key, settled * 1000);
         }
         if (verbose()) std::printf("instrument %d: settles by %.0f ms\n", inst, worst * 1000);
         CHECK(worst < 0.12 + 0.06);  // the default attack and 60 ms (the last unsettled window's start)
@@ -365,6 +366,6 @@ TEST(nightingale_matches_its_reference_render) {
         // Compared up to the last note's release: a self-oscillating model's release tail differs between builds
         // (the chaotic class's 0.1 dB is for the held sound), and the release has its own checks.
         s.l.resize(52800), s.r.resize(52800);
-        CHECK_REFERENCE(refs, "nightingale_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
+        CHECK_REFERENCE(refs, "nightingale_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Friction);
     }
 }
