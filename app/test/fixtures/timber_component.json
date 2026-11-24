@@ -641,6 +641,449 @@
       "release": 0.05,
       "variant": 6
      }
+    },
+    {
+     "name": "Real tine stage piano",
+     "description": "Electric piano, simulated: a hammered tine through its pickup, the action heard softly, for ballads and soul",
+     "params": {
+      "pickup": 0.45,
+      "bell": 0.5,
+      "tremolo": 0.3,
+      "rate": 3.5,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Real tine, close and hard",
+     "description": "Electric piano, simulated: struck hard near the pickup, barking, for funk comping",
+     "params": {
+      "pickup": 0.85,
+      "symmetry": 0.45,
+      "bark": 0.6,
+      "bell": 0.7,
+      "velocity": 1,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Real reed classroom",
+     "description": "Electric piano, simulated: a steel reed with its tremolo and the keys' thunk, for soul and pop",
+     "params": {
+      "kind": 1,
+      "tremolo": 0.45,
+      "rate": 5.5,
+      "bark": 0.25,
+      "noises": 0.4,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Real reed rock",
+     "description": "Electric piano, simulated: an overdriven reed played hard, for rock rhythm parts",
+     "params": {
+      "kind": 1,
+      "bark": 0.8,
+      "pickup": 0.8,
+      "symmetry": 0.5,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Felt-quiet tine",
+     "description": "Electric piano, simulated: a soft tine with the hammers and dampers barely heard, for film and lo-fi",
+     "params": {
+      "pickup": 0.2,
+      "bell": 0.2,
+      "tone": -0.3,
+      "noises": 0.15,
+      "space": 0.25,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Close-miked tine",
+     "description": "Electric piano, simulated: the action's thunk and damper felt up front, as a mic by the keys hears them",
+     "params": {
+      "pickup": 0.5,
+      "noises": 1,
+      "space": 0.05,
+      "sim": 1,
+      "variant": 1
+     }
+    },
+    {
+     "name": "Real tonewheel 888",
+     "description": "Organ, simulated: 888 with the keys' contacts clicking as they close, slow rotary, for gospel and soul",
+     "params": {
+      "click": 0.5,
+      "rotary": 1,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real jazz percussion",
+     "description": "Organ, simulated: 3rd percussion and a crisp contact click, for jazz comping",
+     "params": {
+      "perc": 2,
+      "perc_decay": 1,
+      "vibrato": 6,
+      "click": 0.8,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real rock organ",
+     "description": "Organ, simulated: full and driven on a fast rotary, hard contacts, for rock",
+     "params": {
+      "db4": 8,
+      "db2": 6,
+      "db1": 8,
+      "drive": 0.75,
+      "rotary": 2,
+      "click": 0.9,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real ballad flutes",
+     "description": "Organ, simulated: soft flutes with worn, gentle contacts, for quiet backing",
+     "params": {
+      "db16": 0,
+      "db513": 0,
+      "db8": 6,
+      "db4": 4,
+      "vibrato": 5,
+      "drive": 0,
+      "click": 0.15,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real reggae bubble",
+     "description": "Organ, simulated: short mid stops whose contacts click on every skank",
+     "params": {
+      "db16": 0,
+      "db513": 0,
+      "db8": 8,
+      "db4": 8,
+      "db223": 8,
+      "perc": 1,
+      "perc_decay": 1,
+      "click": 0.7,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real church stops",
+     "description": "Organ, simulated: soft stops without the rotary, the contacts almost silent, for hymns",
+     "params": {
+      "db16": 6,
+      "db513": 0,
+      "db8": 8,
+      "db4": 6,
+      "db2": 4,
+      "rotary": 0,
+      "click": 0.05,
+      "space": 0.35,
+      "release": 0.3,
+      "sim": 1,
+      "variant": 2
+     }
+    },
+    {
+     "name": "Real steel acoustic",
+     "description": "Plucked, simulated: a picked steel-string guitar, hard strokes buzzing on the frets, for strumming",
+     "params": {
+      "brightness": 0.6,
+      "pick": 0.6,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real fingerstyle nylon",
+     "description": "Plucked, simulated: a nylon guitar plucked with the fingers, the bass strings squeaking on slides",
+     "params": {
+      "instrument": 1,
+      "pick": 0.2,
+      "position": 0.25,
+      "brightness": 0.3,
+      "noises": 0.4,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real slide blues",
+     "description": "Plucked, simulated: steel strings for bends and glides, the windings heard as the finger slides",
+     "params": {
+      "pick": 0.55,
+      "position": 0.15,
+      "noises": 0.6,
+      "release": 0.3,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real palm mute",
+     "description": "Plucked, simulated: muted at the bridge and picked hard, for tight rhythm parts",
+     "params": {
+      "damping": 0.8,
+      "pick": 0.8,
+      "position": 0.1,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real concert harp",
+     "description": "Plucked, simulated: a harp let go from the fingers, ringing on, for arpeggios",
+     "params": {
+      "instrument": 2,
+      "pick": 0.25,
+      "space": 0.3,
+      "position": 0.3,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real koto",
+     "description": "Plucked, simulated: a bright koto plucked near its bridge",
+     "params": {
+      "instrument": 3,
+      "position": 0.07,
+      "pick": 0.8,
+      "brightness": 0.7,
+      "sim": 1,
+      "variant": 3
+     }
+    },
+    {
+     "name": "Real solo violin",
+     "description": "Bowed, simulated: elasto-plastic bow friction with its noise, for expressive melodies",
+     "params": {
+      "vibrato": 0.5,
+      "space": 0.25,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real cello",
+     "description": "Bowed, simulated: a singing cello bowed firmly, for lines and solos",
+     "params": {
+      "section": 2,
+      "pressure": 0.6,
+      "vibrato": 0.45,
+      "space": 0.3,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real double bass",
+     "description": "Bowed, simulated: a heavy bass bow for low lines",
+     "params": {
+      "section": 3,
+      "pressure": 0.7,
+      "attack": 0.04,
+      "release": 0.12,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real viola",
+     "description": "Bowed, simulated: a mellow viola with a soft attack, for inner voices",
+     "params": {
+      "section": 1,
+      "attack": 0.2,
+      "vibrato": 0.35,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real scratchy bow",
+     "description": "Bowed, simulated: too much bow force for the speed: the raucous, scratching tone, for tension and sound design",
+     "params": {
+      "pressure": 1,
+      "speed": 0.2,
+      "noises": 0.7,
+      "vibrato": 0,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real airy flautando",
+     "description": "Bowed, simulated: a light, fast bow over the fingerboard, breathy and soft, for film",
+     "params": {
+      "pressure": 0.2,
+      "speed": 0.8,
+      "position": 0.25,
+      "noises": 0.5,
+      "space": 0.35,
+      "sim": 1,
+      "variant": 4
+     }
+    },
+    {
+     "name": "Real marimba, yarn mallets",
+     "description": "Mallets, simulated: a rosewood marimba struck with soft yarn mallets, for warm figures",
+     "params": {
+      "hardness": 0.3,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real marimba, hard mallets",
+     "description": "Mallets, simulated: hard rubber mallets, bright and knocking, for fast lines",
+     "params": {
+      "hardness": 0.85,
+      "noises": 0.4,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real jazz vibes",
+     "description": "Mallets, simulated: a vibraphone with motor and damper, cord mallets, for jazz",
+     "params": {
+      "instrument": 1,
+      "motor": 5,
+      "dampen": 0.8,
+      "hardness": 0.45,
+      "space": 0.2,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real xylophone",
+     "description": "Mallets, simulated: hard plastic mallets on rosewood bars, for quick orchestral figures",
+     "params": {
+      "instrument": 2,
+      "hardness": 0.9,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real glockenspiel",
+     "description": "Mallets, simulated: brass mallets on steel bars, sparkling, for celesta-like lines",
+     "params": {
+      "instrument": 3,
+      "hardness": 0.8,
+      "space": 0.25,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real tubular bells",
+     "description": "Mallets, simulated: chimes struck with a rawhide hammer, for big moments",
+     "params": {
+      "instrument": 4,
+      "hardness": 0.65,
+      "space": 0.35,
+      "decay": 1.5,
+      "sim": 1,
+      "variant": 5
+     }
+    },
+    {
+     "name": "Real clarinet",
+     "description": "Winds, simulated: a reed clarinet with tongued attacks and soft key clicks, for melodies",
+     "params": {
+      "vibrato": 0.2,
+      "space": 0.2,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Real breathy flute",
+     "description": "Winds, simulated: a jet-driven flute whose breath noise pulses with the tone, for soft melodies",
+     "params": {
+      "instrument": 1,
+      "noise": 0.35,
+      "vibrato": 0.35,
+      "space": 0.25,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Real tenor sax",
+     "description": "Winds, simulated: a conical sax bore with tongued attacks, for melodies and solos",
+     "params": {
+      "instrument": 2,
+      "reed": 0.6,
+      "vibrato": 0.3,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Real growl sax",
+     "description": "Winds, simulated: a growled sax blown hard, for rock and funk solos",
+     "params": {
+      "instrument": 2,
+      "growl": 0.6,
+      "breath": 0.85,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Real brass section",
+     "description": "Winds, simulated: lips on a brass bore, brightening and brassy as it gets louder, for horn sections",
+     "params": {
+      "instrument": 3,
+      "breath": 0.6,
+      "attack": 0.02,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Real soft brass",
+     "description": "Winds, simulated: brass played softly: round and dark, for pads and chorales",
+     "params": {
+      "instrument": 3,
+      "breath": 0.3,
+      "velocity": 0.5,
+      "attack": 0.08,
+      "space": 0.3,
+      "sim": 1,
+      "variant": 6
+     }
+    },
+    {
+     "name": "Close-miked flute",
+     "description": "Winds, simulated: the breath, tongue and keys up front, as a close mic hears them",
+     "params": {
+      "instrument": 1,
+      "noise": 0.5,
+      "noises": 1,
+      "space": 0.05,
+      "sim": 1,
+      "variant": 6
+     }
     }
    ],
    "variants": [
@@ -1369,6 +1812,41 @@
        "choices": []
       },
       {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "epiano",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "noises",
+       "name": "Noises",
+       "unit": "",
+       "default": 0.3,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "epiano",
+       "choices": []
+      },
+      {
        "id": "variant",
        "name": "Model",
        "unit": "",
@@ -1803,6 +2281,25 @@
        ]
       },
       {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "organ",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
        "id": "variant",
        "name": "Model",
        "unit": "",
@@ -2070,6 +2567,41 @@
        "max": 4,
        "step": 0,
        "curve": "exponential",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "plucked",
+       "choices": []
+      },
+      {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "plucked",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "noises",
+       "name": "Noises",
+       "unit": "",
+       "default": 0.3,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
        "smoothing_frames": 480,
        "automatable": true,
        "modulatable": true,
@@ -2369,6 +2901,41 @@
        "choices": []
       },
       {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "bowed",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "noises",
+       "name": "Noises",
+       "unit": "",
+       "default": 0.3,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "bowed",
+       "choices": []
+      },
+      {
        "id": "variant",
        "name": "Model",
        "unit": "",
@@ -2652,6 +3219,41 @@
        "default": 0,
        "min": 0,
        "max": 10,
+       "step": 0,
+       "curve": "linear",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "mallets",
+       "choices": []
+      },
+      {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "mallets",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "noises",
+       "name": "Noises",
+       "unit": "",
+       "default": 0.3,
+       "min": 0,
+       "max": 1,
        "step": 0,
        "curve": "linear",
        "smoothing_frames": 480,
@@ -2961,6 +3563,41 @@
        "max": 2,
        "step": 0,
        "curve": "exponential",
+       "smoothing_frames": 480,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "winds",
+       "choices": []
+      },
+      {
+       "id": "sim",
+       "name": "Sim",
+       "unit": "",
+       "default": 0,
+       "min": 0,
+       "max": 1,
+       "step": 1,
+       "curve": "linear",
+       "smoothing_frames": 0,
+       "automatable": true,
+       "modulatable": true,
+       "midi_mappable": true,
+       "group": "winds",
+       "choices": [
+        "Classic",
+        "Simulated"
+       ]
+      },
+      {
+       "id": "noises",
+       "name": "Noises",
+       "unit": "",
+       "default": 0.3,
+       "min": 0,
+       "max": 1,
+       "step": 0,
+       "curve": "linear",
        "smoothing_frames": 480,
        "automatable": true,
        "modulatable": true,

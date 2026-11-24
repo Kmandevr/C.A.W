@@ -43,12 +43,14 @@ const timberPanels = ['Model', 'Sound', 'Space'];
 /// `attack` and `decay` go to the Envelope panel, the organ's drawbars are drawn (and dragged) in the picture.
 const Map<int, ({List<String> choices, List<String> knobs})> timberControls = {
   TimberModel.piano: (choices: ['character', 'sim', 'tier'], knobs: ['hammer', 'unison', 'stretch', 'sustain', 'soft', 'resonance', 'noise']),
-  TimberModel.epiano: (choices: ['kind'], knobs: ['pickup', 'symmetry', 'bell', 'bark', 'tremolo', 'rate']),
-  TimberModel.organ: (choices: ['perc', 'perc_decay', 'vibrato', 'rotary'], knobs: ['click', 'drive']),
-  TimberModel.plucked: (choices: ['instrument'], knobs: ['position', 'pick', 'damping', 'brightness']),
-  TimberModel.bowed: (choices: ['section'], knobs: ['pressure', 'speed', 'position', 'vibrato', 'vib_rate']),
-  TimberModel.mallets: (choices: ['instrument'], knobs: ['hardness', 'position', 'damping', 'dampen', 'motor']),
-  TimberModel.winds: (choices: ['instrument'], knobs: ['breath', 'noise', 'reed', 'vibrato', 'vib_rate', 'growl']),
+  // 1.1.2: each model's `sim` (Classic or Simulated) is its last choice and `noises` its last knob (the organ's
+  // `click` is its contacts' noise).
+  TimberModel.epiano: (choices: ['kind', 'sim'], knobs: ['pickup', 'symmetry', 'bell', 'bark', 'tremolo', 'rate', 'noises']),
+  TimberModel.organ: (choices: ['perc', 'perc_decay', 'vibrato', 'rotary', 'sim'], knobs: ['click', 'drive']),
+  TimberModel.plucked: (choices: ['instrument', 'sim'], knobs: ['position', 'pick', 'damping', 'brightness', 'noises']),
+  TimberModel.bowed: (choices: ['section', 'sim'], knobs: ['pressure', 'speed', 'position', 'vibrato', 'vib_rate', 'noises']),
+  TimberModel.mallets: (choices: ['instrument', 'sim'], knobs: ['hardness', 'position', 'damping', 'dampen', 'motor', 'noises']),
+  TimberModel.winds: (choices: ['instrument', 'sim'], knobs: ['breath', 'noise', 'reed', 'vibrato', 'vib_rate', 'growl', 'noises']),
 };
 
 /// Short knob names (the descriptor's are longer: "Bow pressure", "Unison detune").
@@ -57,6 +59,7 @@ const Map<String, String> timberLabels = {
   'position': 'Position', 'vib_rate': 'Vib rate', 'hardness': 'Hardness', 'damping': 'Damping', 'dampen': 'Key-up',
   'noise': 'Noise', 'rate': 'Rate', 'click': 'Click', 'attack': 'Attack', 'decay': 'Decay', 'release': 'Release',
   'velocity': 'Velocity', 'tone': 'Tone', 'body': 'Body', 'space': 'Room', 'level': 'Level', 'voices': 'Voices',
+  'noises': 'Noises',
 };
 
 /// The model the device under [context] plays.
