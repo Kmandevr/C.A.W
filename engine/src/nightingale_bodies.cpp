@@ -1,4 +1,4 @@
-// Nightingale's estimated bodies (violin, viola, cello, bass): the generated responses (tools/nightingale_bodies.py) behind bodyResponse().
+// Nightingale's estimated bodies (violin, viola, cello, bass): the generated bands (tools/instrument_bodies.py nightingale) behind bodyResponse().
 #include "nightingale_bowed.h"
 
 namespace caw::nightingale {

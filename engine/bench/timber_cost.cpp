@@ -8,6 +8,7 @@
 
 #include "reference_cost.h"
 #include "builtin_components.h"
+#include "builtin_curlew.h"
 #include "builtin_nightingale.h"
 #include "builtin_starling.h"
 #include "builtin_timber.h"
@@ -186,6 +187,10 @@ int timberCost(double seconds) {
         {"org.caw.nightingale", "Nightingale violin: 8 voices", 0, {}, 8, kPoly},
         {"org.caw.nightingale", "Nightingale cello: 8 voices, vibrato 1", 2, {{"vibrato", 1}}, 8, kPoly},
         {"org.caw.nightingale", "Nightingale bass: 8 voices, High", 3, {{"tier", 3}}, 8, 12000},  // High: exports, 1.25x medium
+        {"org.caw.curlew", "Curlew flute: 8 voices", 0, {}, 8, kPoly},
+        {"org.caw.curlew", "Curlew clarinet: 8 voices", 1, {}, 8, kPoly},
+        {"org.caw.curlew", "Curlew saxophone: 8 voices, growl", 2, {{"growl", 0.5}}, 8, kPoly},
+        {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 11000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
     };
     for (const NewCase& c : more) {
         Values v = c.values;
@@ -199,7 +204,10 @@ int timberCost(double seconds) {
         const double us = cost(*p, v, c.voices, seconds);
         const bool bad = us > c.ceilingUs;
         over += bad;
-        const size_t bytes = c.id[8] == 's' ? starling::starlingBytes(c.model, kRate) : nightingale::nightingaleBytes(c.model, kRate);
+        const std::string_view id = c.id;
+        const size_t bytes = id == "org.caw.starling"      ? starling::starlingBytes(c.model, kRate)
+                             : id == "org.caw.nightingale" ? nightingale::nightingaleBytes(c.model, kRate)
+                                                           : curlew::curlewBytes(c.model, kRate);
         std::printf("  %-50s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, bytes, c.ceilingUs, bad ? "  OVER" : "");
     }
     return over;

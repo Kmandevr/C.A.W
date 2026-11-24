@@ -5,6 +5,7 @@
 #include "builtin_timber.h"
 #include "builtin_starling.h"
 #include "builtin_nightingale.h"
+#include "builtin_curlew.h"
 #include "builtin_flock.h"
 #include "audio_clips.h"
 #include "builtin_sampler.h"
@@ -19,6 +20,7 @@ void registerBuiltinInstruments(ModuleRegistry& registry) {
     timber::registerTimber(registry);  // org.caw.timber (builtin_timber.cpp, 1.1.0)
     starling::registerStarling(registry);  // org.caw.starling (builtin_starling.cpp, 1.1.3)
     nightingale::registerNightingale(registry);  // org.caw.nightingale (builtin_nightingale.cpp, 1.1.3)
+    curlew::registerCurlew(registry);  // org.caw.curlew (builtin_curlew.cpp, 1.1.3)
     registerSampler(registry);        // org.caw.sampler (builtin_sampler.cpp)
     flock::registerFlock(registry);   // org.caw.flock (builtin_flock.cpp, 1.1.0)
     registerAudioTrack(registry);     // org.caw.audio-track: audio clips and input (audio_clips.cpp)

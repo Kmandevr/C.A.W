@@ -217,7 +217,7 @@ TEST(nightingale_tuning_table) {
     CHECK(f.good());
 }
 
-// The renders tools/nightingale_bodies.py compares with the recordings: every semitone of each range at velocity 0.7,
+// The renders tools/instrument_bodies.py nightingale compares with the recordings: every semitone of each range at velocity 0.7,
 // body off, written to $CAW_NIGHTINGALE_RENDERS as <instrument>_<key>.f32 (nothing without it).
 TEST(nightingale_body_renders) {
     const char* dir = std::getenv("CAW_NIGHTINGALE_RENDERS");

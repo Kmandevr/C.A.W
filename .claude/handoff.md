@@ -1,36 +1,20 @@
 # Handoff
 
-Commit: f427877 (Main after 1.1.2-alpha.1, PR #261, released 2026-11-24, and #256)
-Branch: start your own from Main. Main is protected, so changes go in by PR only; merge it yourself once CI is green. **The plan and the owner's decisions** are in the private Kmandevr/AutoStacc-Hub: docs/caw/decisions.md ("2026-11-24: realism after 1.1.2, and compatibility in the alpha"), docs/caw/realism-research.md, docs/caw/roadmap.md (1.1.3) and Hub issues #30 (realism) and #29 (maintenance). Read those first.
+Branch: `ccr-bd7ac4df-86w0bh`, PR #264 (Starling + Nightingale; merge it yourself once CI is green). A 5-hourly scheduled wake-up resumes this session.
+**The plan and the owner's decisions** are in the private Kmandevr/AutoStacc-Hub: docs/caw/decisions.md (2026-11-24 entries, incl. "the road to 1.2.0, worked without listening gates"), docs/caw/realism-research.md, docs/caw/roadmap.md.
 
 ## Goal
-Build **1.1.3**, the realistic instruments, one instrument per step, and let the owner listen after each.
-- Timber splits into Starling (piano, guitar, harp), Nightingale (bowed strings), Curlew (winds), Woodpecker (percussion) and Bittern (pipe organ).
-- Each is a synthesized source with recorded bodies and noises (CC0/CC-BY, about 15 MB bundled), dry by default, with only the noises the real instrument makes.
-- Start with Starling's piano: the hybrid from the Salamander Grand, about 1.5 MB.
+Take C.A.W from 1.1.2-alpha.1 to 1.2.0 (roadmap order: 1.1.3 realistic instruments + maintenance, 1.1.4–1.1.7, silent groundwork, 1.2.0 switch-on).
+- Owner: don't wait to listen; keep working; input now and then is weighed, not an order unless said. Ask only for UI looks (one mockup page per release).
+- Never link Claude Code or a claude.ai session in commits/PRs/files (commits were refused with the session line).
 
 ## Done and verified
-- 1.1.2-alpha.1 is released (app.yml run 2278 succeeded).
-- The lessons from 1.1.2 are in .claude/rules (engine, ci, app) and .claude/README.md ("Session quirks").
-
-## State
-- Nothing for 1.1.3 is built yet. The research names the causes:
-  - the bowed strings' force is not tied to bow speed;
-  - the winds' bore click is the "piano on the flute";
-  - every model has a heavy default room;
-  - Rook's kit presets are buried at positions 93–116;
-  - Randomize draws its values uniformly.
-- The name check of the new names was run on 2026-11-24; see the Hub decisions for its result.
-
-## Open (owner)
-- Branch cleanup: the proxy refuses branch deletes, so the owner deletes merged branches on GitHub.
-- Before any new UI look (the four instruments' pages, Rook's kit kinds, the Randomness knob), ask the owner.
-
-## Rules for continuing
-- **No lost work:** push after every commit, and back up agent worktrees to `caw-backup-*`.
-- **Loop guard:** one CI re-run per failure.
-- **Efficiency:** 2–3 agents at a time, short output, a recommendation with every question.
-- **No Claude Code or claude.ai session links** anywhere (owner).
+- Starling (org.caw.starling, hybrid piano, Salamander CC-BY 3.0, embedded FLAC, recorded_bank load-on-use) — tests, rt, references; flutter test 2819 passed with CAW_LIB.
+- Nightingale (org.caw.nightingale, bowed strings) — measured window/tuning tables (tests under --update-references), bodies from VSCO 2 CE (CC0) via engine/tools/nightingale_bodies.py; all realism tests pass; cost ~8.7k vs 9.6k.
+- Flutter 3.47.7 is installed at /opt/fl/flutter (analytics off). Sample sources in the scratchpad dl/ (Salamander, VSCO 2 CE, VCSL).
 
 ## Next
-Starling's piano first. Plan its build against the research (Part B piano, recorded parts list), then the shared recordings loader with load-on-use, the knob gesture, and Rook's presets and Randomize.
+1. Merge #264 when green; release 1.1.3-alpha.1 (version bump in pubspec + lib/version.dart, CHANGELOG at root and app/assets).
+2. Curlew (winds: research B3, the bore click is the "piano on the flute"), Bittern (pipe organ, cathedral room on), Woodpecker (percussion), Starling guitar/harp; then Timber removed with migration (EP + tonewheel to Raven).
+3. Rook realistic kit/presets/Randomness, sideways knob drag, 60 Hz UI while playing; maintenance (Hub #29).
+4. Mockups for the new pages (one page per release), ask the owner.
