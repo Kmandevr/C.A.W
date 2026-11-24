@@ -141,7 +141,7 @@ struct EPiano {
         v.thunk.set(110.0, 0.03, sr);
         v.thunk.clear();
         v.thunkKick = static_cast<float>(0.05 * noises * (0.3 + 0.7 * v.velocity));
-        v.thunkLeft = noises > 0.0 ? static_cast<uint32_t>(0.12 * sr) : 0;  // 4 T60s of the 30 ms thunk
+        v.thunkLeft = noises > 0.0 ? static_cast<uint32_t>(0.06 * sr) : 0;  // 2 T60s of the 30 ms thunk: -120 dB
         v.feltLeft = 0;
         v.felt.set(500.0, sr);
         v.felt.clear();
@@ -176,6 +176,7 @@ struct EPiano {
         }
         return softClip(y * drive) * norm * 0.45f;
     }
+    // The hammer's contact (the first millisecond or two), the modes and pickup, then the acoustic noises.
     CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
         F4 c, sn, zr, zi;
         for (int k = 0; k < 4; ++k) c[k] = v.mode[k].c, sn[k] = v.mode[k].s, zr[k] = v.mode[k].zr, zi[k] = v.mode[k].zi;
@@ -195,7 +196,10 @@ struct EPiano {
             out[i] = pickupOf(im[0] + im[1] + im[2] + im[3]);
         }
         for (int k = 0; k < 4; ++k) v.mode[k].zr = zr[k], v.mode[k].zi = zi[k];
-        // The acoustic noises, while they sound.
+        acoustic(v, out, n);
+    }
+    // The acoustic noises, while they sound.
+    void acoustic(Voice& v, float* out, uint32_t n) noexcept {
         if (v.thunkLeft) {
             const uint32_t m = std::min(n, v.thunkLeft);
             for (uint32_t j = 0; j < m; ++j) out[j] += v.thunk.run(v.thunkKick), v.thunkKick = 0;

@@ -11,11 +11,28 @@
 // loop (the engine builds with -fassociative-math) stay as they were and 1.1.0 presets render bit for bit.
 #if defined(_MSC_VER)
 #define CAW_TIMBER_NOINLINE __declspec(noinline)
+#define CAW_TIMBER_INLINE __forceinline
 #else
 #define CAW_TIMBER_NOINLINE __attribute__((noinline))
+#define CAW_TIMBER_INLINE inline __attribute__((always_inline))
 #endif
 
 namespace caw::timber {
+
+// A fixed delay's read, worked out once (a block's delays move only at control points): the same arithmetic as
+// Line::frac(d), so the same bits, without its float-to-integer step each sample.
+struct Tap {
+    uint32_t i = 2;
+    float f = 0;
+    void set(float d) noexcept {
+        i = static_cast<uint32_t>(d);
+        f = d - static_cast<float>(i);
+    }
+    float read(const Line& l) const noexcept {
+        const float a = l.buf[(l.w - i) & l.mask], b = l.buf[(l.w - i - 1) & l.mask];
+        return a + (b - a) * f;
+    }
+};
 
 // The appended `sim` choice of every model but the piano (0 Classic: 1.1.0 bit for bit; 1 Simulated).
 inline constexpr double kSimDefault = 0.0;

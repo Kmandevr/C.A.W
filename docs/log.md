@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-20
+updated: 2026-11-24
 ---
 
 # Log
 
+- 2026-11-24: Timber 1.1.2's Simulated models all keep to the medium + 20 % ceiling at Normal ([decisions](decisions.md)): the bowed's elasto-plastic bristles move to High (Normal keeps 1.1.0's friction table with the bow noise and lift), brass's Normal steepening is its first order, the cone's delays are worked out once a note, and the pipes' hot loops are trimmed; the separate 11,200 ceiling is gone. Only the bowed's Simulated reference render changed.
 - 2026-11-20: Timber 1.1.2, the Simulated models ([engine](engine.md#timber-the-modelled-acoustic-instrument-110), [decisions](decisions.md)): every model but the piano appends `sim` (Classic plays as 1.1.0, hashed) and `noises`: the jet-driven flute with pulsed breath, tongued reeds, a conical sax, lips with brassiness, elasto-plastic bowing with bow noise, plucks let go from their shape with fret buzz and slide noise, contact mallets and tine hammers with the action's thunk and dampers, the organ's key contacts; 37 Simulated presets; realism, block-size, tier, NaN and rt tests; the page shows Sim and Noises in its existing rows; the patent check per model (our reading).
 - 2026-11-20: playback spikes and UI load for 1.1.1 ([performance](performance.md#playback-spikes-and-ui-load-111-2026-11-20)): the engine has no rare costly block (`caw_bench SECONDS 602`, its `caw_spike_check` ctest; the per-slot cost timing measured free); device motion at most 60 frames a second and the slot meter, auto gain ear, crow loader and Parrot on a `CappedTicker` (an open device page no longer draws 119 frames a second while stopped); Flock's and Timber's pictures no longer relay out their page each motion frame; the device header's ripple and display frames repaint in their own layers; the Benchmark screen rebuilds only its running card at 10 Hz, runs with no cool-down pauses and shows measured numbers only; the load stabilizer spins only as far as the clock needs and backs off with heat (`caw_audio_set_thermal`, API 45); Lark's edit-pitch pill no longer overflows a phone.
 - 2026-11-20: Bitwise's glitch ops (1.1.1, owner's feedback): OR, rotate, reverse, freeze, seeded flips and the key or echo combine, on an 8-step beat pattern, appended after `variant` (1.1.0 bit for bit with them off), keyed, with tone, gate and auto level; 11 presets, display 45, tests and reference renders, cost under the light ceiling; the page's new chips, steps and knobs ([engine](engine.md#new-modes-110), [ui](ui.md)).

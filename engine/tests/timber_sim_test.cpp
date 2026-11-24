@@ -56,6 +56,11 @@ struct Direct {
         m.start(v, s);
         return v;
     }
+    // Ends a chunk as the frame does: the model's post() after its voices.
+    void finish(uint32_t n) {
+        float l[kControlFrames] = {}, r[kControlFrames] = {};
+        m.post(l, r, n, s);
+    }
     // Renders `frames` (a multiple of 16) of voice 0, calling control and voiceControl on the grid.
     void run(std::vector<float>& out, size_t frames) {
         float buf[kControlFrames];
@@ -63,6 +68,7 @@ struct Direct {
             m.control(p, s);
             m.voiceControl(voices[0], s);
             m.render(voices[0], buf, kControlFrames);
+            finish(kControlFrames);
             out.insert(out.end(), buf, buf + kControlFrames);
         }
     }
@@ -178,6 +184,7 @@ TEST(timber_sim_flute_breath_noise_follows_the_flow_and_pulses_with_the_period) 
         d.m.voiceControl(v, d.s);
         for (uint32_t i = 0; i < kControlFrames; ++i) {
             d.m.render(v, buf + i, 1);
+            d.finish(1);
             turb.push_back(v.turb);
             flow.push_back(v.jetU * v.jetU);
         }
@@ -270,12 +277,12 @@ TEST(timber_sim_bow_finds_helmholtz_motion_inside_schellengs_window) {
         // the 5th on the viola.
         const int top = section == 1 ? 4 : 8;
         const Values in = simOf(4, {{"section", section}, {"space", 0}, {"body", 0}, {"vibrato", 0}, {"noises", 0}, {"attack", 0.005}, {"position", 0.1}});
-        const std::vector<float> x = note(in, key, 0.8, 1.5, 1.6);
+        const std::vector<float> x = note(in, key, 0.8, 1.5, 1.6, kQualityHigh);  // High: the elasto-plastic bow
         double worst = 0;
         for (int n = 2; n <= top; ++n) worst = std::max(worst, std::fabs(sawDev(x, f, n, 24000, 24000)));
         Values low = in;
         low.emplace_back("pressure", 0.0);
-        const std::vector<float> y = note(low, key, 0.8, 1.5, 1.6);
+        const std::vector<float> y = note(low, key, 0.8, 1.5, 1.6, kQualityHigh);
         double lowWorst = 0;
         for (int n = 2; n <= 6; ++n) lowWorst = std::max(lowWorst, std::fabs(sawDev(y, f, n, 24000, 24000)));
         if (verbose()) std::printf("bow section %d: worst 1/n deviation %.1f dB in the window, %.1f dB under it\n", section, worst, lowWorst);
@@ -288,7 +295,7 @@ TEST(timber_sim_bow_slips_for_about_its_position_of_each_period) {
     // Helmholtz motion: the string slips under the bow for beta of each period (the bow's position along it); the
     // rounded corner (the bridge's loss) and the bristles' release widen it a little.
     for (double beta : {0.1, 0.15}) {
-        Direct<Bowed> d;
+        Direct<Bowed> d(kQualityHigh);
         double p[Bowed::kModelParams] = {2, 0.5, 0.5, beta, 0, 5.5, 0.005, 1, 0};
         d.set(p);
         Bowed::Voice& v = d.start(48, 0.8);
@@ -336,6 +343,7 @@ TEST(timber_sim_handling_noise_rises_linearly_with_slide_speed) {
             d.m.control(d.p, d.s);
             d.m.voiceControl(v, d.s);
             d.m.render(v, buf, kControlFrames);
+            d.finish(kControlFrames);
             if (blk == 1500) rate[k] = v.slideInc * 48000.0, level[k] = v.slideAmp + kControlFrames * v.slideStep;
         }
     }
@@ -378,7 +386,7 @@ TEST(timber_sim_contact_mallets_and_hammers_brighten_with_hardness_and_velocity)
         Mallet::Voice& v = d.start(64, 0.8);
         int samples = 0;
         float y;
-        while (!v.contact.done && samples < 4800) d.m.render(v, &y, 1), ++samples;
+        while (!v.contact.done && samples < 4800) d.m.render(v, &y, 1), d.finish(1), ++samples;
         return samples;
     };
     const int ty = touch(0.1), th = touch(0.95);
