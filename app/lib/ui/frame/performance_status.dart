@@ -29,8 +29,8 @@ List<(String, Color)> performanceIssues(AppState s) => [
 final _seen = Expando<Set<String>>('performance-seen');
 Set<String> _seenOf(AppState s) => _seen[s] ??= <String>{};
 
-/// [child] (the CPU readout) made the way into the Performance sheet: a tap opens it, and a small dot before it
-/// shows, in the colour of the most urgent, that the sheet has something not seen yet.
+/// [child] (the CPU readout) made the way into the Performance sheet: a tap opens it, and a small dot just
+/// after it shows, in the colour of the most urgent, that the sheet has something not seen yet.
 class PerformanceStatus extends StatefulWidget {
   const PerformanceStatus({super.key, required this.state, required this.child});
   final AppState state;
@@ -64,7 +64,10 @@ class _PerformanceStatusState extends State<PerformanceStatus> {
         onTap: _open,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          // The dot after the readout, which is right-aligned in its box: it sits beside the text.
           child: Row(mainAxisSize: MainAxisSize.min, children: [
+            widget.child,
+            const SizedBox(width: 4),
             ListenableBuilder(
               listenable: Listenable.merge([s.tick, s.pressure, s.freezeHint.suggestion]),
               builder: (context, _) {
@@ -81,8 +84,6 @@ class _PerformanceStatusState extends State<PerformanceStatus> {
                 );
               },
             ),
-            const SizedBox(width: 4),
-            widget.child,
           ]),
         ),
       ),
