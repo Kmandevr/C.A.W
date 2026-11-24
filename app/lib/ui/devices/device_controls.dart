@@ -16,6 +16,7 @@ import '../widgets.dart' show LiveIsland, ResetOnDoubleTap;
 import 'device_scope.dart';
 import 'kit/param_watch.dart';
 import 'kit/key_param.dart';
+import 'kit/touch_engage.dart';
 import 'knob_menu.dart';
 import '../arrange/automate_control.dart';
 import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
@@ -27,7 +28,7 @@ import 'visuals/mod_sheet.dart';
 Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.exponential);
 
 /// A rotary knob for parameter [paramId]: drag up or down (200 px covers the travel; a second finger elsewhere or
-/// Shift for fine), double-tap for the default, on the descriptor's taper. While it is dragged a bubble above it
+/// Shift for fine; a finger engages after a short rest or a slow start, so a quick swipe scrolls the page), double-tap for the default, on the descriptor's taper. While it is dragged a bubble above it
 /// shows the value, so the finger doesn't hide it.
 ///
 /// With a mod matrix (Vital-style, owner 2026-11-10) it shows each route as a ring in its source's colour over the
@@ -352,10 +353,13 @@ class _DeviceKnobState extends State<DeviceKnob> {
                 },
                 // Right-click: what a long-press does (the Modulation sheet, or the value dialog).
                 onSecondaryTapUp: (_) => longPress(),
-                onVerticalDragStart: (d) => start(d.localPosition),
-                onVerticalDragUpdate: (d) => update(d.delta.dy),
-                onVerticalDragEnd: (_) => end(),
-                onVerticalDragCancel: end,
+                // A finger's vertical drag engages after a short rest or a slow start; a quick swipe scrolls the page
+                // (kit/touch_engage.dart). The mouse drags at once.
+                child: EngageVerticalDrag(
+                onStart: (d) => start(d.localPosition),
+                onUpdate: (d) => update(d.delta.dy),
+                onEnd: (_) => end(),
+                onCancel: end,
                 child: WheelSteps(
                   onStep: wheel,
                   onEnd: t.commit,
@@ -390,6 +394,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
                       ],
                     ]),
                   ),
+                ),
                 ),
                 ),
               ),

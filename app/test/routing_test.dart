@@ -174,7 +174,7 @@ void main() {
       expect(find.byKey(const ValueKey('sidechain-key-0')), findsOneWidget);
       final hero = tester.getRect(find.byKey(const ValueKey('duck-hero')));
       final before = t.value('depth');
-      await tester.dragFrom(Offset(hero.center.dx, hero.bottom - 30), const Offset(0, -60));
+      await restDrag(tester, Offset(hero.center.dx, hero.bottom - 30), const Offset(0, -60));
       await tester.pumpAndSettle();
       expect(t.value('depth'), lessThan(before));
       await tester.tap(find.byKey(const ValueKey('duck-shape-Gate')));

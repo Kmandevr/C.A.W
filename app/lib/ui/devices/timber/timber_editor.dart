@@ -16,6 +16,7 @@ import '../kit/controls.dart' show KnobRow;
 import '../kit/device_style.dart';
 import '../kit/feel.dart';
 import '../kit/hero.dart';
+import '../kit/touch_engage.dart';
 import 'timber_visual.dart';
 
 export 'timber_visual.dart';
@@ -348,19 +349,21 @@ class _TimberVisualState extends State<TimberVisual> {
       }),
       child: LayoutBuilder(builder: (context, box) {
         final size = box.biggest;
-        // One axis, so the drag wins over the page's scroll (a pan's larger slop would lose to it).
+        // One axis: a sideways grab wins over the page's scroll at once; an up-and-down one engages after a short rest or
+        // a slow start, so a quick swipe still scrolls (kit/touch_engage.dart).
         final sideways = timberGrab(model)?.horizontal ?? false;
-        return GestureDetector(
+        return EngageVerticalDrag(
+          onStart: sideways ? null : (d) => _down(t, model, d.localPosition, size),
+          onUpdate: sideways ? null : (d) => _move(t, model, d.localPosition, size),
+          onEnd: sideways ? null : (_) => _up(t),
+          onCancel: sideways ? null : () => _up(t),
+          child: GestureDetector(
           key: const ValueKey('timber-grab'),
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: sideways ? (d) => _down(t, model, d.localPosition, size) : null,
           onHorizontalDragUpdate: sideways ? (d) => _move(t, model, d.localPosition, size) : null,
           onHorizontalDragEnd: sideways ? (_) => _up(t) : null,
           onHorizontalDragCancel: sideways ? () => _up(t) : null,
-          onVerticalDragStart: sideways ? null : (d) => _down(t, model, d.localPosition, size),
-          onVerticalDragUpdate: sideways ? null : (d) => _move(t, model, d.localPosition, size),
-          onVerticalDragEnd: sideways ? null : (_) => _up(t),
-          onVerticalDragCancel: sideways ? null : () => _up(t),
           child: AnimatedSwitcher(
             duration: Motion.fade(Motion.standard, Motion.of(context)),
             // At the picture's size (tight constraints): a motion frame's relayout stays inside it, not the page.
@@ -369,7 +372,7 @@ class _TimberVisualState extends State<TimberVisual> {
               builder: (context, seconds) => CustomPaint(size: size, painter: TimberPainter(TimberPicture(
                 model: model, value: t.value, frame: TimberFrame(f), seconds: seconds,
                 accent: scope.accent, secondary: style.secondary))))))),
-        );
+        ));
       }),
     );
   }

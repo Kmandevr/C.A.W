@@ -231,10 +231,10 @@ void main() {
       final s = await open(tester, 'org.caw.compressor');
       final t = targetOf(s, 'org.caw.compressor');
       final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
-      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('threshold'), greaterThan(-18));
-      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('ratio'), lessThan(4));
       await close(tester);
@@ -253,10 +253,10 @@ void main() {
       expect(find.byKey(const ValueKey('dknob-hold')), findsOneWidget);
       expect(find.byKey(const ValueKey('dknob-ratio')), findsNothing);
       final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
-      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('threshold'), greaterThan(-20));
-      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('amount'), lessThan(0.5));
       expect(tester.takeException(), isNull);
@@ -272,12 +272,12 @@ void main() {
       final s = await open(tester, 'org.caw.limiter');
       final t = targetOf(s, 'org.caw.limiter');
       final hero = tester.getRect(find.byKey(const ValueKey('limiter-hero')));
-      await tester.dragFrom(Offset(hero.center.dx, hero.bottom - 20), const Offset(0, -50));
+      await restDrag(tester, Offset(hero.center.dx, hero.bottom - 20), const Offset(0, -50));
       await tester.pumpAndSettle();
       expect(t.value('gain'), greaterThan(2));
       final area = Rect.fromLTRB(hero.left, hero.top + 22, hero.right, hero.bottom - 4);
       final cy = area.bottom - (-1 + 24) / 27 * area.height;
-      await tester.dragFrom(Offset(hero.center.dx, cy), const Offset(0, 40));
+      await restDrag(tester, Offset(hero.center.dx, cy), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(t.value('ceiling'), lessThan(-2));
       await close(tester);
@@ -289,8 +289,8 @@ void main() {
       final s = await open(tester, 'org.caw.transient');
       final t = targetOf(s, 'org.caw.transient');
       final hero = tester.getRect(find.byKey(const ValueKey('transient-hero')));
-      await tester.dragFrom(Offset(hero.left + 30, hero.center.dy), const Offset(0, -40));
-      await tester.dragFrom(Offset(hero.right - 40, hero.center.dy), const Offset(0, 40));
+      await restDrag(tester, Offset(hero.left + 30, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 40, hero.center.dy), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(t.value('attack'), greaterThan(0.1));
       expect(t.value('sustain'), lessThan(-0.1));
@@ -343,7 +343,7 @@ void main() {
     testWidgets('distortion: the same UI on its shape and linear drive', (tester) async {
       final s = await open(tester, 'org.caw.distortion');
       final t = targetOf(s, 'org.caw.distortion');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('drive-hero'))), const Offset(0, -60));
+      await restDrag(tester, tester.getCenter(find.byKey(const ValueKey('drive-hero'))), const Offset(0, -60));
       await tester.pumpAndSettle();
       expect(t.value('drive'), greaterThan(4));
       await tester.tap(find.byKey(const ValueKey('mode-shape-3')));
@@ -426,7 +426,7 @@ void main() {
 
     testWidgets('width and balance: the same goniometer on their one knob', (tester) async {
       var s = await open(tester, 'org.caw.stereo.width');
-      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(0, 40));
+      await restDrag(tester, tester.getCenter(find.byKey(const ValueKey('utility-hero'))), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.width').value('width'), lessThan(1));
       await close(tester);

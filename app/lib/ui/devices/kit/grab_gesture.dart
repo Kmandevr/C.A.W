@@ -1,10 +1,11 @@
-// The one gesture surface every hero visual uses: grab (one finger drags, two pinch), tap, double-tap, long-press, right-click and the mouse wheel.
+// The one gesture surface every hero visual uses: grab (one finger drags after a short rest or sideways, two pinch; a quick vertical swipe scrolls), tap, double-tap, long-press, right-click and the mouse wheel.
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
 import 'feel.dart';
+import 'touch_engage.dart';
 
 /// A drag or pinch on a hero visual. [pointers] is how many fingers are down; [scale] is the pinch's spread since
 /// it started (1 with one finger).
@@ -15,8 +16,9 @@ class GrabUpdate {
   final int pointers;
 }
 
-/// Touches that begin where [grabs] says yes (everywhere by default) are claimed at once, so the page's scroll
-/// doesn't take them; others scroll as usual. Taps, double-taps and long-presses are seen anywhere on [child].
+/// Touches that begin where [grabs] says yes (everywhere by default) are claimed once the finger has rested a
+/// moment, moved sideways or been joined by a second finger (kit/touch_engage.dart), so a quick vertical swipe still
+/// scrolls the page; a mouse is claimed at once; touches elsewhere scroll as usual. Taps, double-taps and long-presses are seen anywhere on [child].
 /// A second finger during a grab turns it into a pinch ([onStart] again with two pointers). A pinch also slows
 /// single-finger drags elsewhere ([DeviceFingers.fine]).
 class GrabGesture extends StatefulWidget {
@@ -171,7 +173,7 @@ class _GrabGestureState extends State<GrabGesture> {
   );
 }
 
-class _GrabScaleRecognizer extends ScaleGestureRecognizer {
+class _GrabScaleRecognizer extends ScaleGestureRecognizer with EngageOnHold {
   bool Function(Offset local)? grabs;
   int _tracked = 0;
 
@@ -181,7 +183,7 @@ class _GrabScaleRecognizer extends ScaleGestureRecognizer {
     if (_tracked == 0 && !(grabs?.call(local) ?? true)) return; // left to the scroll
     _tracked++;
     super.addAllowedPointer(event);
-    resolvePointer(event.pointer, GestureDisposition.accepted);
+    engageOnDown(event); // a short rest, a sideways move or a second finger (touch_engage.dart)
   }
 
   @override

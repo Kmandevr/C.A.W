@@ -128,7 +128,7 @@ void main() {
       final before = t.value('b2_down_thr');
       final areaH = hero.height - 38;
       final y = hero.top + 22 + areaH * (1 - (before + 72) / 72);
-      await tester.dragFrom(Offset(xOf(450), y), const Offset(0, -30));
+      await restDrag(tester, Offset(xOf(450), y), const Offset(0, -30));
       await tester.pumpAndSettle();
       expect(t.value('b2_down_thr'), greaterThan(before));
       await close(tester);

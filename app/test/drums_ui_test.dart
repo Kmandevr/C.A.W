@@ -254,7 +254,7 @@ void main() {
       final before = t.value(first), other = t.value('a1_${first.substring(3)}');
       await tester.ensureVisible(knobs.first);
       await tester.pumpAndSettle();
-      await tester.drag(knobs.first, Offset(0, before >= t.param(first)!.max ? 60 : -60));
+      await restDrag(tester, tester.getCenter(knobs.first), Offset(0, before >= t.param(first)!.max ? 60 : -60));
       await tester.pumpAndSettle();
       expect(t.value(first), isNot(before), reason: first);
       expect(t.value('a1_${first.substring(3)}'), other, reason: first);
@@ -411,7 +411,7 @@ void main() {
     // The start point sets the depth.
     final start = rect.topLeft + drumHeroPoint(shape, 0, rect.size, drumHeroAxis(shape));
     final depth = t.value('a1_body_pitch');
-    await tester.dragFrom(start + const Offset(-3, 0), const Offset(0, -30));
+    await restDrag(tester, start + const Offset(-3, 0), const Offset(0, -30));
     await tester.pumpAndSettle();
     expect(t.value('a1_body_pitch'), greaterThan(depth));
     // Curve mode: the left quarter drags the sweep, the rest the decay.

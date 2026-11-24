@@ -89,7 +89,7 @@ void main() {
     // A drag starting on the knob's rim sets the link's amount, not the knob.
     final before = s.project.layers.first.components.first.params['cutoff'];
     final box = tester.getRect(find.byKey(const ValueKey('dknob-cutoff')));
-    await tester.dragFrom(Offset(box.center.dx, box.top + 6), const Offset(0, -40));
+    await restDrag(tester, Offset(box.center.dx, box.top + 6), const Offset(0, -40));
     await tester.pumpAndSettle();
     expect(s.modLink(link.id)!.amount, greaterThan(0.25));
     expect(s.project.layers.first.components.first.params['cutoff'], before);
