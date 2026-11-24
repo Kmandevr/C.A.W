@@ -203,19 +203,20 @@ int rookCost(double seconds) {
     };
     // The design's targets are on the Acoustic engine itself (its pieces, mics and bleed; docs/engine.md "Drums",
     // Acoustic, Cost): heavy (24,000 µs/s) for a full kit at Normal, medium (8,000) at Eco. The kit's room is 1.1.0's
-    // reverb, priced on its own as the design does ("then 1.1.0's room"). The ceilings catch regressions: about 1.2
-    // times the highest of three runs on the x86 box at CI's length (`caw_bench 0.5 323`, 2026-11-24).
+    // reverb, priced on its own as the design does ("then 1.1.0's room"). The ceilings catch regressions: about 1.4
+    // times the highest of three runs on the x86 box at CI's length (`caw_bench 0.5 323`, 2026-11-24): 1.2 failed on
+    // CI's Arm64 runner, which reads 5-10 % higher even on 1.1.0's own Kit: 909 (PR #261).
     const KitCase kits[] = {
-        {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 11000, 9600},  // 2.4 % of a phone core
-        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 6500, 0},
-        {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 24500, 24000},
-        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 13000, 8000},
-        {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 38000, 0},
-        {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 17500, 0},
-        {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 11500, 0},
-        {"Kit: 909 groove (1.1.0's Layers, for scale)", &old909, &groove, kQualityNormal, 14000, 0},
-        {"Produced kit: House groove", &produced, &groove, kQualityNormal, 28500, 0},
-        {"Synth kit: 808-style groove", &synth, &groove, kQualityNormal, 21000, 0},
+        {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 13000, 9600},  // 2.4 % of a phone core
+        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 7500, 0},
+        {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 28500, 24000},
+        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 15000, 8000},
+        {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 44500, 0},
+        {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 20500, 0},
+        {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 13500, 0},
+        {"Kit: 909 groove (1.1.0's Layers, for scale)", &old909, &groove, kQualityNormal, 16500, 0},
+        {"Produced kit: House groove", &produced, &groove, kQualityNormal, 33000, 0},
+        {"Synth kit: 808-style groove", &synth, &groove, kQualityNormal, 24500, 0},
     };
     std::printf("Drums 1.1.2 (Rook kits), a one-bar loop at 120 BPM (µs of CPU per second of audio; ceiling µs/s; design):\n");
     for (const KitCase& c : kits) {
