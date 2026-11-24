@@ -1,31 +1,36 @@
 # Handoff
 
-Commit: 03f36ce (Main: v1.1.0-alpha.1 released 2026-11-19, PR #258; the sanitizer table PR #259 merged)
-Branch: ccr-56285e11-0xrj3h. Main is protected: PRs only; merge yourself when CI is green. **The owner's standing instructions and the full plan** are in the private Kmandevr/AutoStacc-Hub, docs/caw/sound-plan.md ("The owner's standing instructions…" and "After 1.1.0: the owner's feedback (2026-11-20)"); the roadmap is docs/caw/roadmap.md. Read those first.
+Commit: 5065ba9 + this note. PR #261 is open for 1.1.2-alpha.1 on the session branch.
+Branch: ccr-56285e11-0xrj3h. Main is protected, so changes go in by PR only; merge it yourself once CI is green. **The owner's standing instructions and the full plan** are in the private Kmandevr/AutoStacc-Hub: docs/caw/sound-plan.md ("After 1.1.1 (owner, 2026-11-24)"), docs/caw/roadmap.md and docs/caw/phone-performance-research.md. Read those first.
 
 ## Goal
-1. **1.1.1 (fixes):** the spikes (while playing, opening menus, device pages open), device visuals slowing the app, the echo in older Flagship patches, and Bits' new bitwise modes.
-2. **1.1.2 (realism):** Timber fully simulated (mechanical noises, transients); Rook's kit modes from synthesized to polished EDM to a simulated real kit (not a morph knob; build each kind quickly). Plan it with the owner's answers in the Hub before building.
+Release **1.1.2** (realism plus playback fixes): merge PR #261, then dispatch app.yml on Main with installables and release.
 
 ## Done and verified
-- 1.1.0-alpha.1 released with APK, Windows zip and update files. The owner's Benchmark after it: the stabilizer on, 0 xruns live, low-latency at 192 frames.
-- CI lessons: bits are per build. The drums compat test has tables for x86-64 Release, Arm64, Windows x64 and x86-64 Debug, each from 20bcb8b's own code. Cost tests run RUN_SERIAL. Carve, Mimic and Raven's files build strict-FP.
+- 1.1.2 contents:
+  - Timber Simulated (all models) and Rook's Synth, Produced and Acoustic kits.
+  - Playback on the phone, applying the Hub research: no heat action, the busy-spin retired, workers unpinned, the buffer tuner on, path diagnostics, a Low-latency-only fast-path retry, and a device reopen within 1 s.
+  - Freeze hint only on real dropouts; heat shown as a plain reading.
+  - The Performance sheet (look approved by the owner) and scroll-safe device controls.
+  - The Benchmark generated from the registry; the piano generator's overflow fixed.
+- Local checks: ctest 24/24 and flutter test 2819 pass.
+- The every_instrument cross-build match leaves out the bowed strings (owner OK, 2026-11-24).
 
-## State (2026-11-20, after 1.1.1)
-- 1.1.1 merged (#260) and its release dispatched. Main = 2a9934c.
-- **1.1.2 running** (worktrees from Main under .claude/worktrees): tim-piano (simulated piano), tim-models (flute, reeds, brass, bowed, plucked, mallets, EP, organ), rook-kits (Synth / Produced / Acoustic kits). Design: Hub docs/caw/sound-designs.md "1.1.2: realism"; answers: Hub decisions.md 2026-11-20. Back them up at each check-in: WIP snapshots to caw-backup-<name> (commit-tree with a temp index; never touch their files).
-- Then: merge (tim-piano first, then tim-models; Timber shares builtin_timber*.cpp), full tests, refresh fixture and goldens, 1.1.2 version + CHANGELOG, PR, CI, merge, release.
-- Follow-up: device motion cap should follow the Frame rate setting (decided; built as a fixed 60).
+## State
+- **CI on 5065ba9:** Arm64 and x64 engine tests pass. The Dart job hit the timing-flaky startup reveal test (it passes locally alone and with its file), and its one re-run was triggered. The rest was still running.
+- Lessons are saved in .claude/rules (engine, ci, app) and .claude/README.md ("Session quirks").
+- 1.1.3 maintenance (big files and CI broken down, tooling) is Hub issue #29 and on the roadmap.
 
 ## Open (owner)
-- Branch cleanup: this session can't delete branches (the proxy refuses); the owner deletes merged ones on GitHub.
-- Logo designs to approve; Rook groove look-ahead question (docs/decisions.md).
-- Follow-ups: arming clicks (Lark's dry ring, Ducker/Talon look-ahead jumps); Magpie keyboard zoom; back up a project before its first conversion; Timber at medium+20 % (owner may prefer optimising).
+- Optional: lower the UI to 60 Hz while playing (always, as a setting, or no).
+- Rook "Build a kit" card look; Acoustic piece and mic screens not designed.
+- Branch cleanup: the proxy refuses branch deletes, so the owner deletes them on GitHub.
 
 ## Rules for continuing
-- **No lost work:** push after every commit; agents can't push, so the main session pushes their branches to `caw-backup-*`.
-- **Loop guard:** never repeat a failed attempt; one CI re-run per failure; block only when approaches run out or the owner is needed.
-- **Efficiency:** 2–3 well-briefed agents at a time; short output.
+- **No lost work:** push after every commit, and back up agent worktrees to `caw-backup-*`.
+- **Loop guard:** one CI re-run per failure; never repeat a failed attempt.
+- **Efficiency:** 2–3 agents at a time, short output, a recommendation with every question.
 
 ## Next
-Merge the three agents after tests, then the 1.1.1 version bump, CHANGELOG, PR, CI, merge and release (dispatch app.yml with installables and release on Main). Then plan 1.1.2.
+- When #261 is green: merge it, dispatch the 1.1.2 release, and ask the owner for a Full Benchmark (stream.path, callback_policy, buffer_frames growing).
+- Follow-ups: the motion cap follows the Frame rate setting; the compat tables still to record (Hub #29).
