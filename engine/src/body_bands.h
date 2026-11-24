@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "timber_core.h"  // kControlFrames
 #include "timber_dsp.h"
 
 namespace caw {
@@ -28,6 +29,7 @@ struct BodyFilter {
     const BodyBand* bandsFor = nullptr;
     float amountFor = -1;
     double srFor = 0;
+    uint32_t fill = 0;  // frames since the last control point
 
     void load(BodyResponse r, float amount, double sr) noexcept {
         if (r.bands == bandsFor && amount == amountFor && sr == srFor) return;
@@ -56,11 +58,19 @@ struct BodyFilter {
             }
             l[i] = x[0], r[i] = x[1];
         }
-        for (int k = 0; k < kBands; ++k)
-            for (int c = 0; c < 4; ++c) stage[k].z1[c] = timber::flushf(z1[k][c]), stage[k].z2[c] = timber::flushf(z2[k][c]);
+        for (int k = 0; k < kBands; ++k) stage[k].z1 = z1[k], stage[k].z2 = z2[k];
+        // Tiny values flushed on the control grid only (the instrument's chunks never straddle a control point), so
+        // any block size flushes at the same frames and gives the same bits.
+        fill += n;
+        if (fill >= timber::kControlFrames) {
+            fill = 0;
+            for (int k = 0; k < kBands; ++k)
+                for (int c = 0; c < 4; ++c) stage[k].z1[c] = timber::flushf(stage[k].z1[c]), stage[k].z2[c] = timber::flushf(stage[k].z2[c]);
+        }
     }
     void clear() noexcept {
         for (Stage& st : stage) st.z1 = timber::f4(0.0f), st.z2 = timber::f4(0.0f);
+        fill = 0;
     }
 };
 

@@ -191,6 +191,8 @@ int timberCost(double seconds) {
         {"org.caw.curlew", "Curlew clarinet: 8 voices", 1, {}, 8, kPoly},
         {"org.caw.curlew", "Curlew saxophone: 8 voices, growl", 2, {{"growl", 0.5}}, 8, kPoly},
         {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 11000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
+        {"org.caw.bittern", "Bittern: 10 keys, principal chorus, room", 0, {}, 10, 24000},  // heavy: the room is part of it
+        {"org.caw.bittern", "Bittern: 10 keys, full organ", 0, {{"principal8", 1}, {"octave4", 1}, {"fifteenth2", 1}, {"mixture", 1}, {"trumpet8", 1}, {"subbass32", 1}, {"gamba8", 1}, {"celeste8", 1}}, 10, 24000},
     };
     for (const NewCase& c : more) {
         Values v = c.values;
@@ -207,7 +209,8 @@ int timberCost(double seconds) {
         const std::string_view id = c.id;
         const size_t bytes = id == "org.caw.starling"      ? starling::starlingBytes(c.model, kRate)
                              : id == "org.caw.nightingale" ? nightingale::nightingaleBytes(c.model, kRate)
-                                                           : curlew::curlewBytes(c.model, kRate);
+                             : id == "org.caw.curlew"      ? curlew::curlewBytes(c.model, kRate)
+                                                           : size_t{0};  // Bittern: its tables are shared
         std::printf("  %-50s %8.0f %7.0f/v %9zu B  %6.0f%s\n", c.name, us, us / c.voices, bytes, c.ceilingUs, bad ? "  OVER" : "");
     }
     return over;

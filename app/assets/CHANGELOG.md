@@ -3,6 +3,23 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.1 (2026-11-24)
+
+Realistic instruments, part one: a piano, bowed strings, winds and a cathedral organ that sound like the real thing.
+
+### New
+- **Starling, a grand piano:** modelled strings with a real grand's recorded attack, key and pedal noises (the Salamander Grand Piano by Alexander Holm, CC-BY 3.0), tuned like that piano. Grand, Upright and Felt; 12 presets. Its recordings load only while a track uses it.
+- **Nightingale, bowed strings:** violin, viola, cello and double bass. The bow now stays in the sweet spot at any loudness, so notes start cleanly and never jump to the octave; the bow noise is subtle; each instrument has a body measured from real recordings (VSCO 2, CC0). 12 presets.
+- **Curlew, winds:** flute, clarinet, saxophone, trumpet, trombone and French horn, without the click that made the flute sound like a piano; brass that holds its notes; bodies measured from real recordings. 12 presets.
+- **Bittern, a cathedral pipe organ:** 13 stops from a deep 32' to a sparkling mixture and a trumpet, each rank alive with its own tuning and the chiff of real pipes, a living wind, a tremulant and a swell box on the mod wheel, in a cathedral that rings for seconds (turn Space down for the organ loft). 12 registrations.
+
+### Changed
+- The new piano, strings and winds open dry (no room): add Space or your own reverb. The organ opens in its cathedral.
+
+### Known issues
+- The new instruments use the plain knob page until their own pages are designed.
+- Curlew: the flute's top C, the trombone's low E and the horn's lowest notes don't sound reliably yet, and the sax can jump to its octave on C#4.
+
 ## 1.1.2-alpha.1 (2026-11-24)
 
 Realism: Timber's instruments and Rook's drums are now simulated, the way the real instruments work, mechanical noises and all.

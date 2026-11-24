@@ -247,6 +247,7 @@ add_custom_command(OUTPUT "${_caw_embed_piano}"
 target_sources(caw_core PRIVATE src/builtin_starling.cpp src/recorded_bank.cpp "${_caw_embed_piano}")
 target_sources(caw_core PRIVATE src/builtin_nightingale.cpp src/nightingale_bodies.cpp)  # 1.1.3: Nightingale (org.caw.nightingale), the bowed strings
 target_sources(caw_core PRIVATE src/builtin_curlew.cpp src/curlew_bodies.cpp)  # 1.1.3: Curlew (org.caw.curlew), the winds
+target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp)  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -343,6 +344,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/starling_piano_test.cpp)
   target_sources(caw_tests PRIVATE tests/nightingale_test.cpp)  # 1.1.3: Nightingale, the bowed strings
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
+  target_sources(caw_tests PRIVATE tests/bittern_test.cpp)  # 1.1.3: Bittern, the pipe organ
   # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
   add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
@@ -509,6 +511,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
   target_sources(caw_rt_tests PRIVATE tests/nightingale_rt_test.cpp)  # 1.1.3: Nightingale
   target_sources(caw_rt_tests PRIVATE tests/curlew_rt_test.cpp)  # 1.1.3: Curlew
+  target_sources(caw_rt_tests PRIVATE tests/bittern_rt_test.cpp)  # 1.1.3: Bittern
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
@@ -589,6 +592,7 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
 set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
+set_source_files_properties(src/bittern_render.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Bittern's voices give the same bits at any block size
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

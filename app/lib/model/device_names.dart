@@ -164,6 +164,8 @@ class DeviceNames {
       'double bass', 'contrabass', 'bowed', 'orchestral', 'realistic'], purposes: {_g}),
     'org.caw.curlew': DeviceName('Curlew', 'Winds', tags: ['winds', 'woodwind', 'brass', 'flute', 'clarinet',
       'saxophone', 'sax', 'trumpet', 'trombone', 'french horn', 'horn', 'realistic'], purposes: {_g}),
+    'org.caw.bittern': DeviceName('Bittern', 'Pipe organ', tags: ['organ', 'pipe organ', 'church organ',
+      'cathedral', 'principal', 'flute', 'mixture', 'realistic'], purposes: {_g}),
     'org.caw.flock': DeviceName('Flock', 'Granular', tags: ['granular', 'grains', 'cloud', 'texture', 'drone', 'pad'],
       purposes: {_sd}),
     // MIDI effects

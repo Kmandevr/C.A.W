@@ -307,6 +307,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Breath noise', 'The air you hear around the tone.'),
     ('Vibrato', 'A gentle waver in the note.'),
   ], 'Concert flute'),
+  'org.caw.bittern': FieldGuide('Bittern is a cathedral pipe organ: draw its stops and it fills a great stone '
+      'room.', [
+    ('Stops', 'Each rank of pipes: flutes, principals, strings, the trumpet.'),
+    ('Tremulant', 'A pulse in the wind, for a warm, vocal tone.'),
+    ('Space', 'The cathedral (on): turn it down for the organ loft.'),
+  ], 'Cathedral principal chorus'),
   'org.caw.flock': FieldGuide('Flock plays a sample as a cloud of grains, for pads, textures and drones.', [
     ('Position', 'Where in the sample the grains come from.'),
     ('Size', 'How long each grain is.'),
