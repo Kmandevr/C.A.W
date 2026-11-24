@@ -47,6 +47,7 @@ class ScenarioResult {
     this.backgrounded = false,
     this.partsBasis,
     this.audioThreads = const {},
+    this.stream = const {},
     this.requestedFrames = 0,
     this.firstCallbackUs = 0,
     this.worstAtS = 0,
@@ -101,6 +102,10 @@ class ScenarioResult {
   /// Live: the engine's audio threads at the run's end (caw_audio_threads: the performance hint's state, the
   /// callback's policy and core; #234). Local JSON only.
   final Map<String, Object?> audioThreads;
+
+  /// Live (1.1.2): what the stream was granted at the run's end: its own sample rate against the engine's, the
+  /// low-latency mode and exclusive sharing as read back (the fast path, with `callback_policy` in [audioThreads]).
+  final Map<String, Object?> stream;
   final String? error;
 
   /// Live: which buffer it asked for, [StressBuffer.playing] or [StressBuffer.lowLatency]; null for DSP.
@@ -180,6 +185,7 @@ class ScenarioResult {
       backgrounded: backgrounded,
       partsBasis: j['parts_basis'] is String ? j['parts_basis'] as String : null,
       audioThreads: j['audio_threads'] is Map ? Map<String, Object?>.from(j['audio_threads'] as Map) : const {},
+      stream: j['stream'] is Map ? Map<String, Object?>.from(j['stream'] as Map) : const {},
       requestedFrames: i('requested_frames'),
       firstCallbackUs: d('first_callback_us'),
       worstAtS: d('worst_at_s'),
@@ -257,6 +263,7 @@ class ScenarioResult {
           if (parts.isNotEmpty) 'parts': [for (final p in parts) p.toJson()],
           if (partsBasis != null) 'parts_basis': partsBasis,
           if (audioThreads.isNotEmpty) 'audio_threads': audioThreads,
+          if (stream.isNotEmpty) 'stream': stream,
           if (live) ...{
             'buffer': buffer,
             'requested_frames': requestedFrames,

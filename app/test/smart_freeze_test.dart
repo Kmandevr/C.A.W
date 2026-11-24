@@ -57,10 +57,12 @@ void main() {
   group('FreezeHint', () {
     final a = LayerDoc(id: 'a', name: 'Pad', color: 0), b = LayerDoc(id: 'b', name: 'Bass', color: 1);
     var reads = 0;
-    void run(FreezeHint h, {required int fromMs, required int toMs, double cpu = 0.95, bool playing = true,
-        bool overloaded = false, Map<String, double?> shares = const {}, Map<String, double> hints = const {}}) {
+    // [dropAt]: the dropout count at each poll time (ms -> total so far), else the last.
+    void run(FreezeHint h, {required int fromMs, required int toMs, bool playing = true, bool overloaded = false,
+        int Function(int ms)? drops, Map<String, double?> shares = const {}, Map<String, double> hints = const {}}) {
       for (var ms = fromMs; ms <= toMs; ms += 33) {
-        h.poll(ms * 1000, cpu: cpu, playing: playing, overloaded: overloaded, tracks: () => [a, b],
+        h.poll(ms * 1000, playing: playing, dropouts: drops?.call(ms) ?? 0, overloaded: overloaded,
+            tracks: () => [a, b],
             share: (l) {
               reads++;
               return shares[l.id];
@@ -71,34 +73,69 @@ void main() {
 
     setUp(() => reads = 0);
 
-    test('nothing while the CPU is fine, stopped, or only spikes; then the measured heaviest, once', () {
+    test('nothing without dropouts, stopped, or on one glitch; repeated dropouts: the measured heaviest, once', () {
       final h = FreezeHint();
-      run(h, fromMs: 0, toMs: 10000, cpu: 0.5);
-      run(h, fromMs: 10000, toMs: 20000, playing: false);
+      // 1.1.2 (the owner: it came at about 40 % with no dropout): the CPU figure is not an input at all; no dropout,
+      // nothing, however long.
+      run(h, fromMs: 0, toMs: 10000);
+      run(h, fromMs: 10000, toMs: 20000, playing: false, drops: (ms) => ms ~/ 100);
       expect(h.suggestion.value, isNull);
-      expect(reads, 0, reason: 'no engine reads unless the CPU stays high');
-      // A spike shorter than the hold, then calm: nothing.
-      run(h, fromMs: 20000, toMs: 22000);
-      run(h, fromMs: 22000, toMs: 23000, cpu: 0.5);
+      expect(reads, 0, reason: 'no engine reads without trouble');
+      // One glitch (three dropouts at one moment), then quiet: nothing.
+      run(h, fromMs: 20000, toMs: 35000, drops: (ms) => ms >= 21000 ? 3 : 0);
       expect(h.suggestion.value, isNull);
       expect(reads, 0);
-      // Held near the limit: measured, then the heaviest named.
-      run(h, fromMs: 23000, toMs: 30000, shares: {'a': 0.08, 'b': 0.21});
+      // Two dropouts, far apart (more than the window): nothing.
+      run(h, fromMs: 35000, toMs: 60000, drops: (ms) => 3 + (ms >= 36000 ? 1 : 0) + (ms >= 50000 ? 1 : 0));
+      expect(h.suggestion.value, isNull);
+      expect(reads, 0);
+      // Repeated dropouts within 10 s: measured, then the heaviest named.
+      run(h, fromMs: 60000, toMs: 70000, drops: (ms) => 5 + (ms - 60000) ~/ 2000, shares: {'a': 0.08, 'b': 0.21});
       expect(reads, greaterThan(0));
       expect(h.suggestion.value?.layerId, 'b');
       expect(h.suggestion.value?.share, 0.21);
       // Dismissed: never again this run.
       h.dismiss();
       expect(h.done, isTrue);
-      run(h, fromMs: 30000, toMs: 60000, shares: {'a': 0.5});
+      run(h, fromMs: 70000, toMs: 90000, drops: (ms) => ms ~/ 500, shares: {'a': 0.5});
       expect(h.suggestion.value, isNull);
     });
 
-    test('an overload counts as the limit; without measurements the cost hints rank the tracks', () {
+    test('shedding held for a while counts; a moment of it does not; without measurements the hints rank', () {
       final h = FreezeHint();
-      run(h, fromMs: 0, toMs: 8000, cpu: 0.6, overloaded: true, hints: {'a': 12, 'b': 3});
+      run(h, fromMs: 0, toMs: 1000, overloaded: true, hints: {'a': 12, 'b': 3});
+      run(h, fromMs: 1000, toMs: 9000, hints: {'a': 12, 'b': 3});
+      expect(h.suggestion.value, isNull, reason: 'a track shed for a second is not trouble yet');
+      run(h, fromMs: 9000, toMs: 17000, overloaded: true, hints: {'a': 12, 'b': 3});
       expect(h.suggestion.value?.layerId, 'a');
       expect(h.suggestion.value?.share, isNull);
+    });
+  });
+
+  group('DropoutWatch', () {
+    test('sums the platform\'s underruns once a second while playing, across new streams', () {
+      final w = DropoutWatch();
+      var x = 0, reads = 0;
+      int read() {
+        reads++;
+        return x;
+      }
+      w.poll(0, playing: true, read: read);
+      x = 2;
+      w.poll(500000, playing: true, read: read);  // under a second: not read
+      expect(reads, 1);
+      w.poll(1000000, playing: true, read: read);
+      expect(w.count, 2);
+      x = 1;  // a reopened stream counts from 0 again
+      w.poll(2000000, playing: true, read: read);
+      x = 4;
+      w.poll(3000000, playing: true, read: read);
+      expect(w.count, 5);
+      w.poll(4000000, playing: false, read: read);
+      expect(reads, 4);
+      x = -1;  // unknown: nothing
+      w.poll(5000000, playing: true, read: read);
+      expect(w.count, 5);
     });
   });
 

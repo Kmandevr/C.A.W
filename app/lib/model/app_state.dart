@@ -155,8 +155,19 @@ class AppState extends ChangeNotifier implements StressHost {
   final MeterTimeline meterTimeline = MeterTimeline();
   int _latencyReadUs = -1 << 62;
   int _tuneReadUs = -1 << 62;
+  int _deviceCheckUs = -1 << 62;
 
-  // The output buffer's automatic size (#236; Settings.bufferTuning, off by default): once a second while playing,
+  /// The output's dropouts while playing (the platform's underruns), for the smart-freeze hint (1.1.2).
+  final DropoutWatch dropouts = DropoutWatch();
+
+  // The output's underruns since it opened (-1: the platform can't say), from the status's clock diagnostic.
+  int _outputDropouts(Engine e) {
+    if (!e.audioOn) return -1;
+    final clock = e.audioStatusJson()['clock'];
+    return clock is Map && clock['xruns'] is int ? clock['xruns'] as int : -1;
+  }
+
+  // The output buffer's automatic size (#236; Settings.bufferTuning, on by default since 1.1.2): once a second while playing,
   // and the size it settles on kept per kind of output, where the next stream on that kind starts.
   void _tuneBuffer(Engine e, int now) {
     _tuneReadUs = now;
@@ -573,9 +584,6 @@ class AppState extends ChangeNotifier implements StressHost {
       }
       try {
         engine = await createEngine(settings.sampleRate);
-        // The heat, for the callback's load stabilizer (API 45): now and on every change.
-        engine?.setAudioThermal(pressure.value);
-        pressure.addListener(() => engine?.setAudioThermal(pressure.value));
         DeviceSlotAudio.current = EngineSlotAudio.instance;  // per-slot meters and auto gain (device shell)
         MergedDevices.resolver = Engine.resolveComponent;  // old presets' effects as merged devices (user_presets.dart)
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
@@ -747,10 +755,16 @@ class AppState extends ChangeNotifier implements StressHost {
       // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
       _latencyReadUs = now;
       unawaited(latency.refresh());
+    }
+    // A device the system stopped under the playing transport opens again within a second (1.1.2: it was looked at
+    // every 3 s and only while the app still thought it open, so a stopped stream could leave Play stalled).
+    if (_transportOn && now - _deviceCheckUs > 1000000) {
+      _deviceCheckUs = now;
       checkAudioDevice();
     }
+    dropouts.poll(now, playing: meters.playing, read: () => _outputDropouts(e));
     tick.value++;
-    freezeHint.poll(now, cpu: meters.cpu, playing: meters.playing, overloaded: meters.overloaded > 0,
+    freezeHint.poll(now, playing: meters.playing, dropouts: dropouts.count, overloaded: meters.overloaded > 0,
         tracks: () => freezeCandidates(this), share: (l) => measuredTrackShare(this, l),
         hint: (l) => hintedTrackCost(this, l));
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -1582,12 +1596,14 @@ class AppState extends ChangeNotifier implements StressHost {
   }
 
   /// A device the system stopped while the transport plays (miniaudio gives up on an AAudio stream it could not
-  /// reopen after a disconnect, and the status then says not running) opens again; true when it had to. Called by
-  /// the meter poll now and then, and by the background playback's slow check while the app is behind.
+  /// reopen after a disconnect or an error, AAudio's callback timing out among them, and the status then says not
+  /// running) opens again; true when it had to. Called by the meter poll once a second while the transport plays,
+  /// and by the background playback's slow check while the app is behind. Load and heat never stop playback (1.1.2):
+  /// a device the app had marked closed (a reopen that failed) is opened again too, not left stalled until Play.
   bool checkAudioDevice() {
     final e = engine;
-    if (e == null || !useAudioDevice || !e.audioOn || !_transportOn) return false;
-    if (e.audioStatus().running) return false;
+    if (e == null || !useAudioDevice || !_transportOn || _stressSuspended) return false;
+    if (e.audioOn && e.audioStatus().running) return false;
     _openAudio(e);
     notifyListeners();
     return true;
