@@ -588,14 +588,14 @@ struct Wind {
             click[l] = v.click;
         }
         const F4 zero = f4(0.0f), one = f4(1.0f);
+        F4 nz = zero, clk = zero, b = zero, eta = zero;  // per-lane reads (the unused lanes read none: they stay 0)
         for (uint32_t i = 0; i < n; ++i) {
             env = clamp4(env + envStep, zero, one);
             tongue = clamp4(tongue + tongueStep, zero, one);
             const F4 open = one - tongue;
             const F4 pm = env * base * (one + vibAm);
             g = g + gStep;
-            F4 nz, clk, b;
-            for (uint32_t l = 0; l < 4; ++l) nz[l] = nzs[l].next(), clk[l] = l < count ? click[l].next() : 0.0f, b[l] = bore[l].frac(d[l]);
+            for (uint32_t l = 0; l < count; ++l) nz[l] = nzs[l].next(), clk[l] = click[l].next(), b[l] = bore[l].frac(d[l]);
             F4 w, y;
             if constexpr (K == 0) {  // clarinet
                 lp = lp + f4(0.5f) * (b - lp);
@@ -636,8 +636,7 @@ struct Wind {
                 dcx = lp, dcy = dd;
                 const F4 t = dd;
                 djCur = djCur + djStep;
-                F4 eta;
-                for (uint32_t l = 0; l < 4; ++l) eta[l] = jet[l].frac(djCur[l]);
+                for (uint32_t l = 0; l < count; ++l) eta[l] = jet[l].frac(djCur[l]);
                 const F4 U = jetU * open;
                 jetU = jetU + jetUStep;
                 const F4 half = f4(0.5f) * t;
@@ -669,7 +668,7 @@ struct Wind {
                     // the wave steepens as it gets louder: a short line read earlier by the wave's own pressure.
                     const F4 at = clamp4(f4(kRadiate) - f4(ks) * y, one, f4(2.0f * kRadiate - 1.0f));
                     for (uint32_t l = 0; l < count; ++l) jet[l].push(y[l]);
-                    for (uint32_t l = 0; l < 4; ++l) y[l] = jet[l].frac(at[l]);
+                    for (uint32_t l = 0; l < count; ++l) y[l] = jet[l].frac(at[l]);
                 }
             }
             for (uint32_t l = 0; l < count; ++l) bore[l].push(w[l]);

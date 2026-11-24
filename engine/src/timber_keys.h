@@ -196,6 +196,7 @@ struct EPiano {
             touching = touching || (l < count && !v.contact.done);
         }
         const float invGain = static_cast<float>(1.0 / kSimGain);
+        F4 x = f4(0.0f);  // each voice's pickup input (the unused lanes stay 0)
         for (uint32_t i = 0; i < n; ++i) {
             if (touching) {  // a hammer touching: its force into its voice's modes first
                 for (uint32_t l = 0; l < count; ++l) {
@@ -206,8 +207,7 @@ struct EPiano {
                     zr[l] = zr[l] + v.phi * f4(f);
                 }
             }
-            F4 x;
-            for (uint32_t l = 0; l < 4; ++l) {
+            for (uint32_t l = 0; l < count; ++l) {
                 const F4 r = c[l] * zr[l] - sn[l] * zi[l], im = sn[l] * zr[l] + c[l] * zi[l];
                 zr[l] = r, zi[l] = im;
                 x[l] = im[0] + im[1] + im[2] + im[3];
