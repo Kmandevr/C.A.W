@@ -39,6 +39,34 @@ class ResourceSignals {
     }
   }
 
+  /// Sustained Performance Mode while playing (1.1.2, Android 7+): asked for only where the device says it has it;
+  /// returns whether it does (false elsewhere, or with no platform).
+  static Future<bool> setSustained(bool on) async {
+    try {
+      return await _method.invokeMethod<bool>('sustained', {'on': on}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// The Benchmark's device block (1.1.2): the Android API level and whether Sustained Performance Mode exists.
+  static Future<Map<String, Object?>> readPerformance() async {
+    try {
+      final v = await _method.invokeMapMethod<Object?, Object?>('performance');
+      if (v == null) return const {};
+      return {
+        if (v['sdk'] is int) 'sdk': v['sdk'],
+        if (v['sustainedPerformance'] is bool) 'sustained_performance_supported': v['sustainedPerformance'],
+      };
+    } on MissingPluginException {
+      return const {};
+    } on PlatformException {
+      return const {};
+    }
+  }
+
     static Stream<EnginePressure> get changes => _events.receiveBroadcastStream().map((event) {
         if (event is Map) return decode(Map<Object?, Object?>.from(event));
         return EnginePressure.unknown;

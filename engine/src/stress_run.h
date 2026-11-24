@@ -135,6 +135,8 @@ struct RampOutcome {
     int32_t cappedAt = -1;  // the count the engine refused (kRampCapped), -1: none
 };
 RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<int(int32_t)>& step);
+// A cap's reason as the Benchmark shows it (1.1.2): the engine's own refusal, without the refused load around it.
+std::string rampCapReason(const std::string& refused, int32_t count);
 // The counts each ramp tries (tracks up to 128, voices to 64, effects to 64).
 std::vector<int32_t> rampCounts(Kind kind);
 // The project a ramp plays at count n.

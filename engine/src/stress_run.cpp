@@ -196,6 +196,18 @@ bool rampCapRefusal(const std::string& why) {
     return why.find("native components; at most") != std::string::npos || why.find("budget") != std::string::npos;
 }
 
+std::string rampCapReason(const std::string& refused, int32_t count) {
+    // The engine's own words only (1.1.2: the owner's Benchmark showed the whole refused load, which read as a
+    // failure): `"error":"..."` out of a refused load's JSON, else the text as it is.
+    std::string why = refused;
+    const std::string key = "\"error\":\"";
+    if (const size_t at = refused.find(key); at != std::string::npos) {
+        const size_t from = at + key.size(), to = refused.find('"', from);
+        why = refused.substr(from, to == std::string::npos ? std::string::npos : to - from);
+    }
+    return "the engine's own limit, not this device's: at " + std::to_string(count) + ", " + why;
+}
+
 RampOutcome rampSearch(const std::vector<int32_t>& counts, const std::function<int(int32_t)>& step) {
     RampOutcome o;
     for (const int32_t n : counts) {
@@ -329,7 +341,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             if (!prepare(e, rampProject(r.kind, n), r, false, l, rr, refused)) {
                 // Past the engine's budget (its component cap, its memory) after a count that ran: the ramp's end.
                 if ((heldN > 0 || n > counts.front()) && rampCapRefusal(refused)) {
-                    out.cappedBy = refused;
+                    out.cappedBy = rampCapReason(refused, n);
                     return kRampCapped;
                 }
                 error = refused;

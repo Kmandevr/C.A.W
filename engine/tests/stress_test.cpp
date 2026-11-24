@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "audio_clips.h"
+#include "builtin_components.h"
+#include "module_registry.h"
 #include "caw.h"
 #include "capi_internal.h"
 #include "device_render.h"
@@ -168,8 +170,11 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         {"voice_storm", "c6b85de3f1119515"},
         {"sample_stream", "cb17fda8f1472dea"},
         {"resample", "ae1e8b3fbd5f3ad7"},
-        {"every_instrument", "3ab70624484ac6bd"},
-        {"every_effect", "872fde1013543d13"},  // 1.0.8: the merged ids with each variant (was 7d5715c05ce87eca; same sound)
+        // 1.1.2: generated from the engine's list of built-ins (every instrument in each model and kit kind, every
+        // effect in each variant; the owner: "make sure the benchmark actually tests all of the plugins"), an
+        // intended change of both projects and their sound (were 3ab70624484ac6bd and 872fde1013543d13).
+        {"every_instrument", "5b2dd89ace6ad650"},
+        {"every_effect", "bade933ee53725fc"},
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},
     };
@@ -182,6 +187,62 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         else if (hash != it->second) cawtest::fail(__FILE__, __LINE__, id + ": the project differs from its recorded one (" + hash + ")");
         CHECK_REFERENCE(refs, id, renderSecond(p), cawtest::Class::Chaotic);
     }
+}
+
+// 1.1.2 (the owner: "make sure the benchmark actually tests all of the plugins"): every built-in the engine lists
+// is played by the Benchmark, each instrument in each model and every effect in each variant, so a new one can't
+// be left out again; the scenarios' names are the devices' shown names.
+TEST(stress_benchmark_plays_every_registered_builtin) {
+    ModuleRegistry registry;
+    registerBuiltinComponents(registry);
+    const ProjectSpec inst = everyInstrument(workDir(), nullptr), fx = everyEffect();
+    auto played = [&](const std::string& id, double variant) {
+        for (const ProjectSpec* p : {&inst, &fx})
+            for (const LayerSpec& l : p->layers) {
+                std::vector<const ComponentSpec*> all;
+                if (l.hasInstrument) all.push_back(&l.instrument);
+                for (const ComponentSpec& c : l.components) all.push_back(&c);
+                for (const ComponentSpec* c : all) {
+                    if (c->id != id) continue;
+                    double v = 0;
+                    for (const auto& [k, x] : c->params)
+                        if (k == "variant") v = x;
+                    if (variant < 0 || v == variant) return true;
+                }
+            }
+        return false;
+    };
+    int devices = 0;
+    for (const ModuleDescriptor* d : registry.builtinComponents()) {
+        if (d->role != ModuleRole::Instrument && d->role != ModuleRole::Effect && d->role != ModuleRole::Analyzer) continue;
+        ++devices;
+        const std::string id(d->id);
+        const ParameterDescriptor* variant = nullptr;
+        for (uint32_t k = 0; k < d->parameterCount; ++k)
+            if (d->parameters[k].id == "variant" && d->parameters[k].choiceCount > 1) variant = &d->parameters[k];
+        if (!variant) {
+            if (!played(id, -1)) cawtest::fail(__FILE__, __LINE__, id + " is not in the Benchmark");
+            continue;
+        }
+        for (uint32_t v = 0; v < variant->choiceCount; ++v)
+            if (!played(id, variant->minimum + v))
+                cawtest::fail(__FILE__, __LINE__, id + " variant " + std::to_string(v) + " is not in the Benchmark");
+    }
+    CHECK(devices > 40);
+    // Retired ids (old projects still load them, migrated) are not played again.
+    for (const LayerSpec& l : inst.layers) CHECK(l.instrument.id != "org.caw.synth.morph" && l.instrument.id != "org.caw.drum.kick");
+    // Rook's three kit kinds and Timber's Simulated models are there.
+    int kits = 0, simulated = 0;
+    for (const BenchmarkDevice& d : benchmarkInstruments()) {
+        kits += d.name.find(" kit: ") != std::string::npos;
+        simulated += d.name.find("Simulated") != std::string::npos;
+    }
+    CHECK_EQ(kits, 3);
+    CHECK(simulated >= 7);
+    // Names the owner reads: the devices' shown names, not ids.
+    for (const SuiteScenario& s : benchmarkScenarios()) CHECK(std::string(s.name).find("org.caw") == std::string::npos);
+    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "drums_kit")->name), std::string("Rook kit, 16 pads busy"));
+    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "flagship_heavy")->name), std::string("Raven heavy, 64 voices held"));
 }
 
 TEST(stress_benchmark_has_the_ten_scenarios_section_h_names) {
@@ -420,6 +481,12 @@ TEST(stress_ramp_stops_capped_at_the_engines_component_cap) {
     CHECK(rampCapRefusal("native component chains exceed this Engine's project-state memory budget"));
     CHECK(!rampCapRefusal("the project did not load: {\"ok\":false,\"error\":\"line 3, col 1: unknown note\"}"));
     CHECK(!rampCapRefusal(""));
+    // 1.1.2: what the Benchmark shows is the engine's limit, not a failed load.
+    const std::string why = rampCapReason("the project did not load: " + warn.substr(0, 300), 96);
+    CHECK(why.find("did not load") == std::string::npos);
+    CHECK(why.find("{") == std::string::npos);
+    CHECK(why.find("at most 256 can run") != std::string::npos);
+    CHECK(why.find("at 96") != std::string::npos);
 }
 
 // The ramp stops at the first count over budget and searches only below it, reporting the last count that held.

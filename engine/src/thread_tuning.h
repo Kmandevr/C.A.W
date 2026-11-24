@@ -103,6 +103,17 @@ bool hintActive(const Hint* hint) noexcept;   // a session is open on the thread
 enum class HintState : uint8_t { None = 0, Waiting = 1, On = 2, Failed = 3, Unsupported = 4 };
 const char* hintStateName(HintState state) noexcept;
 HintState hintState(const Hint* hint) noexcept;
+// The 1.1.2 audit's diagnostics, for caw_audio_threads' "hint_diag": the Android API level (0 elsewhere), whether
+// APerformanceHint_isFeatureSupported exists and what it said for hint sessions (-1 not asked: missing, or the hint's
+// thread has not looked yet), and the raw preferred update rate (getPreferredUpdateRateNanos; -1 unknown, as the S22+
+// reports when its Power HAL has no hint sessions).
+struct HintDiagnostics {
+    int sdk = 0;
+    bool featureCall = false;
+    int feature = -1;
+    int64_t preferredRateNs = -1;
+};
+HintDiagnostics hintDiagnostics(const Hint* hint) noexcept;
 // Portable, for the platform part and tests. Whether the system says it has no hint sessions: Android 16's
 // APerformanceHint_isFeatureSupported(APERF_HINT_SESSIONS) when there is one (`feature`: 1 yes, 0 no, -1 unknown),
 // else a preferred update rate of 0 or less (the platform reports -1 when its power HAL has none).

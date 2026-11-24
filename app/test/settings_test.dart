@@ -67,11 +67,16 @@ void main() {
     expect(Neon.light, isTrue);
     expect(Neon.glow(Neon.green), isEmpty);
 
-    // #236: buffer tuning is off by default; the sizes it settled on per kind of output come back, bounded.
+    // #236: buffer tuning is on by default since 1.1.2 (the old default's saved "off" does not carry over, a new
+    // "off" does); the sizes it settled on per kind of output come back, bounded.
+    expect(Settings().bufferTuning, isTrue);
+    expect((Settings()..fromJson({'buffer_tuning': false})).bufferTuning, isTrue);
+    expect((Settings()..fromJson({'buffer_tuning_on': false})).bufferTuning, isFalse);
+    expect((Settings()..fromJson(jsonDecode(jsonEncode((Settings()..bufferTuning = false).toJson())) as Map<String, dynamic>))
+        .bufferTuning, isFalse);
     final tuned = Settings();
-    expect(tuned.bufferTuning, isFalse);
     tuned.fromJson({
-      'buffer_tuning': true,
+      'buffer_tuning_on': true,
       'tuned_buffer_frames': {'bluetooth': 960, 'builtIn': 192, 'bad': -1, 'huge': 1 << 20, 'text': 'x'},
     });
     expect(tuned.bufferTuning, isTrue);

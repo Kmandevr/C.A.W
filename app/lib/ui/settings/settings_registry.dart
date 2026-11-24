@@ -190,8 +190,9 @@ const List<SettingEntry> settingEntries = [
       ['mono', 'stereo', 'phase', 'mix', 'check', 'sum']),
   _E.more('audio.exclusive', _C.quality, 'Exclusive mode', 'Take the device for C.A.W alone: AAudio exclusive, WASAPI exclusive',
       ['latency', 'mmap', 'wasapi', 'aaudio', 'low latency', 'exclusive']),
-  _E.more('audio.background', _C.quality, 'Background playback', 'Whether Android restricts C.A.W\'s battery behind other apps (Android)',
-      ['battery', 'unrestricted', 'background', 'optimization', 'samsung', 'sleep']),
+  _E.more('audio.background', _C.quality, 'Background playback', 'Whether Android restricts C.A.W\'s battery behind other apps (Android). On a Samsung Galaxy, also add C.A.W '
+      'to Never sleeping apps (Battery › Background usage limits)',
+      ['battery', 'unrestricted', 'background', 'optimization', 'samsung', 'sleep', 'never sleeping', 'sleeping apps']),
   _E('audio.outputLatency', _C.latency, 'Latency', 'How late Bluetooth, USB or HDMI output and the microphone are, per device',
       ['bluetooth', 'delay', 'late', 'offset', 'compensation', 'a2dp', 'headphones', 'calibrate', 'tap along',
        'loopback', 'microphone', 'sync', 'playhead', 'meters']),

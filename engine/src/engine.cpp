@@ -725,6 +725,12 @@ std::string Engine::audioThreadsJson() const {
     j += ",\"clock_khz\":" + std::to_string(clock.currentKHz) + ",\"max_khz\":" + std::to_string(clock.maxKHz);
     j += ",\"hint\":" + std::string(pool_ && pool_->hintActive() ? "true" : "false");
     j += ",\"hint_state\":\"" + std::string(tuning::hintStateName(pool_ ? pool_->hintState() : tuning::HintState::None)) + "\"";
+    {
+        const tuning::HintDiagnostics d = pool_ ? pool_->hintDiagnostics() : tuning::hintDiagnostics(nullptr);
+        j += ",\"hint_diag\":{\"sdk\":" + std::to_string(d.sdk) + ",\"is_feature_supported_call\":" +
+             (d.featureCall ? "true" : "false") + ",\"is_feature_supported\":" + std::to_string(d.feature) +
+             ",\"preferred_rate_ns\":" + std::to_string(d.preferredRateNs) + "}";
+    }
     j += ",\"mmcss\":" + std::string(pool_ && pool_->callbackMmcss() ? "true" : "false");
     // The callback's scheduling policy (POSIX SCHED_*: 0 time-sharing, 1 FIFO, 2 RR) and nice, as it last described
     // itself: a shared or Bluetooth AAudio stream's is time-sharing, a low-latency (MMAP) one's FIFO (#234).
@@ -5616,7 +5622,9 @@ void Engine::pickOverloadVictim() noexcept {
         ++audible;
         if (best < 0 || s.order > slotAt(best).order) best = i;
     }
-    if (best < 0) return;
+    // Load never silences the song (owner, 1.1.2: "playback must never stop because of load or heat"): the last
+    // layer still sounding is never shed; a device that cannot carry even that one drops out, and says so.
+    if (best < 0 || audible <= 1) return;
     Slot& s = slotAt(best);
     setShed(s, true);
     s.shedSeq = ++shedSeq_;
@@ -5816,8 +5824,9 @@ void Engine::process(float* left, float* right, int frames) noexcept {
 // behaves the same. The meter: an average of each callback's load that keeps 0.9 of itself per 10.7 ms (512
 // frames at 48 kHz). Shedding: the share of the last ~0.25 s spent in callbacks over 0.85 of their budget (an
 // average with a 0.25 s time constant, weighted by each callback's length) passing 0.7, which takes about 0.3 s
-// of nearly all-over callbacks: one stalled callback, however late (the first after Play, a device restart or
-// reroute, a background burst), is its own length's share and sheds nothing. After a shed, 1.07 s before the
+// of nearly all-over callbacks, with the meter itself over 0.75 then: one stalled callback, however late (the
+// first after Play, a device restart or reroute, a background burst), is its own length's share and sheds nothing;
+// and the last layer still sounding is never shed (1.1.2, pickOverloadVictim). After a shed, 1.07 s before the
 // next. Recovery: the meter under 0.6 for 2 s brings back one layer (the newest shed), only if the load now plus
 // what that layer was seen to cost when shed (the meter's drop in the second after, at most an equal share of
 // the load then) stays under 0.75, or on trial after 8 s more of quiet; then another 2 s for the next. Hysteresis: shed
@@ -5982,7 +5991,11 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
         if (s.overloaded) s.shedCost = std::clamp(measureFrom_ - loadAvg_, 0.0, s.shedCost);
         measureSlot_ = -1;
     }
-    if (!settling && overShare_ > kOverShare && coolSeconds_ <= kSlackSeconds) {
+    // And over now (the meter's ~0.1 s average over kRestoreCeiling): the 0.8 s share remembers a stretch after its
+    // load is gone, and a layer must not go for load that has already passed.
+    // And over now (1.1.2: the meter's ~0.1 s average over kRestoreCeiling): a layer never goes for load that has
+    // already passed.
+    if (!settling && overShare_ > kOverShare && loadAvg_ > kRestoreCeiling && coolSeconds_ <= kSlackSeconds) {
         if (pool_ && autoOn && mixAuto_ && waitAvg_ > kMixWaitShare) {
             // The pool itself may be the overload (the callback waiting on its workers): one thread first, for
             // kMixRetrySeconds, and the share starts again; a song still over on one thread then sheds.

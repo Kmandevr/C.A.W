@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'cpp_reference.dart';
+import 'device_names.dart';
 
 /// How a tier fared: comfortable (p99 at most 70% of the budget), tight (at most 100%), over budget.
 enum StressTier {
@@ -47,6 +48,7 @@ class ScenarioResult {
     this.backgrounded = false,
     this.partsBasis,
     this.audioThreads = const {},
+    this.stream = const {},
     this.requestedFrames = 0,
     this.firstCallbackUs = 0,
     this.worstAtS = 0,
@@ -101,6 +103,10 @@ class ScenarioResult {
   /// Live: the engine's audio threads at the run's end (caw_audio_threads: the performance hint's state, the
   /// callback's policy and core; #234). Local JSON only.
   final Map<String, Object?> audioThreads;
+
+  /// Live (1.1.2): what the stream was granted at the run's end: its own sample rate against the engine's, the
+  /// low-latency mode and exclusive sharing as read back (the fast path, with `callback_policy` in [audioThreads]).
+  final Map<String, Object?> stream;
   final String? error;
 
   /// Live: which buffer it asked for, [StressBuffer.playing] or [StressBuffer.lowLatency]; null for DSP.
@@ -180,6 +186,7 @@ class ScenarioResult {
       backgrounded: backgrounded,
       partsBasis: j['parts_basis'] is String ? j['parts_basis'] as String : null,
       audioThreads: j['audio_threads'] is Map ? Map<String, Object?>.from(j['audio_threads'] as Map) : const {},
+      stream: j['stream'] is Map ? Map<String, Object?>.from(j['stream'] as Map) : const {},
       requestedFrames: i('requested_frames'),
       firstCallbackUs: d('first_callback_us'),
       worstAtS: d('worst_at_s'),
@@ -257,6 +264,7 @@ class ScenarioResult {
           if (parts.isNotEmpty) 'parts': [for (final p in parts) p.toJson()],
           if (partsBasis != null) 'parts_basis': partsBasis,
           if (audioThreads.isNotEmpty) 'audio_threads': audioThreads,
+          if (stream.isNotEmpty) 'stream': stream,
           if (live) ...{
             'buffer': buffer,
             'requested_frames': requestedFrames,
@@ -316,9 +324,11 @@ class StressCost {
   /// How many of it the scenario's project has (the engine's count; 1 for the host).
   final int instances;
 
-  /// Its name in plain words.
+  /// Its name as the app shows the device (1.1.2: "Talon · Compressor", DeviceNames), else in plain words.
   String get name {
     if (id == 'host') return 'The engine itself (mixing, routing, meters)';
+    final shown = DeviceNames.of(id);
+    if (shown != null) return shown.title;
     for (final b in cppBuiltins) {
       if (b.id == id) return b.name;
     }
@@ -326,7 +336,8 @@ class StressCost {
     return last.isEmpty ? id : '${last[0].toUpperCase()}${last.substring(1)}';
   }
 
-  Map<String, Object?> toJson() => {'id': id, 'pct': _r1(pct), 'ran_pct': _r1(ranPct), 'instances': instances};
+  Map<String, Object?> toJson() =>
+      {'id': id, 'name': name, 'pct': _r1(pct), 'ran_pct': _r1(ranPct), 'instances': instances};
 }
 
 /// A sustained run (the heat test): live, in real time, at the playing buffer; the load's trend over the run, the

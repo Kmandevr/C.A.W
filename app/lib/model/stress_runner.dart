@@ -132,6 +132,7 @@ class StressRunner extends ChangeNotifier {
     this.workDir,
     this.device = const {},
     this.readThermal,
+    this.readPerformance,
     this.readDeviceName,
     Stream<bool>? foreground,
     this.inForeground,
@@ -168,6 +169,9 @@ class StressRunner extends ChangeNotifier {
   /// The platform's thermal status and headroom now ({'status', 'headroom'}), read at the sustained run's start
   /// and end; null: not read.
   final Future<Map<String, Object?>> Function()? readThermal;
+
+  /// The platform's performance facts for the device block (1.1.2: API level, Sustained Performance Mode).
+  final Future<Map<String, Object?>> Function()? readPerformance;
 
   /// The device's maker and model in words, for the verdict ("Samsung SM-S906B"); null: not read.
   final Future<String?> Function()? readDeviceName;
@@ -284,6 +288,12 @@ class StressRunner extends ChangeNotifier {
         if (name != null && name.trim().isNotEmpty) result.device = {...result.device, 'name': name.trim()};
       } catch (_) {
         // The verdict says "This device".
+      }
+      try {
+        final perf = await readPerformance?.call();
+        if (perf != null && perf.isNotEmpty) result.device = {...result.device, 'performance': perf};
+      } catch (_) {
+        // Left out.
       }
       host?.suspendForStress();
       dir = await workDir?.call();

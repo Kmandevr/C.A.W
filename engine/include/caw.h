@@ -201,7 +201,9 @@ extern "C" {
    46 (2026-11-20, 1.1.2): Rook's kits of three kinds. org.caw.drums appends engine, acou_piece, acou_artic and
    acou_layer to every pad and, after the pads, the Acoustic kit (kit_kind, acou_*, and 16 pieces pc1_* .. pc16_*);
    caw_drums_kit_build and caw_drums_kit_tool build and finish kits; caw_drums_info gains "builders". Old kits render
-   the same bits. */
+   the same bits. Playback (1.1.2, same functions): caw_audio_tune_buffer grows a fixed size on underruns; caw_audio_set_thermal acts on nothing; the
+   load stabilizer is off unless CAW_LOAD_STABILIZER=1; overload shedding never sheds the last layer still
+   sounding. */
 #define CAW_API_VERSION 46
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
@@ -713,8 +715,8 @@ CAW_API void caw_engine_set_quality(CawEngine* e, int32_t quality);
 CAW_API int32_t caw_engine_quality(CawEngine* e);
 
 /* The device buffer: Auto uses a larger one (about 21 ms) while not recording and the smallest the device
-   gives while recording; Low latency always the smallest; Battery always the larger, on the power-saving path.
-   A running device reopens when the size changes (a short gap). */
+   gives while recording; Low latency always the smallest; Battery
+   always the larger, on the power-saving path. A running device reopens when the size changes (a short gap). */
 #define CAW_BUFFER_AUTO 0
 #define CAW_BUFFER_LOW_LATENCY 1
 #define CAW_BUFFER_BATTERY 2
@@ -726,16 +728,18 @@ CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
    it had; no reopen. Call it only while nothing monitors the input. Returns the buffer size now in frames (0 where
    the backend has no such size, or nothing runs); caw_audio_latency reports the new latency. */
 CAW_API int32_t caw_audio_set_background(CawEngine* e, int32_t background);
-/* API version 45. The platform's thermal state for the device callback's load stabilizer (CAW_PRESSURE_*: warm and
-   hot let the callback's clock settle lower, critical stops the stabilizer; anything else counts as normal). Kept
-   across device reopens; any thread. A no-op where there is no stabilizer (not Android). */
+/* API version 45. The platform's thermal state (CAW_PRESSURE_*). Since 1.1.2 nothing acts on it: the platform
+   throttles, and the load stabilizer that followed it is retired (off unless the environment has
+   CAW_LOAD_STABILIZER=1 when the device opens, a hidden switch for comparison). Kept across reopens; any thread. */
 CAW_API void caw_audio_set_thermal(CawEngine* e, int32_t pressure);
 /* API version 34 (#236). The AAudio output's buffer sized automatically, as Oboe's LatencyTuner does: call it from
    the control side about once a second while the device runs. A new stream (an open, a reroute) starts at
    [start_frames] (the size remembered for this kind of output; 0: two bursts), rounded to whole bursts between two
    bursts and the stream's capacity; each rise of the stream's underrun count adds a burst; 60 s without one takes a
    burst off, never back to a size that underran on this stream. Behind the app (caw_audio_set_background) it waits.
-   Only in Low latency or while recording in Auto (else it returns 0 and leaves the fixed buffer alone). Returns the
+   That full tuning only where the output opened without a size (Low latency, Auto while recording); a fixed size
+   (Auto's and Battery's 1024 frames, a chosen size) only grows since 1.1.2: from the size its stream opened with, a burst at each
+   underrun, never below it, and the call returns 0 (no size to keep for the output). Otherwise it returns the
    buffer size now in frames (0 where the backend has no such size, or nothing runs). Never calls into the audio
    thread; AAudioStream_setBufferSizeInFrames needs no reopen. */
 CAW_API int32_t caw_audio_tune_buffer(CawEngine* e, int32_t start_frames);
@@ -766,7 +770,10 @@ CAW_API int32_t caw_audio_configure(CawEngine* e, const char* device_id, const c
    "exclusive_requested"); with no device running, {"running": false} and the request. On AAudio "exclusive" and
    "low_latency" (the fast path) are read from the stream at open ("modes_read_back": true; a later reroute may
    change them); on WASAPI "exclusive" is what opened (it refuses rather than share); elsewhere they are what was
-   asked. Free with caw_free. */
+   asked. Since 1.1.2 also (0 off AAudio) "buffer_frames", "burst_frames" and "capacity_frames" (the stream's queue,
+   burst and capacity), "mmap" (AAudioStream_isMMapUsed: 1, 0, -1 unknown), "path" ("mmap", "fast": AudioFlinger's
+   fast mixer, "normal": its normal mixer, no real-time callback; "" off AAudio) and "fast_path_retry" ("" none,
+   "granted" or "refused": a low-latency open on the normal mixer is opened once more). Free with caw_free. */
 CAW_API char* caw_audio_status(CawEngine* e);
 /* API version 23. How late the running device is, as JSON: {"running", "sample_rate" (the engine's), "output":
    {"running", "frames" (engine frames from a sample leaving the engine to the speaker), "ms", "source", "device_id"},
