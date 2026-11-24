@@ -1,12 +1,13 @@
-// A drag a device visual claims at once (a handle, a curve), so the page's scroll doesn't take it; elsewhere it scrolls.
+// A drag on a device visual (a handle, a curve): claimed after a short rest, a sideways move or at once by a mouse (kit/touch_engage.dart), so a quick vertical swipe scrolls the page; elsewhere it scrolls.
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../motion.dart';
+import '../kit/touch_engage.dart';
 
-/// Pans on [child] that begin where [grabs] says yes (everywhere by default) are claimed on touch-down; others go
-/// to the scroll as usual. Two quick taps in place call [onDoubleTap] (the reset), since a claimed touch can't
-/// also be a double-tap gesture.
+/// Pans on [child] that begin where [grabs] says yes (everywhere by default) are claimed once a finger rests a
+/// moment or moves sideways (at once with a mouse); a quick vertical swipe and touches elsewhere go to the scroll.
+/// Two quick taps in place call [onDoubleTap] (the reset), seen by a [Listener] whether or not the pan was claimed.
 class GrabPan extends StatefulWidget {
   const GrabPan({super.key, required this.child, required this.onStart, required this.onUpdate, required this.onEnd,
     this.grabs, this.onDoubleTap});
@@ -22,18 +23,21 @@ class GrabPan extends StatefulWidget {
 }
 
 class _GrabPanState extends State<GrabPan> {
-  Offset _down = Offset.zero, _at = Offset.zero;
+  int? _pointer;
+  Offset _down = Offset.zero;
   DateTime _downAt = DateTime(0);
+  bool _moved = false;
   DateTime? _lastTap;
   Offset _lastTapAt = Offset.zero;
 
   // The gesture binding's sampling clock (the test's fake clock under test), as GrabGesture and ClickCounter read.
   static DateTime get _now => GestureBinding.instance.samplingClock.now();
 
-  void _end() {
-    widget.onEnd();
+  void _up(PointerUpEvent e) {
+    if (e.pointer != _pointer) return;
+    _pointer = null;
     final now = _now;
-    final tap = (_at - _down).distance < 8 && now.difference(_downAt) < const Duration(milliseconds: 300);
+    final tap = !_moved && now.difference(_downAt) < const Duration(milliseconds: 300);
     if (!tap) {
       _lastTap = null;
       return;
@@ -50,36 +54,46 @@ class _GrabPanState extends State<GrabPan> {
   }
 
   @override
-  Widget build(BuildContext context) => RawGestureDetector(
+  Widget build(BuildContext context) => Listener(
     behavior: HitTestBehavior.opaque,
-    gestures: {
-      _GrabRecognizer: GestureRecognizerFactoryWithHandlers<_GrabRecognizer>(
-        () => _GrabRecognizer(),
-        (r) => r
-          ..grabs = widget.grabs
-          ..onStart = (d) {
-            _down = _at = d.localPosition;
-            _downAt = _now;
-            widget.onStart(d.localPosition);
-          }
-          ..onUpdate = (d) {
-            _at = d.localPosition;
-            widget.onUpdate(d.localPosition, d.delta);
-          }
-          ..onEnd = ((_) => _end())
-          ..onCancel = widget.onEnd,
-      ),
+    onPointerDown: (e) {
+      if (_pointer != null) return;
+      _pointer = e.pointer;
+      _down = e.localPosition;
+      _downAt = _now;
+      _moved = false;
     },
-    child: widget.child,
+    onPointerMove: (e) {
+      if (e.pointer == _pointer && (e.localPosition - _down).distance >= 8) _moved = true;
+    },
+    onPointerUp: _up,
+    onPointerCancel: (e) {
+      if (e.pointer == _pointer) _pointer = null;
+    },
+    child: RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: {
+        _GrabRecognizer: GestureRecognizerFactoryWithHandlers<_GrabRecognizer>(
+          () => _GrabRecognizer(),
+          (r) => r
+            ..grabs = widget.grabs
+            ..onStart = ((d) => widget.onStart(d.localPosition))
+            ..onUpdate = ((d) => widget.onUpdate(d.localPosition, d.delta))
+            ..onEnd = ((_) => widget.onEnd())
+            ..onCancel = widget.onEnd,
+        ),
+      },
+      child: widget.child,
+    ),
   );
 }
 
-class _GrabRecognizer extends PanGestureRecognizer {
+class _GrabRecognizer extends PanGestureRecognizer with EngageOnHold {
   bool Function(Offset local)? grabs;
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
     super.addAllowedPointer(event);
-    if (grabs?.call(event.localPosition) ?? true) resolvePointer(event.pointer, GestureDisposition.accepted);
+    if (grabs?.call(event.localPosition) ?? true) engageOnDown(event); // touch_engage.dart
   }
 }

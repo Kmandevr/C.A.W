@@ -1,4 +1,4 @@
-// A compact rotary knob for effect cards: drag up or down (or turn the mouse wheel) to turn, double-tap for the default, a tick at the centre;
+// A compact rotary knob for effect cards: drag up or down (a finger after a short rest or a slow start, so a swipe scrolls; or turn the mouse wheel) to turn, double-tap for the default, a tick at the centre;
 // exponential parameters turn on a log taper.
 import 'dart:math' as math;
 
@@ -9,6 +9,7 @@ import '../haptics.dart';
 import '../motion.dart';
 import '../pointer_input.dart';
 import '../theme.dart';
+import '../devices/kit/touch_engage.dart';
 import 'automate_control.dart';
 
 /// Where a value sits along a control's travel (0..1) and back. Linear by default; an exponential parameter
@@ -162,40 +163,42 @@ class _KnobState extends State<Knob> {
         waitDuration: const Duration(milliseconds: 600),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: widget.enabled
-              ? (_) {
-                  _dragValue = widget.value;
-                  _dragPos = _taper.position(widget.value);
-                  Haptics.grab();
-                  setState(() => _held = true);
-                }
-              : null,
-          onVerticalDragUpdate: widget.enabled
-              ? (d) {
-                  // 200 px of travel covers the range; hold Shift on a desktop for fine moves.
-                  final fine = HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1.0;
-                  final pos = ((_dragPos ?? _taper.position(widget.value)) - d.delta.dy / 200 * fine).clamp(0.0, 1.0).toDouble();
-                  _dragPos = pos;
-                  _set(_taper.value(pos));
-                }
-              : null,
-          onVerticalDragEnd: widget.enabled
-              ? (_) {
-                  _dragValue = null;
-                  _dragPos = null;
-                  setState(() => _held = false);
-                  widget.onChangeEnd?.call();
-                }
-              : null,
-          onVerticalDragCancel: () {
-            if (_held) setState(() => _held = false);
-          },
           onLongPressStart: widget.automation == null ? null : (d) => widget.automation!.menu(context, d.globalPosition),
           onSecondaryTapUp: widget.automation == null ? null : (d) => widget.automation!.menu(context, d.globalPosition),
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,
-          child: WheelSteps(
+          // A finger's drag engages after a short rest or a slow start; a quick swipe scrolls the page.
+          child: EngageVerticalDrag(
+            onStart: widget.enabled
+                ? (_) {
+                    _dragValue = widget.value;
+                    _dragPos = _taper.position(widget.value);
+                    Haptics.grab();
+                    setState(() => _held = true);
+                  }
+                : null,
+            onUpdate: widget.enabled
+                ? (d) {
+                    // 200 px of travel covers the range; hold Shift on a desktop for fine moves.
+                    final fine = HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1.0;
+                    final pos = ((_dragPos ?? _taper.position(widget.value)) - d.delta.dy / 200 * fine).clamp(0.0, 1.0).toDouble();
+                    _dragPos = pos;
+                    _set(_taper.value(pos));
+                  }
+                : null,
+            onEnd: widget.enabled
+                ? (_) {
+                    _dragValue = null;
+                    _dragPos = null;
+                    setState(() => _held = false);
+                    widget.onChangeEnd?.call();
+                  }
+                : null,
+            onCancel: () {
+              if (_held) setState(() => _held = false);
+            },
+            child: WheelSteps(
             enabled: widget.enabled,
             onStep: _wheel,
             onEnd: _wheelEnd,
@@ -221,7 +224,7 @@ class _KnobState extends State<Knob> {
                 style: const TextStyle(fontSize: 9, color: Neon.dim)),
               Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 9, color: color)),
             ]),
-          )),
+          ))),
         ),
       ),
     );

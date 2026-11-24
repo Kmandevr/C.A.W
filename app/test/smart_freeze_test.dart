@@ -14,7 +14,7 @@ import 'package:caw/model/freeze_hint.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/song_export.dart';
-import 'package:caw/ui/frame/headroom_notices.dart';
+import 'package:caw/ui/frame/performance_status.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -112,7 +112,7 @@ void main() {
     s.dispose();
   });
 
-  group('the notices', () {
+  group('the performance status', () {
     late AppState s;
     late Directory dir;
     setUp(() {
@@ -130,15 +130,26 @@ void main() {
     });
 
     Future<void> pump(WidgetTester tester) => tester.pumpWidget(MaterialApp(home: Scaffold(
-        body: Column(children: [HeadroomNotices(state: s), const Expanded(child: SizedBox())]))));
+        body: Column(children: [PerformanceStatus(state: s, child: const Text('CPU 0%')),
+          const Expanded(child: SizedBox())]))));
+    Finder dot() => find.byKey(const ValueKey('performance-dot'));
+    Future<void> open(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('performance-status')));
+      await tester.pumpAndSettle();
+    }
 
-    testWidgets('the suggestion names the track, freezes it only on a tap, and goes', (tester) async {
+    testWidgets('nothing shows over the work: a dot marks the suggestion, and the sheet freezes only on a tap',
+        (tester) async {
       await pump(tester);
-      expect(find.byKey(const ValueKey('freeze-suggestion')), findsNothing);
+      expect(dot(), findsNothing);
       s.freezeHint.suggestion.value = const FreezeSuggestion(layerId: 'a', name: 'Pad', share: 0.18);
       await tester.pumpAndSettle();
-      expect(find.textContaining('Pad is the heaviest track (18% of a core)'), findsOneWidget);
+      expect(dot(), findsOneWidget);
+      expect(find.byKey(const ValueKey('freeze-suggestion')), findsNothing, reason: 'no banner: only the dot');
       expect(s.project.layers.first.frozen, isFalse, reason: 'shown, never applied');
+      await open(tester);
+      expect(find.textContaining('Pad is the heaviest track (18% of a core)'), findsOneWidget);
+      expect(dot(), findsNothing, reason: 'seen');
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const ValueKey('freeze-suggestion-freeze')));
         for (var k = 0; k < 20 && !s.project.layers.first.frozen; k++) {
@@ -156,6 +167,7 @@ void main() {
       await pump(tester);
       s.freezeHint.suggestion.value = const FreezeSuggestion(layerId: 'b', name: 'Bass');
       await tester.pumpAndSettle();
+      await open(tester);
       expect(find.textContaining('Bass is the heaviest track:'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('freeze-suggestion-close')));
       await tester.pumpAndSettle();
@@ -164,28 +176,43 @@ void main() {
       expect(s.freezeHint.done, isTrue);
     });
 
-    testWidgets('serious heat shows a warn-only line; closed, it returns only after the phone cools', (tester) async {
+    testWidgets('serious heat marks the dot and warns in the sheet; once seen, the dot returns only after the phone cools',
+        (tester) async {
       final before = jsonEncode(s.settings.toJson());
       await pump(tester);
       s.pressure.value = EnginePressure.thermalWarm;
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('heat-banner')), findsNothing, reason: 'moderate is not serious');
+      expect(dot(), findsNothing, reason: 'moderate is not serious');
       s.pressure.value = EnginePressure.thermalHot;
       await tester.pumpAndSettle();
-      expect(find.text(HeadroomNotices.heatText), findsOneWidget);
+      expect(dot(), findsOneWidget);
+      expect(find.text(performanceHeatText), findsNothing, reason: 'nothing pops up');
+      await open(tester);
+      expect(find.text(performanceHeatText), findsOneWidget);
+      expect(find.text('Heat: Hot'), findsOneWidget);
       expect(jsonEncode(s.settings.toJson()), before, reason: 'it never changes a setting');
-      await tester.tap(find.byKey(const ValueKey('heat-close')));
+      await tester.tapAt(const Offset(10, 10)); // close the sheet
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('heat-banner')), findsNothing);
+      expect(dot(), findsNothing);
       s.pressure.value = EnginePressure.thermalCritical;
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('heat-banner')), findsNothing, reason: 'still hot: it stays closed');
+      expect(dot(), findsNothing, reason: 'still hot: seen');
       s.pressure.value = EnginePressure.normal;
       await tester.pumpAndSettle();
       s.pressure.value = EnginePressure.thermalHot;
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('heat-banner')), findsOneWidget);
+      expect(dot(), findsOneWidget);
       expect(seriousHeat(EnginePressure.batterySaver), isFalse);
+    });
+
+    testWidgets('the sheet lists the heat level and no muted tracks when all is well', (tester) async {
+      await pump(tester);
+      s.pressure.value = EnginePressure.normal;
+      await open(tester);
+      expect(find.text('Heat: Normal'), findsOneWidget);
+      expect(find.text('No tracks muted for headroom'), findsOneWidget);
+      expect(find.byKey(const ValueKey('performance-unmute')), findsNothing);
+      expect(find.text('TIPS'), findsOneWidget);
     });
   });
 }

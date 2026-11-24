@@ -185,7 +185,7 @@ void main() {
       s = await open(tester, 'org.caw.eq.dj');
       t = targetOf(s, 'org.caw.eq.dj');
       final dj = tester.getRect(find.byKey(const ValueKey('eq3-hero')));
-      await tester.dragFrom(dj.topLeft + Offset(freqToX(60, dj.width), dj.height / 2), const Offset(0, -40));
+      await restDrag(tester, dj.topLeft + Offset(freqToX(60, dj.width), dj.height / 2), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('low'), greaterThan(0));
       await close(tester);

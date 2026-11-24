@@ -120,10 +120,10 @@ void main() {
     testWidgets('compressor (Down): the trace drags the threshold, the curve the ratio, the knee bracket the knee', (tester) async {
       final (_, t) = await open(tester, 'org.caw.compressor');
       final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
-      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('threshold'), greaterThan(-18));
-      await tester.dragFrom(Offset(hero.right - 40, hero.top + 60), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 40, hero.top + 60), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('ratio'), lessThan(4));
       // The knee bracket's handle: 12 dp above the plot's bottom, at the knee's top end.
@@ -148,7 +148,7 @@ void main() {
 
       (_, t) = await open(tester, 'org.caw.gate');  // 1.1.0: the Gate's own device (1.0.9: the Compressor's 2)
       hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
-      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -30));
+      await restDrag(tester, Offset(hero.left + 40, hero.center.dy), const Offset(0, -30));
       await tester.pumpAndSettle();
       expect(t.value('threshold'), greaterThan(-40));
       // The range handle sits where the expander meets the floor.
@@ -158,7 +158,7 @@ void main() {
       final x0 = (thr + range / (ratio - 1)).clamp(-80.0, thr);
       final out = x0 + range < thr + (x0 - thr) * ratio ? thr + (x0 - thr) * ratio : x0 + range;
       final at = Offset(left + (x0 + 80) / 80 * pw, top + ph - ((out + 80) / 80).clamp(0.0, 1.0) * ph);
-      await tester.dragFrom(at, const Offset(0, -40));
+      await restDrag(tester, at, const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('range'), greaterThan(-80));
       await close(tester);
@@ -169,7 +169,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value('detection'), 2);
       hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
-      await tester.dragFrom(Offset(hero.right - 40, hero.top + 60), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 40, hero.top + 60), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('amount'), lessThan(0.5));
       await close(tester);
@@ -179,12 +179,12 @@ void main() {
       final (_, t) = await open(tester, 'org.caw.limiter');
       expect(find.byKey(const ValueKey('limiter-gr-meter')), findsOneWidget);
       final hero = tester.getRect(find.byKey(const ValueKey('limiter-hero')));
-      await tester.dragFrom(Offset(hero.center.dx, hero.bottom - 20), const Offset(0, -50));
+      await restDrag(tester, Offset(hero.center.dx, hero.bottom - 20), const Offset(0, -50));
       await tester.pumpAndSettle();
       expect(t.value('gain'), greaterThan(2));
       final area = Rect.fromLTRB(hero.left, hero.top + 22, hero.right, hero.bottom - 4);
       final cy = area.bottom - (-1 + 24) / 27 * area.height;
-      await tester.dragFrom(Offset(hero.center.dx, cy), const Offset(0, 40));
+      await restDrag(tester, Offset(hero.center.dx, cy), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(t.value('ceiling'), lessThan(-2));
       await close(tester);
@@ -193,8 +193,8 @@ void main() {
     testWidgets('transient: the attack part drags attack, the rest sustain', (tester) async {
       final (_, t) = await open(tester, 'org.caw.transient');
       final hero = tester.getRect(find.byKey(const ValueKey('transient-hero')));
-      await tester.dragFrom(Offset(hero.left + 20, hero.center.dy), const Offset(0, -40));
-      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, 40));
+      await restDrag(tester, Offset(hero.left + 20, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.right - 60, hero.center.dy), const Offset(0, 40));
       await tester.pumpAndSettle();
       expect(t.value('attack'), greaterThan(0.1));
       expect(t.value('sustain'), lessThan(-0.1));

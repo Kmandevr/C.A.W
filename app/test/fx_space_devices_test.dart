@@ -233,7 +233,7 @@ void main() {
     testWidgets('Imager: a band dragged up widens it', (tester) async {
       final s = await open(tester, 'org.caw.imager');
       final hero = await heroOf(tester, 'imager-hero');
-      await tester.dragFrom(Offset(hero.left + hero.width / 6, hero.center.dy), const Offset(0, -40));
+      await restDrag(tester, Offset(hero.left + hero.width / 6, hero.center.dy), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(target(s).value('low_width'), greaterThan(1));
       await close(tester);

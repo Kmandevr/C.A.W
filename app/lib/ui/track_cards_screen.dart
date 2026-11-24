@@ -43,7 +43,6 @@ class TrackCardsScreen extends StatelessWidget {
     final list = ListView(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 96),
       children: [
-        if (state.meters.overloaded > 0) _OverloadBanner(state: state),
         _ProjectStrip(state: state),
         const SizedBox(height: 14),
         for (var i = 0; i < p.layers.length; i++) ...[
@@ -84,29 +83,6 @@ class TrackCardsHeader extends StatelessWidget {
           const SizedBox(width: 6),
           const Text('TRACK CARDS', style: TextStyle(color: Neon.dim, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
         ]),
-      );
-}
-
-class _OverloadBanner extends StatelessWidget {
-  const _OverloadBanner({required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: NeonPanel(
-          color: Neon.pink,
-          child: Row(children: [
-            const Icon(Icons.speed, color: Neon.pink),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                  'Out of headroom: the newest track${state.meters.overloaded > 1 ? 's were' : ' was'} muted to keep audio clean.'
-                  '${state.lightTurnedOnBySelf ? ' Light mode is now on (Settings).' : ''}'),
-            ),
-            TextButton(onPressed: state.clearOverload, child: const Text('Unmute')),
-          ]),
-        ),
       );
 }
 

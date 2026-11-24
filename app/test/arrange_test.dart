@@ -778,15 +778,22 @@ void _steppedKnobs() {
       tried++;
       await tester.ensureVisible(knob);
       await tester.pumpAndSettle();
-      // Set to the minimum first (double-tap goes to the default, so drag far down).
-      await tester.drag(knob, const Offset(0, 400));
+      // Set to the minimum first (double-tap goes to the default, so drag far down; a finger rests first, or the swipe
+      // would scroll the page).
+      final down = await tester.startGesture(tester.getCenter(knob));
+      await tester.pump(const Duration(milliseconds: 150));
+      for (var i = 0; i < 20; i++) {
+        await down.moveBy(const Offset(0, 20));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await down.up();
       await tester.pumpAndSettle();
       expect(valueOf(id, p.id), p.min, reason: '$id ${p.id} at the bottom');
       // Then one slow drag up, a pixel at a time, over 60% of the travel (200 px covers it all).
       final g = await tester.startGesture(tester.getCenter(knob));
       for (var i = 0; i < 140; i++) {
         await g.moveBy(const Offset(0, -1));
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 8)); // 125 px a second
       }
       await g.up();
       await tester.pumpAndSettle();

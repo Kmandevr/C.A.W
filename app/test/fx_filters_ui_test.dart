@@ -121,7 +121,7 @@ void main() {
   group('gestures', () {
     Future<void> drag(WidgetTester tester, String key, Offset from, Offset by) async {
       final hero = tester.getRect(find.byKey(ValueKey(key)));
-      await tester.dragFrom(hero.topLeft + from, by);
+      await restDrag(tester, hero.topLeft + from, by); // a finger that rests first: the hero's, not the page's
       await tester.pumpAndSettle();
     }
 
@@ -178,7 +178,7 @@ void main() {
       final t = targetOf(s, 'org.caw.eq.dj');
       final hero = tester.getRect(find.byKey(const ValueKey('eq3-hero')));
       final midX = freqToX(800, hero.width);
-      await tester.dragFrom(hero.topLeft + Offset(midX, hero.height / 2), const Offset(0, -40));
+      await restDrag(tester, hero.topLeft + Offset(midX, hero.height / 2), const Offset(0, -40));
       await tester.pumpAndSettle();
       expect(t.value('mid'), greaterThan(0));
       final lowX = freqToX(250, hero.width);
