@@ -157,8 +157,9 @@ struct Case {
 
 }  // namespace
 
-// Prints each case and returns how many went over their ceilings (about twice what each measured on the x86 box,
-// 2026-11-19: 2.9 to 4.1 ms per second, so a shared runner's noise passes and a path costing double fails).
+// Prints each case and returns how many went over their ceilings (the pad cases about twice what each measured on the
+// x86 box, 2026-11-19: 2.9 to 4.1 ms per second, so a shared runner's noise passes and a path costing double fails;
+// the 1.1.2 kits about 1.2 times, below).
 int rookCost(double seconds) {
     const Case cases[] = {
         {"body and noise (1.0.9's layers, for scale)", {{"a1_body_on", 1}, {"a1_noise_on", 1}}, 8000},
@@ -202,19 +203,19 @@ int rookCost(double seconds) {
     };
     // The design's targets are on the Acoustic engine itself (its pieces, mics and bleed; docs/engine.md "Drums",
     // Acoustic, Cost): heavy (24,000 µs/s) for a full kit at Normal, medium (8,000) at Eco. The kit's room is 1.1.0's
-    // reverb, priced on its own as the design does ("then 1.1.0's room"). The ceilings catch regressions: about 1.7
-    // times what each measured on the x86 box (2026-11-20), so a shared runner's noise passes.
+    // reverb, priced on its own as the design does ("then 1.1.0's room"). The ceilings catch regressions: about 1.2
+    // times the highest of three runs on the x86 box at CI's length (`caw_bench 0.5 323`, 2026-11-24).
     const KitCase kits[] = {
-        {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 24000, 9600},  // 2.4 % of a phone core
-        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 12000, 0},
-        {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 38000, 24000},
-        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 22000, 8000},
-        {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 64000, 0},
-        {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 34000, 0},
-        {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 20000, 0},
-        {"Kit: 909 groove (1.1.0's Layers, for scale)", &old909, &groove, kQualityNormal, 34000, 0},
-        {"Produced kit: House groove", &produced, &groove, kQualityNormal, 60000, 0},
-        {"Synth kit: 808-style groove", &synth, &groove, kQualityNormal, 40000, 0},
+        {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 11000, 9600},  // 2.4 % of a phone core
+        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 6500, 0},
+        {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 24500, 24000},
+        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 13000, 8000},
+        {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 38000, 0},
+        {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 17500, 0},
+        {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 11500, 0},
+        {"Kit: 909 groove (1.1.0's Layers, for scale)", &old909, &groove, kQualityNormal, 14000, 0},
+        {"Produced kit: House groove", &produced, &groove, kQualityNormal, 28500, 0},
+        {"Synth kit: 808-style groove", &synth, &groove, kQualityNormal, 21000, 0},
     };
     std::printf("Drums 1.1.2 (Rook kits), a one-bar loop at 120 BPM (µs of CPU per second of audio; ceiling µs/s; design):\n");
     for (const KitCase& c : kits) {
