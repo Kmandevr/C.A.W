@@ -308,6 +308,8 @@ const List<SettingEntry> settingEntries = [
   _E('feel.haptics', _C.touch, 'Haptics', 'A light touch on presses, steps, snaps, grabs and drops', ['vibration', 'feedback']),
   _E('feel.hapticStrength', _C.touch, 'Haptic strength', 'How strong the haptics are', ['vibration', 'intensity']),
   _E('feel.longPress', _C.touch, 'Long-press menus', 'A list near the finger, or a ring', ['menu', 'ring', 'context menu']),
+  _E('feel.knobDrag', _C.touch, 'Knobs turn with', 'A sideways drag (up and down scrolls), or up and down after a short hold',
+      ['knob', 'drag', 'sideways', 'vertical', 'turn', 'scroll']),
   _E.more('feel.quickActions', _C.touch, 'Quick actions bar', 'A floating row of shortcut buttons on a phone', ['shortcuts', 'buttons']),
   _E('projects.autosave', _C.saving, 'Autosave', 'How soon after an edit the project is saved', ['save', 'interval', 'delay']),
   _E('projects.restorePoints', _C.saving, 'Restore points kept', 'How many restore points each project keeps',

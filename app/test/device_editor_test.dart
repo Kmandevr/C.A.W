@@ -255,6 +255,25 @@ void main() {
       expect(pos.pixels, 0);
     });
 
+    // 1.1.3 (owner, 2026-11-24): a deliberate sideways drag turns a knob at once, right turning it up, left down.
+    wtest('a quick sideways drag turns a knob at once, without a hold, and never scrolls', (tester) async {
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(8, 0));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      final up = synth().value('osc1_level');
+      expect(up, greaterThan(before));
+      expect(pos.pixels, 0);
+      await tester.drag(find.byKey(const ValueKey('dknob-osc1_level')), const Offset(-60, 0));
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_level'), lessThan(up));
+    });
+
     wtest('a drag that starts slowly turns the knob', (tester) async {
       final pos = await top(tester);
       final before = synth().value('osc1_level');

@@ -81,6 +81,8 @@ Future<void> main(List<String> args) async {
   // a slow answer doesn't hold the launch up.
   await frameRate.start().timeout(const Duration(milliseconds: 300), onTimeout: () {});
   final state = AppState(settings: settings);
+  // The UI at 60 Hz while a song plays, always (owner, 2026-11-24).
+  state.addListener(() => frameRate.setPlaying(state.transportOn));
   // What follows the audio is drawn for when its frame lights up, at the rate the app draws at while things move.
   state.avSync.refreshHz = () => frameRate.movingRate > 0 ? frameRate.movingRate : AvSync.screenHz();
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).

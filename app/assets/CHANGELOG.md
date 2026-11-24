@@ -15,6 +15,8 @@ Realistic instruments, part one: a piano, bowed strings, winds and a cathedral o
 
 ### Changed
 - The new piano, strings and winds open dry (no room): add Space or your own reverb. The organ opens in its cathedral.
+- **Knobs turn with a sideways drag**, so swiping up and down over a device page scrolls it. Hold a knob first for fine moves. Prefer the old up-and-down drag? Settings › Haptics and menus › Knobs turn with.
+- While a song plays, the screen runs at 60 Hz to leave the phone's power to the audio.
 
 ### Known issues
 - The new instruments use the plain knob page until their own pages are designed.

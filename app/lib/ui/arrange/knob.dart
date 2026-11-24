@@ -169,7 +169,7 @@ class _KnobState extends State<Knob> {
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,
           // A finger's drag engages after a short rest or a slow start; a quick swipe scrolls the page.
-          child: EngageVerticalDrag(
+          child: EngageKnobDrag(
             onStart: widget.enabled
                 ? (_) {
                     _dragValue = widget.value;

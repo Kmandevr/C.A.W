@@ -72,8 +72,16 @@ class FrameRateController extends ChangeNotifier {
   int get profileCap => _profileCap;
   int _profileCap = 0;
 
+  /// The cap while a song plays: the UI drops to 60 Hz, always, so the audio keeps the CPU (owner, 2026-11-24; no
+  /// setting). 0 while stopped.
+  static const int playingCap = 60;
+  int _playCap = 0;
+
+  // The lowest of the profile's cap and the playing cap (0: neither).
+  int get _softCap => _profileCap == 0 ? _playCap : (_playCap == 0 ? _profileCap : math.min(_profileCap, _playCap));
+
   /// The cap in force: the lower of the setting's and the profile's ([auto] when neither caps).
-  int get effectiveCap => _cap == auto ? _profileCap : (_profileCap == 0 ? _cap : math.min(_cap, _profileCap));
+  int get effectiveCap => _cap == auto ? _softCap : (_softCap == 0 ? _cap : math.min(_cap, _softCap));
 
   /// Whether the profile lowers what the setting alone would ask for.
   bool get profileCaps => _profileCap != 0 && (_cap == auto || _profileCap < _cap);
@@ -179,10 +187,20 @@ class FrameRateController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The transport started or stopped: while it plays, at most [playingCap] (the app calls it on every state change,
+  /// so an unchanged value does nothing).
+  void setPlaying(bool playing) {
+    final v = playing ? playingCap : 0;
+    if (v == _playCap) return;
+    _playCap = v;
+    _apply();
+    notifyListeners();
+  }
+
   bool get _auto => _cap == auto && device.canRequest && _rates.length >= 2;
 
   // Auto's rate while anything moves: the screen's highest, or the highest under the profile's cap.
-  double get _top => _profileCap == 0 ? _rates.last : rateFor(_profileCap, _rates);
+  double get _top => _softCap == 0 ? _rates.last : rateFor(_softCap, _rates);
 
   void _apply() {
     _idleTimer?.cancel();

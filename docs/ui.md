@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-20
+updated: 2026-11-24
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -153,6 +153,7 @@ The track header is the quick-control surface (mute, solo, instrument, folder an
 
 **What good plugin UIs do** (checked 2026-11-10; sources linked):
 - **One hero visual you edit directly.** FabFilter's EQ is edited by dragging band points on the spectrum; on iOS a double-tap on the background makes a band, a double-tap-and-drag sets a band's Q, a press-and-hold on a point opens its menu ([Pro-Q iOS help](https://fabfilter.com/help/pro-q/using/ios)). Pro-C 2's main display is a scrolling level history with the gain reduction, and its knee display plots the transfer curve from threshold, ratio, knee and range ([Pro-C 2 help](https://fabfilter.com/help/pro-c/using/dynamicscontrols); [Production Expert](https://www.production-expert.com/production-expert-1/5-ways-fabfilter-pro-c2-can-help-you-learn-compression?format=amp)).
+- **C.A.W's knobs (owner, 2026-11-24, built 1.1.3):** a sideways drag turns a knob at once, so an up-and-down swipe scrolls the page; a hold first still takes any direction for fine moves; Settings brings back the up-and-down drag ([app](app.md)). While a song plays the UI runs at 60 Hz.
 - **Touch knobs:** FabFilter's iOS knobs turn with a vertical drag only (no rotary drag), a second finger held down gives fine adjustment, a double-tap resets, a press-and-hold types a value ([Pro-Q iOS help](https://fabfilter.com/help/pro-q/using/ios)). Touch users ask for value readouts the finger doesn't hide, typed values and snapping ([Loopy Pro forum](https://forum.loopypro.com/discussion/comment/1315147)); a tap on a knob must not trigger another mode ([Drambo forum](https://forum.beepstreet.com/discussion/comment/52438/)).
 - **Colour and motion carry meaning.** Arturia's Pigments colour-codes its modulation sources and animates waveforms, envelopes and modulation in real time ([Arturia](https://www.arturia.com/products/software-instruments/pigments/overview)); Vital shows every routing visually and "everything moves in real time" ([Vital press kit](https://vital.audio/presskit/)); Bitwig's Grid colours ports by signal type ([Bitwig user guide](https://www.bitwig.com/userguide/latest/welcome_to_the_grid)). Ableton's Auto Filter in Live 12.2 added a real-time spectrum to the device ([Ableton](https://www.ableton.com/zh-cn/blog/live-12-2/)).
 - **Few big targets beat many small ones** on touch: Koala Sampler is praised for keeping you "in the flow" with large pads instead of pages of parameters ([Sound On Sound](https://www.soundonsound.com/reviews/elf-audio-koala-sampler)). [Assumption] Moog Model D, Korg Gadget and Fugue Machine were on the list to study; no primary source on their UI design was found, so nothing here rests on them.

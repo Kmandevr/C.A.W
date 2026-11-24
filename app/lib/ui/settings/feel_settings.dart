@@ -71,6 +71,12 @@ class FeelSettings extends StatelessWidget {
           ),
         ),
       ),
+      settingChoice<bool>('feel.knobDrag', s.knobSideways, const [(true, 'Sideways'), (false, 'Up and down')],
+          (v) => s.update((x) => x.knobSideways = v),
+          icon: Icons.swap_horiz,
+          subtitle: s.knobSideways
+              ? 'Drag a knob left or right; swipe up or down to scroll. Hold first for fine moves'
+              : 'Hold a knob a moment, then drag up or down'),
       settingChoice<LongPressMenuStyle>('feel.longPress', s.longPressMenu,
           const [(LongPressMenuStyle.list, 'List'), (LongPressMenuStyle.ring, 'Ring')],
           (v) => s.update((x) => x.longPressMenu = v),
