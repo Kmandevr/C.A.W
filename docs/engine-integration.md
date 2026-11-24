@@ -29,6 +29,8 @@ The portable C++ core is the single source of processing behavior. Hosts must no
 
 **Sample browsing (API 33, #229, built):** `caw_asset_key` estimates a file's key (an estimate with a confidence; unsure for drums and noise), and `caw_engine_preview_sample` auditions a file beside the song (stretched to a tempo, started on the next beat or bar, optionally through a track's effects) with `_stop`, `_seek`, `_volume` and `_state`. A host that lists audio files reads their metadata itself; the app's readers are in `app/lib/model/sample_meta.dart` ([engine](engine.md#the-sample-preview-and-key-estimate)).
 
+**Clip pitch editing (API 42, built):** the clip pitch editor's engine (Chirp, one voice): `caw_pitch_clip_analyse`, `caw_pitch_clip_curve`, `caw_pitch_clip_render` and `caw_pitch_clip_free`, called off the audio thread ([engine](engine.md#chirp-pitch-correction-and-the-clip-pitch-editor-110)).
+
 Every public capability needs a stable identifier, documented input/output contract, versioning behavior, error reporting and a test. The C ABI remains the compatibility boundary; additive functions and structs must be size/version guarded before any future ABI-breaking redesign.
 
 ## Projects, add-ons and shared workflows
