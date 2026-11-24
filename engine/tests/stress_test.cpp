@@ -129,6 +129,17 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
     return a;
 }
 
+// every_instrument's render less Timber's bowed strings (Classic and Simulated; owner, 2026-11-24: "It doesn't
+// necessarily need to sound identical every time just close enough... You're also welcome to narrow the test").
+// Their stick-slip friction is chaotic, so each compiler's rounding (GCC on Arm64 with fused multiply-adds, Clang on
+// x86-64 even without them or reassociation) moves the bowed layer by up to 1.2 dB, measured 2026-11-24 (PR #261),
+// past this mix's 0.1 dB match. The Benchmark still plays them; their sound is checked by Timber's own references
+// (timber_test.cpp, timber_sim_test.cpp), which hold on every build.
+ProjectSpec withoutBowedStrings(ProjectSpec p) {
+    std::erase_if(p.layers, [](const LayerSpec& l) { return l.name.find("Bowed") != std::string::npos; });
+    return p;
+}
+
 }  // namespace
 
 // The builders moved from caw_bench.cpp to stress_scenarios.cpp unchanged: each project's every field hashes as it
@@ -185,7 +196,7 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         const std::string hash = hex(fnv(describeProject(p, dir).data(), describeProject(p, dir).size()));
         if (it == specHash.end()) cawtest::fail(__FILE__, __LINE__, id + ": no hash recorded (it is " + hash + ")");
         else if (hash != it->second) cawtest::fail(__FILE__, __LINE__, id + ": the project differs from its recorded one (" + hash + ")");
-        CHECK_REFERENCE(refs, id, renderSecond(p), cawtest::Class::Chaotic);
+        CHECK_REFERENCE(refs, id, renderSecond(id == "every_instrument" ? withoutBowedStrings(p) : p), cawtest::Class::Chaotic);
     }
 }
 
