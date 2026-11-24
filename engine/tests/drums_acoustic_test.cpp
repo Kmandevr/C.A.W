@@ -757,4 +757,11 @@ TEST(rook_kit_tools_tune_layer_finish_map_and_render_a_pad) {
     for (const auto& [id, v] : mapped.get("params")->obj)
         if (id.size() > 5 && id.substr(id.size() - 5) == "_note" && v.num == kNoteFirst + 26) edge = true;
     CHECK(edge);
+    // Exploding an Acoustic kit moves no Acoustic pad: its pieces are one kit, so they stay on the kit's track.
+    std::string ex = "{\"id\":\"org.caw.drums\",\"params\":" + ap + "}";
+    char* x = caw_drums_explode(ex.c_str());
+    Json xj;
+    CHECK(parseJson(x, xj, err));
+    caw_free(x);
+    CHECK(xj.boolean("ok", false) && xj.get("tracks") && xj.get("tracks")->arr.empty());
 }

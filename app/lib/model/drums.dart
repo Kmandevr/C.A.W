@@ -45,7 +45,7 @@ const drumLayerNames = {
   'pad': 'Pad', 'press': 'Pressure', 'body': 'Body', 'penv': 'Pitch shape', 'sub': 'Sub', 'click': 'Click',
   'noise': 'Noise', 'metal': 'Metal', 'res': 'Resonator', 'smp': 'Sample', 'drive': 'Drive', 'filter': 'Filter',
   'eq': 'EQ', 'dyn': 'Dynamics', 'space': 'Space', 'macro': 'Character', 'var': 'Variation', 'fm': 'FM',
-  'phys': 'Physical', 'tex': 'Texture', 'fx': 'Pad FX', 'groove': 'Groove',
+  'phys': 'Physical', 'tex': 'Texture', 'fx': 'Pad FX', 'groove': 'Groove', 'acou': 'Acoustic',
 };
 
 /// The layers that make sound (a pad with all of them off is empty and costs nothing).

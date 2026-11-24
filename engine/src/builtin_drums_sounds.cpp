@@ -972,9 +972,11 @@ std::string drumsExplodeJson(std::string_view entryJson) {
         const Voice v = voiceFrom(params, pad, defaultVoice(pad));
         const int note = static_cast<int>(v[kNote]);
         const bool used = v[kBodyOn] + v[kSubOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] + v[kFmOn] + v[kPhysOn] + v[kTexOn] > 0.0 &&
-                          v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff);
+                          v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff) &&
+                          v[kEngine] < 0.5;  // 1.1.2: an Acoustic pad stays with its pieces (shared objects) on the kit's track
         if (!used) continue;
         Voice single = v;
+        single[kAcouLayer] = 0;  // the pieces stay on the kit's track
         single[kNote] = kNoteAuto;
         single[kChan] = 1;  // Any: the track's own notes
         single[kChoke] = 0;
