@@ -98,85 +98,6 @@ const MembraneTable& membrane() {
     return t;
 }
 
-// The modal kernels (structure of arrays, no aliasing, every count a multiple of 4: they vectorize with no scalar
-// tail). y = a1 y1 - a2 y2 is a mode's next displacement before new forces (the damping is in a1, a2); the radiated
-// sum is the weighted velocity sum w (y - y1).
-inline void predictModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
-                         const float* __restrict y2, float* __restrict yp) noexcept {
-    n &= ~3u;
-    for (uint32_t k = 0; k < n; ++k) yp[k] = a1[k] * y1[k] - a2[k] * y2[k];
-}
-inline float dotModes(uint32_t n, const float* __restrict a, const float* __restrict b) noexcept {
-    n &= ~3u;
-    float s = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) s += a[k] * b[k];
-    return s;
-}
-inline void addModes(uint32_t n, float* __restrict y, const float* __restrict phi, float c) noexcept {
-    n &= ~3u;
-    for (uint32_t k = 0; k < n; ++k) y[k] += c * phi[k];
-}
-inline float commitModes(uint32_t n, const float* __restrict yp, float* __restrict y1, float* __restrict y2,
-                         const float* __restrict w) noexcept {
-    n &= ~3u;
-    float out = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) {
-        out += w[k] * (yp[k] - y1[k]);
-        y2[k] = y1[k];
-        y1[k] = yp[k];
-    }
-    return out;
-}
-// predictModes and the predicted displacement's dot product with phi, in one pass.
-inline float predictDot(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
-                        const float* __restrict y2, float* __restrict yp, const float* __restrict phi) noexcept {
-    n &= ~3u;
-    float s = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) {
-        yp[k] = a1[k] * y1[k] - a2[k] * y2[k];
-        s += phi[k] * yp[k];
-    }
-    return s;
-}
-// addModes(c, phi) then commitModes, in one pass.
-inline float commitAdd(uint32_t n, const float* __restrict yp, const float* __restrict phi, float c, float* __restrict y1,
-                       float* __restrict y2, const float* __restrict w) noexcept {
-    n &= ~3u;
-    float out = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) {
-        const float y = yp[k] + c * phi[k];
-        out += w[k] * (y - y1[k]);
-        y2[k] = y1[k];
-        y1[k] = y;
-    }
-    return out;
-}
-// stepModes with a force f[k] added to each mode's displacement (predicted, forced and committed in one pass).
-inline float stepForced(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
-                        float* __restrict y2, const float* __restrict w, const float* __restrict f) noexcept {
-    n &= ~3u;
-    float out = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) {
-        const float y = a1[k] * y1[k] - a2[k] * y2[k] + f[k];
-        out += w[k] * (y - y1[k]);
-        y2[k] = y1[k];
-        y1[k] = y;
-    }
-    return out;
-}
-inline float stepModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
-                       float* __restrict y2, const float* __restrict w) noexcept {
-    n &= ~3u;
-    float out = 0.0f;
-    for (uint32_t k = 0; k < n; ++k) {
-        const float y = a1[k] * y1[k] - a2[k] * y2[k];
-        out += w[k] * (y - y1[k]);
-        y2[k] = y1[k];
-        y1[k] = y;
-    }
-    return out;
-}
-
 // The free-ringing kernels are kept out of line and unspecialised (no inlining, no clones for a constant frame
 // count), so a span stepped at once and a frame stepped alone run the same machine code: the same bits.
 #if defined(__clang__)
@@ -209,6 +130,79 @@ inline V4 load4(const float* p) noexcept {
 }
 inline void store4(float* p, V4 v) noexcept { std::memcpy(p, &v, sizeof v); }
 inline float sum4(V4 v) noexcept { return (v[0] + v[1]) + (v[2] + v[3]); }
+
+// The modal kernels (structure of arrays, every count a multiple of 4), four modes at a time. y = a1 y1 - a2 y2 is a
+// mode's next displacement before new forces (the damping is in a1, a2); the radiated sum is the weighted velocity
+// sum w (y - y1). The sums run in two interleaved accumulators: two chains of adds, not one, per frame.
+template <class F>
+inline float sumGroups(uint32_t n, F&& f) noexcept {
+    n &= ~3u;
+    V4 s0 = {0.0f, 0.0f, 0.0f, 0.0f}, s1 = s0;
+    uint32_t k = 0;
+    for (; k + 8 <= n; k += 8) {
+        s0 = s0 + f(k);
+        s1 = s1 + f(k + 4);
+    }
+    if (k < n) s0 = s0 + f(k);
+    return sum4(s0 + s1);
+}
+inline void predictModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
+                         const float* __restrict y2, float* __restrict yp) noexcept {
+    n &= ~3u;
+    for (uint32_t k = 0; k < n; k += 4) store4(yp + k, load4(a1 + k) * load4(y1 + k) - load4(a2 + k) * load4(y2 + k));
+}
+inline float dotModes(uint32_t n, const float* __restrict a, const float* __restrict b) noexcept {
+    return sumGroups(n, [&](uint32_t k) { return load4(a + k) * load4(b + k); });
+}
+inline void addModes(uint32_t n, float* __restrict y, const float* __restrict phi, float c) noexcept {
+    n &= ~3u;
+    const V4 C = {c, c, c, c};
+    for (uint32_t k = 0; k < n; k += 4) store4(y + k, load4(y + k) + C * load4(phi + k));
+}
+inline float commitModes(uint32_t n, const float* __restrict yp, float* __restrict y1, float* __restrict y2,
+                         const float* __restrict w) noexcept {
+    return sumGroups(n, [&](uint32_t k) {
+        const V4 Y = load4(yp + k), Y1 = load4(y1 + k);
+        store4(y2 + k, Y1), store4(y1 + k, Y);
+        return load4(w + k) * (Y - Y1);
+    });
+}
+// predictModes and the predicted displacement's dot product with phi, in one pass.
+inline float predictDot(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
+                        const float* __restrict y2, float* __restrict yp, const float* __restrict phi) noexcept {
+    return sumGroups(n, [&](uint32_t k) {
+        const V4 Y = load4(a1 + k) * load4(y1 + k) - load4(a2 + k) * load4(y2 + k);
+        store4(yp + k, Y);
+        return load4(phi + k) * Y;
+    });
+}
+// addModes(c, phi) then commitModes, in one pass.
+inline float commitAdd(uint32_t n, const float* __restrict yp, const float* __restrict phi, float c, float* __restrict y1,
+                       float* __restrict y2, const float* __restrict w) noexcept {
+    const V4 C = {c, c, c, c};
+    return sumGroups(n, [&](uint32_t k) {
+        const V4 Y = load4(yp + k) + C * load4(phi + k), Y1 = load4(y1 + k);
+        store4(y2 + k, Y1), store4(y1 + k, Y);
+        return load4(w + k) * (Y - Y1);
+    });
+}
+// stepModes with a force f[k] added to each mode's displacement (predicted, forced and committed in one pass).
+inline float stepForced(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
+                        float* __restrict y2, const float* __restrict w, const float* __restrict f) noexcept {
+    return sumGroups(n, [&](uint32_t k) {
+        const V4 Y1 = load4(y1 + k), Y = load4(a1 + k) * Y1 - load4(a2 + k) * load4(y2 + k) + load4(f + k);
+        store4(y2 + k, Y1), store4(y1 + k, Y);
+        return load4(w + k) * (Y - Y1);
+    });
+}
+inline float stepModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
+                       float* __restrict y2, const float* __restrict w) noexcept {
+    return sumGroups(n, [&](uint32_t k) {
+        const V4 Y1 = load4(y1 + k), Y = load4(a1 + k) * Y1 - load4(a2 + k) * load4(y2 + k);
+        store4(y2 + k, Y1), store4(y1 + k, Y);
+        return load4(w + k) * (Y - Y1);
+    });
+}
 
 // Free ringing, n frames (n <= kCell): modes [from, to) (multiples of 4) four at a time, each group kept in registers
 // over the frames, each frame's weighted velocity sum w (y - y1) added into acc[t] group by group in order. The
@@ -1177,7 +1171,6 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
     const float scale = static_cast<float>(sr_) * p.gain;
     const uint32_t all = top.count + bot.count;
     alignas(32) float yp[kMaxModes];
-    float pressure = 0.0f;
     for (uint32_t t = 0; t < n; ++t) {
         Striker& sa = p.stick[0];
         Striker& sb = p.stick[1];
@@ -1205,7 +1198,7 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
             }
             p.hatDPrev = eta - Fc * p.hatC;
             vz += Fc * dt / 0.4f;
-            pressure += Fc;
+            p.hatPressureSum += Fc;  // frame by frame into the cell's sum: the same at any block size
             if (!ca && !cb) {  // only the plates' force: added as the modes commit (one pass)
                 out = commitAdd(all, yp, p.hatPush, Fc, p.y1, p.y2, p.w);
             } else {
@@ -1226,7 +1219,7 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
         p.hatZ += vz * dt;
         p.out[t] = out * scale + noiseSample(p);
     }
-    p.hatPressureSum += pressure;  // the cell's end turns it into the plates' damping (endCell)
+    // (the cell's end turns hatPressureSum into the plates' damping: endCell)
 }
 
 void AcousticKit::control(Piece& p) noexcept {
