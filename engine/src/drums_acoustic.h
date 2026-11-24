@@ -90,6 +90,7 @@ struct Piece {
     // resonant head, the force fed back to its lowest modes.
     uint32_t wires = 0;
     float psiT[kResoWireModes][kMaxWires] = {};  // wire w's weight on resonant-head mode k: psiT[k][w]
+    float psiW[kMaxWires][kResoWireModes] = {};  // the same, by wire: psiW[w][k] (the force fed back, modes at once)
     float wx[kMaxWires] = {}, wv[kMaxWires] = {}, wC[kMaxWires] = {}, wDPrev[kMaxWires] = {};
     float wOm2 = 0, wDampK = 0, wRest = 0, wMass = 0.002f, wK = 1e6f;
     float rattleHp[4] = {}, rattleK = 0.3f, rattleGain = 0, lastF = 0, wireGate = 0;

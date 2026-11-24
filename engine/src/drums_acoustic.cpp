@@ -127,6 +127,30 @@ inline float commitModes(uint32_t n, const float* __restrict yp, float* __restri
     }
     return out;
 }
+// predictModes and the predicted displacement's dot product with phi, in one pass.
+inline float predictDot(uint32_t n, const float* __restrict a1, const float* __restrict a2, const float* __restrict y1,
+                        const float* __restrict y2, float* __restrict yp, const float* __restrict phi) noexcept {
+    n &= ~3u;
+    float s = 0.0f;
+    for (uint32_t k = 0; k < n; ++k) {
+        yp[k] = a1[k] * y1[k] - a2[k] * y2[k];
+        s += phi[k] * yp[k];
+    }
+    return s;
+}
+// addModes(c, phi) then commitModes, in one pass.
+inline float commitAdd(uint32_t n, const float* __restrict yp, const float* __restrict phi, float c, float* __restrict y1,
+                       float* __restrict y2, const float* __restrict w) noexcept {
+    n &= ~3u;
+    float out = 0.0f;
+    for (uint32_t k = 0; k < n; ++k) {
+        const float y = yp[k] + c * phi[k];
+        out += w[k] * (y - y1[k]);
+        y2[k] = y1[k];
+        y1[k] = y;
+    }
+    return out;
+}
 inline float stepModes(uint32_t n, const float* __restrict a1, const float* __restrict a2, float* __restrict y1,
                        float* __restrict y2, const float* __restrict w) noexcept {
     n &= ~3u;
@@ -443,7 +467,7 @@ void AcousticKit::configureDrum(Piece& p) noexcept {
                     v = besselJ(mt.m[k], mt.zero[k] * r);
                     if (x < 0.0 && (mt.m[k] & 1)) v = -v;
                 }
-                p.psiT[k][wi] = static_cast<float>(v);
+                p.psiT[k][wi] = p.psiW[wi][k] = static_cast<float>(v);
                 sum += v * v;
             }
             p.wC[wi] = static_cast<float>(dt_ * dt_ / p.wMass + p.seg[1].g * sum);
@@ -843,7 +867,7 @@ float AcousticKit::stickForce(Striker& s, float uPred) noexcept {
 
 // A drum ringing on its own for n frames from frame t0 of the span: every mode, then the few point forces (the heads'
 // air, the sympathetic drive) on the batter's and the resonant head's lowest group, stepped frame by frame with them.
-// out[t]: the radiated sum; vel[t]: the snare-side head's two lowest modes' speed (Eco's wire gate).
+// out[t]: the radiated sum; vel[t] (when not null): the snare-side head's two lowest modes' speed (Eco's wire gate).
 CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, uint64_t clock, float* out, float* vel) noexcept {
     const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
     const uint32_t all = b.count + r.count + sh.count;
@@ -851,49 +875,42 @@ CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, ui
     const bool snare = p.set.kind == kPieceSnare;
     float* const y1 = p.y1;
     float* const y2 = p.y2;
-    V4 acc[kCell] = {};
-    float extra[kCell][3];
+    V4 acc[kCell];
+    // The rest of the kit, kLag frames back (all before this span): it drives the snare-side head (the wires buzz
+    // with the kick) and a tom's lowest modes (sympathetic ring).
+    float drive[kCell];
+    for (uint32_t t = 0; t < n; ++t) {
+        acc[t] = V4{0.0f, 0.0f, 0.0f, 0.0f};
+        const uint32_t back = static_cast<uint32_t>(clock + t0 + t - kLag) & (kRing - 1);
+        drive[t] = p.symp > 0.0f ? ring_[back] - p.own[back] : 0.0f;
+    }
+    const float kB = snare ? 0.0f : gb * p.symp * 0.3f, kR = snare ? gr * p.symp * 8.0f : 0.0f;
     {
-        // The two coupled groups (batter b.at.., resonant head r.at..), frame by frame.
+        // The two coupled groups (batter b.at.., resonant head r.at..), frame by frame: the heads' air between their
+        // lowest modes, the drive on the batter's two lowest or the snare-side head's first and third. Each force
+        // is radiated with the motion it causes (w (y + F - y1)).
         const uint32_t kb = b.at, kr = r.at;
         const V4 A1b = load4(p.a1 + kb), A2b = load4(p.a2 + kb), Wb = load4(p.w + kb);
         const V4 A1r = load4(p.a1 + kr), A2r = load4(p.a2 + kr), Wr = load4(p.w + kr);
         V4 Y1b = load4(y1 + kb), Y2b = load4(y2 + kb), Y1r = load4(y1 + kr), Y2r = load4(y2 + kr);
+        const float airK = p.airK;
         for (uint32_t t = 0; t < n; ++t) {
-            // The rest of the kit, kLag frames back: it drives the snare-side head (the wires buzz with the kick) and
-            // a tom's lowest modes (sympathetic ring).
-            const uint32_t back = static_cast<uint32_t>(clock + t0 + t - kLag) & (kRing - 1);
-            const float drive = p.symp > 0.0f ? ring_[back] - p.own[back] : 0.0f;
-            const float fAir = p.airK * (Y1b[0] - Y1r[0]);
-            const float symB = snare ? 0.0f : gb * p.symp * 0.3f * drive;
-            const float symR = snare ? gr * p.symp * 8.0f * drive : 0.0f;
-            const V4 Yb = A1b * Y1b - A2b * Y2b;
-            acc[t] = acc[t] + Wb * (Yb - Y1b);
-            Y2b = Y1b, Y1b = Yb;
-            const V4 Yr = A1r * Y1r - A2r * Y2r;
-            acc[t] = acc[t] + Wr * (Yr - Y1r);
-            Y2r = Y1r, Y1r = Yr;
+            const float fAir = airK * (Y1b[0] - Y1r[0]);
+            const float symB = kB * drive[t], symR = kR * drive[t];
             const float db0 = symB - gb * fAir, dr0 = gr * fAir + symR;
-            Y1b[0] += db0;
-            Y1r[0] += dr0;
-            extra[t][0] = p.w[kb] * db0 + p.w[kr] * dr0;
-            extra[t][1] = extra[t][2] = 0.0f;
-            if (symB != 0.0f && b.count > 1) Y1b[1] += symB, extra[t][1] = p.w[kb + 1] * symB;
-            if (symR != 0.0f && r.count > 2) Y1r[2] += 0.6f * symR, extra[t][2] = p.w[kr + 2] * 0.6f * symR;
-            vel[t] = std::fabs(Y1r[0] - Y2r[0]) + std::fabs(Y1r[1] - Y2r[1]);
+            const V4 Fb = {db0, symB, 0.0f, 0.0f}, Fr = {dr0, 0.0f, 0.6f * symR, 0.0f};
+            const V4 Yb = A1b * Y1b - A2b * Y2b + Fb;
+            const V4 Yr = A1r * Y1r - A2r * Y2r + Fr;
+            acc[t] = acc[t] + Wb * (Yb - Y1b) + Wr * (Yr - Y1r);
+            Y2b = Y1b, Y1b = Yb;
+            Y2r = Y1r, Y1r = Yr;
+            if (vel) vel[t] = std::fabs(Y1r[0] - Y2r[0]) + std::fabs(Y1r[1] - Y2r[1]);
         }
         store4(y1 + kb, Y1b), store4(y2 + kb, Y2b), store4(y1 + kr, Y1r), store4(y2 + kr, Y2r);
     }
     ringGroups(p.a1, p.a2, y1, y2, p.w, b.at + 4, r.at, acc, n);
     ringGroups(p.a1, p.a2, y1, y2, p.w, r.at + 4, all, acc, n);
-    for (uint32_t t = 0; t < n; ++t) {
-        float o = sum4(acc[t]);
-        o += extra[t][0];
-        o += extra[t][1];
-        o += extra[t][2];
-        out[t] = o;
-    }
-    (void)sh;
+    for (uint32_t t = 0; t < n; ++t) out[t] = sum4(acc[t]);
 }
 
 void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
@@ -928,7 +945,7 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
     if (!p.wires && !p.rim.active && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
         waitOut(p.stick[0], n), waitOut(p.stick[1], n);
         float out[kCell], vel[kCell];
-        ringDrum(p, 0, n, clock, out, vel);
+        ringDrum(p, 0, n, clock, out, snare && eco ? vel : nullptr);
         for (uint32_t t = 0; t < n; ++t) {
             const float rattle = rattleOf(0.0f, vel[t]);
             p.out[t] = out[t] * scale + rattle + noiseSample(p);
@@ -951,7 +968,7 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
         float out = 0.0f, fWires = 0.0f, vel = 0.0f;
         if (!ca && !cb && !rim && !p.wires) {
             // Ringing on its own this frame: the span kernel for one frame (the same bits as a span at a time).
-            ringDrum(p, t, 1, clock, &out, &vel);
+            ringDrum(p, t, 1, clock, &out, snare && eco ? &vel : nullptr);
         } else {
             // A stick, the rim or the wires may touch: every force is solved with the response it causes.
             predictModes(all, p.a1, p.a2, y1, y2, yp);
@@ -997,7 +1014,15 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
                     F[w] = f;
                     fWires += f;
                 }
-                for (uint32_t k = 0; k < kResoWireModes; ++k) ypR[k] -= gr * dotModes(nw, p.psiT[k], F);
+                if (fWires > 0.0f) {  // the forces back into the head's modes, a wire at a time (no per-mode sums)
+                    alignas(16) float back[kResoWireModes] = {};
+                    for (uint32_t w = 0; w < nw; ++w) {
+                        const float f = F[w];
+                        const float* __restrict col = p.psiW[w];
+                        for (uint32_t k = 0; k < kResoWireModes; ++k) back[k] += col[k] * f;
+                    }
+                    for (uint32_t k = 0; k < kResoWireModes; ++k) ypR[k] -= gr * back[k];
+                }
                 p.rattleEnergy += static_cast<double>(fWires) * fWires;
             }
             out = commitModes(all, yp, y1, y2, p.w);
@@ -1026,7 +1051,8 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
     // No cascade and nothing touching it this span: it rings a span at a time (the same kernel as a single frame).
     if (!p.triplets && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
         waitOut(p.stick[0], n), waitOut(p.stick[1], n);
-        V4 acc[kCell] = {};
+        V4 acc[kCell];
+        for (uint32_t t = 0; t < n; ++t) acc[t] = V4{0.0f, 0.0f, 0.0f, 0.0f};
         ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, n);
         for (uint32_t t = 0; t < n; ++t) {
             float out = sum4(acc[t]) * scale;
@@ -1042,7 +1068,7 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
         const bool cb = due(sb);
         float out;
         if (!ca && !cb && !p.triplets) {
-            V4 acc[1] = {};
+            V4 acc[1] = {V4{0.0f, 0.0f, 0.0f, 0.0f}};
             ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, 1);
             out = sum4(acc[0]);
         } else {
@@ -1095,9 +1121,8 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
             out = stepModes(all, p.a1, p.a2, p.y1, p.y2, p.w);
             p.hatDPrev = -zP;
         } else {
-            predictModes(all, p.a1, p.a2, p.y1, p.y2, yp);
             // The plates' contact near the edge (down positive: the top plate sits zP above the bottom one).
-            const float eta = dotModes(all, p.hatEta, yp) - zP;
+            const float eta = predictDot(all, p.a1, p.a2, p.y1, p.y2, yp, p.hatEta) - zP;
             float Fc = 0.0f;
             if (eta > 0.0f) {
                 const float sq = std::sqrt(eta);
@@ -1108,17 +1133,21 @@ void AcousticKit::runHat(Piece& p, uint32_t n, uint64_t clock) noexcept {
             p.hatDPrev = eta - Fc * p.hatC;
             vz += Fc * dt / 0.4f;
             pressure += Fc;
-            if (Fc > 0.0f) addModes(all, yp, p.hatPush, Fc);
-            // the stick pushes the top plate on its felt clutch down toward the bottom one, as well as bending it
-            if (ca) {
-                const float F = stickForce(sa, dotModes(top.count, p.phiA, yp) + sa.ref - zP);
-                if (F > 0.0f) addModes(top.count, yp, p.phiA, gt * F), vz -= F * dt / 0.4f;
+            if (!ca && !cb) {  // only the plates' force: added as the modes commit (one pass)
+                out = commitAdd(all, yp, p.hatPush, Fc, p.y1, p.y2, p.w);
+            } else {
+                if (Fc > 0.0f) addModes(all, yp, p.hatPush, Fc);
+                // the stick pushes the top plate on its felt clutch down toward the bottom one, as well as bending it
+                if (ca) {
+                    const float F = stickForce(sa, dotModes(top.count, p.phiA, yp) + sa.ref - zP);
+                    if (F > 0.0f) addModes(top.count, yp, p.phiA, gt * F), vz -= F * dt / 0.4f;
+                }
+                if (cb) {
+                    const float F = stickForce(sb, dotModes(top.count, p.phiB, yp) + sb.ref - zP);
+                    if (F > 0.0f) addModes(top.count, yp, p.phiB, gt * F), vz -= F * dt / 0.4f;
+                }
+                out = commitModes(all, yp, p.y1, p.y2, p.w);
             }
-            if (cb) {
-                const float F = stickForce(sb, dotModes(top.count, p.phiB, yp) + sb.ref - zP);
-                if (F > 0.0f) addModes(top.count, yp, p.phiB, gt * F), vz -= F * dt / 0.4f;
-            }
-            out = commitModes(all, yp, p.y1, p.y2, p.w);
         }
         p.hatV = vz;
         p.hatZ += vz * dt;
@@ -1158,7 +1187,10 @@ void AcousticKit::process(double* left, double* right, double* room, uint32_t n)
 }
 
 void AcousticKit::span(double* left, double* right, double* room, uint32_t n) noexcept {
-    float sum[kCell] = {};
+    // The pieces' sums for this span: raw (the sympathetic drive), the close mics and the bleed bus (one delay for
+    // every piece, so it is summed here and added to the overhead rings once).
+    float sum[kCell], closeL[kCell], closeR[kCell], bleed[kCell];
+    for (uint32_t t = 0; t < n; ++t) sum[t] = closeL[t] = closeR[t] = bleed[t] = 0.0f;
     for (uint32_t i = 0; i < kPieces; ++i) {
         Piece& p = pieces_[i];
         if (!p.awake) continue;
@@ -1199,26 +1231,32 @@ void AcousticKit::span(double* left, double* right, double* room, uint32_t n) no
         // and the bleed bus (every close mic hearing the others 1.5 ms late, centred).
         float* const ohl = ohL_.data();
         float* const ohr = ohR_.data();
-        const uint32_t mask = ohMask_, dl = ohAt_ + p.ohDelayL, dr = ohAt_ + p.ohDelayR, db = ohAt_ + bleedDelay_;
+        const uint32_t mask = ohMask_, dl = ohAt_ + p.ohDelayL, dr = ohAt_ + p.ohDelayR;
         const float level = level_, cl = p.closeL * level, cr = p.closeR * level, gl = p.ohL * level, gr = p.ohR * level,
                     bl = p.bleedSend * level * bleedGain_ * 0.7f, rs = p.roomSend * level;
         for (uint32_t t = 0; t < n; ++t) {
             const float y = p.out[t];
             sum[t] += y;
             p.own[(clock_ + t) & (kRing - 1)] = y;
-            left[t] += y * cl;
-            right[t] += y * cr;
-            ohl[(dl + t) & mask] += y * gl;
-            ohr[(dr + t) & mask] += y * gr;
-            ohl[(db + t) & mask] += y * bl;
-            ohr[(db + t) & mask] += y * bl;
+            closeL[t] += y * cl;
+            closeR[t] += y * cr;
+            bleed[t] += y * bl;
         }
+        for (uint32_t t = 0; t < n; ++t) ohl[(dl + t) & mask] += p.out[t] * gl;
+        for (uint32_t t = 0; t < n; ++t) ohr[(dr + t) & mask] += p.out[t] * gr;
         if (room)
             for (uint32_t t = 0; t < n; ++t) room[t] += p.out[t] * rs;
+    }
+    for (uint32_t t = 0; t < n; ++t) {
+        const uint32_t at = (ohAt_ + bleedDelay_ + t) & ohMask_;
+        ohL_[at] += bleed[t];
+        ohR_[at] += bleed[t];
     }
     // The rings' slots for these frames: heard now, then cleared for their next turn.
     for (uint32_t t = 0; t < n; ++t) {
         const uint32_t at = (ohAt_ + t) & ohMask_;
+        left[t] += closeL[t];
+        right[t] += closeR[t];
         left[t] += ohL_[at];
         right[t] += ohR_[at];
         ohL_[at] = ohR_[at] = 0.0f;
