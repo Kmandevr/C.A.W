@@ -101,8 +101,8 @@ struct Case {
 // 2 %, heavy 6 % of an S22+ core) over an assumed 2.5x slower phone core: 2000, 8000 and 24000 µs/s here.
 int timberCost(double seconds) {
     const Case cases[] = {
-        // kPoly: a model at its usual polyphony, medium (8,000) plus 20 %: these sit at 85-95 % of medium on the
-        // development machine, and CI's x64 runner reads Timber about 8 % higher after normalisation, even run alone
+        // kPoly: a model at its usual polyphony, medium (8,000) plus 20 %: these sit at 45-90 % of medium on the
+        // development machine (2026-11-24), and CI's x64 runner reads Timber about 8 % higher after normalisation, even run alone
         // (the electric piano 8,205 on PR #258, 2026-11-19).
         {"Timber piano: 16 voices (design point)", 0, {}, 16, 24000},
         {"Timber piano: 8 voices", 0, {}, 8, 24000},
@@ -111,7 +111,7 @@ int timberCost(double seconds) {
         // 1.1.2: Simulated (the shared board, contacts and banks; noises at their default level)
         {"Timber piano Simulated Normal: 16 voices", 0, {{"sim", 1}, {"tier", 2}}, 16, 24000},  // the design point: heavy
         {"Timber piano Simulated Normal: 16 voices, pedal down", 0, {{"sim", 1}, {"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 24000},
-        {"Timber piano Simulated Eco: 16 voices", 0, {{"sim", 1}, {"tier", 1}}, 16, 18000},  // about 0.7 heavy (measured 15,300-16,600)
+        {"Timber piano Simulated Eco: 16 voices", 0, {{"sim", 1}, {"tier", 1}}, 16, 18000},  // about 0.6 heavy (measured 14,400, 2026-11-24)
         {"Timber piano Simulated High: 32 voices, pedal down", 0, {{"sim", 1}, {"tier", 3}, {"sustain", 1}}, 32, 64000},  // exports
         {"Timber electric piano: 16 voices (tine)", 1, {}, 16, kPoly},
         {"Timber electric piano: 32 voices, reed, tremolo", 1, {{"kind", 1}, {"tremolo", 0.5}}, 32, 24000},  // Normal's cap: heavy
@@ -128,7 +128,8 @@ int timberCost(double seconds) {
         {"Timber winds: 8 voices (clarinet)", 6, {}, 8, kPoly},
         {"Timber winds: 8 voices (flute, noise, growl)", 6, {{"instrument", 1}, {"noise", 0.5}, {"growl", 0.5}}, 8, kPoly},
         {"Timber winds: 8 voices (brass)", 6, {{"instrument", 3}}, 8, kPoly},
-        // 1.1.2 Simulated, each model at its usual polyphony at Normal (the same ceiling: medium plus 20 %).
+        // 1.1.2 Simulated, each model at its usual polyphony at Normal (the same ceiling: medium plus 20 %; their voices
+        // run four at a time, timber_core.h GroupedModel).
         {"Timber sim electric piano: 16 voices (tine)", 1, {{"sim", 1}}, 16, kPoly},
         {"Timber sim electric piano: 16 voices (reed)", 1, {{"sim", 1}, {"kind", 1}}, 16, kPoly},
         {"Timber sim organ: 10 keys, 888, rotary slow", 2, {{"sim", 1}}, 10, kPoly},

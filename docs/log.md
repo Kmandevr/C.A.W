@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-20
+updated: 2026-11-24
 ---
 
 # Log
 
+- 2026-11-24: Timber's Simulated voices run four at a time and the frame caches its gains (the electric piano, bowed, sax and brass under the 9,600 ceiling, `kSim` removed); Rook's Acoustic pieces ring a span at a time when nothing touches them, with lighter frame-by-frame paths (about 5-10 % faster, 17 % fewer instructions) and kit ceilings at about 1.2 times; the hi-hat's pressure sums frame by frame, so its damping is the same at any block size ([engine](engine.md#performance), [decisions](decisions.md)).
 - 2026-11-20: Timber 1.1.2, the Simulated models ([engine](engine.md#timber-the-modelled-acoustic-instrument-110), [decisions](decisions.md)): every model but the piano appends `sim` (Classic plays as 1.1.0, hashed) and `noises`: the jet-driven flute with pulsed breath, tongued reeds, a conical sax, lips with brassiness, elasto-plastic bowing with bow noise, plucks let go from their shape with fret buzz and slide noise, contact mallets and tine hammers with the action's thunk and dampers, the organ's key contacts; 37 Simulated presets; realism, block-size, tier, NaN and rt tests; the page shows Sim and Noises in its existing rows; the patent check per model (our reading).
 - 2026-11-20: Rook's kits of three kinds (1.1.2, [engine](engine.md#kits-of-three-kinds-112)): the Acoustic engine (persistent modal pieces, stick and wire contacts, glide, a cascading cymbal, a two-plate hi-hat on CC 4, mics and bleed), the Synth, Produced and Acoustic builders with GM, Roland and Alesis maps and 24 kit presets, C API 46, realism tests and caw_bench cases; the drum patents read ([decisions](decisions.md)).
 - 2026-11-20: playback spikes and UI load for 1.1.1 ([performance](performance.md#playback-spikes-and-ui-load-111-2026-11-20)): the engine has no rare costly block (`caw_bench SECONDS 602`, its `caw_spike_check` ctest; the per-slot cost timing measured free); device motion at most 60 frames a second and the slot meter, auto gain ear, crow loader and Parrot on a `CappedTicker` (an open device page no longer draws 119 frames a second while stopped); Flock's and Timber's pictures no longer relay out their page each motion frame; the device header's ripple and display frames repaint in their own layers; the Benchmark screen rebuilds only its running card at 10 Hz, runs with no cool-down pauses and shows measured numbers only; the load stabilizer spins only as far as the clock needs and backs off with heat (`caw_audio_set_thermal`, API 45); Lark's edit-pitch pill no longer overflows a phone.
