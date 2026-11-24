@@ -30,6 +30,7 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
     - **Command line:** `:` opens a one-line bar only while you type a command. There is no permanent status line.
     - **Key hints:** after a prefix key, a small popup lists the keys that can follow.
     - **Toasts:** a brief label says what an action did ("Quantize 1/16").
+- **Performance status, never in the way** (owner, 2026-11-24: "The warnings don't need to be there all the time… hidden away… just a menu or something that lets them know what's going on so they can check it if they are experiencing bad things"): heat, tracks muted for headroom and smart freeze's suggestion live in a Performance sheet behind the CPU readout, with a small dot before the readout while it holds something new; no banner, snackbar or popup about performance covers the work ([app](app.md)).
 - **Audience:** built for the owner first. It should be fast for someone who knows it, with tooltips and tips but no onboarding tour yet.
 - **PC:** mouse and keyboard, and **everything must also be reachable with the keyboard alone**. Shortcuts follow Reaper's where they overlap.
 - **Library:** folders (matching the library repo) plus tags and search across them, with favourites pinned.
