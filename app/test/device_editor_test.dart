@@ -289,21 +289,22 @@ void main() {
       final t = synth();
       final sus = t.value('env1_sustain');
       Rect rect = tester.getRect(view);
+      Taper taper(String id) => Taper(t.param(id)!.min, t.param(id)!.max, exponential: true);
+      EnvelopeGeometry geometry() => EnvelopeGeometry(rect.size, taper('env1_attack').position(t.value('env1_attack')),
+          taper('env1_decay').position(t.value('env1_decay')), t.value('env1_sustain'),
+          taper('env1_release').position(t.value('env1_release')));
       final at = pos.pixels;
-      // Towards the side with more room.
+      // From the decay handle (the part that grabs), towards the side with more room.
       final up = at < pos.maxScrollExtent / 2;
-      await tester.flingFrom(rect.center, Offset(0, up ? -150 : 150), 1500);
+      await tester.flingFrom(rect.topLeft + geometry().decay, Offset(0, up ? -150 : 150), 1500);
       await tester.pumpAndSettle();
       expect((pos.pixels - at).abs(), greaterThan(30), reason: 'the page scrolled');
       expect(t.value('env1_sustain'), sus, reason: 'the envelope is untouched');
       await tester.ensureVisible(view);
       await tester.pumpAndSettle();
       rect = tester.getRect(view);
-      Taper taper(String id) => Taper(t.param(id)!.min, t.param(id)!.max, exponential: true);
-      final g2 = EnvelopeGeometry(rect.size, taper('env1_attack').position(t.value('env1_attack')),
-          taper('env1_decay').position(t.value('env1_decay')), sus, taper('env1_release').position(t.value('env1_release')));
       final scrolled = pos.pixels;
-      final g = await tester.startGesture(rect.topLeft + g2.decay);
+      final g = await tester.startGesture(rect.topLeft + geometry().decay);
       await tester.pump(const Duration(milliseconds: 150));
       for (var i = 0; i < 5; i++) {
         await g.moveBy(const Offset(0, 5));
