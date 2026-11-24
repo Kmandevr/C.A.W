@@ -140,6 +140,64 @@ inline float stepModes(uint32_t n, const float* __restrict a1, const float* __re
     return out;
 }
 
+// The free-ringing kernels are kept out of line and unspecialised (no inlining, no clones for a constant frame
+// count), so a span stepped at once and a frame stepped alone run the same machine code: the same bits.
+#if defined(__clang__)
+#define CAW_ACOU_KERNEL __attribute__((noinline))
+#elif defined(__GNUC__)
+#define CAW_ACOU_KERNEL __attribute__((noinline, noipa))
+#elif defined(_MSC_VER)
+#define CAW_ACOU_KERNEL __declspec(noinline)
+#else
+#define CAW_ACOU_KERNEL
+#endif
+
+// Four modes as one SIMD value (GCC and Clang vector extensions: SSE on x86-64, NEON on Arm64; else a plain struct).
+#if defined(__GNUC__) || defined(__clang__)
+typedef float V4 __attribute__((vector_size(16)));
+#else
+struct V4 {
+    float v[4];
+    float& operator[](int i) noexcept { return v[i]; }
+    float operator[](int i) const noexcept { return v[i]; }
+};
+inline V4 operator+(V4 a, V4 b) noexcept { return {{a.v[0] + b.v[0], a.v[1] + b.v[1], a.v[2] + b.v[2], a.v[3] + b.v[3]}}; }
+inline V4 operator-(V4 a, V4 b) noexcept { return {{a.v[0] - b.v[0], a.v[1] - b.v[1], a.v[2] - b.v[2], a.v[3] - b.v[3]}}; }
+inline V4 operator*(V4 a, V4 b) noexcept { return {{a.v[0] * b.v[0], a.v[1] * b.v[1], a.v[2] * b.v[2], a.v[3] * b.v[3]}}; }
+#endif
+inline V4 load4(const float* p) noexcept {
+    V4 v;
+    std::memcpy(&v, p, sizeof v);
+    return v;
+}
+inline void store4(float* p, V4 v) noexcept { std::memcpy(p, &v, sizeof v); }
+inline float sum4(V4 v) noexcept { return (v[0] + v[1]) + (v[2] + v[3]); }
+
+// Free ringing, n frames (n <= kCell): modes [from, to) (multiples of 4) four at a time, each group kept in registers
+// over the frames, each frame's weighted velocity sum w (y - y1) added into acc[t] group by group in order. The
+// same function steps one frame (n = 1) or a whole span, so the two give the same bits: a piece may ring a span at
+// a time while nothing touches it and frame by frame otherwise, at any block size.
+CAW_ACOU_KERNEL void ringGroups(const float* __restrict a1, const float* __restrict a2, float* __restrict y1, float* __restrict y2,
+                                  const float* __restrict w, uint32_t from, uint32_t to, V4* __restrict acc, uint32_t n) noexcept {
+    for (uint32_t k = from; k < to; k += 4) {
+        const V4 A1 = load4(a1 + k), A2 = load4(a2 + k), W = load4(w + k);
+        V4 Y1 = load4(y1 + k), Y2 = load4(y2 + k);
+        for (uint32_t t = 0; t < n; ++t) {
+            const V4 Y = A1 * Y1 - A2 * Y2;
+            acc[t] = acc[t] + W * (Y - Y1);
+            Y2 = Y1, Y1 = Y;
+        }
+        store4(y1 + k, Y1), store4(y2 + k, Y2);
+    }
+}
+
+// Whether a stick stays still for the next n frames: idle, or a delayed one whose wait outlasts them.
+inline bool stillFor(const Striker& s, uint32_t n) noexcept { return !s.active || s.delay >= n; }
+// Its wait, n frames on (as n calls of due() leave it).
+inline void waitOut(Striker& s, uint32_t n) noexcept {
+    if (s.active) s.delay -= n;
+}
+
 // Whether a stick moves this frame: a delayed one (a flam's main stroke, a roll's next) waits its frames out first.
 inline bool due(Striker& s) noexcept {
     if (!s.active) return false;
@@ -783,6 +841,61 @@ float AcousticKit::stickForce(Striker& s, float uPred) noexcept {
     return F;
 }
 
+// A drum ringing on its own for n frames from frame t0 of the span: every mode, then the few point forces (the heads'
+// air, the sympathetic drive) on the batter's and the resonant head's lowest group, stepped frame by frame with them.
+// out[t]: the radiated sum; vel[t]: the snare-side head's two lowest modes' speed (Eco's wire gate).
+CAW_ACOU_KERNEL void AcousticKit::ringDrum(Piece& p, uint32_t t0, uint32_t n, uint64_t clock, float* out, float* vel) noexcept {
+    const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
+    const uint32_t all = b.count + r.count + sh.count;
+    const float gb = b.g, gr = r.g;
+    const bool snare = p.set.kind == kPieceSnare;
+    float* const y1 = p.y1;
+    float* const y2 = p.y2;
+    V4 acc[kCell] = {};
+    float extra[kCell][3];
+    {
+        // The two coupled groups (batter b.at.., resonant head r.at..), frame by frame.
+        const uint32_t kb = b.at, kr = r.at;
+        const V4 A1b = load4(p.a1 + kb), A2b = load4(p.a2 + kb), Wb = load4(p.w + kb);
+        const V4 A1r = load4(p.a1 + kr), A2r = load4(p.a2 + kr), Wr = load4(p.w + kr);
+        V4 Y1b = load4(y1 + kb), Y2b = load4(y2 + kb), Y1r = load4(y1 + kr), Y2r = load4(y2 + kr);
+        for (uint32_t t = 0; t < n; ++t) {
+            // The rest of the kit, kLag frames back: it drives the snare-side head (the wires buzz with the kick) and
+            // a tom's lowest modes (sympathetic ring).
+            const uint32_t back = static_cast<uint32_t>(clock + t0 + t - kLag) & (kRing - 1);
+            const float drive = p.symp > 0.0f ? ring_[back] - p.own[back] : 0.0f;
+            const float fAir = p.airK * (Y1b[0] - Y1r[0]);
+            const float symB = snare ? 0.0f : gb * p.symp * 0.3f * drive;
+            const float symR = snare ? gr * p.symp * 8.0f * drive : 0.0f;
+            const V4 Yb = A1b * Y1b - A2b * Y2b;
+            acc[t] = acc[t] + Wb * (Yb - Y1b);
+            Y2b = Y1b, Y1b = Yb;
+            const V4 Yr = A1r * Y1r - A2r * Y2r;
+            acc[t] = acc[t] + Wr * (Yr - Y1r);
+            Y2r = Y1r, Y1r = Yr;
+            const float db0 = symB - gb * fAir, dr0 = gr * fAir + symR;
+            Y1b[0] += db0;
+            Y1r[0] += dr0;
+            extra[t][0] = p.w[kb] * db0 + p.w[kr] * dr0;
+            extra[t][1] = extra[t][2] = 0.0f;
+            if (symB != 0.0f && b.count > 1) Y1b[1] += symB, extra[t][1] = p.w[kb + 1] * symB;
+            if (symR != 0.0f && r.count > 2) Y1r[2] += 0.6f * symR, extra[t][2] = p.w[kr + 2] * 0.6f * symR;
+            vel[t] = std::fabs(Y1r[0] - Y2r[0]) + std::fabs(Y1r[1] - Y2r[1]);
+        }
+        store4(y1 + kb, Y1b), store4(y2 + kb, Y2b), store4(y1 + kr, Y1r), store4(y2 + kr, Y2r);
+    }
+    ringGroups(p.a1, p.a2, y1, y2, p.w, b.at + 4, r.at, acc, n);
+    ringGroups(p.a1, p.a2, y1, y2, p.w, r.at + 4, all, acc, n);
+    for (uint32_t t = 0; t < n; ++t) {
+        float o = sum4(acc[t]);
+        o += extra[t][0];
+        o += extra[t][1];
+        o += extra[t][2];
+        out[t] = o;
+    }
+    (void)sh;
+}
+
 void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
     const Segment b = p.seg[0], r = p.seg[1], sh = p.seg[2];
     const uint32_t all = b.count + r.count + sh.count;
@@ -793,6 +906,35 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
     float* const y1 = p.y1;
     float* const y2 = p.y2;
     alignas(32) float yp[kMaxModes];
+    // The rattle (the collisions' force changing: radiated sound goes with its rate), high-passed (two poles at 3 kHz):
+    // the wires' clicks against the head; Eco: noise gated by the snare-side head's motion (`vel`).
+    auto rattleOf = [&](float fWires, float vel) {
+        float rattle = 0.0f;
+        if (snare && p.rattleGain > 0.0f) {
+            float x = (fWires - p.lastF) * 0.02f;
+            p.lastF = fWires;
+            if (eco) {
+                p.wireGate += 0.01f * (vel * scale - p.wireGate);
+                x = unit(p.rng) * std::max(0.0f, p.wireGate - 0.0005f) * 0.05f;
+            }
+            p.rattleHp[0] = p.rattleK * p.rattleHp[0] + (1.0f - p.rattleK) * x;
+            const float h = x - p.rattleHp[0];
+            p.rattleHp[1] = p.rattleK * p.rattleHp[1] + (1.0f - p.rattleK) * h;
+            rattle = (h - p.rattleHp[1]) * p.rattleGain;
+        }
+        return rattle;
+    };
+    // Nothing can touch it this span (no stick due, no rim, no wires): it rings a span at a time.
+    if (!p.wires && !p.rim.active && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
+        waitOut(p.stick[0], n), waitOut(p.stick[1], n);
+        float out[kCell], vel[kCell];
+        ringDrum(p, 0, n, clock, out, vel);
+        for (uint32_t t = 0; t < n; ++t) {
+            const float rattle = rattleOf(0.0f, vel[t]);
+            p.out[t] = out[t] * scale + rattle + noiseSample(p);
+        }
+        return;
+    }
     for (uint32_t t = 0; t < n; ++t) {
         // The rest of the kit, kLag frames back: it drives the snare-side head (the wires buzz with the kick) and a
         // tom's lowest modes (sympathetic ring).
@@ -806,16 +948,10 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
         const bool ca = due(sa);
         const bool cb = due(sb);
         const bool rim = p.rim.active;
-        float out = 0.0f, fWires = 0.0f;
+        float out = 0.0f, fWires = 0.0f, vel = 0.0f;
         if (!ca && !cb && !rim && !p.wires) {
-            // Ringing on its own: one pass over every mode, the few point forces (air, sympathy) added after.
-            out = stepModes(all, p.a1, p.a2, y1, y2, p.w);
-            const float db0 = symB - gb * fAir, dr0 = gr * fAir + symR;
-            y1[b.at] += db0;
-            y1[r.at] += dr0;
-            out += p.w[b.at] * db0 + p.w[r.at] * dr0;
-            if (symB != 0.0f && b.count > 1) y1[b.at + 1] += symB, out += p.w[b.at + 1] * symB;
-            if (symR != 0.0f && r.count > 2) y1[r.at + 2] += 0.6f * symR, out += p.w[r.at + 2] * 0.6f * symR;
+            // Ringing on its own this frame: the span kernel for one frame (the same bits as a span at a time).
+            ringDrum(p, t, 1, clock, &out, &vel);
         } else {
             // A stick, the rim or the wires may touch: every force is solved with the response it causes.
             predictModes(all, p.a1, p.a2, y1, y2, yp);
@@ -865,23 +1001,9 @@ void AcousticKit::runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept {
                 p.rattleEnergy += static_cast<double>(fWires) * fWires;
             }
             out = commitModes(all, yp, y1, y2, p.w);
+            vel = std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1]);
         }
-        // The rattle: the collisions' force changing (radiated sound goes with its rate), high-passed (two poles at
-        // 3 kHz): the wires' clicks against the head.
-        float rattle = 0.0f;
-        if (snare && p.rattleGain > 0.0f) {
-            float x = (fWires - p.lastF) * 0.02f;
-            p.lastF = fWires;
-            if (eco) {  // Eco: noise gated by the snare-side head's motion
-                const float vel = (std::fabs(y1[r.at] - y2[r.at]) + std::fabs(y1[r.at + 1] - y2[r.at + 1])) * scale;
-                p.wireGate += 0.01f * (vel - p.wireGate);
-                x = unit(p.rng) * std::max(0.0f, p.wireGate - 0.0005f) * 0.05f;
-            }
-            p.rattleHp[0] = p.rattleK * p.rattleHp[0] + (1.0f - p.rattleK) * x;
-            const float h = x - p.rattleHp[0];
-            p.rattleHp[1] = p.rattleK * p.rattleHp[1] + (1.0f - p.rattleK) * h;
-            rattle = (h - p.rattleHp[1]) * p.rattleGain;
-        }
+        const float rattle = rattleOf(fWires, vel);
         p.out[t] = out * scale + rattle + noiseSample(p);
     }
 }
@@ -892,6 +1014,27 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
     const float g = s.g;
     const float scale = static_cast<float>(sr_) * p.gain;
     alignas(32) float yp[kMaxModes], sat[kMaxModes];
+    // Eco's substitute for the cascade: band-limited noise growing with the low modes' energy.
+    auto swellOf = [&]() {
+        float x = unit(p.rng) * std::sqrt(std::max(0.0f, p.swellEnv)) * p.swellGain;
+        const float h = x - p.swellHp[0];
+        p.swellHp[0] += 0.35f * h;
+        x = h;
+        p.swellLp += 0.6f * (x - p.swellLp);
+        return p.swellLp;
+    };
+    // No cascade and nothing touching it this span: it rings a span at a time (the same kernel as a single frame).
+    if (!p.triplets && stillFor(p.stick[0], n) && stillFor(p.stick[1], n)) {
+        waitOut(p.stick[0], n), waitOut(p.stick[1], n);
+        V4 acc[kCell] = {};
+        ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, n);
+        for (uint32_t t = 0; t < n; ++t) {
+            float out = sum4(acc[t]) * scale;
+            if (p.swellGain > 0.0f) out += swellOf();
+            p.out[t] = out + noiseSample(p);
+        }
+        return;
+    }
     for (uint32_t t = 0; t < n; ++t) {
         Striker& sa = p.stick[0];
         Striker& sb = p.stick[1];
@@ -899,7 +1042,9 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
         const bool cb = due(sb);
         float out;
         if (!ca && !cb && !p.triplets) {
-            out = stepModes(s.count, p.a1, p.a2, p.y1, p.y2, p.w);
+            V4 acc[1] = {};
+            ringGroups(p.a1, p.a2, p.y1, p.y2, p.w, 0, s.count, acc, 1);
+            out = sum4(acc[0]);
         } else {
             predictModes(s.count, p.a1, p.a2, p.y1, p.y2, yp);
             if (p.triplets) {
@@ -920,14 +1065,7 @@ void AcousticKit::runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept {
             out = commitModes(s.count, yp, p.y1, p.y2, p.w);
         }
         out *= scale;
-        if (p.swellGain > 0.0f) {  // Eco's substitute for the cascade
-            float x = unit(p.rng) * std::sqrt(std::max(0.0f, p.swellEnv)) * p.swellGain;
-            const float h = x - p.swellHp[0];
-            p.swellHp[0] += 0.35f * h;
-            x = h;
-            p.swellLp += 0.6f * (x - p.swellLp);
-            out += p.swellLp;
-        }
+        if (p.swellGain > 0.0f) out += swellOf();  // Eco's substitute for the cascade
         p.out[t] = out + noiseSample(p);
     }
 }

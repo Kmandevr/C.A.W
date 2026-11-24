@@ -167,6 +167,7 @@ private:
     void startStroke(Piece& p, Striker& s, double velocity, float pos, int artic, bool press, bool dead, uint32_t delay) noexcept;
     void weights(Piece& p, float* phi, float pos, bool bell) noexcept;
     void runDrum(Piece& p, uint32_t n, uint64_t clock) noexcept;
+    void ringDrum(Piece& p, uint32_t t0, uint32_t n, uint64_t clock, float* out, float* vel) noexcept;
     void runCymbal(Piece& p, uint32_t n, uint64_t clock) noexcept;
     void runHat(Piece& p, uint32_t n, uint64_t clock) noexcept;
     float noiseSample(Piece& p) noexcept;
