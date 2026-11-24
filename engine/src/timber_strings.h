@@ -363,6 +363,7 @@ struct Bowed {
     double pressure = 0.5, speed = 0.5, position = 0.12, vibrato = 0.3, vibRate = 5.5, attack = 0.12;
     bool sim = false, simEco = false;
     int iterations = 2;
+    float lpk_ = 0;  // Simulated: the bridge's loss, worked out at each control point (its section)
     double noises = kNoisesDefault;
     // The elasto-plastic bow (normalised to the waves' units): stiffness per second, the bristles' damping,
     // the static and dynamic friction coefficients, the Stribeck velocity and the breakaway share of zss.
@@ -414,6 +415,7 @@ struct Bowed {
         iterations = s.quality == kQualityHigh ? 2 : 1;
         simEco = s.quality == kQualityEco;
         bodyAmount = static_cast<float>(s.body * 1.6);
+        lpk_ = static_cast<float>(1.0 - detExp(-kTwoPi * (section >= 2 ? 2500.0 : 4000.0) / sr));
         if (section != bodyFor) {
             static constexpr double kHz[5] = {275, 460, 550, 1100, 2600};
             static constexpr double kQ[5] = {10, 12, 12, 6, 1.4};
@@ -470,7 +472,10 @@ struct Bowed {
     }
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (sim) {
-            renderSim(v, out, n);
+            Voice* one[1] = {&v};
+            float buf[1][kControlFrames];
+            renderSim(one, 1, buf, n);
+            std::copy(buf[0], buf[0] + n, out);
             return;
         }
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
@@ -504,99 +509,132 @@ struct Bowed {
     // than once a period (surface sound), too much and it is raucous. Bow noise (Chafe's pulsed noise, ICMC 1990):
     // a noise in the force while it slides, as the sliding speed (`noises`). Eco: 1.1.0's friction table and the
     // bow noise.
-    CAW_TIMBER_NOINLINE void renderSim(Voice& v, float* out, uint32_t n) noexcept {
-        const float expr = static_cast<float>(std::max(v.pressure, modWheel));
-        const float target = static_cast<float>((0.05 + 0.25 * speed) * (0.45 + 0.55 * v.velocity)) * (1.0f + 0.8f * expr);
+    // Voices run four at a time (GroupedModel, timber_core.h): each lane is one voice, so four voices' friction
+    // chains overlap instead of waiting on each other. Lanes past `count` repeat the first voice and are thrown away
+    // (they never write its lines or its state).
+    bool grouped() const noexcept { return sim; }
+    void renderGroup(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept { renderSim(vs, count, out, n); }
+    CAW_TIMBER_NOINLINE void renderSim(Voice* const* vs, uint32_t count, float (*out)[kControlFrames], uint32_t n) noexcept {
+        Voice* lane[4];
+        for (uint32_t l = 0; l < 4; ++l) lane[l] = vs[l < count ? l : 0];
         const float kk = static_cast<float>(1.5 + 6.0 * (1.0 - pressure));
-        const float lpk = static_cast<float>(1.0 - detExp(-kTwoPi * (section >= 2 ? 2500.0 : 4000.0) / sr));
+        const float lpk = lpk_;  // the bridge's loss (control())
         const float dck = static_cast<float>(kTwoPi * 20.0 / sr);
         const float dt = static_cast<float>(1.0 / sr), k2 = 0.5f * dt;
         const float s0 = sigma0, s1 = sigma1, brk = breakaway;
         const int iters = iterations;
-        const float fn = forceScale * static_cast<float>(0.04 + 0.96 * pressure * pressure) * (1.0f + 0.5f * expr);
-        const float fs = muS * fn, fc = muD * fn;
         const float invSpan = 1.0f / (1.0f - brk);
         const float invVs2 = 1.0f / (vStribeck * vStribeck);
         const float B = s0 * k2 + s1, invOneB = 1.0f / (1.0f + B);
         const float cz = 1.0f - k2 * s0 * invOneB, cg = k2 * invOneB;  // z = zt + k2 zd with zd = (g1 - s0 zt) / (1 + B)
         const float c1 = 1.0f - 2.0f * k2 * s0 * invOneB, c2 = 2.0f * k2 * invOneB;  // the next zt = z + k2 zd
-        const float nAmt = static_cast<float>(0.6 * noises), slideAt = 0.2f * target;
-        // The state in locals: the delay lines' stores cannot then make the compiler reload it every sample.
-        float z = v.z, zdLast = v.zd, zt = v.zt, invZss = v.invZss, lp = v.lp, dc = v.dc;
-        const float bowStep = v.bowStep, dn = v.dn, db = v.db;
-        uint32_t sliding = 0;
-        Noise noise = v.noise;
-        // Released and the bow's speed down to 0: the bow leaves the string and the player's fingers damp it (the
-        // elastic bristles alone, against a resting bow, would hand the string back its energy).
-        const bool lifted = v.lifted;  // decided on the control grid (voiceControl), so any block size gives the same bits
-        const float reflect = lifted ? 0.8f : 0.97f;
-        Line neck = v.neck, bridge = v.bridge;
+        const float nAmt = static_cast<float>(0.6 * noises);
+        // Each lane's constants and state, in locals (the delay lines' stores cannot then make the compiler reload
+        // the state every sample).
+        F4 target, fs, fc, slideAt, bowStep, reflect, bow, z, zdLast, zt, invZss, lp, dc;
+        float dn[4], db[4];
+        I4 lifted;
+        Line neck[4], bridge[4];
+        Noise noise[4];
+        uint32_t sliding[4] = {};
+        for (uint32_t l = 0; l < 4; ++l) {
+            const Voice& v = *lane[l];
+            const float expr = static_cast<float>(std::max(v.pressure, modWheel));
+            target[l] = static_cast<float>((0.05 + 0.25 * speed) * (0.45 + 0.55 * v.velocity)) * (1.0f + 0.8f * expr);
+            const float fn = forceScale * static_cast<float>(0.04 + 0.96 * pressure * pressure) * (1.0f + 0.5f * expr);
+            fs[l] = muS * fn, fc[l] = muD * fn;
+            slideAt[l] = 0.2f * target[l];
+            bowStep[l] = v.bowStep, bow[l] = v.bow;
+            // Released and the bow's speed down to 0: the bow leaves the string and the player's fingers damp it (the
+            // elastic bristles alone, against a resting bow, would hand the string back its energy). Decided on the
+            // control grid (voiceControl), so any block size gives the same bits.
+            lifted[l] = v.lifted ? -1 : 0;
+            reflect[l] = v.lifted ? 0.8f : 0.97f;
+            z[l] = v.z, zdLast[l] = v.zd, zt[l] = v.zt, invZss[l] = v.invZss, lp[l] = v.lp, dc[l] = v.dc;
+            dn[l] = v.dn, db[l] = v.db;
+            neck[l] = v.neck, bridge[l] = v.bridge;
+            noise[l] = v.noise;
+        }
+        const F4 zero = f4(0.0f), one = f4(1.0f);
         for (uint32_t i = 0; i < n; ++i) {
-            v.bow = std::clamp(v.bow + bowStep, 0.0f, 1.0f);  // in the voice: a running sum (see the winds)
-            const float bow = v.bow, vb = bow * target;
-            const float nb = neck.frac(dn), bb = bridge.frac(db);
-            const float vh = nb + bb;
-            float f, slide;
-            if (lifted) {
-                f = 0, slide = 0, z = zdLast = zt = 0;
-            } else if (simEco) {
-                const float dv = vb - vh;
-                const float q = 1.0f + kk * kk * dv * dv;
-                f = dv / (q * q);
-                slide = std::fabs(dv - f);
+            bow = clamp4(bow + bowStep, zero, one);
+            const F4 vb = bow * target;
+            F4 nb, bb;
+            for (uint32_t l = 0; l < 4; ++l) nb[l] = neck[l].frac(dn[l]), bb[l] = bridge[l].frac(db[l]);
+            const F4 vh = nb + bb;
+            F4 f, slide;
+            if (simEco) {
+                // Eco: 1.1.0's friction table and the bow noise.
+                const F4 dv = vb - vh;
+                const F4 q = one + f4(kk * kk) * dv * dv;
+                const F4 fe = div4(dv, q * q);
+                f = sel4(lifted, zero, fe);
+                slide = sel4(lifted, zero, abs4(dv - fe));
+                z = sel4(lifted, zero, z), zdLast = sel4(lifted, zero, zdLast), zt = sel4(lifted, zero, zt);
             } else {
                 // zt (z advanced half a step by the last rate) is the state carried from sample to sample: in the
                 // elastic case the next one is one multiply-add of this one, so the chain stays short.
-                const float g1 = vb - vh;
-                const float A = g1 - s0 * zt;
+                const F4 g1 = vb - vh;
+                const F4 A = g1 - f4(s0) * zt;
                 // The elastic (sticking) solution is exact while alpha is 0: most of each period.
-                float zd = A * invOneB;
-                const float z0 = zt * cz + g1 * cg, vr0 = A - B * zd;
-                float zNew = z0, ztNext = zt * c1 + g1 * c2;
-                if ((vr0 > 0) == (z0 > 0) && std::fabs(z0) * invZss > brk) {
+                F4 zd = A * f4(invOneB);
+                const F4 z0 = zt * f4(cz) + g1 * f4(cg), vr0 = A - f4(B) * zd;
+                F4 zNew = z0, ztNext = zt * f4(c1) + g1 * f4(c2);
+                const I4 slips = and4(eq4(gt4(vr0, zero), gt4(z0, zero)), gt4(abs4(z0) * invZss, f4(brk)));
+                if (any4(slips)) {
                     // Past the breakaway (a share of zss, from the Stribeck curve at the last sample's sliding speed,
-                    // below): Newton's method from the last sample's rate.
-                    zd = zdLast;
+                    // below): Newton's method from the last sample's rate, kept in the lanes that slip.
+                    F4 zn = zdLast;
                     for (int it = 0; it < iters; ++it) {
-                        const float vr = A - B * zd;
-                        const float zz = zt + k2 * zd, ratio = std::fabs(zz) * invZss;
-                        float a = 0;
-                        if ((vr > 0) == (zz > 0) && ratio > brk) {
-                            const float t = std::min(1.0f, (ratio - brk) * invSpan);
-                            a = t * t * (3.0f - 2.0f * t);
-                        }
-                        const float g = 1.0f - a * ratio;
+                        const F4 vr = A - f4(B) * zn;
+                        const F4 zz = zt + f4(k2) * zn, ratio = abs4(zz) * invZss;
+                        const F4 t = min4(one, (ratio - f4(brk)) * f4(invSpan));
+                        const I4 on = and4(eq4(gt4(vr, zero), gt4(zz, zero)), gt4(ratio, f4(brk)));
+                        const F4 a = sel4(on, t * t * (f4(3.0f) - f4(2.0f) * t), zero);
+                        const F4 g = one - a * ratio;
                         // dG/dzd = -(1 + B g) - |vr| a k2 / zss, the last term under 1 %: 1 / (1 + x) by its series.
-                        const float x = B * g + std::fabs(vr) * a * k2 * invZss;
-                        zd += (vr * g - zd) * (1.0f - x + x * x);
+                        const F4 x = f4(B) * g + abs4(vr) * a * f4(k2) * invZss;
+                        zn = zn + (vr * g - zn) * (one - x + x * x);
                     }
-                    zNew = zt + k2 * zd;
-                    ztNext = zNew + k2 * zd;
+                    zd = sel4(slips, zn, zd);
+                    const F4 zs = zt + f4(k2) * zn;
+                    zNew = sel4(slips, zs, zNew);
+                    ztNext = sel4(slips, zs + f4(k2) * zn, ztNext);
                 }
-                zdLast = zd;
-                z = zNew;
-                zt = ztNext;
-                f = s0 * z + s1 * zd;
-                const float vr = g1 - f;
-                slide = std::fabs(vr);
+                const F4 ff = f4(s0) * zNew + f4(s1) * zd;
+                const F4 vr = g1 - ff;
+                // Lifted: no bow, the bristles at rest.
+                zdLast = sel4(lifted, zero, zd);
+                z = sel4(lifted, zero, zNew);
+                zt = sel4(lifted, zero, ztNext);
+                f = sel4(lifted, zero, ff);
+                slide = sel4(lifted, zero, abs4(vr));
                 // The Stribeck curve for the next sample (off this sample's chain): zss = (fc + (fs - fc) S) / sigma0
                 // with S = 1 / (1 + (v/vs)^2), a Lorentzian in place of the paper's e^-(v/vs)^2 (the same shape near 0).
-                const float e1 = 1.0f + vr * vr * invVs2;
-                invZss = s0 * e1 / (fc * e1 + fs - fc);
+                const F4 e1 = one + vr * vr * f4(invVs2);
+                invZss = sel4(lifted, invZss, div4(f4(s0) * e1, fc * e1 + fs - fc));
             }
             // Bow noise, only while it slides and the bow moves (a resting bow adds none: no energy without motion).
-            if (slide > slideAt) f += nAmt * bow * slide * noise.next(), ++sliding;
-            neck.push(-(bb + f));
-            const float toBridge = nb + f;
-            lp += lpk * (toBridge - lp);
-            bridge.push(-reflect * lp);
-            dc += dck * (toBridge - dc);
-            out[i] = (toBridge - dc) * 0.3f;
+            for (uint32_t l = 0; l < count; ++l)
+                if (slide[l] > slideAt[l]) f[l] += nAmt * bow[l] * slide[l] * noise[l].next(), ++sliding[l];
+            const F4 toBridge = nb + f;
+            lp = lp + f4(lpk) * (toBridge - lp);
+            dc = dc + f4(dck) * (toBridge - dc);  // the bow's DC is no sound: it would keep a silent voice alive
+            const F4 o = (toBridge - dc) * f4(0.3f), back = zero - (bb + f), fromBridge = zero - reflect * lp;
+            for (uint32_t l = 0; l < count; ++l) {
+                neck[l].push(back[l]);
+                bridge[l].push(fromBridge[l]);
+                out[l][i] = o[l];
+            }
         }
-        v.neck.w = neck.w, v.bridge.w = bridge.w;
-        v.z = z, v.zd = zdLast, v.zt = zt, v.invZss = invZss, v.lp = lp, v.dc = dc;
-        v.noise = noise;
-        v.sliding += sliding, v.counted += n;
+        for (uint32_t l = 0; l < count; ++l) {
+            Voice& v = *lane[l];
+            v.bow = bow[l];
+            v.neck.w = neck[l].w, v.bridge.w = bridge[l].w;
+            v.z = z[l], v.zd = zdLast[l], v.zt = zt[l], v.invZss = invZss[l], v.lp = lp[l], v.dc = dc[l];
+            v.noise = noise[l];
+            v.sliding += sliding[l], v.counted += n;
+        }
     }
 
     void post(float* l, float* r, uint32_t n, const Shared&) noexcept { body.run(l, r, n, bodyAmount); }

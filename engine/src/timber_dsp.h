@@ -37,6 +37,46 @@ inline F4 operator*(F4 a, F4 b) noexcept { return {{a.v[0] * b.v[0], a.v[1] * b.
 inline F4 f4(float x) noexcept { return {{x, x, x, x}}; }
 #endif
 
+// Four lanes' masks and the lane-wise operations a four-voice loop needs (each lane computes exactly what one voice
+// alone would: the same IEEE operations, so packing voices together changes no bits). A mask lane is all ones or 0.
+#if defined(__GNUC__) || defined(__clang__)
+typedef int32_t I4 __attribute__((vector_size(16)));
+inline I4 i4(int32_t x) noexcept { return I4{x, x, x, x}; }
+inline F4 div4(F4 a, F4 b) noexcept { return a / b; }
+inline I4 lt4(F4 a, F4 b) noexcept { return a < b; }
+inline I4 and4(I4 a, I4 b) noexcept { return a & b; }
+inline I4 or4(I4 a, I4 b) noexcept { return a | b; }
+inline I4 not4(I4 a) noexcept { return ~a; }
+inline I4 eq4(I4 a, I4 b) noexcept { return ~(a ^ b); }  // of masks: both set or both clear
+inline F4 sel4(I4 m, F4 a, F4 b) noexcept { return reinterpret_cast<F4>((reinterpret_cast<I4>(a) & m) | (reinterpret_cast<I4>(b) & ~m)); }
+inline F4 abs4(F4 a) noexcept { return reinterpret_cast<F4>(reinterpret_cast<I4>(a) & i4(0x7fffffff)); }
+#else
+struct I4 {
+    int32_t v[4];
+    int32_t& operator[](int i) noexcept { return v[i]; }
+    int32_t operator[](int i) const noexcept { return v[i]; }
+};
+inline I4 i4(int32_t x) noexcept { return {{x, x, x, x}}; }
+inline F4 div4(F4 a, F4 b) noexcept { return {{a.v[0] / b.v[0], a.v[1] / b.v[1], a.v[2] / b.v[2], a.v[3] / b.v[3]}}; }
+inline I4 lt4(F4 a, F4 b) noexcept {
+    return {{a.v[0] < b.v[0] ? -1 : 0, a.v[1] < b.v[1] ? -1 : 0, a.v[2] < b.v[2] ? -1 : 0, a.v[3] < b.v[3] ? -1 : 0}};
+}
+inline I4 and4(I4 a, I4 b) noexcept { return {{a.v[0] & b.v[0], a.v[1] & b.v[1], a.v[2] & b.v[2], a.v[3] & b.v[3]}}; }
+inline I4 or4(I4 a, I4 b) noexcept { return {{a.v[0] | b.v[0], a.v[1] | b.v[1], a.v[2] | b.v[2], a.v[3] | b.v[3]}}; }
+inline I4 not4(I4 a) noexcept { return {{~a.v[0], ~a.v[1], ~a.v[2], ~a.v[3]}}; }
+inline I4 eq4(I4 a, I4 b) noexcept { return {{~(a.v[0] ^ b.v[0]), ~(a.v[1] ^ b.v[1]), ~(a.v[2] ^ b.v[2]), ~(a.v[3] ^ b.v[3])}}; }
+inline F4 sel4(I4 m, F4 a, F4 b) noexcept {
+    return {{m.v[0] ? a.v[0] : b.v[0], m.v[1] ? a.v[1] : b.v[1], m.v[2] ? a.v[2] : b.v[2], m.v[3] ? a.v[3] : b.v[3]}};
+}
+inline F4 abs4(F4 a) noexcept { return {{std::fabs(a.v[0]), std::fabs(a.v[1]), std::fabs(a.v[2]), std::fabs(a.v[3])}}; }
+#endif
+inline I4 gt4(F4 a, F4 b) noexcept { return lt4(b, a); }
+// std::min, std::max and std::clamp lane by lane (the same picks: b only when b < a, and so on).
+inline F4 min4(F4 a, F4 b) noexcept { return sel4(lt4(b, a), b, a); }
+inline F4 max4(F4 a, F4 b) noexcept { return sel4(lt4(a, b), b, a); }
+inline F4 clamp4(F4 x, F4 lo, F4 hi) noexcept { return sel4(lt4(x, lo), lo, sel4(lt4(hi, x), hi, x)); }
+inline bool any4(I4 m) noexcept { return (m[0] | m[1] | m[2] | m[3]) != 0; }
+
 // A cheap soft clip: the [3/2] Pade form of tanh, x (27 + x^2) / (27 + 9 x^2), held to +-1 past |x| = 3.
 inline float softClip(float x) noexcept {
     x = x < -3.0f ? -3.0f : (x > 3.0f ? 3.0f : x);
