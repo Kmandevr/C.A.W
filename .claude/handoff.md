@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: Main after 1.1.2-alpha.1 (PR #261, released 2026-11-24) and #256.
+Commit: f427877 (Main after 1.1.2-alpha.1, PR #261, released 2026-11-24, and #256)
 Branch: start your own from Main. Main is protected, so changes go in by PR only; merge it yourself once CI is green. **The plan and the owner's decisions** are in the private Kmandevr/AutoStacc-Hub: docs/caw/decisions.md ("2026-11-24: realism after 1.1.2, and compatibility in the alpha"), docs/caw/realism-research.md, docs/caw/roadmap.md (1.1.3) and Hub issues #30 (realism) and #29 (maintenance). Read those first.
 
 ## Goal
