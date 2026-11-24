@@ -303,17 +303,24 @@ void main() {
     expect('${sent.single}', isNot(contains('first_callback')));
   });
 
+  test('heat never stops a run (owner, 2026-11-24: the system throttles, not the app)', () {
+    for (final p in [EnginePressure.thermalWarm, EnginePressure.thermalHot, EnginePressure.thermalCritical]) {
+      expect(stressStopReason(p), isNull);
+    }
+    expect(stressStopReason(EnginePressure.batterySaver), isNotNull);
+  });
+
   test('unknowns are null: a run stopped before the ramps sends no limits', () async {
     final pressure = StreamController<EnginePressure>();
     late StressRunner runner;
     var song8 = 0;
     final fake = FakeStress(onStart: (r) {
-      if (r.scenario == 'song8' && ++song8 == 2) pressure.add(EnginePressure.thermalHot); // after the warm-up
+      if (r.scenario == 'song8' && ++song8 == 2) pressure.add(EnginePressure.batterySaver); // after the warm-up
     });
     final sent = <Map<String, Object?>>[];
     runner = StressRunner(backend: fake, pressure: pressure.stream, sendTelemetry: (s) async => sent.add(s));
     final res = await runner.run(StressPlanKind.quick);
-    expect(res.stoppedBecause, contains('too hot'));
+    expect(res.stoppedBecause, contains('Battery saver'));
     expect(fake.started.any((r) => r.kind == StressKind.rampTracks), isFalse);
     expect((sent.single['limits'] as Map).values, everyElement(isNull));
     expect(sent.single['tiers'], containsPair('heavy', null));

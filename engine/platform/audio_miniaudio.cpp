@@ -1089,11 +1089,19 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     const bool wasOpen = e->audio != nullptr;
     const int32_t r = startOnce(e, error, error_len);
     auto* a = static_cast<Audio*>(e->audio);
-    if (r != 0 || wasOpen || !a || a->context.backend != ma_backend_aaudio || !a->lowLatencyAsked || !a->modesReadBack ||
-        a->lowLatency)
+    // Only the Low-latency mode's no-size open is retried (the audio review of 1.1.2): Auto's 1024 frames never get
+    // the fast path, so retrying them would cut a playing stream on every open, reroute and mode change.
+    if (r != 0 || wasOpen || !a || a->context.backend != ma_backend_aaudio || e->bufferMode != CAW_BUFFER_LOW_LATENCY ||
+        !a->lowLatencyAsked || !a->modesReadBack || a->lowLatency)
         return r;
     stopLocked(e);
-    const int32_t again = startOnce(e, error, error_len);
+    int32_t again = startOnce(e, error, error_len);
+    if (again != 0) {
+        // The retry failed (a route still settling): open as before rather than leave a playing device closed.
+        again = startOnce(e, error, error_len);
+        if (auto* b = static_cast<Audio*>(e->audio)) b->fastRetry = "failed";
+        return again;
+    }
     if (auto* b = static_cast<Audio*>(e->audio)) b->fastRetry = b->lowLatency ? "granted" : "refused";
     return again;
 }

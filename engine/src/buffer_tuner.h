@@ -79,8 +79,10 @@ inline bool tunesBuffer(int openedFrames) noexcept { return openedFrames == 0; }
 // long quiet stretch takes one off again, never below the opened size. Returns the size to set (0: leave it).
 inline int32_t growOnlyStart(BufferTuner& t, int32_t burst, int32_t opened, int32_t ceiling, int64_t xruns) noexcept {
     const int32_t b = std::max<int32_t>(1, burst);
-    const int32_t floor = opened / b * b;  // whole bursts at or under the opened size: never a size above it at start
-    t.start(b, std::max(b, floor), std::max(ceiling, opened), std::max(b, floor), xruns);
+    // The tuner counts from the opened size rounded up to whole bursts (the audio review of 1.1.2): the first
+    // underrun then sets a full burst more than the stream has, and nothing under the opened size is ever set.
+    const int32_t open = std::max(b, opened);
+    t.start(b, open, std::max(ceiling, open), open, xruns);
     return 0;  // the stream keeps the size it opened with until it underruns
 }
 

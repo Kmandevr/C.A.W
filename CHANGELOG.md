@@ -20,7 +20,7 @@ Realism: Timber's instruments and Rook's drums are now simulated, the way the re
 
 ### Changed
 - The new instruments were optimised to fit their CPU budgets.
-- **Steadier playback on phones:** C.A.W now lets Android manage the CPU clock and heat instead of fighting it. The output buffer grows by itself after a dropout (Find the smallest stable buffer is on by default), and phones that offer it run in Sustained Performance Mode while playing.
+- **Steadier playback on phones:** C.A.W now lets Android manage the CPU clock and heat instead of fighting it. The output buffer grows by itself after a dropout (Find the smallest stable buffer is on by default).
 - **Load never stops playback:** when the phone can't keep up, C.A.W mutes tracks one at a time but always keeps one playing, and a stream the system stops is reopened within a second.
 - The smart-freeze suggestion now appears only after real dropouts, never on the CPU figure alone.
 - The Benchmark plays every instrument and effect, with each model and variant, under the names the app shows.

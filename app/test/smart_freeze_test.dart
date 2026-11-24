@@ -213,33 +213,20 @@ void main() {
       expect(s.freezeHint.done, isTrue);
     });
 
-    testWidgets('serious heat marks the dot and warns in the sheet; once seen, the dot returns only after the phone cools',
-        (tester) async {
+    testWidgets('heat is a plain reading: it never marks the dot or warns (owner, 2026-11-24)', (tester) async {
       final before = jsonEncode(s.settings.toJson());
       await pump(tester);
-      s.pressure.value = EnginePressure.thermalWarm;
-      await tester.pumpAndSettle();
-      expect(dot(), findsNothing, reason: 'moderate is not serious');
+      for (final p in [EnginePressure.thermalWarm, EnginePressure.thermalHot, EnginePressure.thermalCritical]) {
+        s.pressure.value = p;
+        await tester.pumpAndSettle();
+        expect(dot(), findsNothing);
+      }
       s.pressure.value = EnginePressure.thermalHot;
-      await tester.pumpAndSettle();
-      expect(dot(), findsOneWidget);
-      expect(find.text(performanceHeatText), findsNothing, reason: 'nothing pops up');
       await open(tester);
-      expect(find.text(performanceHeatText), findsOneWidget);
       expect(find.text('Heat: Hot'), findsOneWidget);
+      expect(find.textContaining('stutter'), findsNothing);
+      expect(find.textContaining('let it cool'), findsNothing);
       expect(jsonEncode(s.settings.toJson()), before, reason: 'it never changes a setting');
-      await tester.tapAt(const Offset(10, 10)); // close the sheet
-      await tester.pumpAndSettle();
-      expect(dot(), findsNothing);
-      s.pressure.value = EnginePressure.thermalCritical;
-      await tester.pumpAndSettle();
-      expect(dot(), findsNothing, reason: 'still hot: seen');
-      s.pressure.value = EnginePressure.normal;
-      await tester.pumpAndSettle();
-      s.pressure.value = EnginePressure.thermalHot;
-      await tester.pumpAndSettle();
-      expect(dot(), findsOneWidget);
-      expect(seriousHeat(EnginePressure.batterySaver), isFalse);
     });
 
     testWidgets('the sheet lists the heat level and no muted tracks when all is well', (tester) async {

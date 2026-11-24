@@ -1,4 +1,4 @@
-// The quiet performance status (1.1.2): the CPU readout opens a Performance sheet (heat, tracks muted for headroom, smart freeze's one-time suggestion, tips), and a small dot beside it marks something new there; nothing pops up over the work.
+// The quiet performance status (1.1.2): the CPU readout opens a Performance sheet (a plain heat reading, tracks muted for headroom, smart freeze's one-time suggestion, tips), and a small dot beside it marks something new there; nothing pops up over the work.
 import 'package:flutter/material.dart';
 
 import '../../engine/execution.dart';
@@ -12,16 +12,9 @@ import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart' show Heading;
 
-/// Whether [p] is serious thermal status (Android's THERMAL_STATUS_SEVERE or worse).
-bool seriousHeat(EnginePressure p) => p == EnginePressure.thermalHot || p == EnginePressure.thermalCritical;
-
-/// The heat row's warning while the phone is hot.
-const performanceHeatText = 'The phone is getting hot, so audio may stutter. Freezing tracks or a larger buffer helps.';
-
 /// What the Performance sheet has to say now, most urgent first, each as (its key, its colour).
 List<(String, Color)> performanceIssues(AppState s) => [
       if (s.meters.overloaded > 0) ('muted', Neon.pink),
-      if (seriousHeat(s.pressure.value)) ('heat', Neon.yellow),
       if (s.freezeHint.suggestion.value case final f?) ('freeze:${f.layerId}', Neon.blue),
     ];
 
@@ -131,7 +124,6 @@ class _PerformanceList extends StatelessWidget {
     final p = s.pressure.value;
     final f = s.freezeHint.suggestion.value;
     final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-    final hot = seriousHeat(p);
     final muted = m.overloaded;
     return ListView(shrinkWrap: true, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
       const Heading('Performance'),
@@ -144,9 +136,9 @@ class _PerformanceList extends StatelessWidget {
       ),
       ListTile(
         key: const ValueKey('heat-banner'),
-        leading: Icon(Icons.device_thermostat, color: hot ? Neon.yellow : Neon.dim),
+        // A plain reading (owner, 2026-11-24: heat is the system's job, and a hot phone need not stutter).
+        leading: const Icon(Icons.device_thermostat, color: Neon.dim),
         title: Text('Heat: ${_heatLevel(p)}'),
-        subtitle: hot ? Text(performanceHeatText, style: const TextStyle(color: Neon.yellow)) : null,
       ),
       ListTile(
         key: const ValueKey('performance-overload'),
@@ -167,7 +159,6 @@ class _PerformanceList extends StatelessWidget {
         'Freeze heavy tracks to play them from audio.',
         'A larger buffer (Settings › Sound › Quality and buffer) gives each block more time.',
         'The Lightweight profile (Settings › App) asks less of the phone.',
-        'A warm phone slows down: unplug the charger or let it cool.',
       ])
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),

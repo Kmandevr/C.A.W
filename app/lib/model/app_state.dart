@@ -761,8 +761,6 @@ class AppState extends ChangeNotifier implements StressHost {
     _readPlayhead();
     if (before.playing != meters.playing) {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
-      // Sustained Performance Mode while playing, where the phone has it (1.1.2; the platform's own steady clock).
-      if (Platform.isAndroid && useAudioDevice) unawaited(ResourceSignals.setSustained(meters.playing));
     }
     layerMeters = e.layerMeters(project.layers.length); // one C API call for every track (beta plan B4.8)
     final now = nowUs;
