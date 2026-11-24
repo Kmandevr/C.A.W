@@ -1,0 +1,5 @@
+Starling's piano plays recorded parts of the Salamander Grand Piano V3 by Alexander Holm (a Yamaha C5), licensed under the Creative Commons Attribution 3.0 Unported licence: https://creativecommons.org/licenses/by/3.0/
+
+Source: https://github.com/sfzinstruments/SalamanderGrandPiano
+
+Changes made for C.A.W: the first 200 ms of 120 notes, 22 key-release noises and 4 pedal noises, trimmed, faded, folded to mono and normalised per clip, and played together with C.A.W's modelled strings.

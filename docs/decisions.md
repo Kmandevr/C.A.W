@@ -6,6 +6,15 @@ updated: 2026-11-24
 
 # Decisions
 
+## 2026-11-24: Starling's piano: recordings set the levels, aligned to the model, embedded and loaded on use (Claude, building the owner's hybrid)
+
+- **The hybrid as built:** the Salamander Grand's first 200 ms per zone and layer, crossfading into Timber's Simulated piano over 40..160 ms, plus its key-release and pedal noises ([engine](engine.md#starling-the-hybrid-piano-113)). Chosen over a residual overlay (the recording with its partials removed): removing partials needs a spectral split that fails in the bass, where they lie closer than an analysis window resolves.
+- **The recordings set the levels, not the model:** first matched the other way, the treble's strike was lifted 20 dB (to +5 dBFS), because the model's treble tone is far louder than a real one. Now each voice's model is scaled to its recording, so the Salamander's balance carries over.
+- **Aligned crossfade:** recording and model share partials and cancelled in places; each clip's lag and polarity are calibrated against the model (generated, checked in CI with build tolerance).
+- **The Salamander's own tuning** for the model and the recordings (its measured stretch, not equal temperament), so the crossfade does not beat.
+- **Dependencies:** no new library: the FLAC decoder is miniaudio's, already used. The recordings are CC-BY 3.0 (permissive, attribution): credited in the app's licences and `engine/assets/starling/CREDITS.md`. The preparation script uses Python with numpy and soundfile (BSD, development only, never shipped).
+- **Embedded, not app assets:** the engine (CLI, tests, every platform) has the bank without a file path; `recorded::acquire` decodes it only when an instrument uses it and frees it after (the owner's load-on-use rule).
+
 ## 2026-11-24: Playback 1.1.2: the phone's own mechanisms, no heat action, load never silences the song; the Benchmark plays every built-in (Claude, on the owner's 1.1.1 report)
 
 **Owner (2026-11-24, S22+ on 1.1.1):** dropouts at a 20-30 % meter; playback stops or stalls when the phone warms or takes load; large spikes. "Look at how demanding applications work on phones; we're probably creating systems that already exist in the phone." "I don't care if the phone gets hot. Games don't get worse because the phone is hot; the system throttles, not the app." The smart-freeze hint must come only after real trouble; the Benchmark must play every device under its shown name ([performance](performance.md#playback-on-the-phone-112-2026-11-24)).

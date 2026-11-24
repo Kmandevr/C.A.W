@@ -289,6 +289,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Body', 'How big the instrument is.'),
     ('Space', 'The room around it.'),
   ], 'Concert grand'),
+  'org.caw.starling': FieldGuide('Starling is a real-sounding grand piano: modelled strings with a recorded grand\'s '
+      'attack and noises.', [
+    ('Hammer', 'Softer or harder hammers: darker or brighter.'),
+    ('Noise', 'The keys and pedal you hear, up close or none.'),
+    ('Space', 'A room around it (off by default: add your own reverb).'),
+  ], 'Grand piano'),
   'org.caw.flock': FieldGuide('Flock plays a sample as a cloud of grains, for pads, textures and drones.', [
     ('Position', 'Where in the sample the grains come from.'),
     ('Size', 'How long each grain is.'),

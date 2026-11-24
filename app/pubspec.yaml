@@ -77,6 +77,7 @@ flutter:
     # Offline copies of the Privacy Policy and Terms (drafts until the owner supplies the final texts).
     - assets/legal/PRIVACY.md
     - assets/legal/TERMS.md
+    - assets/legal/SOUNDS.txt
     # The repository's CHANGELOG.md, copied (a test keeps them equal): Settings' What's new and the sheet after an update.
     - assets/CHANGELOG.md
 

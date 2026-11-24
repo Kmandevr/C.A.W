@@ -158,6 +158,8 @@ class DeviceNames {
     'org.caw.timber': DeviceName('Timber', 'Acoustic', tags: ['acoustic', 'physical modelling', 'physical modeling',
       'piano', 'electric piano', 'organ', 'guitar', 'strings', 'harp', 'mallets', 'bells', 'winds', 'keys'],
       purposes: {_g}),
+    'org.caw.starling': DeviceName('Starling', 'Piano', tags: ['piano', 'grand piano', 'acoustic piano', 'realistic',
+      'keys', 'upright', 'felt piano', 'struck strings'], purposes: {_g}),
     'org.caw.flock': DeviceName('Flock', 'Granular', tags: ['granular', 'grains', 'cloud', 'texture', 'drone', 'pad'],
       purposes: {_sd}),
     // MIDI effects
