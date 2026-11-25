@@ -12,6 +12,13 @@
 
 namespace caw::timber {
 
+// Three peaking filters in series on `out` (transposed direct form II, coefficients and states per filter), the
+// piano's crossfade tone EQ (starling_piano.h). Defined in the strict starling_piano_sim.cpp, so any block size gives
+// the same bits on every build. No flush here: render's chunks follow the blocks.
+void toneEqRun(float* out, uint32_t n, const float* b0, const float* b1, const float* b2, const float* a1,
+               const float* a2, float* z1, float* z2) noexcept;
+
+
 // The piano: Timber's Simulated piano (1.1.2; Classic, the commuted piano it was beside, left with Timber in 1.1.3),
 // the model Starling (starling_piano.h) plays under its recordings. Per voice two or three coupled strings, each a
 // delay line with an exact first-order tuning allpass, M dispersion allpasses fitted to an inharmonicity curve and a

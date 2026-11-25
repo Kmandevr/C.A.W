@@ -2,6 +2,21 @@
 #include "starling_piano_model.h"
 
 namespace caw::timber {
+
+void toneEqRun(float* out, uint32_t n, const float* b0, const float* b1, const float* b2, const float* a1,
+               const float* a2, float* z1, float* z2) noexcept {
+    for (int h = 0; h < 3; ++h) {
+        float s1 = z1[h], s2 = z2[h];
+        const float c0 = b0[h], c1 = b1[h], c2 = b2[h], d1 = a1[h], d2 = a2[h];
+        for (uint32_t i = 0; i < n; ++i) {  // transposed direct form II
+            const float x = out[i], y = c0 * x + s1;
+            s1 = c1 * x - d1 * y + s2;
+            s2 = c2 * x - d2 * y;
+            out[i] = y;
+        }
+        z1[h] = s1, z2[h] = s2;
+    }
+}
 namespace {
 
 // The hammer's force at table frame y (the zones' and speeds' pulses blended), normalised to its peak.

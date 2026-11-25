@@ -173,19 +173,9 @@ struct PianoModel : timber::Piano {
             b0[h] = static_cast<float>((1.0 + al * A) / a0), b1[h] = static_cast<float>(-2.0 * c / a0);
             b2[h] = static_cast<float>((1.0 - al * A) / a0), a1[h] = b1[h], a2[h] = static_cast<float>((1.0 - al / A) / a0);
         }
-        void run(float* out, uint32_t n) noexcept {
-            for (int h = 0; h < 3; ++h) {
-                float s1 = z1[h], s2 = z2[h];
-                const float c0 = b0[h], c1 = b1[h], c2 = b2[h], d1 = a1[h], d2 = a2[h];
-                for (uint32_t i = 0; i < n; ++i) {  // transposed direct form II
-                    const float x = out[i], y = c0 * x + s1;
-                    s1 = c1 * x - d1 * y + s2;
-                    s2 = c2 * x - d2 * y;
-                    out[i] = y;
-                }
-                z1[h] = s1, z2[h] = s2;  // no flush here: render's chunks follow the blocks (same bits at any size)
-            }
-        }
+        // In the strict starling_piano_sim.cpp (toneEqRun): with fast-math, clang-cl grouped the filter's sums
+        // differently in an unrolled body and its remainder, so the bits followed the block size.
+        void run(float* out, uint32_t n) noexcept { timber::toneEqRun(out, n, b0, b1, b2, a1, a2, z1, z2); }
     };
     ToneEq toneEq[kPool];
     void render(Voice& v, float* out, uint32_t n) noexcept {
