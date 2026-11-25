@@ -49,7 +49,9 @@ class DrumVoiceHeader extends StatelessWidget {
         child: Text(padLabel(pad), key: const ValueKey('drum-voice-pad'),
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Neon.text))),
       const SizedBox(width: 8),
-      Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(p.id('type'), color: c))),
+      // The type shrinks to fit beside the dice and the Randomness knob on a narrow phone.
+      Expanded(child: Align(alignment: Alignment.centerLeft, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft,
+        child: DeviceChoice(p.id('type'), color: c)))),
       _DiceButton(key: const ValueKey('drum-randomize'), icon: Icons.casino_outlined, tooltip: 'Randomize ${padLabel(pad)}',
         color: c, onTap: () {
           if (!randomizePad(t, layout, pad)) drumsToast(context, 'Randomize needs the engine');

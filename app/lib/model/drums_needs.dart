@@ -281,7 +281,7 @@ String drumNeedText(DeviceTarget t, DrumsLayout layout, int? pad, DrumNeed n) {
   final p = t.param(id);
   final name = (p?.label ?? n.param).replaceFirst(RegExp(r'^[A-D]\d+ '), '');
   // 1.1.3: a Simulated pad plays its piece; its synth settings are a Synthesized pad's.
-  if (n.param == 'engine' && !n.kit) return 'Synthesized pads only: set Engine to Synthesized';
+  if (n.param == 'engine' && !n.kit) return 'Synthesized pads only';
   if (p != null && p.isChoice && n.only != null) {
     if (p.choices.length == 2 && p.choices.first == 'Off') return 'Turn $name on';
     final names = [for (final c in n.only!) if (c >= 0 && c < p.choices.length) p.choices[c]];
