@@ -8,7 +8,7 @@
 #include "json.h"
 #include "presets.h"
 #include "test.h"
-#include "timber_harness.h"
+#include "instrument_harness.h"
 #include "timber_migrate.h"
 
 using namespace caw;

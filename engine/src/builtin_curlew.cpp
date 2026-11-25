@@ -10,7 +10,7 @@
 #include "builtin_effects.h"
 #include "curlew_winds.h"
 #include "presets.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::curlew {
 namespace {
@@ -42,7 +42,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     const std::lock_guard<std::mutex> lock(guard);
     Built& b = store.emplace_back();
     fx::ParamTable& t = b.table;
-    // Timber's shared knobs (timber_core.h reads them by index). Dry by default; Body 1 is the recorded body.
+    // Timber's shared knobs (instrument_core.h reads them by index). Dry by default; Body 1 is the recorded body.
     t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
     t.num("body", "Body", 1.0, 0.0, 1.0).group = "shared";
     t.num("space", "Space", 0.0, 0.0, 1.0).group = "shared";

@@ -1,5 +1,5 @@
-// Timber's Simulated piano (1.1.2): its per-sample parts (the strings with the hammer and the contacts, then the board, banks and noises after the sum), compiled with strict floating point so any block size gives the same bits.
-#include "timber_piano.h"
+// Starling's piano model (Timber's Simulated piano, 1.1.2): its per-sample parts (the strings with the hammer and the contacts, then the board, banks and noises after the sum), compiled with strict floating point so any block size gives the same bits.
+#include "starling_piano_model.h"
 
 namespace caw::timber {
 namespace {

@@ -1,4 +1,4 @@
-// Timber's small DSP parts (1.1.0; the library the 1.1.3 instruments build on): delay lines, first-order allpasses and their phase delays, one-poles, biquads, noise and the shared tables.
+// The modelled instruments' small DSP parts (Timber's, 1.1.0): delay lines, first-order allpasses and their phase delays, one-poles, biquads, noise and the 4-wide SIMD types.
 #pragma once
 
 #include <cmath>

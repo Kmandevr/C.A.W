@@ -13,8 +13,8 @@
 #include "recorded_bank.h"
 #include "starling_piano.h"
 #include "test.h"
-#include "timber_dsp.h"
-#include "timber_harness.h"
+#include "instrument_dsp.h"
+#include "instrument_harness.h"
 #include "tolerance.h"
 
 using namespace caw;

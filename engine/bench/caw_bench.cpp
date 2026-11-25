@@ -42,7 +42,7 @@ int voiceCost(double seconds);  // bench/voice_cost.cpp: 1.1.0's voice devices a
 int larkCost(double seconds);  // bench/lark_cost.cpp: Lark (org.caw.pitchfix) against its ceilings
 int ravenCost(double seconds);  // bench/raven_cost.cpp: Flagship's 1.1.0 synthesis (Raven) against its ceilings
 int samplerCost(double seconds);  // bench/sampler_cost.cpp: the sampler's plain and stretched zones against their ceilings
-int timberCost(double seconds);  // bench/timber_cost.cpp: the modelled instruments (Starling, Nightingale, Curlew, Bittern, Woodpecker) against their ceilings
+int timberCost(double seconds);  // bench/instrument_cost.cpp: the modelled instruments (Starling, Nightingale, Curlew, Bittern, Woodpecker) against their ceilings
 int rookCost(double seconds);  // bench/rook_cost.cpp: the drums' 1.1.0 additions (Rook) against their ceilings
 int flockCost(double seconds);  // bench/flock_cost.cpp: Flock (org.caw.flock) against its ceilings
 
@@ -1172,7 +1172,7 @@ int main(int argc, char** argv) {
         const bool larkOver = larkCost(secs) != 0;  // and Lark (bench/lark_cost.cpp)
         const bool ravenOver = ravenCost(secs) != 0;  // and Flagship's 1.1.0 modes (bench/raven_cost.cpp)
         const bool samplerOver = samplerCost(secs) != 0;  // and the sampler's zones (bench/sampler_cost.cpp)
-        const bool timberOver = timberCost(secs) != 0;  // and the modelled instruments (bench/timber_cost.cpp)
+        const bool timberOver = timberCost(secs) != 0;  // and the modelled instruments (bench/instrument_cost.cpp)
         const bool rookOver = rookCost(secs) != 0;  // and the drums' 1.1.0 additions (bench/rook_cost.cpp)
         const bool flockOver = flockCost(secs) != 0;  // and Flock (bench/flock_cost.cpp)
         return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver || rookOver || flockOver) ? 1 : 0;

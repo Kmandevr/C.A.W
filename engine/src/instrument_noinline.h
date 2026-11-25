@@ -1,4 +1,4 @@
-// The modelled instruments' out-of-line marker (Timber's 1.1.2 simulation parts, whose Classic models left in 1.1.3: only the marker is still used).
+// The modelled instruments' out-of-line marker (CAW_TIMBER_NOINLINE), what is left of Timber's 1.1.2 simulation parts.
 #pragma once
 
 // The bowed string's and the winds' per-sample loops are kept out of line, so the compiler's choices for the code

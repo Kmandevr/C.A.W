@@ -1,4 +1,4 @@
-// Timber's winds model (blown-pipe waveguides: clarinet, flute, sax, brass), the library Curlew builds on.
+// Curlew's winds model (Timber's Simulated winds, 1.1.2: blown-pipe waveguides for clarinet, flute, sax and brass).
 #pragma once
 
 #include <algorithm>
@@ -8,8 +8,8 @@
 #include <new>
 
 #include "caw/library/fastmath.hpp"
-#include "timber_core.h"
-#include "timber_sim.h"  // CAW_TIMBER_NOINLINE
+#include "instrument_core.h"
+#include "instrument_noinline.h"  // CAW_TIMBER_NOINLINE
 
 namespace caw::timber {
 
@@ -231,7 +231,7 @@ struct Wind {
     // its opening h = max(0, h0 + y), the flow h sqrt(|dp|) into the bore; brassiness (Hirschberg, Gilbert, Msallam
     // and Wijnands, JASA 99(3), 1996): the wave toward the bell travels faster where its pressure is high, so its
     // crests arrive early and it steepens with level (a read of the bore at a delay shortened by its own value).
-    // Voices run four at a time (GroupedModel, timber_core.h): each lane is one voice, so four voices' bore and lip
+    // Voices run four at a time (GroupedModel, instrument_core.h): each lane is one voice, so four voices' bore and lip
     // chains overlap instead of waiting on each other. Lanes past `count` repeat the first voice and are thrown away
     // (they never write its lines or its state).
     bool grouped() const noexcept { return true; }

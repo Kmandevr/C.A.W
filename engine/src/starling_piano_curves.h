@@ -1,4 +1,4 @@
-// Timber's Simulated piano (1.1.2): the keyboard curves shared by the build-time table generator and the engine (inharmonicity B, the hammer table's zones and velocity layers).
+// Starling's piano model (Timber's Simulated piano, 1.1.2): the keyboard curves shared by the build-time table generator and the engine (inharmonicity B, the hammer table's zones and velocity layers).
 #pragma once
 
 #include "caw/detmath.hpp"

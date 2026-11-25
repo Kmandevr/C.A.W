@@ -3,8 +3,8 @@
 
 #include <cstdint>
 
-#include "timber_core.h"  // kControlFrames
-#include "timber_dsp.h"
+#include "instrument_core.h"  // kControlFrames
+#include "instrument_dsp.h"
 
 namespace caw {
 

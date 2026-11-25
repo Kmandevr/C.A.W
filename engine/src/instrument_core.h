@@ -1,4 +1,4 @@
-// Timber's shared instrument frame (the model library of Starling, Nightingale, Curlew, Woodpecker and Bittern): one class per model on a common voice pool, voice cap and stealing, control grid, tone, room send and display.
+// The modelled instruments' shared frame (namespace caw::timber, Timber's until 1.1.3; Starling, Nightingale, Curlew, Woodpecker and Bittern): one class per model on a common voice pool, voice cap and stealing, control grid, tone, room send and display.
 #pragma once
 
 #include <algorithm>
@@ -12,7 +12,7 @@
 #include "caw/library/fastmath.hpp"
 #include "caw/library/reverb.hpp"
 #include "quality.h"
-#include "timber_dsp.h"
+#include "instrument_dsp.h"
 
 namespace caw::timber {
 

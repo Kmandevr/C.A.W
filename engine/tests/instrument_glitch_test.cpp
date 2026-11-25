@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "test.h"
-#include "timber_harness.h"
+#include "instrument_harness.h"
 
 using namespace caw;
 using namespace timber_test;

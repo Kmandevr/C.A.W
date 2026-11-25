@@ -8,7 +8,7 @@
 #include "bittern_organ.h"
 #include "builtin_effects.h"
 #include "presets.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::bittern {
 namespace {
@@ -37,7 +37,7 @@ const ModuleDescriptor& descriptor() {
     static std::vector<ParameterDescriptor> params;
     static ModuleDescriptor m;
     static const bool built = [] {
-        // Timber's shared knobs (timber_core.h reads them by index). The room is on: Space 0.45, a cathedral (owner,
+        // Timber's shared knobs (instrument_core.h reads them by index). The room is on: Space 0.45, a cathedral (owner,
         // 2026-11-24: the organ is the one realistic instrument that is not dry).
         t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
         t.num("body", "Body", 0.5, 0.0, 1.0).group = "shared";

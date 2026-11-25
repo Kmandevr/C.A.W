@@ -1,4 +1,4 @@
-// Timber's piano model: a commuted digital-waveguide piano (hammer-filtered soundboard excitation, coupled detuned strings, dampers, pedal and a shared sympathetic bank).
+// Starling's piano model (Timber's Simulated piano, 1.1.2): coupled stiff strings with fitted dispersion struck by a simulated hammer, the dampers, the pedal, the board and the contacts' noises.
 #pragma once
 
 #include <algorithm>
@@ -7,8 +7,8 @@
 #include <memory>
 #include <new>
 
-#include "timber_core.h"
-#include "timber_piano_sim.h"
+#include "instrument_core.h"
+#include "starling_piano_sim.h"
 
 namespace caw::timber {
 
@@ -17,12 +17,12 @@ namespace caw::timber {
 // delay line with an exact first-order tuning allpass, M dispersion allpasses fitted to an inharmonicity curve and a
 // one-pole loss, meeting at a bridge that takes c x their sum from each (Weinreich's coupled strings: the two-stage
 // decay and the beating). The strike is a hammer force pulse from a build-time finite-difference simulation
-// (timber_piano_tables.inc), injected at two taps (the strike point's comb comes from the physics); the soundboard
+// (starling_piano_tables.inc), injected at two taps (the strike point's comb comes from the physics); the soundboard
 // is one shared parallel-section filter after the voice sum; loud bass notes glide down in pitch as their energy
 // falls; the dampers land over about 18 ms with a contact buzz from the string's own amplitude; the attack thump,
 // the key bottoming on the keybed, the finger on the key and the pedal's trapwork and dampers are simulated
 // contacts; held keys' strings take the bridge sum (sympathetic resonance) and, with the pedal down, a 24-mode
-// register bank rings (timber_piano_sim.h). What it deliberately is not (the design's reading of Modartt's
+// register bank rings (starling_piano_sim.h). What it deliberately is not (the design's reading of Modartt's
 // US7915515B2, owner-settled 2026-11-19): no per-partial damping or frequency coefficients, no sum-of-partials
 // renderer and no soundboard physical parameter. The patent reading behind the damper and pedal noises is in
 // docs/decisions.md (2026-11-20): nothing depends on how a key is released, and no noise ever reaches the resonance.
@@ -604,7 +604,7 @@ struct Piano {
         }
         renderSimFrames(v, out, n, 0);
     }
-    // Per sample, in timber_piano_sim.cpp: compiled with strict floating point (no reassociation), so the
+    // Per sample, in starling_piano_sim.cpp: compiled with strict floating point (no reassociation), so the
     // Simulated piano gives the same bits at any block size (the engine's fast flags may regroup a sum differently
     // in a loop's main and remainder bodies).
     void renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexcept;

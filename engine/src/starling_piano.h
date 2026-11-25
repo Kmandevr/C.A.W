@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "recorded_bank.h"
-#include "timber_piano.h"
+#include "starling_piano_model.h"
 
 namespace caw::starling {
 

@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdint>
 
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::bittern {
 

@@ -1,4 +1,4 @@
-// Timber's Simulated piano (1.1.2): the shared soundboard and resonance banks, Hunt-Crossley contacts for the mechanical noises, the fitted dispersion design and the decay curve.
+// Starling's piano model (Timber's Simulated piano, 1.1.2): the shared soundboard and resonance banks, Hunt-Crossley contacts for the mechanical noises, the fitted dispersion design and the decay curve.
 #pragma once
 
 #include <cmath>
@@ -6,12 +6,12 @@
 #include <cstdint>
 #include <cstring>
 
-#include "timber_dsp.h"
-#include "timber_piano_curves.h"
+#include "instrument_dsp.h"
+#include "starling_piano_curves.h"
 
 namespace caw::timber::psim {
 
-// ---------- The generated tables (timber_piano_tables.cpp) ----------
+// ---------- The generated tables (starling_piano_tables.cpp) ----------
 struct HammerData {
     const int16_t* pulse;  // piano_curves::kPulseFrames frames at kPulseRate, peak 32767
     float peak;            // the pulse's peak force, N

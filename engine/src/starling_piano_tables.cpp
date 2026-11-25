@@ -1,11 +1,11 @@
-// Timber's Simulated piano: the generated hammer and soundboard tables (timber_piano_tables.inc) behind small accessors, compiled once.
+// Starling's piano model: the generated hammer and soundboard tables (starling_piano_tables.inc) behind small accessors, compiled once.
 #include <cstdint>
 
-#include "timber_piano_sim.h"
+#include "starling_piano_sim.h"
 
 namespace caw::timber::psim {
 namespace {
-#include "timber_piano_tables.inc"
+#include "starling_piano_tables.inc"
 }  // namespace
 
 static_assert(sizeof(kHammerPulse) / sizeof(kHammerPulse[0]) == piano_curves::kZones * piano_curves::kLayers);

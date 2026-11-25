@@ -6,7 +6,7 @@
 #include <cstdint>
 
 #include "body_bands.h"
-#include "timber_mallet_wind.h"
+#include "curlew_wind_model.h"
 
 namespace caw::curlew {
 
@@ -20,7 +20,7 @@ inline constexpr int kPullFirst[6] = {58, 50, 46, 52, 38, 40};
 inline constexpr int kPullKeys = 40;
 #include "curlew_tuning.inc"
 
-// The winds of Timber's Simulated mode (timber_mallet_wind.h: the jet, the reeds, the cone, the lips, the tongue and
+// The winds of Timber's Simulated mode (curlew_wind_model.h: the jet, the reeds, the cone, the lips, the tongue and
 // the breath's turbulence), with what the realism research (2026-11-24) found wrong taken out or added:
 // - no pad, key or valve click into the bore: it rang at the note's pitch on every note and slur, a pitched thump
 //   (the "piano on the flute"). The breath's own turbulence stays (Breath noise).
