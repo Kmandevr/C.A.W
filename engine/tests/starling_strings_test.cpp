@@ -377,8 +377,10 @@ TEST(starling_strings_presets_load_and_play) {
     CHECK(per[1] >= 6 && per[2] >= 6);
 }
 
-// Stable: starling_strings.cpp (the model and its frame) is compiled with strict floating point, so every build
-// renders the same bits.
+// Chaotic (loudness, spectrum and onsets within the tolerance classes): the strict build gives the same bits on Linux
+// x64 and Arm64, but Windows clang-cl differs by -91 dB (about a 16-bit step) from a cause not yet found: neither
+// strict builtin_starling.cpp nor deterministic trigonometry changed it (2026-11-25, Issue #268). Inaudible; the
+// tolerance check is the engine's cross-device standard (docs/decisions.md 2026-11-12).
 TEST(starling_strings_match_their_reference_renders) {
     cawtest::References refs("starling_strings");
     for (int inst = 0; inst < 2; ++inst) {
@@ -386,7 +388,7 @@ TEST(starling_strings_match_their_reference_renders) {
         auto p = makeS(v);
         const double k = starling::kLow[inst];
         const Stereo s = play(*p, v, {{0.0, 0.3, k + 4, 0.7}, {0.15, 0.4, k + 16, 0.5}, {0.3, 0.5, k + 28, 0.9}}, 0.7);
-        CHECK_REFERENCE(refs, std::string("starling_") + kNames[inst], (cawtest::Audio{s.l, s.r}), cawtest::Class::Stable);
+        CHECK_REFERENCE(refs, std::string("starling_") + kNames[inst], (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
     }
 }
 
