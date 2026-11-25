@@ -101,52 +101,64 @@ Stereo perform(const char* id, const Values& v, const Take& t, uint32_t block = 
     return out;
 }
 
-// A glitch: a 2 ms window whose peak is `kJumpDb` over the median of the 40 ms before it, or one sample step
-// `kStepX` times the RMS step of that 40 ms, where neither a note started nor (`allowed`) a knob says a noise may
-// begin. Windows more than 60 dB under the take's peak are the noise floor: not judged.
+// A glitch, where no note has just started (each instrument's attack, `allowMs` after its note-on):
+// - a level jump: a window's peak `kJumpDb` over the median of the windows of the 60 ms before it, the window a
+//   period and a half of the take's lowest note (2 ms at least: a shorter one catches the wave's crest or not);
+// - a sample step `kStepX` times the RMS step of the 40 ms before it (a click or a discontinuity).
+// Windows more than 60 dB under the take's peak are the noise floor: not judged.
 constexpr double kJumpDb = 6.0, kStepX = 12.0;
 struct Glitch {
     double at = -1, db = 0;
     const char* kind = "";
 };
-Glitch scan(const std::vector<float>& x, const std::vector<double>& allowed, double allowMs = 40.0) {
-    const size_t w = static_cast<size_t>(0.002 * kSr), hist = 20;
-    const size_t nw = x.size() / w;
-    std::vector<double> peak(nw), step(nw);
+Glitch scan(const std::vector<float>& x, const std::vector<double>& allowed, double allowMs, double lowestKey, double jumpDb = kJumpDb) {
     float top = 0;
     for (float s : x) top = std::max(top, std::fabs(s));
-    for (size_t i = 0; i < nw; ++i) {
-        float p = 0, s = 0;
-        double e = 0;
-        for (size_t j = i * w; j < (i + 1) * w; ++j) {
-            p = std::max(p, std::fabs(x[j]));
-            if (j > 0) {
-                const float d = std::fabs(x[j] - x[j - 1]);
-                s = std::max(s, d), e += static_cast<double>(d) * d;
-            }
-        }
-        peak[i] = p;
-        step[i] = std::sqrt(e / w);
-        (void)s;
-    }
+    auto allowedAt = [&](double t) {
+        for (double a : allowed)
+            if (t >= a - 0.004 && t < a + allowMs / 1000.0) return true;
+        return false;
+    };
     Glitch worst;
-    for (size_t i = hist; i < nw; ++i) {
-        const double t = static_cast<double>(i * w) / kSr;
-        bool ok = false;
-        for (double a : allowed) ok = ok || (t >= a - 0.004 && t < a + allowMs / 1000.0);
-        if (ok || peak[i] < top * 1e-3) continue;
-        std::vector<double> before(peak.begin() + static_cast<long>(i - hist), peak.begin() + static_cast<long>(i));
-        std::nth_element(before.begin(), before.begin() + hist / 2, before.end());
-        const double med = before[hist / 2];
-        const double jump = 20 * std::log10(peak[i] / std::max(med, 1e-12));
-        if (jump > kJumpDb && jump > worst.db) worst = {t, jump, "level jump"};
-        double se = 0;
-        for (size_t j = i - hist; j < i; ++j) se += step[j] * step[j];
-        const double sref = std::sqrt(se / hist);
-        float big = 0;
-        for (size_t j = i * w + 1; j < (i + 1) * w; ++j) big = std::max(big, std::fabs(x[j] - x[j - 1]));
-        const double sx = 20 * std::log10(big / std::max(sref, 1e-12));
-        if (big > kStepX * sref && sx > worst.db) worst = {t, sx, "sample step"};
+    {  // level jumps
+        const double hz = 440.0 * std::pow(2.0, (lowestKey - 69) / 12.0);
+        const size_t w = std::max<size_t>(96, static_cast<size_t>(1.5 * kSr / hz));
+        const size_t hist = std::max<size_t>(4, static_cast<size_t>(0.06 * kSr) / w), nw = x.size() / w;
+        std::vector<double> peak(nw);
+        for (size_t i = 0; i < nw; ++i)
+            for (size_t j = i * w; j < (i + 1) * w; ++j) peak[i] = std::max(peak[i], static_cast<double>(std::fabs(x[j])));
+        for (size_t i = hist; i < nw; ++i) {
+            const double t = static_cast<double>(i * w) / kSr;
+            if (allowedAt(t) || peak[i] < top * 1e-3) continue;
+            std::vector<double> before(peak.begin() + static_cast<long>(i - hist), peak.begin() + static_cast<long>(i));
+            std::nth_element(before.begin(), before.begin() + hist / 2, before.end());
+            const double jump = 20 * std::log10(peak[i] / std::max(before[hist / 2], 1e-12));
+            if (jump > jumpDb && jump > worst.db) worst = {t, jump, "level jump"};
+        }
+    }
+    {  // sample steps
+        const size_t w = 96, hist = 20, nw = x.size() / w;
+        std::vector<double> step(nw), peak(nw);
+        for (size_t i = 0; i < nw; ++i) {
+            double e = 0;
+            for (size_t j = std::max<size_t>(1, i * w); j < (i + 1) * w; ++j) {
+                const double d = x[j] - x[j - 1];
+                e += d * d;
+                peak[i] = std::max(peak[i], static_cast<double>(std::fabs(x[j])));
+            }
+            step[i] = std::sqrt(e / w);
+        }
+        for (size_t i = hist; i < nw; ++i) {
+            const double t = static_cast<double>(i * w) / kSr;
+            if (allowedAt(t) || peak[i] < top * 1e-3) continue;
+            double se = 0;
+            for (size_t j = i - hist; j < i; ++j) se += step[j] * step[j];
+            const double sref = std::sqrt(se / hist);
+            double big = 0;
+            for (size_t j = i * w + 1; j < (i + 1) * w; ++j) big = std::max(big, static_cast<double>(std::fabs(x[j] - x[j - 1])));
+            const double sx = 20 * std::log10(big / std::max(sref, 1e-12));
+            if (big > kStepX * sref && sx > worst.db) worst = {t, sx, "sample step"};
+        }
     }
     return worst;
 }
@@ -157,12 +169,13 @@ struct Instrument {
     int variants;
     double low, high;  // the scan's keys
     Values extra;      // knobs every take uses (Starling: noise off, so its recorded noises are not flagged)
+    double attackMs;   // how long a note's own onset may rise (its attack: the bow's 120 ms, a wind's speaking)
 };
 const Instrument kInstruments[] = {
-    {"org.caw.starling", "Starling", 1, 24, 104, {{"noise", 0.0}}},
-    {"org.caw.nightingale", "Nightingale", 4, 0, 0, {}},
-    {"org.caw.curlew", "Curlew", 6, 0, 0, {}},
-    {"org.caw.woodpecker", "Woodpecker", 6, 0, 0, {}},
+    {"org.caw.starling", "Starling", 1, 24, 104, {{"noise", 0.0}}, 40},
+    {"org.caw.nightingale", "Nightingale", 4, 0, 0, {}, 300},
+    {"org.caw.curlew", "Curlew", 6, 0, 0, {}, 200},
+    {"org.caw.woodpecker", "Woodpecker", 6, 0, 0, {}, 40},
 };
 // Each variant's keys (Nightingale, Curlew, Woodpecker): a range it plays.
 void rangeOf(const Instrument& ins, int var, double& lo, double& hi) {
@@ -276,8 +289,12 @@ TEST(instrument_glitch_scan) {
                     Values vv = v;
                     if (t == 2) vv.emplace_back("voices", 6.0);
                     const Stereo s = perform(ins.id, vv, takes[t]);
-                    Glitch g = scan(s.mono(), onsets[t]);
-                    const Glitch gl = scan(s.l, onsets[t]);
+                    double lowest = 200;
+                    for (const Note& n : takes[t].notes) lowest = std::min(lowest, n.pitch);
+                    // Take 4 moves knobs (Tone, Body, ...) a long way in 50 ms: a level change there is the knob's; only steps count.
+                    const double jump = t == 4 ? 1e9 : kJumpDb;
+                    Glitch g = scan(s.mono(), onsets[t], ins.attackMs, lowest, jump);
+                    const Glitch gl = scan(s.l, onsets[t], ins.attackMs, lowest, jump);
                     if (gl.db > g.db) g = gl;
                     const bool fail = g.at >= 0;
                     if (fail || verbose())
@@ -318,26 +335,54 @@ double peakOf(const Stereo& s, double from, double to) {
 // everywhere else: before the first note (project start), while a held note sounds past its strike, after its
 // release has rung out, after a transport stop (reset), and on a restruck voice past its own strike.
 TEST(instrument_noises_sound_only_at_their_moment) {
-    // Starling: the key-release noise at note-off, the pedal's noises when it moves, the thump and keybed at the
-    // strike (all under Noise). Notes at 0.3 (held to 1.0) and 0.35 (restruck at 0.6); the pedal down at 1.3, up at 1.9.
+    // Starling: the key-release noise at note-off (its clip lasts 350 ms), the pedal's noises when it moves (down 1.2 s,
+    // up 0.7 s), the thump and keybed at the strike (all under Noise). Notes at 0.3 (held to 1.0) and 0.35 (restruck at
+    // 0.6, off 0.8); the pedal down at 1.5, up at 2.8.
     for (double character : {0.0, 1.0, 2.0}) {
         Take t;
         t.notes = {{0.3, 1.0, 60, 0.7}, {0.35, 0.55, 67, 0.6}, {0.6, 0.8, 67, 0.6}};
-        t.ccs = {{1.3, 64, 1.0}, {1.9, 64, 0.0}};
-        t.seconds = 3.2;
+        t.ccs = {{1.5, 64, 1.0}, {2.8, 64, 0.0}};
+        t.seconds = 4.2;
         const Values on = {{"character", character}, {"noise", 1.0}}, off = {{"character", character}, {"noise", 0.0}};
         const Stereo a = perform("org.caw.starling", on, t), b = perform("org.caw.starling", off, t);
-        const double rel = diffDb(a, b, 1.0, 1.15), ped = diffDb(a, b, 1.3, 1.45);
-        const double before = diffDb(a, b, 0.0, 0.3), held = diffDb(a, b, 0.45, 0.55), quiet = diffDb(a, b, 1.15, 1.3);
-        const double late = diffDb(a, b, 2.3, 3.2);
+        const double rel = diffDb(a, b, 1.0, 1.35), ped = diffDb(a, b, 1.5, 2.0), up = diffDb(a, b, 2.8, 3.2);
+        const double before = diffDb(a, b, 0.0, 0.3), held = diffDb(a, b, 0.45, 0.55), quiet = diffDb(a, b, 1.37, 1.5);
+        const double late = diffDb(a, b, 3.55, 4.2);
         if (verbose())
-            std::printf("Starling character %.0f noise: release %.1f pedal %.1f | before %.1f held %.1f between %.1f after %.1f dB\n",
-                        character, rel, ped, before, held, quiet, late);
-        CHECK(rel > -90 && ped > -90);
+            std::printf("Starling character %.0f noise: release %.1f pedal %.1f up %.1f | before %.1f held %.1f between %.1f after %.1f dB\n",
+                        character, rel, ped, up, before, held, quiet, late);
+        CHECK(rel > -90 && ped > -90 && up > -90);
         CHECK(before < -150);
-        CHECK(held < std::min(rel, ped) - 30);
-        CHECK(quiet < std::min(rel, ped) - 30);
-        CHECK(late < std::min(rel, ped) - 60);
+        CHECK(held < -150);
+        CHECK(quiet < -150);
+        CHECK(late < -150);
+    }
+    // Starling's dampers: a key released under the pedal makes no damper noise until the pedal lifts, and then it does;
+    // a key from F#6 up (no dampers) makes none at all.
+    {
+        auto noiseOf = [](const Take& t) {
+            const Stereo a = perform("org.caw.starling", {{"noise", 1.0}}, t), b = perform("org.caw.starling", {{"noise", 0.0}}, t);
+            Stereo d = a;
+            for (size_t i = 0; i < d.size(); ++i) d.l[i] -= b.l[i], d.r[i] -= b.r[i];
+            return d;
+        };
+        Take released, kept;
+        released.ccs = kept.ccs = {{0.05, 64, 1.0}, {1.5, 64, 0.0}};
+        released.notes = {{0.3, 0.6, 60, 0.7}};
+        kept.notes = {{0.3, -1, 60, 0.7}};
+        released.seconds = kept.seconds = 2.2;
+        const Stereo r = noiseOf(released), k = noiseOf(kept);
+        Take top;
+        top.notes = {{0.1, 0.4, 97, 0.8}};
+        top.seconds = 1.0;
+        const Stereo t = noiseOf(top);
+        Stereo none = t;
+        for (size_t i = 0; i < none.size(); ++i) none.l[i] = none.r[i] = 0;
+        const double underPedal = diffDb(r, k, 0.6, 1.0), atLift = diffDb(r, k, 1.5, 1.85), noDamper = diffDb(t, none, 0.4, 0.8);
+        if (verbose()) std::printf("Starling dampers: under the pedal %.1f, at its lift %.1f, a key with none %.1f dB\n", underPedal, atLift, noDamper);
+        CHECK(underPedal < -150);
+        CHECK(atLift > -90);
+        CHECK(noDamper < -150);
     }
     // Nightingale: the bow noise only while the bow moves (from the note on to the end of its release, 0.25 s).
     for (int var = 0; var < 4; ++var) {
@@ -395,4 +440,49 @@ TEST(instrument_noises_sound_only_at_their_moment) {
         CHECK(stopped == 0.0);
         CHECK(start == 0.0);
     }
+}
+
+// No stray peaks on any key of the sustained instruments (Nightingale, Curlew): each key of each variant held 1 s at
+// two velocities, every window (2 ms or a period and a half) of its sustain (0.25..0.9 s) under the sustain's median window peak + 6 dB, and its
+// peak under 4 x (12 dB over) the sustain's RMS.
+TEST(instrument_no_stray_peaks_on_any_key) {
+    int bad = 0;
+    for (const Instrument& ins : kInstruments) {
+        const std::string id(ins.id);
+        if (id != "org.caw.nightingale" && id != "org.caw.curlew") continue;
+        for (int var = 0; var < variantCount(ins.id); ++var) {
+            double lo = 0, hi = 0;
+            rangeOf(ins, var, lo, hi);
+            double worst = -100, worstKey = 0, worstCrest = 0;
+            for (double key = lo; key <= hi; key += 1)
+                for (double vel : {0.35, 0.9}) {
+                    Take t;
+                    t.notes = {{0.0, 0.95, key, vel}};
+                    t.seconds = 1.0;
+                    const std::vector<float> m = perform(ins.id, {{"variant", var}}, t).mono();
+                    // Windows of 2 ms or a period and a half, whichever is longer (a shorter one catches the wave's crest or not).
+                    const size_t a = static_cast<size_t>(0.25 * kSr), b = static_cast<size_t>(0.9 * kSr);
+                    const size_t w = std::max<size_t>(96, static_cast<size_t>(1.5 * kSr / (440.0 * std::pow(2.0, (key - 69) / 12.0))));
+                    std::vector<double> peaks;
+                    double e = 0, top = 0, at = 0;
+                    for (size_t i = a; i + w <= b; i += w) {
+                        double p = 0;
+                        for (size_t j = i; j < i + w; ++j) p = std::max(p, static_cast<double>(std::fabs(m[j]))), e += static_cast<double>(m[j]) * m[j];
+                        peaks.push_back(p);
+                        if (p > top) top = p, at = static_cast<double>(i) / kSr;
+                    }
+                    std::vector<double> sorted = peaks;
+                    std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
+                    const double med = sorted[sorted.size() / 2], rms = std::sqrt(e / static_cast<double>(b - a));
+                    const double over = 20 * std::log10(top / std::max(med, 1e-12)), crest = 20 * std::log10(top / std::max(rms, 1e-12));
+                    if (over > worst) worst = over, worstKey = key, worstCrest = crest;
+                    if (over > 6.0 || crest > 12.0) {
+                        ++bad;
+                        std::printf("PEAK %s %d key %.0f vel %.2f at %.3f s: %.1f dB over the median, crest %.1f dB\n", ins.name, var, key, vel, at, over, crest);
+                    }
+                }
+            if (verbose()) std::printf("%s %d: worst window %.1f dB over the median (key %.0f, crest %.1f dB)\n", ins.name, var, worst, worstKey, worstCrest);
+        }
+    }
+    CHECK_EQ(bad, 0);
 }

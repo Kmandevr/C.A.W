@@ -78,6 +78,49 @@ struct Player {
     uint32_t hold = 0;      // frames at full level before the fade (attacks)
     float fadeT = 0, fadeStep = 0;  // 0 = no fade
     bool on = false;
+    // The strike's voicing on an attack (the hammer, the soft pedal, the character), matched to the model's: a one-pole
+    // low-pass (lpK < 1) or a shelf of `shelf` over 1 kHz (shelfK); and Felt's softer transient, a fade-in over `ramp`.
+    float lpK = 1, lpY = 0, shelf = 0, shelfK = 0, shelfY = 0;
+    float ramp = 1, rampStep = 0;
+    float filter(float x) noexcept {
+        if (lpK < 1.0f) x = lpY += lpK * (x - lpY);
+        if (shelf != 0.0f) shelfY += shelfK * (x - shelfY), x += shelf * (x - shelfY);
+        if (ramp < 1.0f) x *= ramp, ramp = std::min(1.0f, ramp + rampStep);
+        return x;
+    }
+};
+
+// The character's body after the voices' sum (both channels): Grand none; Upright a boxy, nasal case that loses its
+// top (peaks at 250 Hz and 1.1 kHz, a low-pass at 6 kHz); Felt the felt rail's muffle (two low-passes, 0.8 and 1.8 kHz).
+// [Assumption] voiced by measurement against the grand (docs/engine.md, "Starling"), not fitted to recordings.
+struct CharacterBody {
+    timber::Biquad b[2][3];
+    int character = 0;
+    double rate = 0;
+    void design(int c, double sr) noexcept {
+        if (c == character && sr == rate) return;
+        character = c, rate = sr;
+        for (auto& ch : b) {
+            for (auto& q : ch) q = timber::Biquad{};
+            if (c == 1) ch[0].peak(250.0, 0.9, 5.0, sr), ch[1].peak(1100.0, 1.4, 4.0, sr), ch[2].lowpass(6000.0, 0.7, sr);
+            if (c == 2) ch[0].lowpass(800.0, 0.6, sr), ch[1].lowpass(1800.0, 0.7, sr);
+        }
+    }
+    void process(float* l, float* r, uint32_t n) noexcept {
+        if (character == 0) return;
+        const int stages = character == 1 ? 3 : 2;
+        for (uint32_t i = 0; i < n; ++i) {
+            float x = l[i], y = r[i];
+            for (int k = 0; k < stages; ++k) x = b[0][k].run(x), y = b[1][k].run(y);
+            l[i] = x, r[i] = y;
+        }
+        for (auto& ch : b)
+            for (auto& q : ch) q.flush();
+    }
+    void clear() noexcept {
+        for (auto& ch : b)
+            for (auto& q : ch) q.clear();
+    }
 };
 
 // Starling's piano: the Simulated piano with the recordings around it. What is recorded and why is in
@@ -87,8 +130,12 @@ struct Player {
 // and pedal noises are recorded too, scaled by Noise. The recordings set the levels: each voice's model is scaled to
 // its recording over 110..170 ms (the calibration), so the real piano's balance across the keys and between attack
 // and tone carries over (a treble note's strike is about 30 dB over its tone, and dies within 100 ms). The model's simulated thump and keybed contact are off
-// under a recorded attack (the recording has them). The Upright and Felt boards have no recorded attack: their
-// voices are the model from the strike. Everything is dry: Space defaults to 0.
+// under a recorded attack (the recording has them). Upright and Felt play the grand's recorded attack processed as
+// their own (2026-11-25: alone, from the model's strike, they sounded thin and the Felt brighter than the grand): the
+// Felt through the felt rail (the strike's force and the attack low-passed, its transient softened over 4 ms, the
+// whole through CharacterBody's muffle), the Upright with a shorter decay, wider unisons and a boxy case. Hammer and
+// the soft pedal voice the attack as they voice the model's strike: a velocity layer nearer the hardness, and the
+// same felt low-pass or hard shelf. Everything is dry: Space defaults to 0.
 struct PianoModel : timber::Piano {
     using Base = timber::Piano;
     // Starling's own knobs (no Mode: always Simulated), mapped onto the piano's.
@@ -107,10 +154,18 @@ struct PianoModel : timber::Piano {
     uint32_t pedalCount = 0;
     double toModel = 1;  // every recording's gain: the attacks' median calibration, so the middle keys keep the model's level
     bool testMuteRecordings = false;  // the tests' A/B (never used for sound)
+    double touchCurve = 0;  // Touch: 0 the velocity as played .. 1 a light action
+    int characterNow = 0;
+    CharacterBody characterBody;
+    // [Assumption] Set by ear-free measurement (instrument_knobs_test): Resonance 0..1 about 6 dB of the pedalled
+    // tail; a silently held chord's ring at Sympathy 1 about 25 dB under the struck notes.
+    static constexpr double kResGain = 8.0, kHeldGain = 6.0;
 
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         f1Cents = keyCents();
         recordedPedal = true;
+        voicing = true, resGain = kResGain, resHeld = 1.0, heldGain = kHeldGain, phantomNormal = true;
+        uprightStrings = true, uprightDamper = 1.6;
         buzzSound = 0.0f;  // the key-release recordings hold the dampers' sound
         if (!bank) bank = recorded::acquire(recorded::BankId::StarlingPiano);
         double g[kAttacks];
@@ -136,9 +191,23 @@ struct PianoModel : timber::Piano {
         double q[Base::kModelParams] = {};
         for (uint32_t k = 0; k < kModelParams; ++k) q[kMap[k]] = p[k];
         q[Base::kSim] = 1.0;
+        // Touch is Starling's velocity curve (start()), not the finger's contact noise (too quiet to hear).
+        touchCurve = clampd(p[kSTouch], 0, 1);
+        q[Base::kTouch] = 0.0;
+        // The Upright: a shorter-lived string (0.55 x the decay) and wider unisons (1.8 x the detune); the Felt 0.8 x.
+        characterNow = static_cast<int>(clampd(p[kSCharacter], 0, 2) + 0.5);
+        if (characterNow == 1) q[Base::kDecay] = clampd(p[kSDecay], 0.25, 4) * 0.55, q[Base::kUnison] = clampd(p[kSUnison], 0, 6) * 1.8;
+        if (characterNow == 2) q[Base::kDecay] = clampd(p[kSDecay], 0.25, 4) * 0.8;
         pedalEvent = 0;
         Base::control(q, s);
+        characterBody.design(characterNow, sr);
         if (pedalEvent != 0) pedalNoise(pedalEvent == 1);
+        if (pedalEvent == 2)  // the pedal up: the dampers of the keys released under it land now
+            for (uint32_t k = 0; k < voiceCount; ++k) {
+                Voice& v = voices[k];
+                if (v.active && v.damperNoiseDue && !v.held) releaseNoise(v);
+                v.damperNoiseDue = false;
+            }
     }
 
     double noiseGain() const noexcept { return noise / 0.35; }  // 0.35 (the default) plays Salamander's own levels
@@ -168,9 +237,13 @@ struct PianoModel : timber::Piano {
     }
 
     void start(Voice& v, const Shared& s) noexcept {
+        // Touch: a lighter action brings soft playing up (velocity^(1 / (1 + 2 touch))); a key pressed silently stays so.
+        const bool silentKey = s.velocity > 0.05 && 0.75 + (v.velocity - 0.75) / s.velocity < 0.03;
+        if (touchCurve > 0 && !silentKey) v.velocity = detPow(v.velocity, 1.0 / (1.0 + 2.0 * touchCurve));
         Base::start(v, s);
         v.gated = false;
-        if (!bank || v.velocity < 0.03 || character != 0) return;  // a silent key, or a board with no recording
+        v.damperNoiseDue = false;
+        if (!bank || !v.exciting) return;  // a silent key
         const double pitch = clampd(v.pitch, 21.0, 108.0);
         const int zone = std::clamp(static_cast<int>(std::floor((pitch - 21.0) / 3.0 + 0.5)), 0, kAttackZones - 1);
         const int root = 21 + 3 * zone;
@@ -189,12 +262,23 @@ struct PianoModel : timber::Piano {
         const double m0 = kCalibration[c0].level * r0, m1 = kCalibration[c1].level * r1;
         if (!(r0 > 0 && r1 > 0 && m0 > 0 && m1 > 0)) return;
         const double R = r0 * detPow(r1 / r0, t), M = m0 * detPow(m1 / m0, t);
+        // The clips played: the layers nearest the velocity moved by the hammer's hardness and the soft pedal (a
+        // harder hammer sounds as a harder strike at the same level; R and M stay the played velocity's), the Felt
+        // a layer softer.
+        const double hard = clampd(hammer - 0.4 * soft, 0, 1);
+        const double sv = clampd(mv + 70.0 * (hard - 0.5) - (character == 2 ? 20.0 : 0.0), 1.0, 127.0);
+        int s0 = 0;
+        while (s0 + 2 < kAttackLayers && sv > kPianoClips[(s0 + 1) * kAttackZones].vel) ++s0;
+        const double sv0 = kPianoClips[s0 * kAttackZones].vel, sv1 = kPianoClips[(s0 + 1) * kAttackZones].vel;
+        const double sw = clampd((sv - sv0) / (sv1 - sv0), 0.0, 1.0);
+        const int p0 = s0 * kAttackZones + zone, p1 = p0 + kAttackZones;
         const uint32_t delay = v.wait, hold = static_cast<uint32_t>(kHoldS * sr);
         const float step = static_cast<float>(1.0 / (kFadeS * sr));
         bool any = false;
+        (void)w;
         for (int j = 0; j < 2; ++j) {
-            const int c = j == 0 ? c0 : c1;
-            const double weight = j == 0 ? 1.0 - w : w;
+            const int c = j == 0 ? p0 : p1;
+            const double weight = j == 0 ? 1.0 - sw : sw;
             if (weight <= 0) continue;
             const Calibration& k = kCalibration[c];
             const float g = static_cast<float>(toModel * weight * R / kPianoClips[c].rms) * (k.sign < 0 ? -1.0f : 1.0f);
@@ -205,6 +289,7 @@ struct PianoModel : timber::Piano {
             if (Player* p = play(c, ratio, g * v.panL, g * v.panR, delay + later)) {
                 if (k.lag < 0) p->pos = -k.lag;
                 p->hold = hold - later, p->fadeStep = step;
+                voice(*p, v);
                 any = true;
             }
         }
@@ -217,8 +302,27 @@ struct PianoModel : timber::Piano {
         v.gateHold = delay + hold, v.gateT = 0, v.gateStep = step;
     }
 
+    // The model's voicing of this strike on its recorded attack: the same felt low-pass or hard shelf (startSim), and
+    // Felt's softer transient.
+    void voice(Player& p, const Voice& v) const noexcept {
+        if (v.felt < 1.0f) p.lpK = v.felt;
+        if (v.hardK != 0.0f) p.shelf = v.hardK, p.shelfK = v.hardLpK;
+        if (character == 2) p.ramp = 0.0f, p.rampStep = static_cast<float>(1.0 / (0.004 * sr));
+    }
+
+    // The key's release: its damper lands on the strings (the recorded key-release noise). Keys from F#6 up have no
+    // dampers (silent); under the pedal the damper stays up, and lands when the pedal lifts (control()). A key pressed
+    // silently has a damper too.
     void release(Voice& v, const Shared& s) noexcept {
         Base::release(v, s);
+        if (!v.hasDamper) return;
+        if (pedalDown) {
+            v.damperNoiseDue = true;
+            return;
+        }
+        releaseNoise(v);
+    }
+    void releaseNoise(Voice& v) noexcept {
         if (noise <= 0) return;
         const double key = clampd(v.pitch, 21.0, 108.0);
         const int i = std::clamp(static_cast<int>(std::floor((key - 21.0) / 4.0 + 0.5)), 0, kReleaseClips - 1);
@@ -237,6 +341,10 @@ struct PianoModel : timber::Piano {
     }
 
     void post(float* l, float* r, uint32_t n, const Shared& s) noexcept {
+        postPlayers(l, r, n, s);
+        characterBody.process(l, r, n);
+    }
+    void postPlayers(float* l, float* r, uint32_t n, const Shared& s) noexcept {
         Base::post(l, r, n, s);
         for (Player& p : players) {
             if (!p.on) continue;
@@ -256,7 +364,7 @@ struct PianoModel : timber::Piano {
                 }
                 const uint32_t at = static_cast<uint32_t>(pos);
                 const float f = static_cast<float>(pos - at);
-                const float x = d[at] + (d[at + 1] - d[at]) * f;
+                const float x = p.filter(d[at] + (d[at + 1] - d[at]) * f);
                 l[i] += x * gl, r[i] += x * gr;
                 pos += p.step;
             }
@@ -271,7 +379,7 @@ struct PianoModel : timber::Piano {
                 const float u = 1.0f - t;
                 const uint32_t at = static_cast<uint32_t>(pos);
                 const float f = static_cast<float>(pos - at);
-                const float x = (d[at] + (d[at + 1] - d[at]) * f) * (u * (1.5704f + u * u * (0.0723f * u * u - 0.6427f)));
+                const float x = p.filter(d[at] + (d[at + 1] - d[at]) * f) * (u * (1.5704f + u * u * (0.0723f * u * u - 0.6427f)));
                 l[i] += x * gl, r[i] += x * gr;
                 pos += p.step;
             }
@@ -287,6 +395,7 @@ struct PianoModel : timber::Piano {
     void clearPost() noexcept {
         Base::clearPost();
         for (Player& p : players) p.on = false;
+        characterBody.clear();
     }
     static lib::ReverbSettings room() noexcept { return Base::room(); }
 };

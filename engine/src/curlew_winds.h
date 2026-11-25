@@ -32,7 +32,7 @@ inline constexpr int kPullKeys = 40;
 //   flutter-tongue is the player humming or rolling an R into the instrument. Here: the rolled tongue, a train of
 //   short closures at about 26 Hz that wanders (a rough buzz, not a tremolo), with a little pitch flutter; and the
 //   hummed pitch, about an octave under the note and 2 Hz off it, modulating the air (the sub-octave sidebands and
-//   the slow beating against the note that make a growl sound sung). Per sample on each voice's output.
+//   the slow beating against the note that make a growl sound sung). Per sample, into each voice's breath.
 struct Winds : timber::Wind {
     using Base = timber::Wind;
     enum P : uint32_t { kCBreath, kCNoise, kCReed, kCVibrato, kCVibRate, kCGrowl, kCAttack };
@@ -55,7 +55,7 @@ struct Winds : timber::Wind {
         // Brass: the lips' resonance a little above the note (outward-striking lips, as Fletcher and Rossing describe
         // them); at Timber's 0.9 below it, a trombone or horn held only half its notes (measured 2026-11-24: 1.15
         // held 10 of 11 trombone and 9 of 10 trumpet notes; the pull table aims off the sharpening that comes with it).
-        if (kKind[which] == 3) lipRatio = 1.15f;
+        if (kKind[which] == 3) lipRatio = 1.15f, lipSpan = 0.08, lipsCloseWithBreath = true;  // Lips 0..1: the lips' resonance 1.12..1.20 x the note
         if (!Base::prepare(rate, v, n)) return false;
         body.load(bodyResponse(which), bodyAmount, sr);
         return true;
@@ -86,30 +86,39 @@ struct Winds : timber::Wind {
         const double flutter = 20.0 * growlAmount * lib::fastSinCycles(g.tongue);
         tune(v, 8.0 * vibrato * lib::fastSinCycles(v.vib) + flutter);
     }
-    // Each voice's output through the growl's gain: the tongue's closures (a raised cosine cubed, narrow dips) times
-    // the hum (a sine at half the note, 2 Hz up), its mean brought back to 1 so Growl leaves the level where it was.
-    void growl(Voice& v, float* out, uint32_t n) noexcept {
-        if (growlAmount <= 0) return;
+    // The growl into each voice's breath (the mouth pressure, before the reed, jet or lips: the hum and the rolled
+    // tongue modulate the air, and the excitation's nonlinearity mixes them with the note): the tongue's closures (a
+    // raised cosine cubed, narrow dips that nearly stop the air) times the hum (a sine at half the note, 2 Hz up),
+    // the mean brought back to 1 so Growl leaves the breath where it was on average.
+    void growl(Voice& v, float* gm, uint32_t n) noexcept {
         Growl& g = growls[&v - voices];
-        const double a = growlAmount, dt = 1.0 / sr;
+        // A reed speaks only in a narrow window of pressure: less depth there (the clarinet half, the sax 0.6) keeps it
+        // speaking through the growl.
+        const double a = growlAmount * (kKind[which] == 0 ? 0.5 : (kKind[which] == 2 ? 0.6 : 1.0)), dt = 1.0 / sr;
         const double humHz = 0.5 * v.baseHz + 2.0;
-        const float dT = static_cast<float>(0.8 * a), dH = static_cast<float>(0.7 * a);
+        const float dT = static_cast<float>(0.85 * a), dH = static_cast<float>(0.6 * a);
         const float norm = 1.0f / (1.0f - dT * 0.3125f);
         for (uint32_t i = 0; i < n; ++i) {
             const float c = 0.5f + 0.5f * static_cast<float>(lib::fastSinCycles(g.tongue + 0.25));
             const float h = static_cast<float>(lib::fastSinCycles(g.hum));
-            out[i] *= (1.0f - dT * c * c * c) * norm * (1.0f + dH * h);
+            gm[i] = (1.0f - dT * c * c * c) * norm * (1.0f + dH * h);
             g.tongue += g.rate * dt, g.hum += humHz * dt;
             g.tongue -= std::floor(g.tongue), g.hum -= std::floor(g.hum);
         }
     }
+    float growlBuf[4][timber::kControlFrames] = {};
     void render(Voice& v, float* out, uint32_t n) noexcept {
+        if (growlAmount > 0) growl(v, growlBuf[0], n), breathMod = growlBuf;
         Base::render(v, out, n);
-        growl(v, out, n);
+        breathMod = nullptr;
     }
     void renderGroup(Voice* const* vs, uint32_t count, float (*out)[timber::kControlFrames], uint32_t n) noexcept {
+        if (growlAmount > 0) {
+            for (uint32_t l = 0; l < count; ++l) growl(*vs[l], growlBuf[l], n);
+            breathMod = growlBuf;
+        }
         Base::renderGroup(vs, count, out, n);
-        for (uint32_t l = 0; l < count; ++l) growl(*vs[l], out[l], n);
+        breathMod = nullptr;
     }
     void post(float* l, float* r, uint32_t n, const Shared& s) noexcept {
         Base::post(l, r, n, s);

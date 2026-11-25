@@ -382,7 +382,9 @@ struct Wind {
             v.d = std::min(cap, static_cast<float>(std::max(2.0, rest)));
         }
         if (instrument == 3) {  // the lips: a two-pole resonance at the note
-            const double w = kTwoPi * f0 * ((sim ? lipRatio : 0.92) + 0.02 * reed) / sr, r = 0.997;
+            // Curlew widens the lips' tension (lipSpan) around the same middle, so Lips is heard on every brass.
+            const double lr = lipSpan > 0 ? lipRatio + 0.01 + lipSpan * (reed - 0.5) : (sim ? lipRatio : 0.92) + 0.02 * reed;
+            const double w = kTwoPi * f0 * lr / sr, r = 0.997;
             v.lipA1 = static_cast<float>(2.0 * r * std::cos(w)), v.lipA2 = static_cast<float>(-r * r);
             v.lipG = static_cast<float>(0.002 * std::sin(w) / 0.043);  // the same peak gain at every pitch
         }
@@ -418,6 +420,9 @@ struct Wind {
         const int i = std::min(static_cast<int>(k), pullCount - 2);
         return pullTable[i] + (pullTable[i + 1] - pullTable[i]) * (k - i);
     }
+    const float (*breathMod)[kControlFrames] = nullptr;  // Curlew (1.1.3): its growl, per lane and frame, times the breath
+    bool lipsCloseWithBreath = false;  // Curlew (1.1.3): the lips' rest gap closes as the breath ends
+    double lipSpan = 0;  // Curlew (1.1.3): the lips' tension range over Lips 0..1 (Timber: 0.02 from 0)
     bool padClicks = true;  // Curlew (1.1.3) turns them off: a click into the bore on every note was the "piano on the flute"
     void padClick(Voice& v) noexcept {
         v.clickPitch = v.pitch;
@@ -605,7 +610,11 @@ struct Wind {
             env = clamp4(env + envStep, zero, one);
             tongue = clamp4(tongue + tongueStep, zero, one);
             const F4 open = one - tongue;
-            const F4 pm = env * base * (one + vibAm);
+            F4 pm = env * base * (one + vibAm), bm = one;
+            if (breathMod) {  // Curlew's growl, into the breath (the flute's: its jet; Timber never sets it)
+                for (uint32_t l = 0; l < 4; ++l) bm[l] = breathMod[l < count ? l : 0][i];
+                pm = pm * bm;
+            }
             g = g + gStep;
             for (uint32_t l = 0; l < count; ++l) nz[l] = nzs[l].next(), clk[l] = click[l].next(), b[l] = bore[l].frac(d[l]);
             F4 w, y;
@@ -649,7 +658,7 @@ struct Wind {
                 const F4 t = dd;
                 djCur = djCur + djStep;
                 for (uint32_t l = 0; l < count; ++l) eta[l] = jet[l].frac(djCur[l]);
-                const F4 U = jetU * open;
+                const F4 U = breathMod ? jetU * open * bm : jetU * open;
                 jetU = jetU + jetUStep;
                 const F4 half = f4(0.5f) * t;
                 for (uint32_t l = 0; l < count; ++l) jet[l].push(half[l]);
@@ -666,7 +675,10 @@ struct Wind {
                 const F4 dp = pm - f4(0.85f) * b;
                 const F4 lip = lipG * dp + lipA1 * lip1 + lipA2 * lip2;
                 lip2 = lip1, lip1 = lip;
-                const F4 hgt = clamp4(f4(0.02f) + f4(lipOpen) * lip, zero, f4(lipMax)) * open;  // the lips part only so far
+                F4 hgt = clamp4(f4(0.02f) + f4(lipOpen) * lip, zero, f4(lipMax)) * open;  // the lips part only so far
+                // Curlew: with no breath the lips close (their rest gap let the bore's own wave through the valve,
+                // and a released low note kept sounding, -33 dB, 0.3 s after its release had ended).
+                if (lipsCloseWithBreath) hgt = hgt * min4(one, env * f4(20.0f));
                 const F4 root = sqrt4(abs4(dp));
                 const F4 flow = hgt * sel4(gt4(dp, zero), root, zero - root);
                 turb = f4(turbAmt) * f4(0.5f) * abs4(flow) * nz;
