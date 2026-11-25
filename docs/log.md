@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Log
 
+- 2026-11-25: every knob of the 1.1.3 instruments heard, characters apart, glitches and stray noises gone ([engine](engine.md#starling-the-hybrid-piano-113)): `instrument_every_knob_is_audible`, `instrument_glitch_scan`, `instrument_noises_sound_only_at_their_moment`, `instrument_no_stray_peaks_on_any_key`, `starling_piano_characters_are_three_pianos` and `starling_piano_bank_is_decoded_and_freed_off_the_audio_thread`; Starling's Hammer, Soft, Touch, Resonance, Sympathy, Phantom and Noise made audible, Upright and Felt their own pianos with the processed recorded attack, the dampers' noise at the pedal's lift; Nightingale's release spikes and buzz fixed, its vibrato and noise heard; Curlew's growl into the breath, its vibrato, lips and release; Nightingale's and Curlew's bodies refit within ±9 dB, the sax given its bell; Woodpecker's Attack a stroke over the model, Decay no longer inflating it, Release as hand damping, one Motor control; Starling, Nightingale, Curlew and stress references re-recorded.
 - 2026-11-24: Nightingale's bow force rises behind its speed (C#4 had started on its octave for 140 ms; every key now settles within 110 ms), and its references use the new **Friction** class (chaotic within 1 dB: bowed strings differ that much between compilers).
 - 2026-11-24: devices renamed (the owner's names; display only, ids, files, classes and saved fields unchanged, each old name a search tag): Duck → **Swoop** (`org.caw.duck`), Swoop → **Stoop** (`org.caw.transient`), Lark → **Chirp**, Ricochet → **Mock**, Syrinx → **Coo**, Canopy → **Hover**, Lookout → **Spot**, Hollow → **Call**, Iris → **Molt** (also the engine descriptor's name), Pinion → **Puff**, Strobe → **Blink**; the Ducker's "Duck" variant and the music video's Strobe effect keep their names.
 - 2026-11-24: Woodpecker, the tuned percussion (1.1.3 step 5, [engine](engine.md#woodpecker-tuned-percussion-113)): `org.caw.woodpecker` with marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, modal models measured from VCSL (CC0) with their recorded strokes crossfaded in phase; tests, reference, rt and cost cases; in the app on the fallback page; the stress scenario's every-instrument project now plays it.

@@ -3,6 +3,10 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+- **The new instruments, every knob heard:** Starling's Hammer runs from soft felt to hard (about 12 dB brighter), and Soft pedal, Touch, Resonance, Sympathy, Phantom partials and Noise all do what they say in normal playing; the Upright and Felt are their own pianos (the Felt darker and softer, the Upright boxy and shorter-lived), both with the grand's recorded attack processed to match; a key let go under the pedal sounds its damper when the pedal lifts. Curlew's Growl is a real growl and flutter-tongue, its Vibrato is heard at the default, and the sax has a body. Nightingale no longer spikes or buzzes as a note is released, and its vibrato comes in sooner. Woodpecker's Release damps the bars by hand, Attack level adds or removes the mallet's stroke, and the vibraphone's motor is one control.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.

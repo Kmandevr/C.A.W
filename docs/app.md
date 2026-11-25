@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: three sections (Build, Files, Arrange), shared engine state, the project library, portable files, performance profiles, the Benchmark, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # App
