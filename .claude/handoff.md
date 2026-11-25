@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 4f14faf (merged here: sound fixes, Timber removal, instrument pages; Unison per key)
+Commit: e15e0bd (merged here: sound fixes, Timber removal, instrument pages; Unison per key)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
@@ -10,7 +10,6 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
 - Guitar + harp: worktree-agent-a7fa15840664e0054 df0139b (based on 1061175).
 - Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc d78ecb5 (agent now cutting cost to 24000 and fixing dead knobs).
 - Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
-- Live-path gate test: worktree-agent-adafbe12bcaece343 f4ea097.
 
 ## Open
 - Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell only the Swell?; Rook cards/Studio; panels; EP/tonewheel by ear.
@@ -19,13 +18,15 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
   budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
 
 ## Next
-- Owner (2026-11-25, on alpha.2): Starling Unison sounds weird, not out-of-tune; Noise/Resonance/Pitch glide/Sympathy/Phantom
+- Starling crossfade (owner): pitch/tone jumps. Measured: dominant partial differs rec vs model (key57 x2->x1, key48
+  x1->x2); treble model 13-40 dB below the attack within 0.3 s; keys 105/108 recording strongest an octave below.
+  Fix: per-zone partial-balance correction filter on the model (fit in starling_piano_assets.py), treble decay, top zones.
+- Owner (2026-11-25, on alpha.2): Starling (Unison done) Noise/Resonance/Pitch glide/Sympathy/Phantom
   inaudible; Upright/Felt unrealistic; a high, distortion-like sound at note ends (probe: scratchpad zz_starling_probe.cpp).
   Strings: no low end or body (8 narrow bands): build a full measured body (convolution or many bands) per instrument.
   Woodpecker needs more settings: strike position, mallet type, bar material/ratios, resonator tuning, rolls,
   dead strokes, timpani pedal glide, stereo layout (each audible, in the knob test).
-  Curlew: mono legato by default (a new note while held slurs: no re-attack; a gap re-tongues; Poly option), and
-  most of the wind family (piccolo, alto flute, recorder, oboe, cor anglais, bassoon, bass clarinet, saxes, tuba...).
+  Curlew (legato done e15e0bd): most of the wind family (piccolo, alto flute, oboe, bassoon, saxes, tuba...).
 0. All agents were STOPPED by the owner (usage). Their tips are parents of b35881e (pushed). Resume work
    yourself, one piece at a time, pushing after each step; don't spawn many agents at once.
    Performance goal (owner): close the gap between the 1% high (p99) CPU and the mean, keeping the mean low
