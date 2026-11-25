@@ -136,17 +136,14 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
     return a;
 }
 
-// every_instrument's render less Timber's bowed strings (Classic and Simulated; owner, 2026-11-24: "It doesn't
-// necessarily need to sound identical every time just close enough... You're also welcome to narrow the test").
-// Their stick-slip friction is chaotic, so each compiler's rounding (GCC on Arm64 with fused multiply-adds, Clang on
-// x86-64 even without them or reassociation) moves the bowed layer by up to 1.2 dB, measured 2026-11-24 (PR #261),
-// past this mix's 0.1 dB match. The Benchmark still plays them; their sound is checked by Timber's own references
-// (timber_test.cpp, timber_sim_test.cpp), which hold on every build.
+// every_instrument's render less the self-oscillating instruments (owner, 2026-11-24: "It doesn't necessarily need to
+// sound identical every time just close enough... You're also welcome to narrow the test"): Nightingale's stick-slip
+// friction (Timber's bowed strings until 1.1.3) and Curlew's reeds, jets and lips are chaotic, so each compiler's
+// rounding moves them by up to 1.2 dB (measured 2026-11-24, PR #261), past this mix's 0.1 dB match. The Benchmark
+// still plays them; their own references (nightingale_test.cpp, curlew_test.cpp) check them on every build.
 ProjectSpec withoutBowedStrings(ProjectSpec p) {
-    // 1.1.3: Nightingale (bowed, the same friction) and Curlew (self-oscillating reeds, jets and lips) likewise; their
-    // own references (nightingale_test.cpp, curlew_test.cpp) check them.
     std::erase_if(p.layers, [](const LayerSpec& l) {
-        return l.name.find("Bowed") != std::string::npos || l.name.rfind("Nightingale", 0) == 0 || l.name.rfind("Curlew", 0) == 0;
+        return l.name.rfind("Nightingale", 0) == 0 || l.name.rfind("Curlew", 0) == 0;
     });
     return p;
 }
@@ -196,8 +193,10 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         // effect in each variant; the owner: "make sure the benchmark actually tests all of the plugins"), an
         // intended change of both projects and their sound (were 3ab70624484ac6bd and 872fde1013543d13). 1.1.3: with
         // Starling, Nightingale, Curlew and Bittern (was 5b2dd89ace6ad650); then Woodpecker's six instruments, an
-        // intended change of the project and its sound (was 348171ca8d5d56dc).
-        {"every_instrument", "01e0b49b53128913"},
+        // intended change of the project and its sound (was 348171ca8d5d56dc). 2026-11-25: Timber removed (its 14 model
+        // and Classic/Simulated rows gone; its successors were already in it), an intended change of the project and
+        // its sound (was 01e0b49b53128913).
+        {"every_instrument", "6105a20ddc8b25c0"},
         {"every_effect", "bade933ee53725fc"},
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},
@@ -255,14 +254,11 @@ TEST(stress_benchmark_plays_every_registered_builtin) {
     CHECK(devices > 40);
     // Retired ids (old projects still load them, migrated) are not played again.
     for (const LayerSpec& l : inst.layers) CHECK(l.instrument.id != "org.caw.synth.morph" && l.instrument.id != "org.caw.drum.kick");
-    // Rook's three kit kinds and Timber's Simulated models are there.
-    int kits = 0, simulated = 0;
-    for (const BenchmarkDevice& d : benchmarkInstruments()) {
-        kits += d.name.find(" kit: ") != std::string::npos;
-        simulated += d.name.find("Simulated") != std::string::npos;
-    }
+    for (const LayerSpec& l : inst.layers) CHECK(l.instrument.id != "org.caw.timber");  // 1.1.3: Timber loads only as its successors
+    // Rook's three kit kinds are there.
+    int kits = 0;
+    for (const BenchmarkDevice& d : benchmarkInstruments()) kits += d.name.find(" kit: ") != std::string::npos;
     CHECK_EQ(kits, 3);
-    CHECK(simulated >= 7);
     // Names the owner reads: the devices' shown names, not ids.
     for (const SuiteScenario& s : benchmarkScenarios()) CHECK(std::string(s.name).find("org.caw") == std::string::npos);
     CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "drums_kit")->name), std::string("Rook kit, 16 pads busy"));
