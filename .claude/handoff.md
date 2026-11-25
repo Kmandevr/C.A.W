@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: 94afd84 pushed (Rook merged). Uncommitted on top (commits were refused by the permission check, 2026-11-25):
-staged = Rook app fixes (hero on Simulated pads, owner-use test, Arrange FX golden); unstaged = Bittern as the
-Tabernacle organ (engine, tests, refs, bench, page, fixture, docs). Commit both, push, then continue below.
+Commit: 9f5cdb7 (1.1.3-alpha.3 merged to Main as 7d26f27, PR #267; its release run, app.yml with release=true, dispatched 22:3x UTC).
+Branch has Main merged in, then the Nightingale body refit and Woodpecker Roll/Tube detune (next release's; changelog
+entry still to write when its version is set). Issue #268: Starling strings' Windows-only -91 dB difference.
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
