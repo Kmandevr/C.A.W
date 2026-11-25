@@ -355,7 +355,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
                 onSecondaryTapUp: (_) => longPress(),
                 // A finger's vertical drag engages after a short rest or a slow start; a quick swipe scrolls the page
                 // (kit/touch_engage.dart). The mouse drags at once.
-                child: EngageVerticalDrag(
+                child: EngageKnobDrag(
                 onStart: (d) => start(d.localPosition),
                 onUpdate: (d) => update(d.delta.dy),
                 onEnd: (_) => end(),

@@ -1,4 +1,4 @@
-// Lark (org.caw.pitchfix, 1.1.0): live pitch correction: YIN detection, a correction law toward a key and scale (or the key track's MIDI notes), TD-PSOLA resynthesis with the formant kept.
+// Chirp (org.caw.pitchfix, 1.1.0): live pitch correction: YIN detection, a correction law toward a key and scale (or the key track's MIDI notes), TD-PSOLA resynthesis with the formant kept.
 #include "builtin_fx_lark.h"
 
 #include <algorithm>

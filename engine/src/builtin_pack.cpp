@@ -1,4 +1,4 @@
-// The AutoStacc beta pack's registration, pack mark and preset lists (Murmur, Peck, Bend, Iris).
+// The AutoStacc beta pack's registration, pack mark and preset lists (Murmur, Peck, Bend, Molt).
 #include "builtin_pack.h"
 
 #include "caw/library/grain.hpp"

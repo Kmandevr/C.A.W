@@ -192,7 +192,7 @@ extension RoutingEdit on AppState {
     if (sourceId != null && !routing.canKey(layer, sourceId)) return false;
     final use = layer.components[slot];
     final page = MergedDevices.pageIdOf(use.id, use.params);  // a merged device: the old effect its variant is
-    // A compressor, gate or Duck listens to the key once it has one (Sidechain: External), and back to itself without.
+    // A compressor, gate or Swoop listens to the key once it has one (Sidechain: External), and back to itself without.
     if (page == 'org.caw.compressor' || page == 'org.caw.gate' || page == MergedDevices.duckPageId) {
       setNativeParamLive(layer, slot, 'sidechain', sourceId == null ? 0 : 1);
     }

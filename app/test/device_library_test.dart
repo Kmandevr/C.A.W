@@ -100,14 +100,14 @@ void main() {
       expect(best('equalizer'), 'Plume');
       expect(best('compressor'), 'Talon');
       expect(best('reverb'), 'Roost');
-      expect(best('autotune'), 'Lark');
+      expect(best('autotune'), 'Chirp');
       expect(best('delay'), 'Relay');
       expect(best('distortion'), 'Ember');
       expect(best('utility'), 'Wingspan', reason: 'an old name');
       expect(best('bit distortion'), 'Grit', reason: 'an old name');
-      expect(best('limiter'), 'Canopy');
+      expect(best('limiter'), 'Hover');
       expect(best('de-esser'), 'Quell');
-      expect(best('tuner'), 'Lookout');
+      expect(best('tuner'), 'Spot');
       expect(best('arpeggiator'), 'Hop');
       expect(best('lfo'), 'Orbit');
       expect(best('talon'), 'Talon');
@@ -169,7 +169,7 @@ void main() {
       }
       expect(find.byKey(const ValueKey('fx-template-chain:vocal')), findsNothing);
       expect(find.text('Hatch · Gate'), findsOneWidget, reason: 'a guitar device');
-      expect(find.text('Lark · Pitch correction'), findsNothing, reason: 'not a guitar device');
+      expect(find.text('Chirp · Pitch correction'), findsNothing, reason: 'not a guitar device');
     });
 
     test('every chain template\'s presets are the engine\'s, and one applies as one undo step', () {

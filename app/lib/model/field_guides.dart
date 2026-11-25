@@ -26,7 +26,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Ratio', 'How firmly it holds. 2:1 is gentle, 4:1 is firm, 10:1 is close to a limiter.'),
     ('Attack', 'How fast it grabs. Slower lets the hit of a drum or pick through first.'),
   ], 'Gentle glue'),
-  'org.caw.limiter': FieldGuide('Canopy is a ceiling nothing goes through. Put it last on the master to stop clipping '
+  'org.caw.limiter': FieldGuide('Hover is a ceiling nothing goes through. Put it last on the master to stop clipping '
       'and to make the mix louder without overs.', [
     ('Gain', 'How hard you push into the ceiling. Raise it slowly and listen for the punch going soft.'),
     ('Ceiling', 'The loudest the output gets. -1 dB leaves room for streaming.'),
@@ -38,19 +38,19 @@ const fieldGuides = <String, FieldGuide>{
     ('Range', 'How far it turns down when closed. Less range sounds more natural.'),
     ('Release', 'How it fades out. Longer keeps the tails of notes.'),
   ], 'Tame the room'),
-  'org.caw.duck': FieldGuide('Duck turns this track down while another one plays, so a voice or kick always comes '
+  'org.caw.duck': FieldGuide('Swoop turns this track down while another one plays, so a voice or kick always comes '
       'through. Level rides a part to an even loudness on its own.', [
     ('Threshold', 'How loud the key needs to be before it ducks.'),
     ('Amount', 'How far it ducks. A few dB is felt more than heard.'),
     ('Release', 'How fast it comes back. Match it to the tempo for a pump.'),
   ], 'Kick duck bass'),
-  'org.caw.transient': FieldGuide('Swoop changes the hit and the ring of a sound, whatever its level: more snap on a '
+  'org.caw.transient': FieldGuide('Stoop changes the hit and the ring of a sound, whatever its level: more snap on a '
       'snare, less room on a kick.', [
     ('Attack', 'Up for more snap at the start, down to soften it.'),
     ('Sustain', 'Up for more body and room, down for a tighter, drier hit.'),
     ('Mix', 'Blend it back with the original when it gets too much.'),
   ]),
-  'org.caw.multiband': FieldGuide('Pinion compresses the lows, mids and highs on their own, and can lift the quiet '
+  'org.caw.multiband': FieldGuide('Puff compresses the lows, mids and highs on their own, and can lift the quiet '
       'parts too. OTT is its loud, bright, everything-up sound.', [
     ('Depth', 'How much it does overall. Start low; it adds up fast.'),
     ('Upward', 'How much the quiet details come up.'),
@@ -84,7 +84,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Decay', 'How long it rings after each hit.'),
     ('Brightness', 'Dark and soft, or bright and glassy.'),
   ], 'Plucked string'),
-  'org.caw.formant': FieldGuide('Syrinx gives a sound vowels, like a mouth shaping it: ahh, ooh, eee.', [
+  'org.caw.formant': FieldGuide('Coo gives a sound vowels, like a mouth shaping it: ahh, ooh, eee.', [
     ('Vowel X', 'Moves between vowels. Automate it to make a sound talk.'),
     ('Vowel Y', 'The other direction of the vowel pad.'),
     ('Gender / shift', 'A bigger or smaller mouth.'),
@@ -141,7 +141,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Stereo spread', 'Sets the sides apart for width.'),
     ('Mix', 'How much of the effect you hear.'),
   ], 'Classic ring'),
-  'org.caw.trancegate': FieldGuide('Strobe chops a sound to a step pattern, so pads and chords pulse in time.', [
+  'org.caw.trancegate': FieldGuide('Blink chops a sound to a step pattern, so pads and chords pulse in time.', [
     ('Steps', 'How many steps the pattern has; tap them to turn them on and off.'),
     ('Gate length', 'How long each step stays open.'),
     ('Release', 'Soft or clipped edges.'),
@@ -158,7 +158,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Pre-delay', 'A short gap before the space starts, so the dry sound stays clear.'),
     ('Mix', 'How far back the sound sits.'),
   ], 'Vocal plate'),
-  'org.caw.convolver': FieldGuide('Hollow plays a sound through a real space or speaker cabinet, from a recording of '
+  'org.caw.convolver': FieldGuide('Call plays a sound through a real space or speaker cabinet, from a recording of '
       'it.', [
     ('Impulse', 'Which space or cab.'),
     ('Size / stretch', 'Makes the space bigger or smaller.'),
@@ -171,7 +171,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Cents', 'Fine tuning, for a doubled, wider sound.'),
     ('Mix', 'Blend the shifted voice with the original.'),
   ], 'Octave down'),
-  'org.caw.pitchfix': FieldGuide('Lark pulls a voice to the notes of a key, from a gentle polish to a hard, '
+  'org.caw.pitchfix': FieldGuide('Chirp pulls a voice to the notes of a key, from a gentle polish to a hard, '
       'stepped tune.', [
     ('Key and scale', 'The notes it may land on. Set them to the song.'),
     ('Speed', 'How fast it pulls. Slow is natural, fast is the hard-tune sound.'),
@@ -199,7 +199,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Width', 'Narrower towards mono, wider towards the sides.'),
     ('Bass mono', 'Keeps the low end in the middle, where it hits hardest.'),
   ], 'Mono bass'),
-  'org.caw.meters': FieldGuide('Lookout shows what you hear: the spectrum, the stereo field, loudness and a tuner.', [
+  'org.caw.meters': FieldGuide('Spot shows what you hear: the spectrum, the stereo field, loudness and a tuner.', [
     ('Source', 'What it measures.'),
     ('Tilt', 'Tilts the spectrum so a balanced mix looks level.'),
     ('Mode', 'Spectrum, stereo, loudness or tuner.'),
@@ -261,13 +261,13 @@ const fieldGuides = <String, FieldGuide>{
     ('Cycle', 'How long one bend takes.'),
     ('Shape', 'Smooth wobble or sharp steps.'),
   ], 'Tape wow'),
-  'org.caw.pack.spectral': FieldGuide('Iris freezes and paints the spectrum, for pads from any sound.', [
+  'org.caw.pack.spectral': FieldGuide('Molt freezes and paints the spectrum, for pads from any sound.', [
     ('Freeze', 'Holds the sound as it is now.'),
     ('Blur', 'Smears it into a wash.'),
     ('Shift', 'Moves it up or down.'),
   ], 'Freeze pad'),
   // Instruments
-  'org.caw.synth.flagship': FieldGuide('Raven is a wavetable synth with three oscillators, two filters and a mod '
+  'org.caw.synth.flagship': FieldGuide('Kestrel is a wavetable synth with three oscillators, two filters and a mod '
       'matrix: basses, leads, pads and keys.', [
     ('Osc 1 frame', 'Moves through the wavetable; the main way to change the tone.'),
     ('Filter cutoff', 'Darker or brighter.'),
@@ -289,6 +289,30 @@ const fieldGuides = <String, FieldGuide>{
     ('Body', 'How big the instrument is.'),
     ('Space', 'The room around it.'),
   ], 'Concert grand'),
+  'org.caw.starling': FieldGuide('Starling is a real-sounding grand piano: modelled strings with a recorded grand\'s '
+      'attack and noises.', [
+    ('Hammer', 'Softer or harder hammers: darker or brighter.'),
+    ('Noise', 'The keys and pedal you hear, up close or none.'),
+    ('Space', 'A room around it (off by default: add your own reverb).'),
+  ], 'Grand piano'),
+  'org.caw.nightingale': FieldGuide('Nightingale is a bowed string: violin, viola, cello or double bass, played by a '
+      'modelled bow.', [
+    ('Bow pressure', 'Light and airy, or digging in.'),
+    ('Bow position', 'Glassy at the bridge, soft over the fingerboard.'),
+    ('Vibrato', 'How much the finger rocks the pitch.'),
+  ], 'Solo violin'),
+  'org.caw.curlew': FieldGuide('Curlew is a wind player: flute, clarinet, sax, trumpet, trombone or horn, '
+      'blown by a modelled breath.', [
+    ('Breath', 'How hard it is blown: soft and round, or bright and forward.'),
+    ('Breath noise', 'The air you hear around the tone.'),
+    ('Vibrato', 'A gentle waver in the note.'),
+  ], 'Concert flute'),
+  'org.caw.bittern': FieldGuide('Bittern is a cathedral pipe organ: draw its stops and it fills a great stone '
+      'room.', [
+    ('Stops', 'Each rank of pipes: flutes, principals, strings, the trumpet.'),
+    ('Tremulant', 'A pulse in the wind, for a warm, vocal tone.'),
+    ('Space', 'The cathedral (on): turn it down for the organ loft.'),
+  ], 'Cathedral principal chorus'),
   'org.caw.flock': FieldGuide('Flock plays a sample as a cloud of grains, for pads, textures and drones.', [
     ('Position', 'Where in the sample the grains come from.'),
     ('Size', 'How long each grain is.'),
@@ -310,7 +334,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Scale', 'Major, minor and the modes.'),
     ('Mode', 'Snap to the nearest note, or leave out the others.'),
   ]),
-  'org.caw.midi.echo': FieldGuide('Ricochet repeats each note, quieter each time, for echoes the synth plays itself.', [
+  'org.caw.midi.echo': FieldGuide('Mock repeats each note, quieter each time, for echoes the synth plays itself.', [
     ('Time', 'How far apart the repeats are.'),
     ('Repeats', 'How many there are.'),
     ('Pitch', 'Moves each repeat up or down.'),

@@ -498,7 +498,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.pack.warp', 'Bend', false,
       'Warp: a curve of 4, 8 or 16 points (p0..p15) bends the delay (Time) or the speed (Speed) through each cycle.',
       ['mode', 'cycle', 'depth', 'range', 'points', 'shape', 'smooth', 'resync', 'mix', 'output']),
-  CppBuiltin('org.caw.pack.spectral', 'Iris', false,
+  CppBuiltin('org.caw.pack.spectral', 'Molt', false,
       'Spectral effects on an STFT: freeze (a captured spectrum, painted through its state), blur, shift and gate; '
       'a window of latency.',
       ['quality', 'freeze', 'fade', 'drift', 'paint', 'blur', 'shift', 'gate', 'gate_range', 'mix', 'output']),
@@ -509,7 +509,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.vocalclean', 'Hush', false,
       'Variants (`variant`): De-click, De-plosive, Breath, for voices; a few ms of latency each.',
       ['variant', 'sensitivity', 'length', 'mode', 'amount', 'range', 'fade', 'keep', 'listen']),
-  CppBuiltin('org.caw.pitchfix', 'Lark', false,
+  CppBuiltin('org.caw.pitchfix', 'Chirp', false,
       'Pitch correction to a key and scale (or the key track\'s notes), with Keep vibrato and formant keep; 25 ms of latency, 10 ms with `monitor`.',
       ['key', 'scale', 'target', 'speed', 'humanize', 'keep_vibrato', 'formant_keep', 'formant', 'mix', 'output', 'monitor']),
   // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>

@@ -102,7 +102,7 @@ void Piano::renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexc
                 const float Fb = (o > 0 ? 1.0f : -1.0f) * ex * std::sqrt(ex) * 4.0f;
                 for (int s = 0; s < ns; ++s) w[s] -= kBuzzAbsorb * Fb / ns;
                 o -= kBuzzAbsorb * Fb;
-                busBoard[at + i] += Fb * kBuzzGain * noiseK;
+                busBoard[at + i] += Fb * kBuzzGain * noiseK * buzzSound;
                 buzzEnergy += static_cast<double>(Fb) * Fb;
             }
         }
@@ -110,6 +110,18 @@ void Piano::renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexc
         for (int s = 0; s < ns; ++s) v.line[s].push(w[s]);
         if (glides) v.energy += o * o;
         float y = o * gain;
+        if (v.gated) {  // Starling: the model fades in under the recorded attack (sin over the crossfade, power-complementary)
+            float g = 0;
+            if (v.gateHold > 0) {
+                --v.gateHold;
+            } else {
+                v.gateT += v.gateStep;
+                if (v.gateT >= 1.0f) v.gateT = 1.0f, v.gated = false;
+                const float t = v.gateT;
+                g = t * (1.5704f + t * t * (0.0723f * t * t - 0.6427f));  // sin(pi t / 2) within 0.02 %, exactly 1 at t = 1
+            }
+            y *= g;
+        }
         if (v.phantomGain > 0) {  // High: longitudinal modes driven by the transverse motion squared
             const float d = o * o;
             y += (modeRun(v.phantom[0], d) + 0.5f * modeRun(v.phantom[1], d)) * v.phantomGain;

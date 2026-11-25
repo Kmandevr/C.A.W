@@ -1,4 +1,4 @@
-// Flagship's 1.1.0 presets (Raven's synthesis): sync, ring and noise FM, spectral and additive warps, the new filters, LFO 4 and the macros.
+// Flagship's 1.1.0 presets (Kestrel's synthesis): sync, ring and noise FM, spectral and additive warps, the new filters, LFO 4 and the macros.
 #include <deque>
 #include <string>
 #include <string_view>

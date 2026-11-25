@@ -1,4 +1,4 @@
-// Flagship's (Raven's) spectral and additive warp banks: each wavetable's frames resynthesised at 8 warp amounts, built off the audio thread and shared.
+// Flagship's (Kestrel's) spectral and additive warp banks: each wavetable's frames resynthesised at 8 warp amounts, built off the audio thread and shared.
 #pragma once
 
 #include <atomic>

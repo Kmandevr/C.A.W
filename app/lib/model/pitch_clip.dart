@@ -1,4 +1,4 @@
-// The clip pitch editor's model (Lark, 1.1.0; one voice): an audio clip's notes and pitch curve as the engine's C API 42 analysed them, the per-note edits, the editor's work as cancellable jobs, and the render applied as a new take or in place of the clip (one undo step).
+// The clip pitch editor's model (Chirp, 1.1.0; one voice): an audio clip's notes and pitch curve as the engine's C API 42 analysed them, the per-note edits, the editor's work as cancellable jobs, and the render applied as a new take or in place of the clip (one undo step).
 import 'dart:async';
 import 'dart:math' as math;
 

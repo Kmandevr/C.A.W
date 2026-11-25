@@ -1,4 +1,4 @@
-// Lark (1.1.0): detection accuracy, correction to scale, speed, Keep vibrato, MIDI target, formant, latency, block sizes, NaN, presets, display, the clip editor's analyse and render round trip and C API, references.
+// Chirp (1.1.0): detection accuracy, correction to scale, speed, Keep vibrato, MIDI target, formant, latency, block sizes, NaN, presets, display, the clip editor's analyse and render round trip and C API, references.
 #include <algorithm>
 #include <cmath>
 #include <cstring>

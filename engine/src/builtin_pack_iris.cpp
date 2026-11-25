@@ -1,4 +1,4 @@
-// Iris (org.caw.pack.spectral, the AutoStacc beta pack): spectral effects on a streaming STFT: freeze (its frozen spectrum painted through the display and the state), blur, shift and gate.
+// Molt (org.caw.pack.spectral, the AutoStacc beta pack): spectral effects on a streaming STFT: freeze (its frozen spectrum painted through the display and the state), blur, shift and gate.
 #include "builtin_effects.h"
 #include "builtin_pack.h"
 
@@ -79,7 +79,7 @@ constexpr uint32_t stateBytes(uint32_t bins) { return kHeader + 4 * kBands + 16 
 
 const ModuleDescriptor& irisDescriptor() {
     static const ModuleDescriptor d = [] {
-        ModuleDescriptor x = withCpu(effectDescriptor("org.caw.pack.spectral", "Iris", irisParams(),
+        ModuleDescriptor x = withCpu(effectDescriptor("org.caw.pack.spectral", "Molt", irisParams(),
                                                       clean::tierWindow(1, false, 48000), 4096),
                                      CpuClass::Heavy);
         x.maxStateBytes = stateBytes(kMaxStateBins);

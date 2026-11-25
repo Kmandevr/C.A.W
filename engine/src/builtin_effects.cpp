@@ -268,8 +268,8 @@ void registerBuiltinEffects(ModuleRegistry& registry) {
     // fx-racks begin
     fx::registerRacks(registry);  // builtin_fx_racks*.cpp (a rack looks its children up when it is built)
     // fx-racks end
-    fx::registerPack(registry);  // builtin_pack.h: the AutoStacc beta pack (Murmur, Peck, Bend, Iris)
-    fx::registerLark(registry);  // builtin_fx_lark.h: Lark, org.caw.pitchfix (1.1.0)
+    fx::registerPack(registry);  // builtin_pack.h: the AutoStacc beta pack (Murmur, Peck, Bend, Molt)
+    fx::registerLark(registry);  // builtin_fx_lark.h: Chirp, org.caw.pitchfix (1.1.0)
     fx::registerVoice(registry);  // builtin_fx_voice.h: Mimic (1.1.0; Glint is a merged device)
     fx::registerTools(registry);  // builtin_fx_tools.h: Lo-fi and Phase align (1.1.0; Meters is a merged device)
     fx::registerMergedDevices(registry);  // fx_merged.h: the FX consolidation's merged devices (Pitch/Shift...)

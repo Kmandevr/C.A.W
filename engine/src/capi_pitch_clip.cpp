@@ -1,4 +1,4 @@
-// C API 42: the clip pitch editor's engine (Lark, one voice) for the app's workers: analyse a clip into notes, read its pitch curve, render per-note edits, free.
+// C API 42: the clip pitch editor's engine (Chirp, one voice) for the app's workers: analyse a clip into notes, read its pitch curve, render per-note edits, free.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

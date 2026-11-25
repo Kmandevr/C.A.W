@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -90,8 +91,14 @@ std::string hex(uint64_t v) {
     return b;
 }
 
+// One folder per test process: ctest runs shards side by side, and a shared folder let one shard rewrite loop.wav
+// while another read it (song8_extras 0.8 dB off on Windows, PR #264).
 std::string workDir() {
-    const std::string d = (std::filesystem::temp_directory_path() / "caw_stress_test").string();
+    static const std::string d = [] {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const std::string name = "caw_stress_test_" + std::to_string(stamp) + "_" + std::to_string(reinterpret_cast<uintptr_t>(&stamp) & 0xFFFFFF);
+        return (std::filesystem::temp_directory_path() / name).string();
+    }();
     std::filesystem::create_directories(d);
     return d;
 }
@@ -136,7 +143,11 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
 // past this mix's 0.1 dB match. The Benchmark still plays them; their sound is checked by Timber's own references
 // (timber_test.cpp, timber_sim_test.cpp), which hold on every build.
 ProjectSpec withoutBowedStrings(ProjectSpec p) {
-    std::erase_if(p.layers, [](const LayerSpec& l) { return l.name.find("Bowed") != std::string::npos; });
+    // 1.1.3: Nightingale (bowed, the same friction) and Curlew (self-oscillating reeds, jets and lips) likewise; their
+    // own references (nightingale_test.cpp, curlew_test.cpp) check them.
+    std::erase_if(p.layers, [](const LayerSpec& l) {
+        return l.name.find("Bowed") != std::string::npos || l.name.rfind("Nightingale", 0) == 0 || l.name.rfind("Curlew", 0) == 0;
+    });
     return p;
 }
 
@@ -183,8 +194,9 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         {"resample", "ae1e8b3fbd5f3ad7"},
         // 1.1.2: generated from the engine's list of built-ins (every instrument in each model and kit kind, every
         // effect in each variant; the owner: "make sure the benchmark actually tests all of the plugins"), an
-        // intended change of both projects and their sound (were 3ab70624484ac6bd and 872fde1013543d13).
-        {"every_instrument", "5b2dd89ace6ad650"},
+        // intended change of both projects and their sound (were 3ab70624484ac6bd and 872fde1013543d13). 1.1.3: with
+        // Starling, Nightingale, Curlew and Bittern (was 5b2dd89ace6ad650).
+        {"every_instrument", "348171ca8d5d56dc"},
         {"every_effect", "bade933ee53725fc"},
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},
@@ -253,7 +265,7 @@ TEST(stress_benchmark_plays_every_registered_builtin) {
     // Names the owner reads: the devices' shown names, not ids.
     for (const SuiteScenario& s : benchmarkScenarios()) CHECK(std::string(s.name).find("org.caw") == std::string::npos);
     CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "drums_kit")->name), std::string("Rook kit, 16 pads busy"));
-    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "flagship_heavy")->name), std::string("Raven heavy, 64 voices held"));
+    CHECK_EQ(std::string(findScenario(benchmarkScenarios(), "flagship_heavy")->name), std::string("Kestrel heavy, 64 voices held"));
 }
 
 TEST(stress_benchmark_has_the_ten_scenarios_section_h_names) {

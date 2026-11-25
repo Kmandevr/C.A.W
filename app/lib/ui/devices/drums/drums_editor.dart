@@ -15,7 +15,7 @@ import 'drums_kit.dart';
 import 'drums_pads.dart';
 import 'drums_voice.dart';
 
-/// The drums' editor entry: one page (owner, 2026-11-19: Raven's one-screen layout for every instrument).
+/// The drums' editor entry: one page (owner, 2026-11-19: Kestrel's one-screen layout for every instrument).
 final Map<String, DeviceEditorEntry> drumEditors = {
   drumsComponentId: DeviceEditorEntry(
     (_) => [DeviceSection('drums', 'DRUMS', Icons.grid_view_rounded, (_) => const DrumsPage())],

@@ -1,4 +1,4 @@
-// A log-spaced band filterbank (TPT SVF band-passes, envelope followers, a bell cascade, a synthesis bank) shared by Duck's Carve and Mimic's vocoder.
+// A log-spaced band filterbank (TPT SVF band-passes, envelope followers, a bell cascade, a synthesis bank) shared by Swoop's Carve and Mimic's vocoder.
 #pragma once
 
 #include <cmath>

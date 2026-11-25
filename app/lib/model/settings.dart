@@ -10,6 +10,7 @@ import '../ui/arrange/clip_look.dart';
 import '../ui/code_prefs.dart';
 import '../ui/frame_rate.dart';
 import '../ui/glass.dart';
+import '../ui/devices/kit/touch_engage.dart' show KnobDrag;
 import '../ui/haptics.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
@@ -330,6 +331,7 @@ class Settings extends ChangeNotifier {
     Neon.showScopes = performanceMode != PerformanceMode.minimal;
     Motion.setting = motion;
     Motion.haptics = haptics;
+    KnobDrag.sideways = knobSideways;
     Haptics.strength = hapticStrength;
     Glass.enabled = glass && !activeTheme.flat; // the Flat family never shows glass, whatever the switch says
     Glass.blurEnabled = glassBlur;
@@ -396,6 +398,10 @@ class Settings extends ChangeNotifier {
 
   /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
+
+  /// Knobs turn with a sideways drag, so an up-and-down swipe scrolls the page (owner, 2026-11-24: the default); off,
+  /// the old up-and-down drag after a short hold.
+  bool knobSideways = true;
 
   /// The startup animation plays to its end even when loading finishes first (owner, 2026-11-17: "so it doesn't feel
   /// like it's there for no reason"); off, it shows only while the app loads. On by default.
@@ -745,6 +751,7 @@ class Settings extends ChangeNotifier {
         'glow_strength': glowStrength,
         if (baseProfile != null) 'base_profile': baseProfile,
         'haptics': haptics,
+        'knob_sideways': knobSideways,
         'full_startup_animation': fullStartupAnimation,
         'haptic_strength': hapticStrength,
         'layout_mode': layoutMode.name,
@@ -902,6 +909,7 @@ class Settings extends ChangeNotifier {
       };
     }
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    if (j['knob_sideways'] is bool) knobSideways = j['knob_sideways'] as bool;
     if (j['full_startup_animation'] is bool) fullStartupAnimation = j['full_startup_animation'] as bool;
     final hs = j['haptic_strength'];
     if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
@@ -1230,6 +1238,7 @@ class Settings extends ChangeNotifier {
       'layout.toolbars': jsonEncode(editor.toJson()),
       'behaviour.long_press_menu': longPressMenu.name,
       'behaviour.haptics': on(haptics),
+      'behaviour.knob_drag': knobSideways ? 'sideways' : 'vertical',
       'behaviour.haptic_strength': n(hapticStrength),
       'behaviour.motion': motion.name,
       'behaviour.edit_style': editMotionStyle.name,
@@ -1289,6 +1298,8 @@ class Settings extends ChangeNotifier {
     if (bars is Map<String, dynamic>) editor = EditorLook.fromJson(bars);
     longPressMenu = pick(LongPressMenuStyle.values, 'behaviour.long_press_menu') ?? longPressMenu;
     haptics = flag('behaviour.haptics') ?? haptics;
+    final knobDrag = profile['behaviour.knob_drag']?.toLowerCase();
+    if (knobDrag == 'sideways' || knobDrag == 'vertical') knobSideways = knobDrag == 'sideways';
     hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
     motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
     editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;

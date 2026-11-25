@@ -1,4 +1,4 @@
-// Duck's new variants (1.1.0): Level (a slow rider toward a target loudness) and Carve (the key's spectrum dips the same bands here).
+// Swoop's new variants (1.1.0): Level (a slow rider toward a target loudness) and Carve (the key's spectrum dips the same bands here).
 #include <algorithm>
 #include <cmath>
 #include <new>

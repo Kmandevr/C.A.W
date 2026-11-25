@@ -15,6 +15,10 @@
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
 #include "builtin_timber.h"
+#include "builtin_starling.h"
+#include "builtin_nightingale.h"
+#include "builtin_curlew.h"
+#include "builtin_bittern.h"
 #include "builtin_flock.h"
 #include "builtin_fx_space.h"  // fx-space
 // fx-filters begin
@@ -318,8 +322,12 @@ const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId) {
     if (const auto* p = fx::toolsPresets(componentId)) return *p;  // Meters, Lo-fi, Phase align (1.1.0)
     if (const auto* p = fx::voicePresets(componentId)) return *p;  // Glint, Mimic (1.1.0)
     if (const auto* p = fx::packPresets(componentId)) return *p;  // the AutoStacc beta pack (1.1.0)
-    if (const auto* p = fx::larkPresets(componentId)) return *p;  // Lark (1.1.0)
+    if (const auto* p = fx::larkPresets(componentId)) return *p;  // Chirp (1.1.0)
     if (const auto* p = timber::timberPresets(componentId)) return *p;  // Timber (1.1.0)
+    if (const auto* p = starling::starlingPresets(componentId)) return *p;  // Starling (1.1.3)
+    if (const auto* p = nightingale::nightingalePresets(componentId)) return *p;  // Nightingale (1.1.3)
+    if (const auto* p = curlew::curlewPresets(componentId)) return *p;  // Curlew (1.1.3)
+    if (const auto* p = bittern::bitternPresets(componentId)) return *p;  // Bittern (1.1.3)
     if (const auto* p = flock::presets(componentId)) return *p;  // Flock (1.1.0)
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();

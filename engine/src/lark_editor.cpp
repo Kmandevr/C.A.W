@@ -1,4 +1,4 @@
-// Lark's clip editor engine: the offline analysis (YIN candidates, an HMM, note segmentation, drift and vibrato) and the non-destructive per-note TD-PSOLA render.
+// Chirp's clip editor engine: the offline analysis (YIN candidates, an HMM, note segmentation, drift and vibrato) and the non-destructive per-note TD-PSOLA render.
 #include "lark_editor.h"
 
 #include <algorithm>

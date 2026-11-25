@@ -358,6 +358,7 @@ struct Wind {
         // Brass: the lips pull the pitch by a measured amount that grows down the range; it is aimed off by that.
         if (v.pitch != v.tunedPitch) {  // the note's own pitch, aimed off by its kind's pull (worked out once)
             double aim = sim ? -simPull(instrument, v.pitch) : -residualPull(instrument, v.pitch);
+            if (pullTable) aim = -pullAt(v.pitch);  // Curlew: its own pull, measured over each instrument's range
             if (instrument == 3 && !sim) aim -= 6.0 - 3.4 * (clampd(v.pitch, 34.0, 100.0) - 62.0);
             v.baseHz = noteHz(clampd(v.pitch, 34.0, 100.0) + aim / 100.0);
         }
@@ -408,8 +409,19 @@ struct Wind {
             padClick(v);
         }
     }
+    // Curlew (1.1.3): a pull table of its own, `pullCount` keys a semitone apart from `pullFirst` (cents; linear between,
+    // held outside), measured over each instrument's whole range (Timber's five keys held outside 45..81).
+    const float* pullTable = nullptr;
+    int pullFirst = 0, pullCount = 0;
+    double pullAt(double pitch) const noexcept {
+        const double k = clampd(pitch - pullFirst, 0.0, pullCount - 1.0);
+        const int i = std::min(static_cast<int>(k), pullCount - 2);
+        return pullTable[i] + (pullTable[i + 1] - pullTable[i]) * (k - i);
+    }
+    bool padClicks = true;  // Curlew (1.1.3) turns them off: a click into the bore on every note was the "piano on the flute"
     void padClick(Voice& v) noexcept {
         v.clickPitch = v.pitch;
+        if (!padClicks) return;
         const double a = noises * (0.4 + 0.6 * v.velocity) * (instrument == 3 ? 0.12 : 0.3);
         v.click.start(static_cast<float>(a), instrument == 3 ? 0.002 : 0.001, sr);
     }

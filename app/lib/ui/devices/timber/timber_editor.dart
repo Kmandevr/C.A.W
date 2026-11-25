@@ -1,4 +1,4 @@
-// Timber's editor (org.caw.timber) in Raven's one-screen layout: the model cards and the instrument drawn live on top with the model's own knobs under it, the envelope, tone and space panels below, the mod-source strip at the bottom; a phone held upright swipes three panels (Model, Sound, Space) under the picture.
+// Timber's editor (org.caw.timber) in Kestrel's one-screen layout: the model cards and the instrument drawn live on top with the model's own knobs under it, the envelope, tone and space panels below, the mod-source strip at the bottom; a phone held upright swipes three panels (Model, Sound, Space) under the picture.
 import 'package:flutter/material.dart';
 
 import '../../../model/device_target.dart';

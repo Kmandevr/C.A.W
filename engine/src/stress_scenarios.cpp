@@ -1028,8 +1028,8 @@ std::vector<SuiteScenario> suiteScenarios() {
         {"song8", "Typical song (8 tracks)", [](const std::string&) { return typicalSong(false); }, false, Tier::Normal, false, 96, "all"},
         {"song8_extras", "Typical song + extras", [](const std::string& d) { return typicalSong(true, d); }, false, Tier::Normal, false, 112, "all",
          [](const std::string& d, std::string* e) { return typicalSong(true, d, e); }},
-        {"flagship_heavy", "Raven heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32, "instrument"},
-        {"flagship_heavy16", "Raven heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32, "instrument"},
+        {"flagship_heavy", "Kestrel heavy, 64 voices held", [](const std::string&) { return flagshipHeavy(64); }, false, Tier::Extreme, false, 32, "instrument"},
+        {"flagship_heavy16", "Kestrel heavy, 16 voices held", [](const std::string&) { return flagshipHeavy(16); }, false, Tier::Heavy, false, 32, "instrument"},
         {"drums_kit", "Rook kit, 16 pads busy", [](const std::string&) { return drumsBusy(); }, false, Tier::Heavy, false, 32, "instrument"},
         {"song16", "Song, 16 tracks", [](const std::string&) { return bigSong(16, false); }, false, Tier::Heavy, false, 176, "all"},
         {"song32_heavy", "Song, 32 tracks + heavy FX", [](const std::string&) { return bigSong(32, true); }, false, Tier::Extreme, false, 384, "all"},
@@ -1045,7 +1045,7 @@ std::vector<SuiteScenario> featureScenarios() {
     using E = std::string*;
     return {
         {"empty", "Empty project", [](D) { return emptyProject(); }, false, Tier::Idle, false, 8, "baseline"},
-        {"single_synth", "One Raven", [](D) { return singleSynth(); }, false, Tier::Normal, false, 24, "instrument"},
+        {"single_synth", "One Kestrel", [](D) { return singleSynth(); }, false, Tier::Normal, false, 24, "instrument"},
         {"single_sampler", "One Magpie", [](D d) { return singleSampler(d, nullptr); }, false, Tier::Normal, false, 24, "instrument",
          [](D d, E e) { return singleSampler(d, e); }},
         {"single_drums", "One Rook kit", [](D) { return singleDrums(); }, false, Tier::Normal, false, 32, "instrument"},

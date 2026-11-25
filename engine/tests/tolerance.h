@@ -19,7 +19,9 @@ Audio fromInterleaved(const std::vector<float>& lr);
 // How a reference is compared (docs/engine.md, "Reference renders"). Stable: the render nulls against the stored
 // waveform. Chaotic: tiny float differences grow (feedback near self-oscillation, free-running phases), so only what
 // a listener hears is compared: loudness over time, the spectrum, and the onsets exactly.
-enum class Class : uint8_t { Stable = 0, Chaotic = 1 };
+// Friction: chaotic, for stick-slip models (bowed strings), whose held sound moves by up to about 1 dB between
+// compilers whatever the flags (.claude/rules/engine.md, measured 2026-11-24): the same features within 1 dB.
+enum class Class : uint8_t { Stable = 0, Chaotic = 1, Friction = 2 };
 
 namespace tol {
 // Stable: the peak of render - reference stays below -120 dBFS. The reference is stored in steps of 2^-21, at most
@@ -32,6 +34,7 @@ constexpr double kNullPeakDbfs = -120.0;
 constexpr int kWindowFrames = 2400;
 constexpr double kLoudnessDb = 0.1;
 constexpr double kBandDb = 0.5;
+constexpr double kFrictionDb = 1.0;  // Friction: loudness, difference loudness and bands
 constexpr double kFloorBelowLoudestDb = 60.0;
 constexpr double kAbsoluteFloorDbfs = -120.0;
 // An onset: the first frame above -60 dBFS after at least 10 ms at or below -80 dBFS (frame 0 counts as after
@@ -57,7 +60,8 @@ std::vector<uint32_t> onsets(const std::vector<float>& x);
 double nullResidualDbfs(const Audio& reference, const Audio& render);
 // Each returns "" when the render is accepted, else why it is not.
 std::string compareStable(const Audio& reference, const Audio& render);
-std::string compareChaotic(const Features& reference, const Features& render);
+std::string compareChaotic(const Features& reference, const Features& render, double loudnessDb = tol::kLoudnessDb,
+                           double bandDb = tol::kBandDb);
 // Exact comparison of discrete results (event frames, chosen indices).
 template <class T>
 std::string compareExact(const std::vector<T>& reference, const std::vector<T>& now) {

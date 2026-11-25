@@ -1,4 +1,4 @@
-// Lark (org.caw.pitchfix, 1.1.0) plays, corrects, moves its knobs and publishes its display without allocating on the audio thread.
+// Chirp (org.caw.pitchfix, 1.1.0) plays, corrects, moves its knobs and publishes its display without allocating on the audio thread.
 #include <cmath>
 #include <string>
 #include <utility>

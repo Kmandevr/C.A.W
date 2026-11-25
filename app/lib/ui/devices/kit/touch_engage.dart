@@ -1,4 +1,4 @@
-// When a touch on a device page's control is the control's and when it is the page's scroll: a short hold, a slow start or sideways motion engages the control; a quick vertical swipe scrolls. The mouse engages at once, as before.
+// When a touch on a device page's control is the control's and when it is the page's scroll: knobs turn with a sideways drag (or the old up-and-down drag after a hold), a visual's grab on a hold, a slow start or sideways motion; a quick vertical swipe scrolls. The mouse engages at once, as before.
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -149,5 +149,107 @@ mixin EngageOnHold on OneSequenceGestureRecognizer {
   void dispose() {
     _stopWaiting();
     super.dispose();
+  }
+}
+
+/// How knobs take a drag (owner, 2026-11-24): `sideways` (the default) turns a knob with a deliberate sideways drag at
+/// once, and a hold first still takes any direction for fine moves, so an up-and-down swipe scrolls the page; off, the
+/// old up-and-down drag after [touchEngageHold] ([EngageVerticalDrag]). Settings › Haptics and menus sets it.
+abstract final class KnobDrag {
+  static bool sideways = true;
+}
+
+/// A knob's pan: claimed at once by a mouse; by a finger on a deliberate sideways move (past half the touch slop
+/// within about 27° of horizontal) at once, or, once it has rested [touchEngageHold] (or with a second finger), on any
+/// move past the pan slop; a quick vertical swipe goes to the scroll. Like [EngageVerticalDragRecognizer] it never
+/// wins on the hold alone, so a tap, a double-tap and a long-press (the knob's menu) still work.
+class EngageKnobPanRecognizer extends PanGestureRecognizer {
+  EngageKnobPanRecognizer({super.debugOwner});
+
+  final Map<int, (DateTime, Offset)> _down = {};
+  int? _pointer;
+  Offset _at = Offset.zero;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    _down[event.pointer] = (_now(), event.position);
+    super.addAllowedPointer(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    _pointer = event.pointer;
+    if (event is PointerMoveEvent) _at = event.position;
+    super.handleEvent(event);
+  }
+
+  @override
+  bool hasSufficientGlobalDistanceToAccept(PointerDeviceKind pointerDeviceKind, double? deviceTouchSlop) {
+    final down = _down[_pointer];
+    if (down == null || !waitsToEngage(pointerDeviceKind)) {
+      return super.hasSufficientGlobalDistanceToAccept(pointerDeviceKind, deviceTouchSlop);
+    }
+    if (_down.length >= 2) return true;  // two fingers on the knob (its amount) are never the page's scroll
+    final m = _at - down.$2;
+    final slop = deviceTouchSlop ?? kTouchSlop;
+    if (m.dx.abs() >= slop / 2 && m.dx.abs() * 2 >= m.dy.abs()) return true;  // a deliberate sideways move
+    // A quick swipe is the page's scroll; after the hold any move past the touch slop is the knob's (as the
+    // up-and-down drag's, so the scroll does not take it first).
+    if (_now().difference(down.$1) < touchEngageHold) return false;
+    return m.distance >= slop;
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    _down.clear();
+    super.didStopTrackingLastPointer(pointer);
+  }
+
+  @override
+  String get debugDescription => 'engage knob pan';
+}
+
+/// A knob's drag, as [KnobDrag] says: sideways, its handlers get a vertical delta made of both axes (right or up turns
+/// it up: `dy - dx`), so a knob written for the up-and-down drag needs no change; otherwise [EngageVerticalDrag].
+class EngageKnobDrag extends StatelessWidget {
+  const EngageKnobDrag({super.key, required this.child, this.onStart, this.onUpdate, this.onEnd, this.onCancel});
+  final Widget child;
+  final GestureDragStartCallback? onStart;
+  final GestureDragUpdateCallback? onUpdate;
+  final GestureDragEndCallback? onEnd;
+  final GestureDragCancelCallback? onCancel;
+
+  static DragUpdateDetails folded(DragUpdateDetails d) {
+    final dy = d.delta.dy - d.delta.dx;
+    return DragUpdateDetails(
+      sourceTimeStamp: d.sourceTimeStamp,
+      delta: Offset(0, dy),
+      primaryDelta: dy,
+      globalPosition: d.globalPosition,
+      localPosition: d.localPosition,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!KnobDrag.sideways) {
+      return EngageVerticalDrag(onStart: onStart, onUpdate: onUpdate, onEnd: onEnd, onCancel: onCancel, child: child);
+    }
+    final update = onUpdate;
+    return RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: {
+        if (onStart != null || onUpdate != null || onEnd != null)
+          EngageKnobPanRecognizer: GestureRecognizerFactoryWithHandlers<EngageKnobPanRecognizer>(
+            () => EngageKnobPanRecognizer(debugOwner: this),
+            (r) => r
+              ..onStart = onStart
+              ..onUpdate = update == null ? null : (d) { update(folded(d)); }
+              ..onEnd = onEnd
+              ..onCancel = onCancel,
+          ),
+      },
+      child: child,
+    );
   }
 }

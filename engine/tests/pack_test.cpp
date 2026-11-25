@@ -1,4 +1,4 @@
-// The AutoStacc beta pack: the grain engine (overlap-add, cap, seeding) and Murmur, Peck, Bend and Iris (their sound, pack mark, display, block sizes, bad input, presets and reference renders).
+// The AutoStacc beta pack: the grain engine (overlap-add, cap, seeding) and Murmur, Peck, Bend and Molt (their sound, pack mark, display, block sizes, bad input, presets and reference renders).
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -574,7 +574,7 @@ TEST(iris_is_block_size_independent_and_survives_bad_input) {
     const Values frozen = {{"freeze", 1}, {"drift", 0.7}, {"shift", 100}};
     const Stereo want = render(kIris, frozen, in, 64);
     for (uint32_t block : {1u, 37u, 512u}) CHECK(same(want, render(kIris, frozen, in, block)));
-    // NaN into a frozen Iris: finite throughout.
+    // NaN into a frozen Molt: finite throughout.
     Stereo bad = music(9600);
     bad.l[100] = std::nanf("");
     bad.r[300] = INFINITY;

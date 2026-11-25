@@ -1,4 +1,4 @@
-// The AutoStacc beta pack (Murmur, Peck, Bend, Iris) plays, moves its knobs, freezes and publishes its display without allocating on the audio thread.
+// The AutoStacc beta pack (Murmur, Peck, Bend, Molt) plays, moves its knobs, freezes and publishes its display without allocating on the audio thread.
 #include <cmath>
 #include <string>
 #include <utility>

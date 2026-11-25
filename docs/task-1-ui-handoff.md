@@ -1,7 +1,7 @@
 ---
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
-updated: 2026-11-20
+updated: 2026-11-24
 covers: [app/lib/ui/, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/test/project_test.dart]
 ---
 
@@ -26,6 +26,7 @@ Implemented UI/workflow foundations include:
 - Freeze, Unfreeze and Bounce to audio from the track and clip hold menus (1.0.5, [app](app.md)).
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue; saving copies the finished file to the picked place in chunks. The Music video sheet (Export page and project menu) renders the arrangement as an MP4, cut by an auto director or edited as shots on a lane with layouts, looks, effects, transitions, camera moves, text and images, in Shots, Look, Text & media and Export tabs with a pinned export bar ([app](app.md)).
 - Timber's page (1.1.2, 2026-11-20): each model but the piano shows its new Sim choice and Noises knob in its existing rows on the approved page; no new layout ([app](app.md), Timber).
+- 1.1.3 (2026-11-24): Starling, Nightingale, Curlew and Bittern use the fallback page of knobs until the owner approves their looks (mockups drawn); knobs turn with a sideways drag, with the up-and-down drag as a setting; the UI is held to 60 Hz while a song plays ([app](app.md)).
 - Devices: a merged effect device (FX consolidation, 1.0.8) opens its variant's old page with a variant picker under the header; its own new device UI is not built yet ([app](app.md)).
 - Files: Projects first (cards with metadata, nested folders, search, sort, select mode with Move, Export and undoable Delete; [app](app.md)), then a Unity-style tree, grid and inspector over built-in effects, C++ components, patterns, audio and MIDI files, with drag and the effect picker; project (.caw) import and export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
 - Settings › Audio: the output and input device drop-downs (on Android `AudioManager`'s devices: the speaker, wired, Bluetooth, USB and the microphones, remembered across reconnects, the device in use under each; #242, [app](app.md)).

@@ -65,6 +65,8 @@ Future<void> main(List<String> args) async {
   };
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
+    // Recorded sounds built into the engine (1.1.3): CC-BY needs the credit, the licence and what was changed.
+    yield LicenseEntryWithLineBreaks(['Salamander Grand Piano (Starling)'], await rootBundle.loadString('assets/legal/SOUNDS.txt'));
   });
   Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
   ComponentBenchBackend.current = const EngineComponentBench(); // the plug-in benchmark (engine API 30)
@@ -79,6 +81,8 @@ Future<void> main(List<String> args) async {
   // a slow answer doesn't hold the launch up.
   await frameRate.start().timeout(const Duration(milliseconds: 300), onTimeout: () {});
   final state = AppState(settings: settings);
+  // The UI at 60 Hz while a song plays, always (owner, 2026-11-24).
+  state.addListener(() => frameRate.setPlaying(state.transportOn));
   // What follows the audio is drawn for when its frame lights up, at the rate the app draws at while things move.
   state.avSync.refreshHz = () => frameRate.movingRate > 0 ? frameRate.movingRate : AvSync.screenHz();
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).

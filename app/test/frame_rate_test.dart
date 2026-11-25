@@ -192,6 +192,19 @@ void main() {
       timers.advance(const Duration(seconds: 1));
       expect(display.asked.last, 60);
     });
+
+    // Owner, 2026-11-24: the UI drops to 60 Hz whenever a song plays, always.
+    test('while a song plays the UI is held to 60 Hz, and goes back up when it stops', () {
+      expect(display.asked.last, 120);
+      c.setPlaying(true);
+      expect(display.asked.last, 60);
+      expect(c.movingRate, 60);
+      c.onFrame();
+      expect(display.asked.last, 60, reason: 'a frame while playing asks no more than 60');
+      c.setPlaying(false);
+      expect(display.asked.last, 120);
+      expect(c.movingRate, 120);
+    });
   });
 
   group('profile caps (owner, 2026-11-12)', () {
