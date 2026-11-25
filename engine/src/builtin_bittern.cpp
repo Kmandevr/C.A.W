@@ -18,19 +18,24 @@ constexpr PortDescriptor kPorts[] = {
     stereoOutput("out"),
 };
 
-// The stops in Stop's order, their labels and default registration (a principal chorus on a 16' Bourdon).
+// The stops in Stop's order (by division: the Great, the Swell, the Pedal), their labels, default registration (a
+// principal chorus on a 16' Bourdon, the Rohrflöte from the Swell coupled) and division, which is the knob's group.
 struct StopInfo {
     const char* id;
     const char* name;
     double initial;
 };
 constexpr StopInfo kStopInfo[kStops] = {
-    {"bourdon16", "Bourdon 16'", 0.6}, {"principal8", "Principal 8'", 1.0}, {"rohrflute8", "Rohrflöte 8'", 0.5},
-    {"gamba8", "Gamba 8'", 0.0},       {"celeste8", "Voix céleste 8'", 0.0}, {"octave4", "Octave 4'", 0.7},
-    {"flute4", "Flute 4'", 0.0},       {"nazard", "Nazard 2 2/3'", 0.0},   {"fifteenth2", "Fifteenth 2'", 0.0},
-    {"tierce", "Tierce 1 3/5'", 0.0},  {"mixture", "Mixture IV", 0.0},     {"trumpet8", "Trumpet 8'", 0.0},
+    {"bourdon16", "Bourdon 16'", 0.6},  {"principal8", "Principal 8'", 1.0}, {"octave4", "Octave 4'", 0.7},
+    {"fifteenth2", "Fifteenth 2'", 0.0}, {"mixture", "Mixture IV", 0.0},     {"trumpet8", "Trumpet 8'", 0.0},
+    {"rohrflute8", "Rohrflöte 8'", 0.5}, {"gamba8", "Gamba 8'", 0.0},        {"celeste8", "Voix céleste 8'", 0.0},
+    {"flute4", "Flute 4'", 0.0},         {"nazard", "Nazard 2 2/3'", 0.0},   {"tierce", "Tierce 1 3/5'", 0.0},
     {"subbass32", "Subbass 32'", 0.0},
 };
+constexpr const char* kDivisionGroup[kDivisions] = {"great", "swell", "pedal"};
+// The registration choice (kRegistration's rows): the organ's usual combinations, one tap; "Stops" plays the knobs.
+constexpr std::string_view kRegistrationNames[kRegistrations] = {"Stops", "Flutes 8' 4'", "Principal chorus",
+                                                                 "Full organ", "Reeds", "Strings"};
 
 const ModuleDescriptor& descriptor() {
     static fx::ParamTable t;
@@ -47,11 +52,14 @@ const ModuleDescriptor& descriptor() {
         ParameterDescriptor& v = t.num("voices", "Voices", 16.0, 1.0, 24.0);
         v.step = 1.0, v.smoothingFrames = 0, v.group = "shared";
         t.num("level", "Level", 0.0, -48.0, 12.0, "dB").group = "shared";
-        for (const StopInfo& s : kStopInfo) t.num(s.id, s.name, s.initial, 0.0, 1.0).group = "stops";
+        for (int k = 0; k < kStops; ++k) t.num(kStopInfo[k].id, kStopInfo[k].name, kStopInfo[k].initial, 0.0, 1.0).group = kDivisionGroup[kDivisionOf[k]];
         t.num("tremulant", "Tremulant", 0.0, 0.0, 1.0).group = "wind";
         t.num("wind", "Living wind", 0.3, 0.0, 1.0).group = "wind";
         t.num("chiff", "Chiff", 0.5, 0.0, 1.0).group = "wind";
         t.expo("trem_rate", "Tremulant rate", 5.5, 2.0, 9.0, "Hz").group = "wind";
+        // Last, so every earlier knob keeps its place: a project from before it plays its stops as drawn.
+        ParameterDescriptor& r = t.pick("registration", "Registration", 0.0, kRegistrationNames);
+        r.group = "registration", r.modulatable = false;
         params.assign(t.data(), t.data() + t.size());
         m.id = kBitternId;
         m.name = "Bittern";
@@ -68,7 +76,7 @@ const ModuleDescriptor& descriptor() {
     (void)built;
     return m;
 }
-static_assert(Organ::kModelParams == kStops + 4);
+static_assert(Organ::kModelParams == kStops + 5);
 
 ModuleProcessor* make() noexcept { return new (std::nothrow) timber::Instrument<Organ>(descriptor(), 0); }
 
@@ -99,6 +107,12 @@ void registerBittern(ModuleRegistry& registry) {
 
 const std::vector<BuiltinPreset>* bitternPresets(std::string_view id) {
     static const std::vector<BuiltinPreset> p = {
+        // The registrations, as their stops (the knobs show them; the Registration choice does the same in one tap).
+        {"Flutes 8' 4'", "The Rohrflöte 8' and Flute 4' of the Swell: the organ's gentlest combination", reg({{"rohrflute8", 0.9}, {"flute4", 0.7}})},
+        {"Principal chorus", "Principals 8', 4' and 2' on the 16' Bourdon, with the 32' in the pedal", reg({{"bourdon16", 0.6}, {"principal8", 1}, {"octave4", 0.8}, {"fifteenth2", 0.6}, {"subbass32", 0.5}})},
+        {"Full organ (plenum)", "The chorus with its mixture and trumpet, the Swell's flutes coupled and the 32'", reg({{"bourdon16", 0.8}, {"principal8", 1}, {"octave4", 0.9}, {"fifteenth2", 0.8}, {"mixture", 0.7}, {"trumpet8", 0.7}, {"rohrflute8", 0.5}, {"flute4", 0.5}, {"subbass32", 0.8}})},
+        {"Reeds", "The trumpet on a soft principal and flute, the pedal under them", reg({{"principal8", 0.3}, {"trumpet8", 1}, {"rohrflute8", 0.5}, {"subbass32", 0.4}})},
+        {"Strings (Gamba and celeste)", "The Gamba with its céleste on a soft flute: the slow shimmer of the Swell", reg({{"rohrflute8", 0.3}, {"gamba8", 0.8}, {"celeste8", 0.8}})},
         {"Cathedral principal chorus", "Principals 8' and 4' on a 16' Bourdon, in the cathedral", reg({{"bourdon16", 0.6}, {"principal8", 1}, {"rohrflute8", 0.5}, {"octave4", 0.7}})},
         {"Full organ", "Everything out: principals, mixture, trumpet and the 32' in the pedal, for the big finish", reg({{"bourdon16", 0.8}, {"principal8", 1}, {"octave4", 0.8}, {"fifteenth2", 0.7}, {"mixture", 0.7}, {"trumpet8", 0.8}, {"subbass32", 0.8}})},
         {"Bach plenum", "A bright principal chorus with the mixture, for counterpoint", reg({{"principal8", 1}, {"octave4", 0.8}, {"fifteenth2", 0.7}, {"mixture", 0.6}, {"space", 0.35}})},

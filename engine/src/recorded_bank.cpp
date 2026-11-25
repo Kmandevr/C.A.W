@@ -11,6 +11,8 @@ extern const unsigned char starling_piano_flac[];
 extern const std::size_t starling_piano_flac_size;
 extern const unsigned char woodpecker_mallets_flac[];
 extern const std::size_t woodpecker_mallets_flac_size;
+extern const unsigned char bittern_speech_flac[];
+extern const std::size_t bittern_speech_flac_size;
 }  // namespace caw::assets
 
 namespace caw::recorded {
@@ -25,6 +27,7 @@ Source source(BankId id) noexcept {
     switch (id) {
         case BankId::StarlingPiano: return {assets::starling_piano_flac, assets::starling_piano_flac_size};
         case BankId::Woodpecker: return {assets::woodpecker_mallets_flac, assets::woodpecker_mallets_flac_size};
+        case BankId::Bittern: return {assets::bittern_speech_flac, assets::bittern_speech_flac_size};
         default: return {nullptr, 0};
     }
 }
