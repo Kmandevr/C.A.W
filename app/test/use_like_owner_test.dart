@@ -1,4 +1,5 @@
 // Every built-in device used the way the owner uses it on a phone (1.1.3-alpha.1, "most of the knobs and all of the effects don't do anything"): each device of the library on a new project's track, its page at phone size, and every control on it touched with a real finger and a mouse; the value must move and reach the engine.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -11,9 +12,13 @@ import 'package:caw/model/device_target.dart';
 import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/model/templates.dart';
 import 'package:caw/ui/arrange/knob.dart' show Taper;
 import 'package:caw/ui/devices/device_editor.dart';
+import 'package:caw/ui/devices/device_controls.dart' show DeviceKnob;
+import 'package:caw/ui/devices/kit/grab_gesture.dart';
 import 'package:caw/ui/devices/kit/touch_engage.dart';
+import 'package:caw/ui/devices/visuals/grab.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -62,10 +67,24 @@ List<DeviceCase> deviceCases(List<NativeComponentInfo> catalog) => [
     ];
 
 /// The catalog: the engine's own (CAW_LIB) or the test fixture's.
-List<NativeComponentInfo> _catalog = builtinInfos();
+List<NativeComponentInfo> _catalog = [
+  ...builtinInfos(),
+  for (final f in ['timber_component', 'sampler_component'])
+    ...NativeComponentInfo.listFromJson(
+        jsonDecode(File('test/fixtures/$f.json').readAsStringSync()) as Map<String, dynamic>),
+];
 Engine? _real;
 
 const phone = Size(412, 915);
+const _frame = Duration(milliseconds: 16);
+
+/// Closes a sheet or menu a gesture left open (a knob's hold menu), so the page is in front again.
+Future<void> _dismiss(WidgetTester tester) async {
+  for (var i = 0; i < 3 && find.byType(BottomSheet).evaluate().isNotEmpty; i++) {
+    await tester.tapAt(const Offset(200, 20));
+    await tester.pumpAndSettle();
+  }
+}
 
 /// How one control kind answers the owner's gestures.
 enum Kind { knob, slider, choice, mode, toggle, power, xy }
@@ -139,9 +158,15 @@ Future<void> main() async {
     final s = AppState(settings: Settings()..knobSideways = sideways);
     KnobDrag.sideways = sideways;
     Motion.setting = MotionLevel.off;
-    s.project = ProjectDoc(id: 'p', name: 'New', bpm: 120, modules: [], layers: [LayerDoc(id: 'a', name: 'Track 1', color: 2)]);
+    // New project, as the project menu makes it (the default template), on its first track that plays notes.
+    s.project = s.newProjectDoc();
     s.componentCatalog.set(_catalog);
-    final layer = s.project.layers.first;
+    var layer = s.project.layers.where((l) => !l.isFolder && !l.isAudio && l.instrument != null).firstOrNull;
+    if (layer == null) {
+      layer = LayerDoc(id: 'a', name: 'Track 1', color: 2);
+      s.project.layers.add(layer);
+      s.setNativeInstrument(layer, 'org.caw.synth.flagship');
+    }
     final int slot;
     if (c.info.isInstrument) {
       s.setNativeInstrument(layer, c.info.id);
@@ -150,8 +175,9 @@ Future<void> main() async {
     } else {
       final use = s.addNativeEffect(layer, c.info.id)!;
       if (c.variant != null) use.params['variant'] = c.variant!.toDouble();
-      slot = 0;
+      slot = layer.components.length - 1;
     }
+    // The page opens on the new device: an effect at the end of the track's chain.
     final engine = RecordingEngine();
     s.engine = engine;
     tester.view.physicalSize = phone;
@@ -166,7 +192,7 @@ Future<void> main() async {
     openDeviceEditor(ctx, s, layer, slot);
     await tester.pumpAndSettle();
     DeviceFakeFrame.frame(c.info.id);
-    return (s, DeviceTarget(s, 'a', slot), engine);
+    return (s, DeviceTarget(s, layer.id, slot), engine);
   }
 
   String name(DeviceCase c) => c.variant == null ? c.info.id : '${c.info.id}#${c.variant}';
@@ -175,7 +201,7 @@ Future<void> main() async {
   Future<List<Finding>> work(WidgetTester tester, DeviceCase c, AppState s, DeviceTarget t, RecordingEngine engine) async {
     final findings = <Finding>[];
     final dev = name(c);
-    final layer = s.project.layers.first;
+    final layer = t.layer!;
     final index = t.isInstrument ? ProjectDoc.instrumentIndex : s.engineComponentIndex(layer, t.slot);
     final done = <String>{};
 
@@ -192,69 +218,64 @@ Future<void> main() async {
         findings.add(Finding(dev, control, gesture, 'value moved but nothing was sent to the engine'));
         return false;
       }
-      if (last.$2 != index || last.$1 != 'a' || (last.$4 - value(p)).abs() > 1e-9) {
-        findings.add(Finding(dev, control, gesture, 'sent ${last.$1}/${last.$2} ${last.$4}, expected a/$index ${value(p)}'));
+      if (last.$2 != index || last.$1 != layer.id || (last.$4 - value(p)).abs() > 1e-9) {
+        findings.add(Finding(dev, control, gesture, 'sent ${last.$1}/${last.$2} ${last.$4}, expected ${layer.id}/$index ${value(p)}'));
         return false;
       }
       return true;
     }
 
     Future<void> knob(Finder f, String p, String control) async {
-      Offset at() => tester.getCenter(f);
-      // A sideways finger drag, slightly off horizontal as a thumb moves.
-      middle(p);
-      await tester.pump();
-      var before = value(p);
-      engine.sent.clear();
-      await fingerDrag(tester, at(), KnobDrag.sideways ? const Offset(5, -1.5) : const Offset(0, -5), 12);
-      if (value(p) == before) {
-        findings.add(Finding(dev, control, KnobDrag.sideways ? 'finger sideways' : 'finger up', 'did not move'));
-      } else {
-        reached(p, 'finger sideways', control);
-      }
-      // A quick vertical swipe: the page's (both settings leave it to the scroll).
-      middle(p);
-      await tester.pump();
-      if (f.hitTestable().evaluate().isEmpty) return;
-      before = value(p);
-      await fingerDrag(tester, at(), const Offset(0, -14), 7, frame: const Duration(milliseconds: 8));
-      await tester.pumpAndSettle();
-      if (value(p) != before) findings.add(Finding(dev, control, 'quick vertical swipe', 'turned the knob'));
-      if (f.hitTestable().evaluate().isEmpty) return;
-      // A rest, then a vertical drag: the knob's.
-      middle(p);
-      await tester.pump();
-      before = value(p);
-      engine.sent.clear();
-      await fingerDrag(tester, at(), const Offset(0, -6), 10, rest: const Duration(milliseconds: 300));
-      if (value(p) == before) {
-        findings.add(Finding(dev, control, 'hold then vertical', 'did not move'));
-      } else {
-        reached(p, 'hold then vertical', control);
-      }
-      await tester.pumpAndSettle();
-      if (f.hitTestable().evaluate().isEmpty) return;
-      // A mouse drag up: at once.
-      middle(p);
-      await tester.pump();
-      before = value(p);
-      engine.sent.clear();
-      await fingerDrag(tester, at(), const Offset(0, -6), 10, kind: PointerDeviceKind.mouse);
-      if (value(p) == before) {
-        findings.add(Finding(dev, control, 'mouse drag', 'did not move'));
-      } else {
-        reached(p, 'mouse drag', control);
+      final sideways = KnobDrag.sideways;
+      // (gesture, step, steps, rest, frame, kind, turns it)
+      final gestures = <(String, Offset, int, Duration, Duration, PointerDeviceKind, bool)>[
+        // A thumb's sideways drag, slightly off horizontal (Sideways only).
+        if (sideways) ('finger sideways', const Offset(5, -1.5), 12, Duration.zero, _frame, PointerDeviceKind.touch, true),
+        // A quick vertical swipe is the page's under both settings.
+        ('quick vertical swipe', const Offset(0, -14), 7, Duration.zero, const Duration(milliseconds: 8),
+            PointerDeviceKind.touch, false),
+        // A rest, then any direction: the knob's.
+        ('hold then vertical', const Offset(0, -6), 10, const Duration(milliseconds: 300), _frame, PointerDeviceKind.touch, true),
+        if (sideways)
+          ('hold then sideways', const Offset(6, 0), 10, const Duration(milliseconds: 300), _frame, PointerDeviceKind.touch, true),
+        // Held past the long-press (its menu waits for the finger to lift still), then moved.
+        ('long hold then vertical', const Offset(0, -6), 10, const Duration(milliseconds: 700), _frame,
+            PointerDeviceKind.touch, true),
+        if (sideways)
+          ('long hold then sideways', const Offset(6, 0), 10, const Duration(milliseconds: 700), _frame,
+              PointerDeviceKind.touch, true),
+        ('mouse drag', const Offset(0, -6), 10, Duration.zero, _frame, PointerDeviceKind.mouse, true),
+      ];
+      for (final (gesture, step, steps, rest, frame, kind, turns) in gestures) {
+        if (f.hitTestable().evaluate().isEmpty) return;
+        middle(p);
+        await tester.pump();
+        final before = value(p);
+        engine.sent.clear();
+        await fingerDrag(tester, tester.getCenter(f), step, steps, rest: rest, frame: frame, kind: kind);
+        await tester.pumpAndSettle();
+        // A long hold's lift may leave its sheet or a tooltip: close what opened.
+        await _dismiss(tester);
+        if (turns && value(p) == before) {
+          findings.add(Finding(dev, control, gesture, 'did not move'));
+        } else if (!turns && value(p) != before) {
+          findings.add(Finding(dev, control, gesture, 'turned the knob'));
+        } else if (turns) {
+          reached(p, gesture, control);
+        }
       }
     }
 
     Future<void> slider(Finder f, String p, String control) async {
-      for (final (gesture, kind) in [('finger sideways', PointerDeviceKind.touch), ('mouse drag', PointerDeviceKind.mouse)]) {
+      for (final (gesture, kind, rest) in [('finger sideways', PointerDeviceKind.touch, Duration.zero),
+          ('hold then sideways', PointerDeviceKind.touch, const Duration(milliseconds: 300)),
+          ('mouse drag', PointerDeviceKind.mouse, Duration.zero)]) {
         final r = tester.getRect(f);
         t.set(p, t.param(p)!.min);
         await tester.pump();
         final before = value(p);
         engine.sent.clear();
-        await fingerDrag(tester, Offset(r.left + r.width * 0.3, r.center.dy), const Offset(6, -1), 8, kind: kind);
+        await fingerDrag(tester, Offset(r.left + r.width * 0.3, r.center.dy), const Offset(6, -1), 8, kind: kind, rest: rest);
         if (value(p) == before) {
           findings.add(Finding(dev, control, gesture, 'did not move'));
         } else {
@@ -276,6 +297,91 @@ Future<void> main() async {
       }
     }
 
+    Map<String, double> snapshot() => {for (final q in t.info?.parameters ?? const <ComponentParameterInfo>[]) q.id: t.value(q.id)};
+    Future<void> restore(Map<String, double> was) async {
+      final now = snapshot();
+      final back = {for (final e in was.entries) if (now[e.key] != e.value) e.key: e.value};
+      if (back.isNotEmpty) t.setAll(back);
+      await tester.pump();
+    }
+
+    // A hero visual or an XY pad (GrabGesture, GrabPan): where it takes a finger, a drag must move something.
+    Future<void> visual(Element e, String control) async {
+      final w = e.widget;
+      final grabs = w is GrabPan ? w.grabs : (w as GrabGesture).grabs;
+      if (w is GrabGesture && w.onUpdate == null) return;
+      final box = e.renderObject! as RenderBox;
+      Offset? local;
+      for (final fy in const [0.5, 0.3, 0.7, 0.15, 0.85]) {
+        for (final fx in const [0.5, 0.3, 0.7, 0.15, 0.85]) {
+          final l = Offset(box.size.width * fx, box.size.height * fy);
+          if (grabs?.call(l) ?? true) {
+            local = l;
+            break;
+          }
+        }
+        if (local != null) break;
+      }
+      if (local == null) return;
+      final at = box.localToGlobal(local);
+      final gestures = <(String, Offset, int, Duration, PointerDeviceKind)>[
+        ('finger sideways', const Offset(6, -1), 10, Duration.zero, PointerDeviceKind.touch),
+        ('hold then vertical', const Offset(0, -6), 10, const Duration(milliseconds: 300), PointerDeviceKind.touch),
+        ('hold then sideways', const Offset(6, 0), 10, const Duration(milliseconds: 300), PointerDeviceKind.touch),
+        ('mouse drag', const Offset(-6, -6), 10, Duration.zero, PointerDeviceKind.mouse),
+      ];
+      final was = snapshot();
+      final movedBy = <String>{};
+      for (final (gesture, step, steps, rest, kind) in gestures) {
+        var moved = false;
+        // One way, then the other (a value at the end of its travel moves only back).
+        for (final dir in const [1.0, -1.0]) {
+          await restore(was);
+          engine.sent.clear();
+          await fingerDrag(tester, at, step * dir, steps, rest: rest, kind: kind);
+          await tester.pumpAndSettle();
+          await _dismiss(tester);
+          final now = snapshot();
+          if (now.entries.any((x) => was[x.key] != x.value)) {
+            moved = true;
+            final p = now.entries.firstWhere((x) => was[x.key] != x.value).key;
+            reached(p, gesture, control);
+            break;
+          }
+        }
+        if (moved) movedBy.add(gesture);
+      }
+      await restore(was);
+      // A visual uses the axes it has (a wavetable's up and down only with a warp on): a rested drag moves it, a quick
+      // sideways one too where a rested sideways one does, and the mouse.
+      if (!movedBy.contains('hold then vertical') && !movedBy.contains('hold then sideways')) {
+        findings.add(Finding(dev, control, 'hold then drag', 'moved nothing'));
+      }
+      if (movedBy.contains('hold then sideways') && !movedBy.contains('finger sideways')) {
+        findings.add(Finding(dev, control, 'finger sideways', 'moved nothing'));
+      }
+      if (!movedBy.contains('mouse drag')) findings.add(Finding(dev, control, 'mouse drag', 'moved nothing'));
+    }
+
+    // On a swipe panel: a quick sideways swipe that starts beside a knob's face (its label) changes the panel.
+    Future<void> swipeBeside(PageController pc) async {
+      final knobs = find.byType(DeviceKnob).hitTestable().evaluate()
+          .where((e) => tester.getRect(find.byWidget(e.widget)).bottom < phone.height - 120).toList();
+      if (knobs.isEmpty) return;
+      final r = tester.getRect(find.byWidget(knobs.first.widget));
+      final page = pc.page!.round();
+      final last = (find.byType(PageView).evaluate().first.widget as PageView).childrenDelegate.estimatedChildCount! - 1;
+      final dir = page < last ? -1.0 : 1.0;
+      await fingerDrag(tester, Offset(r.center.dx, r.bottom - 4), Offset(28 * dir, 0), 10,
+          frame: const Duration(milliseconds: 8));
+      await tester.pumpAndSettle();
+      if (pc.page!.round() == page) {
+        findings.add(Finding(dev, 'panel ${page + 1}', 'swipe from a knob\'s label', 'did not change the panel'));
+      }
+      pc.jumpToPage(page);
+      await tester.pumpAndSettle();
+    }
+
     // Every panel of every section: the tabs, the swipe panels inside them, and the vertical scroll of each.
     final tabs = find.byWidgetPredicate((w) => w.key is ValueKey<String> &&
         (w.key! as ValueKey<String>).value.startsWith('device-tab-'));
@@ -292,6 +398,7 @@ Future<void> main() async {
           final pv = tester.widget<PageView>(find.byType(PageView).first);
           pv.controller?.jumpToPage(pi);
           await tester.pumpAndSettle();
+          if (pv.controller != null) await swipeBeside(pv.controller!);
         }
         // Down the page's scroll, a screen at a time.
         final scrolls = find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down);
@@ -319,6 +426,19 @@ Future<void> main() async {
             // Fully on screen, clear of the editor's header and footer.
             if (!screen.deflate(4).contains(r.topLeft) || !screen.deflate(4).contains(r.bottomRight)) continue;
             candidates.add((key, _parse(key)!));
+          }
+          final visuals = <(Element, String)>[];
+          for (final e in find.byWidgetPredicate((w) => w is GrabPan || w is GrabGesture).hitTestable().evaluate()) {
+            final box = e.renderObject as RenderBox?;
+            if (box == null || !box.hasSize) continue;
+            final r = box.localToGlobal(Offset.zero) & box.size;
+            if (!screen.deflate(4).contains(r.topLeft) || !screen.deflate(4).contains(r.bottomRight)) continue;
+            final id = 'visual ${e.widget.runtimeType} ${e.widget.key ?? ''} $ti/$pi/${(r.top + (pos?.pixels ?? 0)).round()}';
+            if (done.add(id)) visuals.add((e, id));
+          }
+          for (final (e, id) in visuals) {
+            if (!e.mounted) continue;
+            await visual(e, id);
           }
           for (final (key, c) in candidates) {
             final f = find.byKey(key).first;
@@ -374,6 +494,21 @@ Future<void> main() async {
             }
           }
         }
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 1));
+        s.dispose();
+        expect(findings, isEmpty, reason: findings.join('\n'));
+      });
+    }
+  });
+
+  // Settings › Knobs turn with › Up and down: a quick swipe still scrolls, a rest then any drag turns the knob.
+  group('with knobs set to turn up and down', () {
+    for (final c in cases.where((c) => const {'org.caw.drive#0', 'org.caw.reverb#0', 'org.caw.synth.flagship',
+        'org.caw.timber'}.contains(name(c)))) {
+      testWidgets(name(c), (tester) async {
+        final (s, t, engine) = await open(tester, c, sideways: false);
+        final findings = await work(tester, c, s, t, engine);
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(seconds: 1));
         s.dispose();

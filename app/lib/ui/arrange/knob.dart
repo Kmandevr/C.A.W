@@ -170,6 +170,9 @@ class _KnobState extends State<Knob> {
               : null,
           // A finger's drag engages after a short rest or a slow start; a quick swipe scrolls the page.
           child: EngageKnobDrag(
+            // A finger starts it on the face, not the label under it or the gap beside it.
+            grabs: (local) => (local - Offset(math.max(48, widget.size + 14) / 2, (widget.size + 6) / 2)).distance <=
+                (widget.size + 6) / 2 + 4,
             onStart: widget.enabled
                 ? (_) {
                     _dragValue = widget.value;
