@@ -33,7 +33,7 @@ inline constexpr int kFamilyOf[kStops] = {kStopped, kPrincipal, kPrincipal, kPri
 inline constexpr double kFoot[kStops] = {0.5, 1, 2, 4, 1, 1, 1, 1, 1, 2, 3, 5, 0.25};
 
 // The tables' zones: 6 semitones of the pipe's sounding pitch each, from MIDI 12 (the mixture's by its key's 8'
-// pitch), every table kTableSize + 1 floats (the last repeats the first, for the interpolation), peak 1.
+// pitch), every table kTableSize pairs of floats (each value and the step to the next), peak 1.
 inline constexpr int kZones = 18;
 inline constexpr uint32_t kTableSize = 2048;
 inline int zoneOf(double sounding) noexcept { return std::clamp(static_cast<int>((sounding - 12.0) / 6.0), 0, kZones - 1); }

@@ -78,7 +78,7 @@ int mixtureRanks(int z, int* out) {
 }
 
 void build() {
-    const size_t per = kTableSize + 1;
+    const size_t per = 2 * kTableSize;
     gTables.reset(new (std::nothrow) float[static_cast<size_t>(kFamilies) * kZones * kKinds * per]());
     if (!gTables) return;
     const double nyq = 0.45 * 44100.0;  // band-limited for 44.1 kHz and up (a little duller at higher rates)
@@ -127,19 +127,20 @@ void build() {
                 for (uint32_t i = 0; i < kTableSize; ++i) peak = std::max(peak, std::fabs(im[i]));
                 double ss = 0;
                 for (uint32_t i = 0; i < kTableSize; ++i) {
-                    t[i] = static_cast<float>(im[i] / peak);
-                    ss += static_cast<double>(t[i]) * t[i];
+                    t[2 * i] = static_cast<float>(im[i] / peak);
+                    ss += static_cast<double>(t[2 * i]) * t[2 * i];
                 }
-                t[kTableSize] = t[0];
+                // Each value with the step to the next beside it (the interpolation's two reads at one place).
+                for (uint32_t i = 0; i < kTableSize; ++i) t[2 * i + 1] = t[2 * ((i + 1) % kTableSize)] - t[2 * i];
                 gRms[fam][z][kind] = static_cast<float>(std::sqrt(ss / kTableSize));
             }
 }
 
 const float* table(int family, int zone, int kind) noexcept {
-    static const float silent[kTableSize + 1] = {};
+    static const float silent[2 * kTableSize] = {};
     if (!gTables || family < 0 || family >= kFamilies) return silent;
     zone = std::clamp(zone, 0, kZones - 1);
-    return gTables.get() + ((static_cast<size_t>(family) * kZones + zone) * kKinds + kind) * (kTableSize + 1);
+    return gTables.get() + ((static_cast<size_t>(family) * kZones + zone) * kKinds + kind) * (2 * kTableSize);
 }
 
 }  // namespace
@@ -157,7 +158,7 @@ float tableRms(int family, int zone) noexcept {
     return gRms[family][std::clamp(zone, 0, kZones - 1)][0];
 }
 size_t tableBytes() noexcept {
-    return gTables ? static_cast<size_t>(kFamilies) * kZones * kKinds * (kTableSize + 1) * sizeof(float) : 0;
+    return gTables ? static_cast<size_t>(kFamilies) * kZones * kKinds * (2 * kTableSize) * sizeof(float) : 0;
 }
 
 double riseSeconds(double hz) noexcept { return std::clamp(kRise0 * detPow(hz / 440.0, kRiseExp), 0.015, 0.35); }

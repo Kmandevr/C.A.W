@@ -19,36 +19,36 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         const float o = static_cast<float>(clock - v.lineAt[k]);
         const float es = v.envStep[k], gs = v.gStep[k], ws = v.spokeStep[k];
         const float e0 = v.env[k], g0 = v.gain[k], w0 = v.spoke[k];  // at the line's start: sample t = o + i + 1 of it
-        float t[kControlFrames];
-        for (uint32_t i = 0; i < n; ++i) t[i] = o + steps[i];  // whole numbers: exact
         const float* s = v.steady[k];
         const float* e = v.speaking[k];
         const uint32_t inc = v.step[k], ph = v.phase[k];
-        // The pipe's level each sample: its speech or release (squared) and its level, both lines across the block.
-        float amp[kControlFrames];
-        if (es == 0.0f && e0 == 1.0f) {
-            for (uint32_t i = 0; i < n; ++i) amp[i] = g0 + gs * t[i];
-        } else {
-            for (uint32_t i = 0; i < n; ++i) {
-                const float x = e0 + es * t[i];
-                amp[i] = x * x * (g0 + gs * t[i]);
-            }
-        }
-        if (w0 >= 1.0f && ws == 0.0f) {
-            for (uint32_t i = 0; i < n; ++i) {
+        // The pipe's level each sample (its speech or release, squared, and its level: both lines; o + i + 1 is a
+        // whole number, exact) times its table, in one pass.
+        if (w0 >= 1.0f && ws == 0.0f && es == 0.0f && e0 == 1.0f) {
+            for (uint32_t i = 0; i < n; ++i) {  // spoken and up: the common case
+                const float t = o + steps[i];
                 const uint32_t p = ph + i * inc;  // wraps at 2^32: a whole cycle
-                const uint32_t at = p >> kShift;
+                const uint32_t at = (p >> kShift) * 2;
                 const float f = static_cast<float>(p & kMask) * kFrac;
-                acc[i] += (s[at] + (s[at + 1] - s[at]) * f) * amp[i];
+                acc[i] += (s[at] + s[at + 1] * f) * (g0 + gs * t);
+            }
+        } else if (w0 >= 1.0f && ws == 0.0f) {
+            for (uint32_t i = 0; i < n; ++i) {
+                const float t = o + steps[i], x = e0 + es * t;
+                const uint32_t p = ph + i * inc;
+                const uint32_t at = (p >> kShift) * 2;
+                const float f = static_cast<float>(p & kMask) * kFrac;
+                acc[i] += (s[at] + s[at + 1] * f) * (x * x * (g0 + gs * t));
             }
         } else {
             // Speaking: the measured speaking spectrum, giving way to the steady one as the pipe comes up to speech.
             for (uint32_t i = 0; i < n; ++i) {
+                const float t = o + steps[i], x = e0 + es * t;
                 const uint32_t p = ph + i * inc;
-                const uint32_t at = p >> kShift;
+                const uint32_t at = (p >> kShift) * 2;
                 const float f = static_cast<float>(p & kMask) * kFrac;
-                const float a = s[at] + (s[at + 1] - s[at]) * f, b = e[at] + (e[at + 1] - e[at]) * f;
-                acc[i] += (b + (a - b) * (w0 + ws * t[i])) * amp[i];
+                const float a = s[at] + s[at + 1] * f, b = e[at] + e[at + 1] * f;
+                acc[i] += (b + (a - b) * (w0 + ws * t)) * (x * x * (g0 + gs * t));
             }
         }
         v.phase[k] = ph + n * inc;
