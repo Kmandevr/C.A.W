@@ -290,3 +290,109 @@ TEST(instrument_glitch_scan) {
     }
     CHECK_EQ(bad, 0);
 }
+
+namespace {
+
+// The energy (dB, both channels) of a - b over [from, to) seconds.
+double diffDb(const Stereo& a, const Stereo& b, double from, double to) {
+    const size_t i0 = static_cast<size_t>(std::max(0.0, from) * kSr), i1 = std::min(a.size(), static_cast<size_t>(to * kSr));
+    double e = 0;
+    for (size_t i = i0; i < i1; ++i) {
+        const double l = a.l[i] - b.l[i], r = a.r[i] - b.r[i];
+        e += l * l + r * r;
+    }
+    return 10 * std::log10(e / std::max<size_t>(1, i1 - i0) + 1e-30);
+}
+double peakOf(const Stereo& s, double from, double to) {
+    const size_t i0 = static_cast<size_t>(std::max(0.0, from) * kSr), i1 = std::min(s.size(), static_cast<size_t>(to * kSr));
+    float p = 0;
+    for (size_t i = i0; i < i1; ++i) p = std::max({p, std::fabs(s.l[i]), std::fabs(s.r[i])});
+    return p;
+}
+
+}  // namespace
+
+// Each noise layer only at its physical moment. The layer is what changes between its knob at 1 and at 0 (it reaches
+// the output only, never the strings or the bore, so the difference is the layer alone, except Curlew's breath, which
+// blows the bore: there only the silences are checked). It must be loud where it belongs and far under that
+// everywhere else: before the first note (project start), while a held note sounds past its strike, after its
+// release has rung out, after a transport stop (reset), and on a restruck voice past its own strike.
+TEST(instrument_noises_sound_only_at_their_moment) {
+    // Starling: the key-release noise at note-off, the pedal's noises when it moves, the thump and keybed at the
+    // strike (all under Noise). Notes at 0.3 (held to 1.0) and 0.35 (restruck at 0.6); the pedal down at 1.3, up at 1.9.
+    for (double character : {0.0, 1.0, 2.0}) {
+        Take t;
+        t.notes = {{0.3, 1.0, 60, 0.7}, {0.35, 0.55, 67, 0.6}, {0.6, 0.8, 67, 0.6}};
+        t.ccs = {{1.3, 64, 1.0}, {1.9, 64, 0.0}};
+        t.seconds = 3.2;
+        const Values on = {{"character", character}, {"noise", 1.0}}, off = {{"character", character}, {"noise", 0.0}};
+        const Stereo a = perform("org.caw.starling", on, t), b = perform("org.caw.starling", off, t);
+        const double rel = diffDb(a, b, 1.0, 1.15), ped = diffDb(a, b, 1.3, 1.45);
+        const double before = diffDb(a, b, 0.0, 0.3), held = diffDb(a, b, 0.45, 0.55), quiet = diffDb(a, b, 1.15, 1.3);
+        const double late = diffDb(a, b, 2.3, 3.2);
+        if (verbose())
+            std::printf("Starling character %.0f noise: release %.1f pedal %.1f | before %.1f held %.1f between %.1f after %.1f dB\n",
+                        character, rel, ped, before, held, quiet, late);
+        CHECK(rel > -90 && ped > -90);
+        CHECK(before < -150);
+        CHECK(held < std::min(rel, ped) - 30);
+        CHECK(quiet < std::min(rel, ped) - 30);
+        CHECK(late < std::min(rel, ped) - 60);
+    }
+    // Nightingale: the bow noise only while the bow moves (from the note on to the end of its release, 0.25 s).
+    for (int var = 0; var < 4; ++var) {
+        Take t;
+        t.notes = {{0.2, 0.8, 60.0 - 8 * var, 0.7}};
+        t.seconds = 1.8;
+        const Values on = {{"variant", var}, {"noise", 1.0}}, off = {{"variant", var}, {"noise", 0.0}};
+        const Stereo a = perform("org.caw.nightingale", on, t), b = perform("org.caw.nightingale", off, t);
+        const double bowing = diffDb(a, b, 0.3, 0.8), before = diffDb(a, b, 0.0, 0.2), after = diffDb(a, b, 1.2, 1.8);
+        if (verbose()) std::printf("Nightingale %d bow noise: bowing %.1f | before %.1f after %.1f dB\n", var, bowing, before, after);
+        CHECK(bowing > -90);
+        CHECK(before < -150);
+        CHECK(after < bowing - 60);
+    }
+    // Curlew: breath only while blowing: silent before the note, after its release and after a transport stop.
+    for (int var = 0; var < 6; ++var) {
+        Take t;
+        const double key = var >= 4 ? 48.0 : 62.0;
+        t.notes = {{0.2, 0.7, key, 0.7}, {1.2, -1, key, 0.7}};
+        t.resetAt = 1.5;
+        t.seconds = 2.0;
+        const Values on = {{"variant", var}, {"noise", 1.0}};
+        const Stereo a = perform("org.caw.curlew", on, t);
+        const double blowing = peakOf(a, 0.3, 0.7), before = peakOf(a, 0.0, 0.2), after = peakOf(a, 1.0, 1.2),
+                     stopped = peakOf(a, 1.55, 2.0);
+        if (verbose()) std::printf("Curlew %d: blowing %.3g | before %.3g after %.3g stopped %.3g\n", var, blowing, before, after, stopped);
+        CHECK(blowing > 1e-3);
+        CHECK(before == 0.0);
+        CHECK(after < blowing * 1e-3);
+        CHECK(stopped < blowing * 1e-3);
+    }
+    // Woodpecker: the recorded stroke at the hit, and nothing of it before.
+    for (int var = 0; var < 6; ++var) {
+        static constexpr double kKey[6] = {60, 72, 84, 65, 64, 48};
+        Take t;
+        t.notes = {{0.2, 1.4, kKey[var], 0.7}, {0.9, 1.4, kKey[var], 0.7}};
+        t.seconds = 1.6;
+        const Values on = {{"variant", var}, {"attack", 1.0}}, off = {{"variant", var}, {"attack", 0.0}};
+        const Stereo a = perform("org.caw.woodpecker", on, t), b = perform("org.caw.woodpecker", off, t);
+        const double hit = diffDb(a, b, 0.2, 0.3), before = diffDb(a, b, 0.0, 0.2);
+        if (verbose()) std::printf("Woodpecker %d stroke: hit %.1f | before %.1f\n", var, hit, before);
+        CHECK(hit > -80);
+        CHECK(before < -150);
+    }
+    // Every instrument is silent at the start, and after a transport stop (reset) while notes and the pedal were down.
+    for (const char* id : {"org.caw.starling", "org.caw.nightingale", "org.caw.curlew", "org.caw.woodpecker"}) {
+        Take t;
+        t.notes = {{0.05, -1, 60, 0.8}, {0.1, -1, 64, 0.8}};
+        t.ccs = {{0.2, 64, 1.0}};
+        t.resetAt = 0.5;
+        t.seconds = 1.0;
+        const Stereo a = perform(id, {{"noise", 0.8}}, t);
+        const double stopped = peakOf(a, 0.502, 1.0), start = peakOf(a, 0.0, 0.05);
+        if (verbose()) std::printf("%s after a transport stop: %.3g (start %.3g)\n", id, stopped, start);
+        CHECK(stopped == 0.0);
+        CHECK(start == 0.0);
+    }
+}
