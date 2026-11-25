@@ -1,6 +1,7 @@
 // Every built-in device used the way the owner uses it on a phone (1.1.3-alpha.1, "most of the knobs and all of the effects don't do anything"): each device of the library on a new project's track, its page at phone size, and every control on it touched with a real finger and a mouse; the value must move and reach the engine.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:caw/engine/component_info.dart';
@@ -9,11 +10,12 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/merged_devices.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/templates.dart';
-import 'package:caw/ui/arrange/knob.dart' show Taper;
+import 'package:caw/ui/arrange/knob.dart' show Knob, Taper;
 import 'package:caw/ui/devices/device_editor.dart';
 import 'package:caw/ui/devices/device_controls.dart' show DeviceKnob;
 import 'package:caw/ui/devices/kit/grab_gesture.dart';
@@ -47,6 +49,9 @@ class RecordingEngine implements Engine {
   Future<List<NativeComponentInfo>> nativeComponents() async => _catalog;
 
   @override
+  Future<bool> setComponentState(String? layerId, int index, Uint8List bytes, int version) async => true;
+
+  @override
   Map<int, ({String state, int version})> componentStates(String? layerId) => const {};
 
   @override
@@ -64,6 +69,7 @@ typedef DeviceCase = ({NativeComponentInfo info, int? variant});
 List<DeviceCase> deviceCases(List<NativeComponentInfo> catalog) => [
       for (final c in catalog)
         if (isBuiltinComponent(c.id) && !c.id.startsWith('org.caw.mod.') && !c.id.startsWith('org.caw.rack.') &&
+            c.role != 'event_processor' &&  // MIDI effects: not in the library (files_catalog.dart)
             !ComponentUseDoc.retiredInstruments.contains(c.id) && !MergedDevices.isRetired(c.id))
           if (c.variants.length < 2) (info: c, variant: null)
           else for (var v = 0; v < c.variants.length; v++) (info: c, variant: v),
@@ -231,7 +237,15 @@ Future<void> main() async {
       return true;
     }
 
-    Future<void> knob(Finder f, String p, String control) async {
+    Map<String, double> snapshot() => {for (final q in t.info?.parameters ?? const <ComponentParameterInfo>[]) q.id: t.value(q.id)};
+    Future<void> restore(Map<String, double> was) async {
+      final now = snapshot();
+      final back = {for (final e in was.entries) if (now[e.key] != e.value) e.key: e.value};
+      if (back.isNotEmpty) t.setAll(back);
+      await tester.pump();
+    }
+
+    Future<void> knob(Finder f, String? p, String control) async {
       final sideways = KnobDrag.sideways;
       // (gesture, step, steps, rest, frame, kind, turns it)
       final gestures = <(String, Offset, int, Duration, Duration, PointerDeviceKind, bool)>[
@@ -252,24 +266,40 @@ Future<void> main() async {
               PointerDeviceKind.touch, true),
         ('mouse drag', const Offset(0, -6), 10, Duration.zero, _frame, PointerDeviceKind.mouse, true),
       ];
+      // The fallback page's Knob has no parameter key: the one it moved is the one whose value changed.
+      final was = p == null ? snapshot() : null;
       for (final (gesture, step, steps, rest, frame, kind, turns) in gestures) {
         if (f.hitTestable().evaluate().isEmpty) return;
-        middle(p);
+        if (p != null) {
+          middle(p);
+        } else {
+          await restore(was!);
+        }
         await tester.pump();
-        final before = value(p);
+        final before = p == null ? null : value(p);
         engine.sent.clear();
-        await fingerDrag(tester, tester.getCenter(f), step, steps, rest: rest, frame: frame, kind: kind);
+        // A finger on the knob's face (the top of a fallback Knob, the centre of a device knob).
+        final r = tester.getRect(f);
+        final at = p == null ? Offset(r.center.dx, r.top + 20) : tester.getCenter(f);
+        await fingerDrag(tester, at, step, steps, rest: rest, frame: frame, kind: kind);
         await tester.pumpAndSettle();
         // A long hold's lift may leave its sheet or a tooltip: close what opened.
         await _dismiss(tester);
-        if (turns && value(p) == before) {
+        String? movedParam;
+        if (p != null) {
+          if (value(p) != before) movedParam = p;
+        } else {
+          movedParam = snapshot().entries.where((x) => was![x.key] != x.value).firstOrNull?.key;
+        }
+        if (turns && movedParam == null) {
           findings.add(Finding(dev, control, gesture, 'did not move'));
-        } else if (!turns && value(p) != before) {
+        } else if (!turns && movedParam != null) {
           findings.add(Finding(dev, control, gesture, 'turned the knob'));
         } else if (turns) {
-          reached(p, gesture, control);
+          reached(movedParam!, gesture, control);
         }
       }
+      if (was != null) await restore(was);
     }
 
     Future<void> slider(Finder f, String p, String control) async {
@@ -303,14 +333,6 @@ Future<void> main() async {
       }
     }
 
-    Map<String, double> snapshot() => {for (final q in t.info?.parameters ?? const <ComponentParameterInfo>[]) q.id: t.value(q.id)};
-    Future<void> restore(Map<String, double> was) async {
-      final now = snapshot();
-      final back = {for (final e in was.entries) if (now[e.key] != e.value) e.key: e.value};
-      if (back.isNotEmpty) t.setAll(back);
-      await tester.pump();
-    }
-
     // A hero visual or an XY pad (GrabGesture, GrabPan): where it takes a finger, a drag must move something.
     Future<void> visual(Element e, String control) async {
       final w = e.widget;
@@ -329,7 +351,13 @@ Future<void> main() async {
         if (local != null) break;
       }
       if (local == null) return;
-      final at = box.localToGlobal(local);
+      final points = [
+        box.localToGlobal(local),
+        for (final fx in const [0.3, 0.7, 0.15, 0.85])
+          if (grabs?.call(Offset(box.size.width * fx, box.size.height * 0.5)) ?? true)
+            box.localToGlobal(Offset(box.size.width * fx, box.size.height * 0.5)),
+      ];
+      String? stateNow() => t.isInstrument ? null : t.layer?.components[t.slot].state;
       final gestures = <(String, Offset, int, Duration, PointerDeviceKind)>[
         ('finger sideways', const Offset(6, -1), 10, Duration.zero, PointerDeviceKind.touch),
         ('hold then vertical', const Offset(0, -6), 10, const Duration(milliseconds: 300), PointerDeviceKind.touch),
@@ -337,22 +365,31 @@ Future<void> main() async {
         ('mouse drag', const Offset(-6, -6), 10, Duration.zero, PointerDeviceKind.mouse),
       ];
       final was = snapshot();
+      final wasState = stateNow();
       final movedBy = <String>{};
       for (final (gesture, step, steps, rest, kind) in gestures) {
         var moved = false;
-        // One way, then the other (a value at the end of its travel moves only back).
-        for (final dir in const [1.0, -1.0]) {
-          await restore(was);
-          engine.sent.clear();
-          await fingerDrag(tester, at, step * dir, steps, rest: rest, kind: kind);
-          await tester.pumpAndSettle();
-          await _dismiss(tester);
-          final now = snapshot();
-          if (now.entries.any((x) => was[x.key] != x.value)) {
-            moved = true;
-            final p = now.entries.firstWhere((x) => was[x.key] != x.value).key;
-            reached(p, gesture, control);
-            break;
+        // One way, then the other (a value at the end of its travel moves only back), at a few places (a hero
+        // whose handles are its crossovers takes a drag only near one).
+        search:
+        for (final at in points) {
+          for (final dir in const [1.0, -1.0]) {
+            await restore(was);
+            engine.sent.clear();
+            await fingerDrag(tester, at, step * dir, steps, rest: rest, kind: kind);
+            await tester.pumpAndSettle();
+            await _dismiss(tester);
+            final now = snapshot();
+            if (now.entries.any((x) => was[x.key] != x.value)) {
+              moved = true;
+              final p = now.entries.firstWhere((x) => was[x.key] != x.value).key;
+              reached(p, gesture, control);
+              break search;
+            }
+            if (stateNow() != wasState) {  // a painted state (Molt's spectrum), written to the engine
+              moved = true;
+              break search;
+            }
           }
         }
         if (moved) movedBy.add(gesture);
@@ -446,6 +483,21 @@ Future<void> main() async {
             if (!e.mounted) continue;
             await visual(e, id);
           }
+          // The fallback page's knobs (arrange/knob.dart), by their label.
+          final plain = <(Finder, String)>[];
+          for (final e in find.byType(Knob).hitTestable().evaluate()) {
+            final box = e.renderObject as RenderBox?;
+            if (box == null || !box.hasSize) continue;
+            final r = box.localToGlobal(Offset.zero) & box.size;
+            if (!screen.deflate(4).contains(r.topLeft) || !screen.deflate(4).contains(r.bottomRight)) continue;
+            final label = (e.widget as Knob).label;
+            final id = 'knob $label $ti/$pi';
+            if (done.add(id)) plain.add((find.byWidget(e.widget), id));
+          }
+          for (final (f, id) in plain) {
+            if (f.evaluate().isEmpty) continue;
+            await knob(f, null, id);
+          }
           for (final (key, c) in candidates) {
             if (find.byKey(key).evaluate().isEmpty) continue;  // a visual's drag rebuilt the page without it
             final f = find.byKey(key).first;
@@ -485,6 +537,18 @@ Future<void> main() async {
   }
 
   final cases = deviceCases(_catalog).where((c) => only == null || name(c).contains(only)).toList();
+  // A device the library offers must play where it goes: a MIDI effect on an effect chain is left out by the engine.
+  testWidgets('the library offers no MIDI effect for a chain', (tester) async {
+    final s = AppState(settings: Settings());
+    s.nativeCatalog = [
+      ..._catalog,
+      const NativeComponentInfo(id: 'org.caw.midi.test', name: 'Arp', role: 'event_processor', ports: [], parameters: []),
+    ];
+    expect(s.builtinAssets.where((a) => a.native?.role == 'event_processor'), isEmpty);
+    expect(s.builtinAssets.where((a) => a.native?.id == 'org.caw.drive'), isNotEmpty);
+    s.dispose();
+  });
+
   group('every control of every device answers the owner\'s finger', () {
     for (final c in cases) {
       testWidgets(name(c), (tester) async {

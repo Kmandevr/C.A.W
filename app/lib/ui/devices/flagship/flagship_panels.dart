@@ -119,7 +119,9 @@ class FPanel extends StatelessWidget {
           Text(title, maxLines: 1, style: TextStyle(fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w800, color: c,
             shadows: [Shadow(color: c.withValues(alpha: 0.5), blurRadius: 8)])),
           const SizedBox(width: 6),
-          Expanded(child: Align(alignment: Alignment.centerRight, child: Row(mainAxisSize: MainAxisSize.min, children: trailing))),
+          // Scaled down rather than cut off when a phone is too narrow for them (the sampler's header, 1.1.3-alpha.2).
+          Expanded(child: Align(alignment: Alignment.centerRight, child: FittedBox(fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight, child: Row(mainAxisSize: MainAxisSize.min, children: trailing)))),
           const SizedBox(width: 2),
         ])),
         AnimatedOpacity(duration: Motion.fade(Motion.small, Motion.of(context)), opacity: dimmed ? 0.5 : 1,
