@@ -542,7 +542,7 @@ TEST(acoustic_every_kit_and_piece_setting_changes_the_sound_and_its_needs_are_ho
                                         notes::noteOn(9600, 3, 38, 0.9), notes::noteOn(14400, 4, 49, 0.8)};
     for (uint32_t k = 0; k < kAcouCount; ++k) {
         const std::string id(t[acouParam(k)].id);
-        if (id == "kit_kind") continue;  // which builder made the kit: metadata
+        if (id == "kit_kind" || id == "randomness") continue;  // which builder made the kit: metadata; Randomize's amount (rook_test)
         heard(id, kit, pattern, t[acouParam(k)].choiceCount > 0);
     }
     if (failures) std::printf("acoustic audit: %d settings changed nothing\n", failures);

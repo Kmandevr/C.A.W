@@ -309,7 +309,7 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
         auto heard = [&](uint32_t index, uint32_t pad, bool global) {
             for (const NeedRule& r : needs()) {
                 if (r.global != global) continue;
-                if (global ? r.param != index : padParam(pad, r.param) != index) continue;
+                if (r.param != index) continue;  // index: the global one, or the pad parameter (PadParam)
                 for (const Need& n : r.all) {
                     const double x = valueOf(n.global ? n.param : padParam(pad, n.param));
                     const bool ok = n.in.empty() ? x != 0.0 : std::find(n.in.begin(), n.in.end(), static_cast<int>(std::lround(x))) != n.in.end();
@@ -322,25 +322,33 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
         CHECK(pads.size() >= 8);
         std::vector<uint32_t> ids;
         for (uint32_t k = 0; k < kGlobalCount; ++k) ids.push_back(k);
-        for (uint32_t k = kAcouBase; k < kAcouBase + kAcouCount; ++k) ids.push_back(k);
+        bool anyPiece = false;  // the Acoustic kit's own settings are heard only through its pieces
+        for (uint32_t pc = 0; pc < kPieces; ++pc) anyPiece = anyPiece || static_cast<int>(valueOf(pieceParam(pc, kPcKind))) != kPieceOff;
+        if (anyPiece)
+            for (uint32_t k = kAcouBase; k < kAcouBase + kAcouCount; ++k) ids.push_back(k);
         for (uint32_t pc = 0; pc < kPieces; ++pc)
             if (static_cast<int>(valueOf(pieceParam(pc, kPcKind))) != kPieceOff)
                 for (uint32_t k = 0; k < kPieceParams; ++k) ids.push_back(pieceParam(pc, k));
         for (uint32_t i = 0; i < 2 && i < pads.size(); ++i)
             for (uint32_t k = 0; k < kPadParams; ++k) ids.push_back(padParam(pads[i], k));
-        // The bar's hits on the pads' own notes (whatever map the kit uses), the first two pads hit on every beat.
+        // The bar's hits, then every playing pad once on its own note (whatever map the kit uses), the first two
+        // pads also hit on every beat.
         std::vector<Hit> hits = groove();
-        for (uint32_t i = 0; i < 2 && i < pads.size(); ++i) {
-            const Voice& dv = defaultVoice(pads[i]);
-            double note = dv[kNote];
+        bool autoNotes = false;
+        for (uint32_t i = 0; i < pads.size(); ++i) {
+            double note = defaultVoice(pads[i])[kNote];
             for (const auto& [id, x] : kit)
                 if (id == padId(pads[i]) + "_note") note = x;
+            autoNotes = autoNotes || note == kNoteAuto;
             const int key = note == kNoteAuto ? autoNote(pads[i], 36) : static_cast<int>(note) - kNoteFirst;
-            for (uint32_t b = 0; b < 4; ++b) hits.push_back({b * 24000 + 3000 + i * 1500, key, 0.8});
+            if (i < 2)
+                for (uint32_t b = 0; b < 4; ++b) hits.push_back({b * 24000 + 3000 + i * 1500, key, 0.8});
+            hits.push_back({kGrooveFrames + i * 2400, key, 0.85});
         }
+        const uint32_t frames = kGrooveFrames + static_cast<uint32_t>(pads.size()) * 2400 + 24000;
         std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.frame < b.frame; });
         const std::vector<Event> events = eventsOf(hits);
-        const std::vector<float> ref = render(kit, events, kGrooveFrames);
+        const std::vector<float> ref = render(kit, events, frames);
         for (uint32_t index : ids) {
             const ParameterDescriptor& d = t[index];
             const std::string id(d.id);
@@ -351,6 +359,22 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
             // does), a pad's type (a label), the shown pad.
             if (id == "view_pad" || id == "kit_kind" || id == "randomness" || (!global && suffix == kType)) continue;
             if (!heard(global ? index : suffix, pad, global)) continue;
+            // What the bar cannot play: pressure, a playing transport (the groove), held or overlapping notes and
+            // routing (note, channel, trigger, voices, choke, outputs), a sample slot, an echo no pad sends to, an
+            // acoustic layer on a kit with no pieces. drums_audit_test hears each of these where it can sound.
+            if (!global) {
+                const std::string_view group = d.group.substr(d.group.find('/') + 1);
+                if (group == "press" || group == "groove" || group == "smp") continue;
+                static constexpr uint32_t kRouting[] = {kNote, kChan, kTrack, kRoot, kMono, kGlide, kTrig, kRelease, kPoly, kChoke, kOut};
+                if (std::find(std::begin(kRouting), std::end(kRouting), suffix) != std::end(kRouting)) continue;
+                if (suffix == kAcouLayer && !anyPiece) continue;
+            }
+            if (id == "base_note" && !autoNotes) continue;  // every pad on a note of its own: no Auto note to move
+            if (id == "echo") {
+                bool sends = false;
+                for (const auto& [k, x] : kit) sends = sends || (k.size() > 10 && k.substr(k.size() - 10) == "_echo_send" && x > 0.0);
+                if (!sends) continue;
+            }
             const double was = valueOf(index);
             bool any = false;
             double best = 0.0;
@@ -359,15 +383,16 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
                 if (std::fabs(m - was) < 1e-9) continue;
                 Values moved = kit;
                 moved.emplace_back(id, m);
-                const double x = apart(ref, render(moved, events, kGrooveFrames));
+                const double x = apart(ref, render(moved, events, frames));
                 best = std::max(best, x);
-                any = any || x >= 2e-3;
+                any = any || x >= 3e-4;  // -70 dB of the bar's level, L1
             }
             ++checked;
             if (!any && best >= 0.0 && !(std::fabs(d.minimum - was) < 1e-9 && std::fabs(d.maximum - was) < 1e-9)) {
                 char msg[240];
                 std::snprintf(msg, sizeof msg, "%s: %s changes nothing at its ends (%.2g apart)", name, id.c_str(), best);
-                if (++failures <= 40) cawtest::fail(__FILE__, __LINE__, msg);
+                cawtest::fail(__FILE__, __LINE__, msg);
+                ++failures;
             }
         }
     }

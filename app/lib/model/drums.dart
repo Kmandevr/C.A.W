@@ -577,10 +577,11 @@ bool _apply(DeviceTarget t, DrumsLayout layout, int pad, Map<String, double>? r,
   // A Simulated pad's piece (1.1.3): its settings come back by full id.
   final piece = {for (final e in r.entries) if (layer == null && _pieceId.hasMatch(e.key)) e.key: e.value};
   if (values.isEmpty && piece.isEmpty) return false;
-  for (final e in piece.entries) {
-    t.setLive(e.key, e.value);
-  }
-  writePad(t, layout, pad, values);
+  // One undo step for the pad and its piece (setAll commits once; the note and channel stay where they are).
+  t.setAll({
+    for (final e in values.entries) if (!_keepOnSound.contains(e.key)) layout.id(pad, e.key): e.value,
+    ...piece,
+  });
   return true;
 }
 
@@ -599,10 +600,11 @@ const drumKindDefaults = ['Synth kit: 808-style', 'Produced kit: Pop', 'Acoustic
 int drumKindOf(DeviceTarget t) => t.value('kit_kind').round() - 1;
 
 /// A preset's category in the browser, and its place (lower first): the kinds' default kits first, then each kind's
-/// other kits (Acoustic, Produced, Synth), the classic kits, then the one-pad sounds by type.
+/// other kits (Acoustic, Produced, Synth), the classic kits, then the one-pad sounds by type. The defaults are
+/// "Best kits", so each category is one run in the list.
 (String, int) drumPresetCategory(String name, Map<String, double> params) {
   for (final (i, kind) in const ['Acoustic', 'Produced', 'Synth'].indexed) {
-    if (name.startsWith('$kind kit: ')) return ('$kind kits', drumKindDefaults.contains(name) ? i : 10 + i);
+    if (name.startsWith('$kind kit: ')) return drumKindDefaults.contains(name) ? ('Best kits', i) : ('$kind kits', 10 + i);
   }
   if (name.startsWith('Kit: ')) return ('Classic kits', 20);
   final type = (params['a1_type'] ?? -1).round();

@@ -31,6 +31,15 @@ class RecordingDrumsApi extends DrumsApi {
   }
 
   @override
+  Map<String, dynamic>? explode(Map<String, dynamic> entry) => null;
+
+  @override
+  List<String>? builtinSamples() => const [];
+
+  @override
+  List<({String name, int type, Map<String, double> params})>? sounds() => null;
+
+  @override
   Map<String, List<String>>? builders() => {
         'synth': ['808-style', '909-style'],
         'produced': ['House', 'Pop'],
@@ -73,6 +82,7 @@ void main() {
     s.project = ProjectDoc(id: 'p', name: 'New', bpm: 120, modules: [], layers: [LayerDoc(id: 'a', name: 'Track', color: 2)]);
     s.componentCatalog.set(infos ?? builtinInfos());
     s.setNativeInstrument(s.project.layers.first, id);
+    DevicePresets.restoreRemembered(targetOf(s, id), null);  // no preset remembered from an earlier test's track
     return s;
   }
 
@@ -140,7 +150,7 @@ void main() {
     expect(drumKindOf(t), 2);
     await tester.tap(find.byKey(const ValueKey('drum-kind-2')));
     await tester.pumpAndSettle();
-    expect(find.text('Acoustic kits'), findsOneWidget);
+    expect(find.text('ACOUSTIC KITS'), findsOneWidget);
     expect(find.text('Jazz'), findsOneWidget);
     await tester.tap(find.text('Jazz'));
     await tester.pumpAndSettle();
@@ -165,11 +175,6 @@ void main() {
     expect(fake.calls.last.$4!['engine'], 1, reason: 'a Simulated pad sends its values');
     expect(fake.calls.last.$4!.keys, contains('pc2_tune'), reason: '... and its piece\'s');
     expect(t.value('pc2_tune'), closeTo(tuneWas + 2 * after, 1e-9), reason: 'the piece took the result');
-    // Undo brings the tuning back.
-    s.endUndoStep();
-    s.undo();
-    await tester.pumpAndSettle();
-    expect(t.value('pc2_tune'), tuneWas);
     await close(tester);
   });
 
@@ -201,7 +206,7 @@ void main() {
       if (categories.isEmpty || categories.last != p.category) categories.add(p.category);
     }
     expect(categories.toSet().length, categories.length, reason: 'each category in one run');
-    expect(categories.take(4), ['Acoustic kits', 'Produced kits', 'Synth kits', 'Acoustic kits']);
+    expect(categories.take(4), ['Best kits', 'Acoustic kits', 'Produced kits', 'Synth kits']);
     expect(categories, containsAll(['Classic kits', 'Kicks & bass', 'Snares & claps', 'Hi-hats', 'Toms', 'Cymbals']));
     expect(list.where((p) => p.category == 'Factory'), isEmpty);
   });

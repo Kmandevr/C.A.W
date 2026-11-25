@@ -638,7 +638,7 @@ TEST(drums_info_and_explode) {
     CHECK(j.get("sounds") && j.get("sounds")->arr.size() >= 40);
     CHECK(j.get("kits") && j.get("kits")->arr.size() == 22);
     CHECK(j.get("layers") && j.get("layers")->arr.size() == 23);
-    CHECK(j.get("builders") && j.get("builders")->get("acoustic") && j.get("builders")->get("acoustic")->arr.size() == 8);
+    CHECK(j.get("builders") && j.get("builders")->get("acoustic") && j.get("builders")->get("acoustic")->arr.size() == 9);  // 1.1.3 added Studio
     CHECK(j.get("gm") && j.get("gm")->arr.front().number("note", 0) == 35.0);
     // The default kit explodes into its 16 bank-A pads, each a Single-mode Drums with that pad's sound on A1.
     char* x = caw_drums_explode(R"({"id":"org.caw.drums","params":{"a3_note":3,"a5_level":-60},"samples":[{"slot":2,"builtin":"Clap"}]})");

@@ -286,7 +286,10 @@ extension ArrangeFx on AppState {
       final start = LayerDoc.newInstrumentPresets[componentId], use = layer.instrument;
       if (fresh && start != null && use != null) {
         final preset = componentCatalog.value[componentId]?.presets.where((p) => p.name == start).firstOrNull;
-        if (preset != null) use.params = {...preset.params, ...use.params};
+        if (preset != null) {
+          use.params = {...preset.params, ...use.params};
+          use.preset = start;  // the header names it; the engine reads the same values either way
+        }
       }
     });
   }

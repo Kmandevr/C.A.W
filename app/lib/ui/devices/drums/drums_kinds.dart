@@ -110,26 +110,34 @@ class _KindCard extends StatelessWidget {
           color: selected ? c.withValues(alpha: 0.2) : Neon.ink.withValues(alpha: 0.03),
           border: Border.all(color: selected ? c : Neon.line, width: selected ? 1.5 : 1),
           boxShadow: selected ? [BoxShadow(color: c.withValues(alpha: 0.32), blurRadius: 10)] : null),
-        child: Row(children: [
-          AnimatedScale(
-            duration: Motion.fade(Motion.standard, level),
-            scale: selected ? 1.0 : 0.85,
-            child: Icon(_kindIcons[kind], size: 18, color: selected ? c : Neon.dim)),
-          const SizedBox(width: 6),
-          Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name.toUpperCase(), maxLines: 1, overflow: TextOverflow.fade, softWrap: false,
-              style: TextStyle(fontSize: 11, letterSpacing: 1.1, fontWeight: FontWeight.w900, color: selected ? Neon.text : Neon.dim)),
-            AnimatedSwitcher(
-              duration: Motion.fade(Motion.standard, level),
-              child: Text(style ?? (selected ? 'Edited' : _kindBlurbs[kind]), key: ValueKey('drum-kind-style-$kind-${style ?? ''}'),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, color: selected ? c : Neon.dim))),
-          ])),
-          AnimatedOpacity(
-            duration: Motion.fade(Motion.standard, level),
-            opacity: selected ? 1 : 0,
-            child: Icon(Icons.expand_more, size: 16, color: c)),
-        ]),
+        child: LayoutBuilder(builder: (context, box) {
+          final roomy = box.maxWidth >= 118;  // a 360 dp phone's cards drop the icon to keep the kind's whole name
+          return Row(children: [
+            if (roomy) ...[
+              AnimatedScale(
+                duration: Motion.fade(Motion.standard, level),
+                scale: selected ? 1.0 : 0.85,
+                child: Icon(_kindIcons[kind], size: 18, color: selected ? c : Neon.dim)),
+              const SizedBox(width: 6),
+            ],
+            Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name.toUpperCase(), maxLines: 1, overflow: TextOverflow.fade, softWrap: false,
+                style: TextStyle(fontSize: 11, letterSpacing: roomy ? 1.1 : 0.6, fontWeight: FontWeight.w900,
+                  color: selected ? Neon.text : Neon.dim)),
+              Row(children: [
+                Flexible(child: AnimatedSwitcher(
+                  duration: Motion.fade(Motion.standard, level),
+                  child: Text(style ?? (selected ? 'Edited' : _kindBlurbs[kind]), key: ValueKey('drum-kind-style-$kind-${style ?? ''}'),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: selected ? c : Neon.dim)))),
+                AnimatedOpacity(
+                  duration: Motion.fade(Motion.standard, level),
+                  opacity: selected ? 1 : 0,
+                  child: Icon(Icons.expand_more, size: 14, color: c)),
+              ]),
+            ])),
+          ]);
+        }),
       )),
     ));
   }
