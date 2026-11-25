@@ -8,7 +8,6 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
 
 ## Done and verified (each an agent branch; commit 81b1cab has every tip as a parent, so all are on GitHub)
 - Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc caec31f (WIP: cost over 24000, dead knobs; redo as the Tabernacle organ).
-- Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
 ## Open
 - Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell only the Swell?; Rook cards/Studio; panels; EP/tonewheel by ear.
 - Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
@@ -16,6 +15,8 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
   budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
 
 ## Next
+- After the current work (owner): optimise Rook without changing its sound (it uses ~40 % CPU on its own; profile,
+  bit-identical or reference-equal renders); better kick tools so a kick sounds like a kick (the synth snare is good).
 - Starling crossfade (owner): pitch/tone jumps. Measured: dominant partial differs rec vs model (key57 x2->x1, key48
   x1->x2); treble model 13-40 dB below the attack within 0.3 s; keys 105/108 recording strongest an octave below.
   Tone match done (b7126bf); left: treble decay, top zones; guitar's level jump above its recorded range.
