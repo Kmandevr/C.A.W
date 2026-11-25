@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../model/device_display.dart';
 import '../../theme.dart';
+import '../kit/birds.dart';
 import '../kit/hero.dart';
 
 /// The models in `variant` order (engine/src/builtin_timber.cpp), as the cards name them.
@@ -514,44 +515,6 @@ class TimberPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant TimberPainter o) => true;
-}
-
-/// Timber's one motif: a small woodpecker perched with its feet at [feet], [size] tall, facing left (its beak at the
-/// strike point). [beak] 0..1 tilts it from upright to pecking (the piano's hammer hardness).
-void paintWoodpecker(Canvas canvas, Offset feet, double size, Color color, {double beak = 0.4}) {
-  final h = size.clamp(10.0, 30.0);
-  canvas.save();
-  canvas.translate(feet.dx, feet.dy);
-  final body = Paint()..color = Color.lerp(Neon.ink, Neon.bg, 0.15)!;
-  final edge = Paint()
-    ..color = color
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 1;
-  // Tail prop and body, leaning against the post.
-  final tail = Path()
-    ..moveTo(h * 0.18, -h * 0.05)
-    ..lineTo(h * 0.42, h * 0.12)
-    ..lineTo(h * 0.26, -h * 0.2)
-    ..close();
-  canvas.drawPath(tail, body);
-  canvas.rotate(-0.15 - beak * 0.25);
-  final torso = Rect.fromCenter(center: Offset(h * 0.12, -h * 0.42), width: h * 0.42, height: h * 0.7);
-  canvas.drawOval(torso, body);
-  canvas.drawOval(torso, edge);
-  // The head, its red crest and the beak (pointing left, down as it pecks).
-  final head = Offset(h * 0.02, -h * 0.82);
-  canvas.drawCircle(head, h * 0.17, body);
-  canvas.drawCircle(head, h * 0.17, edge);
-  canvas.drawPath(Path()..addArc(Rect.fromCircle(center: head, radius: h * 0.17), -math.pi * 0.95, math.pi * 0.7),
-      Paint()..color = Neon.pink..style = PaintingStyle.stroke..strokeWidth = h * 0.09);
-  final beakPath = Path()
-    ..moveTo(head.dx - h * 0.12, head.dy - h * 0.05)
-    ..lineTo(head.dx - h * 0.46, head.dy + h * 0.02 + beak * h * 0.06)
-    ..lineTo(head.dx - h * 0.12, head.dy + h * 0.06)
-    ..close();
-  canvas.drawPath(beakPath, Paint()..color = color);
-  canvas.drawCircle(head + Offset(-h * 0.05, -h * 0.03), h * 0.035, Paint()..color = color);
-  canvas.restore();
 }
 
 /// The model cards' icons ([ChoiceIcon]): keys, tines, drawbars, a guitar, a bow on a string, bars, a horn.
