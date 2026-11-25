@@ -481,9 +481,9 @@ struct Organ {
         // dry flute reads 1.2 cents and 0.6 dB (the recording's level also swings with its room's reflections).
         const double scale = wind / 0.3;
         const float wc = static_cast<float>(wanderCents() * scale), wd = static_cast<float>(wanderDb() * scale);
-        // Worked out every other block for each pipe (half of them each block): the wander is slow.
-        const float follow = static_cast<float>(std::min(1.0, 4.0 * kControlFrames / sr));
-        const float jump = static_cast<float>(1.0 - 4.0 * kControlFrames / sr);
+        // A pipe's wander worked out every fourth block (a quarter of them each block): it is slow.
+        const float follow = static_cast<float>(std::min(1.0, 8.0 * kControlFrames / sr));
+        const float jump = static_cast<float>(1.0 - 8.0 * kControlFrames / sr);
         const uint32_t parity = v.tick++ & 1u;
         constexpr float kLine = 1.0f / (2 * kControlFrames);  // a line runs two blocks
         float tone = 0;
@@ -499,7 +499,8 @@ struct Organ {
             // Where its lines are now; then new ones for the next two blocks.
             float env = v.envAt(k), gain = v.gainAt(k), spoke = v.spokeAt(k);
             v.lineAt[k] = v.clock;
-            if (want && !v.on[k]) open(v, k), gain = v.gain[k], spoke = v.spoke[k];
+            const bool fresh = want && !v.on[k];
+            if (fresh) open(v, k), gain = v.gain[k], spoke = v.spoke[k];
             if (!want) v.on[k] = false;
             if (!v.on[k] && env < 1e-5f) {
                 v.env[k] = v.envStep[k] = v.drawOf[k] = v.toneOf[k] = 0;
@@ -515,14 +516,17 @@ struct Organ {
             if (spokeEnd > 0.999f) spokeEnd = 1.0f;
             if (spoke > 0.999f) spoke = 1.0f;
             v.spoke[k] = spoke, v.spokeStep[k] = (spokeEnd - spoke) * kLine;
-            const float u = v.rng.next();  // one draw: a new pitch target at one end, a new level one at the other
-            if (u > jump) v.wPitchTo[k] = v.rng.next();
-            else if (u < -jump) v.wLevelTo[k] = v.rng.next();
-            v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
-            v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
-            v.settle[k] *= v.settleK[k] * v.settleK[k];
-            const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
-            v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod);
+            // Its pitch and wander every fourth block (every other time it is worked out), or now when it opens.
+            if (all || fresh || (((static_cast<uint32_t>(k) >> 1) ^ (v.tick >> 1)) & 1u) == 0) {
+                const float u = v.rng.next();  // one draw: a new pitch target at one end, a new level one at the other
+                if (u > jump) v.wPitchTo[k] = v.rng.next();
+                else if (u < -jump) v.wLevelTo[k] = v.rng.next();
+                v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
+                v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
+                v.settle[k] *= v.settleK[k] * v.settleK[k] * v.settleK[k] * v.settleK[k];
+                const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
+                v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod);
+            }
             // A stop retired holds its gain (its pipe releases); a stop drawn or moving eases to its new level.
             v.gain[k] = gain, v.gStep[k] = 0;
             if (level[k] > 0.0f) {
