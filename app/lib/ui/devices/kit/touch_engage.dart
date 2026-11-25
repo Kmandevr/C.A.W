@@ -78,6 +78,7 @@ class EngageVerticalDrag extends StatelessWidget {
             EngageVerticalDragRecognizer: GestureRecognizerFactoryWithHandlers<EngageVerticalDragRecognizer>(
               () => EngageVerticalDragRecognizer(debugOwner: this),
               (r) => r
+                ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
                 ..onStart = onStart
                 ..onUpdate = onUpdate
                 ..onEnd = onEnd
@@ -128,7 +129,7 @@ mixin EngageOnHold on OneSequenceGestureRecognizer {
   void handleEvent(PointerEvent event) {
     if (_waiting && event is PointerMoveEvent && event.pointer == _first) {
       final d = event.position - _from;
-      if (d.dx.abs() >= kTouchSlop / 2 && d.dx.abs() * 2 >= d.dy.abs()) _engage();
+      if (d.dx.abs() >= (gestureSettings?.touchSlop ?? kTouchSlop) / 2 && d.dx.abs() * 2 >= d.dy.abs()) _engage();
     }
     super.handleEvent(event);
   }
@@ -243,6 +244,7 @@ class EngageKnobDrag extends StatelessWidget {
           EngageKnobPanRecognizer: GestureRecognizerFactoryWithHandlers<EngageKnobPanRecognizer>(
             () => EngageKnobPanRecognizer(debugOwner: this),
             (r) => r
+              ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
               ..onStart = onStart
               ..onUpdate = update == null ? null : (d) { update(folded(d)); }
               ..onEnd = onEnd
