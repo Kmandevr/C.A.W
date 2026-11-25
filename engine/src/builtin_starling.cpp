@@ -1,4 +1,4 @@
-// Starling (org.caw.starling): each model's descriptor and class as a variant of one merged device, its presets, registration and sizes.
+// Starling (org.caw.starling): each model's descriptor and class as a variant of one merged device (the piano here, the plucked strings in starling_strings.cpp), its presets, registration and sizes.
 #include "builtin_starling.h"
 
 #include <deque>
@@ -18,7 +18,7 @@ namespace {
 using timber::Instrument;
 
 constexpr std::string_view kName = "Starling";
-constexpr std::string_view kModels[] = {"Piano"};
+constexpr std::string_view kModels[] = {"Piano", "Classical guitar", "Harp"};
 constexpr uint32_t kModelCount = sizeof(kModels) / sizeof(kModels[0]);
 
 constexpr PortDescriptor kPorts[] = {
@@ -104,8 +104,21 @@ ModuleProcessor* make() noexcept {
     return new (std::nothrow) Instrument<M>(D(), Index);
 }
 
+// ---------- Plucked strings (starling_strings.cpp) ----------
+template <int Which>
+const ModuleDescriptor& stringsVariant() {
+    static const ModuleDescriptor& d = stringsDescriptor(Which, kModels, static_cast<uint32_t>(Which + 1));
+    return d;
+}
+template <int Which>
+ModuleProcessor* makeString() noexcept {
+    return makeStrings(Which, stringsVariant<Which>(), Which + 1);
+}
+
 const fx::Variant kVariants[] = {
     {kModels[0], &pianoDescriptor, &make<PianoModel, &pianoDescriptor, 0>},
+    {kModels[1], &stringsVariant<0>, &makeString<0>},
+    {kModels[2], &stringsVariant<1>, &makeString<1>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kModelCount);
 const fx::MergedDevice kDevices[] = {{kStarlingId, kName, kVariants}};
@@ -139,6 +152,23 @@ const std::vector<BuiltinPreset>* starlingPresets(std::string_view id) {
         {"Honky-tonk upright", "Piano: an old upright out of tune with itself, for saloon and ragtime", with(0, {{"character", 1}, {"unison", 5.0}, {"hammer", 0.7}})},
         {"Light grand (Eco)", "Piano at Eco: the grand for less CPU, for big projects on a phone", with(0, {{"tier", 1}})},
         {"Grand for export (High)", "Piano at High: more strings' detail and phantom partials, for final renders", with(0, {{"tier", 3}, {"phantom", 0.7}})},
+        // Classical guitar (1): FreePats' nylon-string guitar's own plucks on a measured string, close and dry.
+        {"Classical guitar", "Classical guitar: nylon strings plucked with the fingers, close and dry", with(1, {})},
+        {"Classical guitar, a little room", "Classical guitar: the same with a small room around it", with(1, {{"space", 0.15}})},
+        {"Nail by the bridge", "Classical guitar: plucked near the bridge with the nail, bright and crisp (ponticello)", with(1, {{"position", 0.07}, {"hardness", 0.85}})},
+        {"Warm sul tasto", "Classical guitar: plucked over the fingerboard with the flesh, round and dark (tasto)", with(1, {{"position", 0.35}, {"hardness", 0.2}, {"tone", -0.1}})},
+        {"Palm-muted nylon", "Classical guitar: the strings damped at the bridge, short and percussive", with(1, {{"damping", 0.7}})},
+        {"Let-ring arpeggios", "Classical guitar: every string rings on (or hold CC 64), for arpeggios and campanella", with(1, {{"sustain", 1.0}, {"space", 0.1}})},
+        {"Buzzy old guitar", "Classical guitar: a low action, fret buzz on hard plucks and the fingers' noises up", with(1, {{"noise", 0.8}, {"hardness", 0.7}})},
+        {"Light guitar (Eco)", "Classical guitar at Eco: fewer voices and no fret buzz, for big projects on a phone", with(1, {{"tier", 1}})},
+        // Harp (2): VCSL's concert pedal harp's own plucks, every string let ring.
+        {"Concert harp", "Harp: the pedal harp's strings plucked in the middle, ringing on, close and dry", with(2, {})},
+        {"Harp in a hall", "Harp: the same with a hall's room around it", with(2, {{"space", 0.35}})},
+        {"Near the soundboard", "Harp: plucked near the soundboard (pres de la table), thin, metallic and guitar-like", with(2, {{"position", 0.06}, {"hardness", 0.7}})},
+        {"Soft harp", "Harp: a gentle flesh pluck, dark and round, for lullabies and film", with(2, {{"hardness", 0.05}, {"tone", -0.15}})},
+        {"Damped harp", "Harp: each string damped as you let go (etouffe), for staccato and bass lines", with(2, {{"sustain", 0.0}, {"release", 0.08}})},
+        {"Harp, muffled", "Harp: the strings half damped by the hand, short and woody", with(2, {{"damping", 0.6}})},
+        {"Harp for export (High)", "Harp at High: more of the strings' inharmonicity, for final renders", with(2, {{"tier", 3}})},
     };
     return id == kStarlingId ? &p : nullptr;
 }
@@ -147,7 +177,13 @@ size_t starlingBytes(uint32_t variant, double sampleRate) noexcept {
     if (variant >= kModelCount) return 0;
     std::unique_ptr<ModuleProcessor> p(kVariants[variant].create());
     if (!p || !p->activate(sampleRate, 64)) return 0;
-    return static_cast<Instrument<PianoModel>&>(*p).bytes();
+    if (variant != kPiano) return stringsBytes(*p, static_cast<int>(variant) - 1);
+    auto* piano = dynamic_cast<Instrument<PianoModel>*>(p.get());
+    return piano ? piano->bytes() : 0;
+}
+
+Strings* starlingStringsModel(ModuleProcessor& p, uint32_t variant) noexcept {
+    return variant == kClassicalGuitar || variant == kHarpVariant ? stringsModel(p, static_cast<int>(variant) - 1) : nullptr;
 }
 
 }  // namespace caw::starling

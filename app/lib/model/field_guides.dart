@@ -283,10 +283,10 @@ const fieldGuides = <String, FieldGuide>{
     ('Glue', 'A bus compressor on the whole kit.'),
     ('Kit drive', 'Warmth and grit on the whole kit.'),
   ], 'Kit: 808'),
-  'org.caw.starling': FieldGuide('Starling is a real-sounding grand piano: modelled strings with a recorded grand\'s '
-      'attack and noises.', [
-    ('Hammer', 'Softer or harder hammers: darker or brighter.'),
-    ('Noise', 'The keys and pedal you hear, up close or none.'),
+  'org.caw.starling': FieldGuide('Starling is real-sounding struck and plucked strings: a grand piano, a classical '
+      'guitar or a concert harp (pick it under Model), modelled strings with the real instrument\'s recorded attack.', [
+    ('Hammer', 'Piano: softer or harder hammers, darker or brighter.'),
+    ('Pluck position', 'Guitar and harp: near the bridge is thin and bright, the middle round and warm.'),
     ('Space', 'A room around it (off by default: add your own reverb).'),
   ], 'Grand piano'),
   'org.caw.nightingale': FieldGuide('Nightingale is a bowed string: violin, viola, cello or double bass, played by a '

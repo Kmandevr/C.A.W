@@ -186,6 +186,8 @@ void rangeOf(const Instrument& ins, int var, double& lo, double& hi) {
     if (std::string(ins.id) == "org.caw.nightingale") lo = kNight[var][0], hi = kNight[var][1];
     else if (std::string(ins.id) == "org.caw.curlew") lo = kCurlew[var][0], hi = kCurlew[var][1];
     else if (std::string(ins.id) == "org.caw.woodpecker") lo = kWood[var][0], hi = kWood[var][1];
+    else if (std::string(ins.id) == "org.caw.starling" && var == 1) lo = 40, hi = 83;  // the classical guitar E2..B5
+    else if (std::string(ins.id) == "org.caw.starling" && var == 2) lo = 28, hi = 101;  // the harp E1..F7
     else lo = ins.low, hi = ins.high;
 }
 
@@ -278,7 +280,7 @@ TEST(instrument_glitch_scan) {
         const int variants = variantCount(ins.id);
         for (int var = 0; var < variants; ++var) {
             const std::vector<std::pair<std::string, double>> chars =
-                std::string(ins.id) == "org.caw.starling" ? std::vector<std::pair<std::string, double>>{{"Grand", 0}, {"Upright", 1}, {"Felt", 2}}
+                std::string(ins.id) == "org.caw.starling" && var == 0 ? std::vector<std::pair<std::string, double>>{{"Grand", 0}, {"Upright", 1}, {"Felt", 2}}
                                                           : std::vector<std::pair<std::string, double>>{{"", 0}};
             for (const auto& [cname, cval] : chars) {
                 Values v = ins.extra;

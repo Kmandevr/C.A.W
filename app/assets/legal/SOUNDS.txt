@@ -4,6 +4,18 @@ Source: https://github.com/sfzinstruments/SalamanderGrandPiano
 
 Changes made for C.A.W: the first 200 ms of 120 notes, 22 key-release noises and 4 pedal noises, trimmed, faded, folded to mono and normalised per clip, and played together with C.A.W's modelled strings.
 
+Starling's classical guitar plays recorded plucks from FreePats' Spanish Classical Guitar (2019-06-18) by Roberto (roberto@zenvoid.org) for the FreePats project, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (no credit is required; it is given here with thanks).
+
+Source: https://freepats.zenvoid.org/Guitar/acoustic-guitar.html
+
+Changes made for C.A.W: the first 134 ms of 16 notes (E2 to C6), trimmed, faded and normalised per clip, measured for their tuning, inharmonicity and decay, and played together with C.A.W's modelled strings and body.
+
+Starling's harp plays recorded plucks of the concert harp from the Versilian Community Sample Library (VCSL) by Versilian Studios LLC, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (no credit is required; it is given here with thanks).
+
+Source: https://github.com/sgossner/VCSL (Chordophones/Composite Chordophones/Concert Harp)
+
+Changes made for C.A.W: the first 149 ms of 46 notes (23 strings, E1 to F7, two dynamics each), trimmed, faded, folded to mono and normalised per clip, measured for their tuning, inharmonicity and decay, and played together with C.A.W's modelled strings and body.
+
 Woodpecker's tuned percussion plays recorded mallet strokes from the Versilian Community Sample Library (VCSL) by Versilian Studios LLC, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (no credit is required; it is given here with thanks).
 
 Source: https://github.com/sgossner/VCSL (marimba, xylophone, glockenspiel, vibraphone, Tubular Bells 1 and Timpani 1)

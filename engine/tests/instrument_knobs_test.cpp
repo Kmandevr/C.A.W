@@ -164,6 +164,7 @@ struct Context {
 };
 const Context kContexts[] = {
     {"org.caw.starling", "resonance", {{"sustain", 1.0}}, 0, "the sustain pedal down"},
+    {"org.caw.starling", "release", {{"sustain", 0.0}}, 0, "the pedal up (the harp lets its strings ring by default)"},
     {"org.caw.starling", "sympathy", {}, 0, "the chord's keys held (their undamped strings answer)"},
     {"org.caw.starling", "glide", {{"velocity", 1.0}}, 2, "a loud bass note"},
     {"org.caw.starling", "velocity", {}, 1, "soft notes"},
@@ -207,7 +208,7 @@ Phrase variantChord(const std::string& id, int var) {
         double lo[6], hi[6];
     };
     static const R kRanges[] = {
-        {"org.caw.starling", {48}, {108}},
+        {"org.caw.starling", {48, 40, 28}, {108, 83, 101}},  // piano, classical guitar (E2..B5), harp (E1..F7)
         {"org.caw.nightingale", {55, 48, 36, 28}, {96, 88, 76, 60}},
         {"org.caw.curlew", {60, 50, 49, 54, 40, 41}, {96, 89, 80, 82, 72, 77}},
         {"org.caw.woodpecker", {48, 65, 79, 53, 60, 40}, {96, 108, 108, 89, 77, 57}},

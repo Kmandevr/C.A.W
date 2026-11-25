@@ -113,6 +113,10 @@ int timberCost(double seconds) {
         {"org.caw.starling", "Starling piano Normal: 16 voices", 0, {{"tier", 2}}, 16, 34000},
         {"org.caw.starling", "Starling piano Normal: 16 voices, pedal down", 0, {{"tier", 2}, {"sustain", 1}, {"resonance", 0.6}}, 16, 35500},
         {"org.caw.starling", "Starling piano Eco: 16 voices", 0, {{"tier", 1}}, 16, 27000},
+        {"org.caw.starling", "Starling guitar Normal: 16 voices", 1, {{"tier", 2}}, 16, 17500},
+        {"org.caw.starling", "Starling guitar High: 16 voices, let ring", 1, {{"tier", 3}, {"sustain", 1}}, 16, 18200},
+        {"org.caw.starling", "Starling harp Normal: 16 voices", 2, {{"tier", 2}}, 16, 17700},
+        {"org.caw.starling", "Starling harp Eco: 16 voices, Body 1", 2, {{"tier", 1}, {"body", 1}}, 16, 18300},
         {"org.caw.nightingale", "Nightingale violin: 8 voices", 0, {}, 8, kNew},
         {"org.caw.nightingale", "Nightingale cello: 8 voices, vibrato 1", 2, {{"vibrato", 1}}, 8, kNew},
         {"org.caw.nightingale", "Nightingale bass: 8 voices, High", 3, {{"tier", 3}}, 8, 15000},  // High: exports
