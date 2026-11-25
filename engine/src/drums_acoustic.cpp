@@ -54,7 +54,7 @@ struct PartClips {
 // Each part's level against the model's (a drum's recorded layer sits on its synthesized heads; a cymbal's replaces
 // its plate), measured with rook_recorded_parts_balance_against_the_model (drums_recorded_test.cpp).
 constexpr float kPartLevel[kPartCount] = {0.55f, 0.5f, 0.5f, 0.55f, 0.6f, 0.28f, 0.5f, 0.5f,
-                                          0.5f,  0.5f, 0.5f, 0.5f,  0.55f, 0.5f, 0.5f, 0.55f};
+                                          0.71f, 0.85f, 0.95f, 0.6f, 2.1f, 1.12f, 1.77f, 0.55f};
 
 double clampd(double v, double lo, double hi) noexcept {
     if (!(v == v)) return lo;
