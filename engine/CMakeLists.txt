@@ -354,6 +354,8 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
   target_sources(caw_tests PRIVATE tests/bittern_test.cpp)  # 1.1.3: Bittern, the pipe organ
   target_sources(caw_tests PRIVATE tests/woodpecker_test.cpp)  # 1.1.3: Woodpecker, the tuned percussion
+  target_sources(caw_tests PRIVATE tests/instrument_knobs_test.cpp)  # 1.1.3: every instrument knob is audible
+  target_sources(caw_tests PRIVATE tests/instrument_glitch_test.cpp)  # 1.1.3: no glitches, noises only at their moment
   # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
   add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
