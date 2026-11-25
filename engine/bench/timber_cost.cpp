@@ -195,8 +195,11 @@ int timberCost(double seconds) {
         {"org.caw.curlew", "Curlew clarinet: 8 voices", 1, {}, 8, kNew},
         {"org.caw.curlew", "Curlew saxophone: 8 voices, growl", 2, {{"growl", 0.5}}, 8, kNew},
         {"org.caw.curlew", "Curlew trombone: 8 voices", 4, {}, 8, 13000},  // brass: the lips and steepening, plus the body (Timber's 8,957)
-        {"org.caw.bittern", "Bittern: 10 keys, principal chorus, room", 0, {}, 10, 24000},  // heavy: the room is part of it
-        {"org.caw.bittern", "Bittern: 10 keys, full organ", 0, {{"principal8", 1}, {"octave4", 1}, {"fifteenth2", 1}, {"mixture", 1}, {"trumpet8", 1}, {"subbass32", 1}, {"gamba8", 1}, {"celeste8", 1}}, 10, 24000},
+        // Bittern (1.1.3-alpha.3): every pipe speaks on its own (its speech and level a line across each control
+        // block, the speaking spectrum while it speaks), the recorded speech, the breath and the room. Measured 21,900
+        // and 33,200 locally (x86-64, 2026-11-25; alpha.1's static tables 13,100 and 17,400); ceilings about 1.4x.
+        {"org.caw.bittern", "Bittern: 10 keys, principal chorus, room", 0, {}, 10, 31000},  // heavy: the room is part of it
+        {"org.caw.bittern", "Bittern: 10 keys, full organ", 0, {{"principal8", 1}, {"octave4", 1}, {"fifteenth2", 1}, {"mixture", 1}, {"trumpet8", 1}, {"subbass32", 1}, {"gamba8", 1}, {"celeste8", 1}}, 10, 46000},
         // Woodpecker: 8 (High 12) modes a voice and a recorded attack a note; the marimba and vibraphone add the tube.
         // Measured 9,400 / 8,700 / 7,500 / 7,300 locally (x86-64, 2026-11-24); ceilings about 1.4x.
         {"org.caw.woodpecker", "Woodpecker marimba: 16 voices", 0, {}, 16, 13500},

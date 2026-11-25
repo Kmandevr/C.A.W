@@ -107,7 +107,7 @@ struct Organ {
     static constexpr uint32_t kTrem = kStops, kWind = kStops + 1, kChiff = kStops + 2, kTremRate = kStops + 3,
                               kReg = kStops + 4;
     static constexpr uint32_t kModelParams = kStops + 5;
-    static constexpr int kPlayers = 6;  // recorded speech clips per note
+    static constexpr int kPlayers = 4;  // recorded speech clips per note: one per recorded registration
     static constexpr int kBreathBands = 4;
     static constexpr float kBreathDamp = 0.25f;  // the breath's band-passes: Q 4
     static constexpr float kOut = 0.12f;  // a rank at level 1 (its table's peak 1)
@@ -127,15 +127,23 @@ struct Organ {
         const float* steady[kStops] = {};
         const float* speaking[kStops] = {};
         float rms[kStops] = {};
-        float env[kStops] = {};      // its speech and release (0..1; the pipe sounds env^2)
+        // Its speech and release (0..1; the pipe sounds env^2): a one-pole worked out per control block, env at
+        // the block's start and envTo at its end, a line across it (envStep a sample).
+        float env[kStops] = {}, envTo[kStops] = {}, envStep[kStops] = {};
         float spoke[kStops] = {};    // how far it has spoken (the spectrum, speaking to steady)
-        float rise[kStops] = {};     // its one-pole's coefficient while it speaks
-        float gain[kStops] = {}, gainTo[kStops] = {};  // its level (the stop, its wander, the wind), smoothed
+        float rise[kStops] = {};     // its one-pole's decay over a control block while it speaks
+        // Its level (the stop, its wander, the wind): eased toward the knob per control block (about 5 ms), and a
+        // line from the block's start (gain) to its end (gainTo) across it, sample by sample (gStep a sample; pos the
+        // voice's place in the block), so no sample's level depends on the last one's and any block size gives the
+        // same bits.
+        float gain[kStops] = {}, gainTo[kStops] = {}, gStep[kStops] = {};
+        uint32_t pos = 0;
         float tuning[kStops] = {};   // its fixed tuning error (cents)
         float strikeRise[kStops] = {};  // this strike's own speed of speech (a factor near 1)
         float settle[kStops] = {}, settleK[kStops] = {};  // its speech's pitch error (cents) and its decay a block
         float wPitch[kStops] = {}, wPitchTo[kStops] = {}, wLevel[kStops] = {}, wLevelTo[kStops] = {};
-        float relK = 0;              // the release's one-pole coefficient
+        float relK = 0;              // the release's one-pole coefficient a sample (the recorded speech's)
+        float relD = 0;              // and over a control block (the pipes')
         double relFor = -1;          // the Release it was worked out for
         bool on[kStops] = {};        // the pipe's valve open (key held and stop drawn)
         Player players[kPlayers];
@@ -165,7 +173,8 @@ struct Organ {
     // The swell box: a one-pole low-pass and a gain, each smoothed per sample toward the mod wheel's.
     float swellLp[2] = {}, swellK = 1, swellG = 1, swellKTo = 1, swellGTo = 1;
     uint32_t swellFill = 0;
-    float gainK = 0.004f;  // a pipe's level eased over about 5 ms (prepare())
+    float gainK = 0.004f;   // the breath's level eased over about 5 ms a sample (prepare())
+    float blockK = 0.064f;  // a pipe's level eased over about 5 ms a control block (prepare())
     std::shared_ptr<const recorded::Bank> bank;
     Voice* voices = nullptr;
     uint32_t count = 0;
@@ -181,6 +190,7 @@ struct Organ {
         sr = rate;
         voices = v, count = n;
         gainK = static_cast<float>(1.0 - detExp(-1.0 / (0.005 * sr)));
+        blockK = static_cast<float>(1.0 - detExp(-static_cast<double>(kControlFrames) / (0.005 * sr)));
         buildTables();
         if (!bank) bank = recorded::acquire(recorded::BankId::Bittern);
         reset();
@@ -223,7 +233,7 @@ struct Organ {
         for (uint32_t i = 0; i < count; ++i) {
             const Voice& v = voices[i];
             if (!v.active) continue;
-            for (int k = 0; k < kStops; ++k) d += static_cast<double>(v.env[k]) * v.env[k] * v.gain[k] * kDraw[k];
+            for (int k = 0; k < kStops; ++k) d += static_cast<double>(v.env[k]) * v.env[k] * v.gainTo[k] * kDraw[k];
         }
         draw = d;
         const double target = d / (d + 24.0), w = timber::kTwoPi * 3.0;
@@ -259,7 +269,7 @@ struct Organ {
         double t50 = kFamilyOf[k] == kReed ? 0.012 : riseSeconds(std::max(hz, 20.0));
         if (kFamilyOf[k] == kString) t50 *= 1.5;
         const double tau = std::max(0.004, t50 * v.strikeRise[k] / 1.23);
-        v.rise[k] = static_cast<float>(1.0 - detExp(-1.0 / (tau * sr)));
+        v.rise[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
         v.settleK[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
     }
     // A pipe opening: it speaks from rest (or from what it still sounds), a few cents off, and no two strikes alike
@@ -279,7 +289,7 @@ struct Organ {
             v.settle[k] = -(12.5f + 2.5f * v.rng.next()) * (1.0f - v.env[k]);
             v.puff += static_cast<float>(level[k] * v.rms[k] * kOut * 0.06 * chiffAmt / 0.5) * (1.0f - v.env[k]);
         }
-        v.gain[k] = v.gainTo[k] = level[k];
+        v.gain[k] = v.gainTo[k] = level[k], v.gStep[k] = 0;
     }
     void start(Voice& v, const Shared& s) noexcept {
         v.rng.s = 0xB177E2Du + 977u * v.key + 7919u * notes;
@@ -296,16 +306,20 @@ struct Organ {
         for (int k = 0; k < kStops; ++k) {
             // [Measured] the chorus' ranks beat at a median 4.4 cents (VCSL's Loud: 0.4-4 Hz on partials of 0.2-2 kHz):
             // each pipe's tuning a triangular error of +-11 cents (standard deviation 4.6), so two pipes of a key
-            // differ by a median of 4.4 cents; the céleste 6 cents sharp on top.
-            v.tuning[k] = (k == kCeleste8 ? 6.0f : 0.0f) + 5.6f * (pipe.next() + pipe.next());
+            // differ by a median of 4.4 cents, narrowing as the square root of the pipe's pitch over 500 Hz (the
+            // recording's small pipes sit within its harmonics' 20 Hz: its residual stays 33-40 dB under the tone up
+            // to C7, where 4.6 cents would put the 2' at -18 dB); the céleste 6 cents sharp on top.
+            const double pipeHz = timber::noteHz(clampd(v.pitch, 12.0, 120.0)) * kFoot[k] * (kFamilyOf[k] == kMixtureFamily ? 4.0 : 1.0);
+            const float narrow = static_cast<float>(std::min(1.0, std::sqrt(500.0 / pipeHz)));
+            v.tuning[k] = (k == kCeleste8 ? 6.0f : 0.0f) + 5.6f * narrow * (pipe.next() + pipe.next());
             v.strikeRise[k] = 1.0f, v.strikeLevel[k] = 0;
             if (was) {
-                v.phase[k] = was->phase[k], v.env[k] = was->env[k], v.spoke[k] = was->spoke[k];
-                v.gain[k] = was->gain[k], v.wPitch[k] = was->wPitch[k], v.wLevel[k] = was->wLevel[k];
+                v.phase[k] = was->phase[k], v.env[k] = v.envTo[k] = was->envTo[k], v.spoke[k] = was->spoke[k];
+                v.gain[k] = v.gainTo[k] = was->gainTo[k], v.wPitch[k] = was->wPitch[k], v.wLevel[k] = was->wLevel[k];
             } else {
                 v.phase[k] = static_cast<uint32_t>((0.5 + 0.5 * v.rng.next()) * 4294967295.0);
-                v.env[k] = v.spoke[k] = 0;
-                v.gain[k] = level[k];
+                v.env[k] = v.envTo[k] = v.spoke[k] = 0;
+                v.gain[k] = v.gainTo[k] = level[k];
                 v.wPitch[k] = v.rng.next(), v.wLevel[k] = v.rng.next();
             }
             v.wPitchTo[k] = v.wPitch[k], v.wLevelTo[k] = v.wLevel[k];
@@ -343,9 +357,13 @@ struct Organ {
         v.inStep = static_cast<float>(1.0 / std::max(1.0, 0.005 * sr));
         startSpeech(v, was ? was->env : nullptr);
         voiceControl(v, s);
+        // Started between two control points: the levels hold until the next one, from this sample of the block.
+        v.pos = static_cast<uint32_t>(s.clock % kControlFrames);
+        for (int k = 0; k < kStops; ++k) v.gain[k] = v.gainTo[k], v.gStep[k] = 0, v.envTo[k] = v.env[k], v.envStep[k] = 0;
     }
-    // The recorded speech: for each flue stop drawn, its family's recording nearest its pipe's pitch (within 2
-    // semitones; the clip is played at the ratio to the pipe), at the stop's level, summed where stops share a clip.
+    // The recorded speech: for each flue stop drawn, its family's recording nearest the key (within 2 semitones; the
+    // clip is played at the ratio to the key), at the stop's level, summed where stops share a clip (so a note plays
+    // at most one clip per family: the chorus' recording holds its octaves and mixture already).
     void startSpeech(Voice& v, const float* still) noexcept {
         v.playersOn = 0;
         if (!bank || testMuteSpeech || chiffAmt <= 0) return;
@@ -356,11 +374,10 @@ struct Organ {
             if (fam == kReed) continue;
             // Each family's recording: the stopped flutes the quiet manual, the open flutes the quiet pedal (the quiet
             // manual past its range), the principals, mixture and strings the chorus, the 32' the loud pedal.
-            const double sounding = clampd(v.pitch, 12.0, 120.0) + 12.0 * std::log2(kFoot[k]);
-            const double at = fam == kMixtureFamily ? clampd(v.pitch, 12.0, 120.0) + 24.0 : sounding;
+            const double at = clampd(v.pitch, 12.0, 120.0);
             int group = fam == kStopped ? 0 : fam == kOpen ? 2 : 1;
             if (k == kSubbass32) group = 3;
-            int c = nearestClip(group, group == 3 ? clampd(v.pitch, 12.0, 120.0) : at, 2.0);
+            int c = nearestClip(group, at, 2.0);
             if (c < 0 && group == 2) c = nearestClip(0, at, 2.0);
             if (c < 0) continue;
             const ClipInfo ci = clipInfo(c);
@@ -372,7 +389,7 @@ struct Organ {
             const float since = still ? 1.0f - still[k] : 1.0f;  // a pipe still sounding speaks less again
             const float g = static_cast<float>(level[k] * v.rms[k] * kOut * ci.scale * share) * amount * since;
             if (g <= 1e-7f) continue;
-            const double ratio = detPow(2.0, ((group == 3 ? clampd(v.pitch, 12.0, 120.0) : at) - ci.key) / 12.0);
+            const double ratio = detPow(2.0, (at - ci.key) / 12.0);
             Player* p = nullptr;
             for (int i = 0; i < v.playersOn; ++i)
                 if (v.players[i].data == bank->pcm.get() + ci.first) p = &v.players[i];
@@ -403,7 +420,7 @@ struct Organ {
         for (int k = 0; k < kStops; ++k) {
             v.on[k] = false;
             if (kFamilyOf[k] == kReed) continue;
-            const float a = v.env[k] * v.env[k] * v.gain[k] * v.rms[k];
+            const float a = v.env[k] * v.env[k] * v.gainTo[k] * v.rms[k];
             tone += a * a;
         }
         v.puff += static_cast<float>(std::sqrt(tone) * kOut * 0.04 * chiffAmt / 0.5);
@@ -418,34 +435,49 @@ struct Organ {
             v.relFor = s.release;
             const double tau = std::max(0.004, std::max(0.03, s.release) / 3.45);
             v.relK = static_cast<float>(1.0 - detExp(-1.0 / (tau * sr)));
+            v.relD = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
         }
         // [Measured] a single pipe's wander: the stopped flute's medians (about 1.2 cents and 0.85 dB, over 0.2-10
-        // Hz), at Living wind 0.3; a pipe's share of it is its own, a random walk toward a new target about once a
-        // second.
+        // Hz), at Living wind 0.3: each pipe's own random walk toward a new target about once a second, scaled so a
+        // dry flute reads 1.2 cents and 0.6 dB (the recording's level also swings with its room's reflections).
         const double scale = wind / 0.3;
         const float wc = static_cast<float>(wanderCents() * scale), wd = static_cast<float>(wanderDb() * scale);
         const float follow = static_cast<float>(std::min(1.0, 2.0 * kControlFrames / sr));
         const float jump = static_cast<float>(1.0 - 2.0 * kControlFrames / sr);
         float tone = 0;
+        v.pos = 0;
+        const float bk = blockK;
         for (int k = 0; k < kStops; ++k) {
+            v.gain[k] = v.gainTo[k], v.gStep[k] = 0;
+            v.env[k] = v.envTo[k], v.envStep[k] = 0;
             const bool want = v.held && level[k] > 0.0f;
             if (want && !v.on[k]) open(v, k);
             if (!want) v.on[k] = false;
             if (!v.on[k] && v.env[k] < 1e-5f) {
-                v.env[k] = 0;
+                v.env[k] = v.envTo[k] = 0;
                 continue;
             }
+            // Spoken, the steady table alone (the last 3 % of the speaking spectrum's difference is inaudible); up,
+            // the pipe at its full level (0.05 % from it).
+            v.spoke[k] = std::max(v.spoke[k], v.env[k]);
+            if (v.spoke[k] > 0.97f) v.spoke[k] = 1.0f;
+            if (v.on[k] && v.env[k] > 0.9995f) v.env[k] = 1.0f;
+            const float target = v.on[k] ? 1.0f : 0.0f;
+            v.envTo[k] = target + (v.env[k] - target) * (v.on[k] ? v.rise[k] : v.relD);
+            v.envStep[k] = (v.envTo[k] - v.env[k]) * (1.0f / kControlFrames);
             if (v.rng.next() > jump) v.wPitchTo[k] = v.rng.next();
             if (v.rng.next() > jump) v.wLevelTo[k] = v.rng.next();
             v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
             v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
             v.settle[k] *= v.settleK[k];
-            if (v.spoke[k] > 0.999f) v.spoke[k] = 1.0f;  // spoken: the steady table alone (on the grid, for the bits)
-            const double c = v.tuning[k] + v.settle[k] + 1.6 * wc * v.wPitch[k];
+            const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
             v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod);
             // A stop retired holds its gain (its pipe releases); a stop drawn or moving takes its new level.
-            if (level[k] > 0.0f)
-                v.gainTo[k] = static_cast<float>(level[k] * levelMod * (1.0 + 0.115 * 1.6 * wd * v.wLevel[k]) * (1.0 + v.strikeLevel[k]));
+            if (level[k] > 0.0f) {
+                const float to = static_cast<float>(level[k] * levelMod * (1.0 + 0.115 * 3.0 * wd * v.wLevel[k]) * (1.0 + v.strikeLevel[k]));
+                v.gainTo[k] += (to - v.gainTo[k]) * bk;
+                v.gStep[k] = (v.gainTo[k] - v.gain[k]) * (1.0f / kControlFrames);
+            }
             const float a = v.env[k] * v.env[k] * v.gainTo[k] * v.rms[k];
             tone += a * a;
         }
