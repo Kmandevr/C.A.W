@@ -91,10 +91,11 @@ struct Player {
 };
 
 // The character's body after the voices' sum (both channels): Grand none; Upright a boxy, nasal case that loses its
-// top (peaks at 250 Hz and 1.1 kHz, a low-pass at 6 kHz); Felt the felt rail's muffle (two low-passes, 0.8 and 1.8 kHz).
+// bass and top (a high-pass at 150 Hz: a smaller board; +8 dB at 260 Hz, +10 dB at 1.1 kHz, a low-pass at 4 kHz;
+// 3 dB down overall); Felt the felt rail's muffle (two low-passes, 0.8 and 1.8 kHz).
 // [Assumption] voiced by measurement against the grand (docs/engine.md, "Starling"), not fitted to recordings.
 struct CharacterBody {
-    timber::Biquad b[2][3];
+    timber::Biquad b[2][4];
     int character = 0;
     double rate = 0;
     void design(int c, double sr) noexcept {
@@ -102,17 +103,19 @@ struct CharacterBody {
         character = c, rate = sr;
         for (auto& ch : b) {
             for (auto& q : ch) q = timber::Biquad{};
-            if (c == 1) ch[0].peak(250.0, 0.9, 5.0, sr), ch[1].peak(1100.0, 1.4, 4.0, sr), ch[2].lowpass(6000.0, 0.7, sr);
+            if (c == 1)
+                ch[0].highpass(150.0, 0.6, sr), ch[1].peak(260.0, 1.0, 8.0, sr), ch[2].peak(1100.0, 1.2, 10.0, sr), ch[3].lowpass(4000.0, 0.7, sr);
             if (c == 2) ch[0].lowpass(800.0, 0.6, sr), ch[1].lowpass(1800.0, 0.7, sr);
         }
     }
     void process(float* l, float* r, uint32_t n) noexcept {
         if (character == 0) return;
-        const int stages = character == 1 ? 3 : 2;
+        const int stages = character == 1 ? 4 : 2;
+        const float gain = character == 1 ? 0.71f : 1.0f;
         for (uint32_t i = 0; i < n; ++i) {
             float x = l[i], y = r[i];
             for (int k = 0; k < stages; ++k) x = b[0][k].run(x), y = b[1][k].run(y);
-            l[i] = x, r[i] = y;
+            l[i] = x * gain, r[i] = y * gain;
         }
         for (auto& ch : b)
             for (auto& q : ch) q.flush();

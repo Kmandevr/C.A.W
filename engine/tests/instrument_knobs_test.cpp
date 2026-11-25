@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "test.h"
+#include "timber_dsp.h"
 #include "timber_harness.h"
 
 using namespace caw;
@@ -25,6 +26,7 @@ constexpr double kSr = 48000;
 // crossings), from the fundamental's peak in 40 ms windows every 20 ms over 0.4..1.4 s.
 struct Features {
     double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0, flutter = 0, strike = 0, sbright = 0, sub = 0;
+    double band[8] = {};  // octave bands 125 Hz..16 kHz over 0.05..0.8 s (dB): the colour, compared in pairs
 };
 constexpr int kFeatures = 14;
 constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate", "flutter", "strike", "sbright", "sub"};
@@ -55,6 +57,16 @@ Features measure(const std::vector<float>& m, double lowest, bool held = false) 
     f.bright = rmsOf(d, 0, s08) - f.lvl;
     f.early = rmsOf(m, 0, static_cast<size_t>(0.1 * kSr));
     f.strike = rmsOf(m, 0, static_cast<size_t>(0.015 * kSr));
+    for (int b = 0; b < 8; ++b) {
+        timber::Biquad q;
+        q.band(125.0 * std::pow(2.0, b), 1.41, kSr);
+        double e = 0;
+        for (size_t i = 0; i < s08; ++i) {
+            const float y = q.run(m[i]);
+            if (i >= static_cast<size_t>(0.05 * kSr)) e += static_cast<double>(y) * y;
+        }
+        f.band[b] = 10 * std::log10(e + 1e-30);
+    }
     f.sbright = rmsOf(d, 0, static_cast<size_t>(0.03 * kSr)) - rmsOf(m, 0, static_cast<size_t>(0.03 * kSr));
     f.late = rmsOf(m, static_cast<size_t>(0.6 * kSr), s08);
     f.tail = std::max(-120.0, rmsOf(m, static_cast<size_t>(0.9 * kSr), static_cast<size_t>(1.5 * kSr)));
@@ -106,7 +118,7 @@ Features measure(const std::vector<float>& m, double lowest, bool held = false) 
         for (double hz = 18; hz <= 40; hz += 0.5) {
             double re = 0, im = 0;
             for (size_t i = 0; i < env.size(); ++i) {
-                const double ph = 2 * kPi * hz * i * 0.002;
+                const double ph = 2 * timber_test::kPi * hz * i * 0.002;
                 re += (env[i] - em) * std::cos(ph), im += (env[i] - em) * std::sin(ph);
             }
             best = std::max(best, 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(env.size()));
@@ -311,14 +323,20 @@ TEST(instrument_every_knob_is_audible) {
                             const double dd = std::fabs(featureAt(fs[i], f) - featureAt(fs[j], f)) / kThreshold[f];
                             if (dd > best) best = dd, which = f;
                         }
+                        // colour: the octave bands' level differences, their mean (the level) taken off, RMS: 1.5 dB.
+                        double mean = 0, colour = 0;
+                        for (int b = 0; b < 8; ++b) mean += (fs[j].band[b] - fs[i].band[b]) / 8.0;
+                        for (int b = 0; b < 8; ++b) colour += std::pow(fs[j].band[b] - fs[i].band[b] - mean, 2) / 8.0;
+                        colour = std::sqrt(colour);
+                        if (colour / 1.5 > best) best = colour / 1.5, which = kFeatures;
                         const bool identical = sameAudio(outs[i], outs[j]);
                         const bool heard = id == "tier" ? !identical : best >= 1.0;
                         if (verbose()) {
                             std::printf("  %-12s %-8s|%-8s", id.c_str(), ends[i].first.c_str(), ends[j].first.c_str());
                             for (int f = 0; f < kFeatures; ++f)
                                 std::printf(" %s %+6.1f", kFeatureNames[f], featureAt(fs[j], f) - featureAt(fs[i], f));
-                            std::printf("  %s%s%s%s\n", identical ? "IDENTICAL " : "", heard ? "ok" : "NOT HEARD",
-                                        which >= 0 ? " by " : "", which >= 0 ? kFeatureNames[which] : "");
+                            std::printf(" colour %4.1f  %s%s%s%s\n", colour, identical ? "IDENTICAL " : "", heard ? "ok" : "NOT HEARD",
+                                        which >= 0 ? " by " : "", which >= 0 ? (which == kFeatures ? "colour" : kFeatureNames[which]) : "");
                             if (ctx) std::printf("               (context: %s)\n", ctx->why);
                         }
                         if (!heard && dev.checked && !labelledUnused(pd)) {

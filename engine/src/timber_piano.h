@@ -842,6 +842,12 @@ struct Piano {
             v.phantom[0].set(fl2, 0.6, sr), v.phantom[0].clear();
             v.phantom[1].set(std::min(2.0 * fl2, 0.45 * sr), 0.4, sr), v.phantom[1].clear();
             v.phantomGain = static_cast<float>(phantomLevel * 0.04);
+            // Starling: a mode over 0.45 x the rate is left out (it aliased: the treble's 40-47 kHz modes folded down to
+            // near DC, where the string's squared motion drove them, 20-26 dB over the note).
+            if (voicing) {
+                if (fl2 >= 0.45 * sr) v.phantomGain = 0;
+                else if (2.0 * fl2 >= 0.45 * sr) v.phantom[1].set(0.45 * sr, 0.0, sr);
+            }
         }
         static constexpr float kStrike[3] = {1.0f, 0.72f, 0.5f};
         for (int k = 0; k < 3; ++k) v.strike[k] = k < v.strings ? kStrike[k] : 0.0f;

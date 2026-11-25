@@ -1,6 +1,7 @@
 // Curlew's winds (1.1.3): Timber's Simulated reeds, jets and lips without the click into the bore on every note, dry, each with a body estimated from recordings.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -48,6 +49,17 @@ struct Winds : timber::Wind {
         timber::Noise wander;
     };
     Growl growls[Base::kPool];
+    // A released note fades with its breath at the output too (the envelope's level, in a line over each block): the
+    // breath alone let a low brass note's bore and lips go on sounding, -33 dB, after its release had ended, and a
+    // flute's jet fall into a lower regime with a 6 dB blip as it died.
+    float releaseGain[Base::kPool] = {};
+    void fadeReleased(Voice& v, float* out, uint32_t n) noexcept {
+        if (v.envStep >= 0.0f) return;
+        float& g = releaseGain[&v - voices];
+        const float to = std::clamp(v.env, 0.0f, 1.0f), step = (to - g) / static_cast<float>(n);
+        for (uint32_t i = 0; i < n; ++i) g += step, out[i] *= g;
+        g = to;
+    }
 
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         padClicks = false;
@@ -75,6 +87,7 @@ struct Winds : timber::Wind {
         Base::start(v, s);
         Growl& g = growls[&v - voices];
         g.tongue = 0, g.hum = 0, g.rate = 26;
+        releaseGain[&v - voices] = 1.0f;
         g.wander.s = 0x6A09u + 131u * v.key;
     }
     void voiceControl(Voice& v, const Shared& s) noexcept {
@@ -110,6 +123,7 @@ struct Winds : timber::Wind {
     void render(Voice& v, float* out, uint32_t n) noexcept {
         if (growlAmount > 0) growl(v, growlBuf[0], n), breathMod = growlBuf;
         Base::render(v, out, n);
+        fadeReleased(v, out, n);
         breathMod = nullptr;
     }
     void renderGroup(Voice* const* vs, uint32_t count, float (*out)[timber::kControlFrames], uint32_t n) noexcept {
@@ -118,6 +132,7 @@ struct Winds : timber::Wind {
             breathMod = growlBuf;
         }
         Base::renderGroup(vs, count, out, n);
+        for (uint32_t l = 0; l < count; ++l) fadeReleased(*vs[l], out[l], n);
         breathMod = nullptr;
     }
     void post(float* l, float* r, uint32_t n, const Shared& s) noexcept {
