@@ -174,6 +174,7 @@ const Context kContexts[] = {
     {"org.caw.curlew", "vib_rate", {{"vibrato", 0.6}}, 4, "vibrato on"},
     {"org.caw.curlew", "vibrato", {}, 4, "one note"},
     {"org.caw.curlew", "growl", {}, 4, "one note"},
+    {"org.caw.curlew", "voices", {{"play", 1.0}}, 0, "Poly (Legato plays the chord one note at a time)"},
     {"org.caw.nightingale", "vib_rate", {{"vibrato", 0.6}}, 4, "vibrato on"},
     {"org.caw.nightingale", "vibrato", {}, 4, "one note"},
     {"org.caw.bittern", "trem_rate", {{"tremulant", 0.8}}, 0, "the tremulant on"},

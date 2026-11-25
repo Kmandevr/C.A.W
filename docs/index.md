@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-19
+updated: 2026-11-25
 ---
 
 # C.A.W vault
@@ -20,6 +20,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [C++ creation platform](cpp-creation-platform.md): owner-approved C++ language direction, the Library/SDK, shared component model, code editor, real-time boundaries and migration
 - [Engine integration contract](engine-integration.md): how projects, add-ons, the app, library and CLI share native capabilities and assets
 - [How it works](how-it-works.md): the path from a .caw file to sound and to a WAV, the file that owns each step, and where to change what; start here in a new session
+- [The Tabernacle organ](organ-research-tabernacle.md): research for Bittern (owner, 2026-11-25: model the Salt Lake Tabernacle organ): its builders, full stoplist, voicing, the room's reverberation, and which recordings are usable
 - [Engine reference](engine.md): the built engine: patterns, playback, project file, exports, C API, CLI, tests
 - [Modular engine implementation status](engine-build-status.md): evidence-based ledger of built engine components, incomplete integrations and verification
 - [Native module SDK](native-module-sdk.md): the versioned C ABI contract and remaining host/loading work

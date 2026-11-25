@@ -36,8 +36,12 @@ inline constexpr int kPullKeys = 40;
 //   the slow beating against the note that make a growl sound sung). Per sample, into each voice's breath.
 struct Winds : timber::Wind {
     using Base = timber::Wind;
-    enum P : uint32_t { kCBreath, kCNoise, kCReed, kCVibrato, kCVibRate, kCGrowl, kCAttack };
-    static constexpr uint32_t kModelParams = 7;
+    enum P : uint32_t { kCBreath, kCNoise, kCReed, kCVibrato, kCVibRate, kCGrowl, kCAttack, kCPlay };
+    static constexpr uint32_t kModelParams = 8;
+    // Play (1.1.3): Legato, one note at a time, a new note slurring from the held one as a player does (the frame's
+    // mono legato), or Poly for chords.
+    bool mono = true;
+    bool legato(const Shared&) const noexcept { return mono; }
     int which = 0;  // the instrument (Flute .. French horn)
     BodyFilter body;
     float bodyAmount = 1;
@@ -88,6 +92,7 @@ struct Winds : timber::Wind {
         q[Base::kVibrato] = p[kCVibrato], q[Base::kVibRate] = p[kCVibRate], q[Base::kGrowl] = 0.0;
         growlAmount = timber::clampd(p[kCGrowl], 0, 1);
         q[Base::kAttack] = p[kCAttack];
+        mono = p[kCPlay] < 0.5;
         Base::control(q, s);
         bodyAmount = static_cast<float>(timber::clampd(s.body, 0, 1));
         body.load(bodyResponse(which), bodyAmount, sr);

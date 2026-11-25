@@ -106,6 +106,7 @@ public:
         lastKey_ = -1;
         lastVelocity_ = 0;
         notes_ = 0;
+        legatoN_ = 0;
         display_.clear();
     }
     bool quiet() const noexcept override { return settled_; }
@@ -143,6 +144,27 @@ protected:
                 const double vel = clampd(0.75 + (clampd(m.velocity, 0.0, 1.0) - 0.75) * sens, 0.01, 1.0);
                 lastVelocity_ = vel;
                 const uint8_t key = notes::keyOf(m.pitch);
+                // Mono legato (owner, 2026-11-25: a flute's note "restarts every time a note changes"): a note played
+                // while one is held moves the sounding voice to it, breath and all, as a player slurs; the held one
+                // waits underneath and sounds again when this one ends. A gap between notes still starts a new note.
+                if constexpr (requires(M& mm, const Shared& sh) { mm.legato(sh); }) {
+                    if (model_.legato(shared_)) {
+                        typename M::Voice* cur = nullptr;
+                        pool_.forEachActive([&](typename M::Voice& v) {
+                            if (v.held && !v.fading) cur = &v;
+                        });
+                        if (cur) {
+                            if (legatoN_ == 16) {  // a full stack drops its oldest
+                                for (uint32_t i = 1; i < 16; ++i) legato_[i - 1] = legato_[i];
+                                --legatoN_;
+                            }
+                            legato_[legatoN_++] = {cur->noteId, cur->pitch, cur->key};
+                            cur->noteId = m.noteId, cur->pitch = m.pitch, cur->key = key;
+                            break;
+                        }
+                        legatoN_ = 0;
+                    }
+                }
                 // A key struck again: its sounding voice fades (one string, one bar).
                 if (M::kRestrike)
                     pool_.forEachActive([&](typename M::Voice& v) {
@@ -178,6 +200,19 @@ protected:
                 break;
             }
             case NoteMessageType::Off:
+                if (legatoN_ > 0) {
+                    if (typename M::Voice* v = pool_.find(m.noteId); v && v->held) {  // the sounding note ends:
+                        const Held h = legato_[--legatoN_];                           // slur back to the last one held
+                        v->noteId = h.id, v->pitch = h.pitch, v->key = h.key;
+                        break;
+                    }
+                    for (uint32_t i = 0; i < legatoN_; ++i)  // a note held underneath ends: forget it
+                        if (legato_[i].id == m.noteId) {
+                            for (uint32_t j = i + 1; j < legatoN_; ++j) legato_[j - 1] = legato_[j];
+                            --legatoN_;
+                            break;
+                        }
+                }
                 if (typename M::Voice* v = pool_.find(m.noteId); v && v->held) {
                     v->held = false;
                     model_.release(*v, shared_);
@@ -381,6 +416,10 @@ private:
     const std::atomic<int>* quality_ = nullptr;
     double sr_ = 48000.0;
     Shared shared_;
+    // Mono legato (a model with legato(shared) true, e.g. Curlew): the notes held under the sounding one, newest last.
+    struct Held { uint32_t id; double pitch; uint8_t key; };
+    Held legato_[16] = {};
+    uint32_t legatoN_ = 0;
     double p_[static_cast<uint32_t>(M::kModelParams)] = {};
     lib::Reverb room_;
     float toneK_ = 0, toneLo_ = 1, toneHi_ = 1, toneL_ = 0, toneR_ = 0;
