@@ -10,7 +10,7 @@
 #include "presets.h"
 #include "recorded_bank.h"
 #include "test.h"
-#include "timber_harness.h"
+#include "instrument_harness.h"
 #include "tolerance.h"
 #include "woodpecker_bars.h"
 

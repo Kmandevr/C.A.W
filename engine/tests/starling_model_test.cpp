@@ -7,9 +7,9 @@
 
 #include "starling_piano.h"
 #include "test.h"
-#include "timber_harness.h"
-#include "timber_piano_curves.h"
-#include "timber_piano_sim.h"
+#include "instrument_harness.h"
+#include "starling_piano_curves.h"
+#include "starling_piano_sim.h"
 
 using namespace caw;
 using namespace timber_test;
@@ -93,7 +93,7 @@ TEST(starling_model_hammer_contact_shortens_up_the_keyboard_and_with_speed) {
 
 TEST(starling_model_inharmonicity_follows_the_fitted_curve) {
     // Every A and D# from A0 to A6: B from partials 2..15 (least squares) within 10 % of the curve the loop was
-    // designed from (and that curve fits the Salamander Grand's partials, timber_piano_curves.h).
+    // designed from (and that curve fits the Salamander Grand's partials, starling_piano_curves.h).
     const double sr = 48000;
     for (double key = 21; key <= 93; key += 3) {
         if (static_cast<int>(key) % 12 != 9 && static_cast<int>(key) % 12 != 3) continue;

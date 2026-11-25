@@ -8,8 +8,8 @@
 #include <new>
 
 #include "body_bands.h"
-#include "timber_core.h"
-#include "timber_sim.h"  // CAW_TIMBER_NOINLINE
+#include "instrument_core.h"
+#include "instrument_noinline.h"  // CAW_TIMBER_NOINLINE
 
 namespace caw::nightingale {
 
@@ -293,7 +293,7 @@ struct Bowed {
         renderGroup(one, 1, buf, n);
         std::copy(buf[0], buf[0] + n, out);
     }
-    // Voices run four at a time (timber_core.h's GroupedModel), one a lane, so four voices' friction chains overlap
+    // Voices run four at a time (instrument_core.h's GroupedModel), one a lane, so four voices' friction chains overlap
     // instead of waiting on each other; lanes past `count` repeat the first voice and are thrown away. Each lane's
     // state is in locals (the delay lines' stores could otherwise alias it, and the compiler would reload all of it
     // every sample).

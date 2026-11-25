@@ -10,7 +10,7 @@
 #include "builtin_effects.h"
 #include "presets.h"
 #include "starling_piano.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::starling {
 namespace {
@@ -26,7 +26,7 @@ constexpr PortDescriptor kPorts[] = {
     stereoOutput("out"),
 };
 
-// The shared knobs, first in every model's descriptor, in Timber's order (timber_core.h reads them by index).
+// The shared knobs, first in every model's descriptor, in Timber's order (instrument_core.h reads them by index).
 // Dry by default (owner, 2026-11-24): Space 0, the room is the user's own effect.
 void sharedParams(fx::ParamTable& t, double voices, double maxVoices, double release, double body) {
     t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";

@@ -8,7 +8,7 @@
 
 #include "caw/library/fastmath.hpp"
 #include "recorded_bank.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::woodpecker {
 

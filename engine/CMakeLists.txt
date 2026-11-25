@@ -234,7 +234,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
 target_sources(caw_core PRIVATE src/timber_migrate.cpp)  # Timber's load-time alias (Timber removed in 1.1.3; its model library, timber_*.h, is what Starling, Nightingale, Curlew, Woodpecker and Bittern build on)
-target_sources(caw_core PRIVATE src/timber_piano_tables.cpp src/timber_piano_sim.cpp)  # the piano model (Starling's; Timber's Simulated piano, 1.1.2): its tables (generated: tools/timber_piano_gen.cpp) and per-sample code
+target_sources(caw_core PRIVATE src/starling_piano_tables.cpp src/starling_piano_sim.cpp)  # the piano model (Starling's; Timber's Simulated piano, 1.1.2): its tables (generated: tools/starling_piano_gen.cpp) and per-sample code
 # 1.1.3: Starling (org.caw.starling) and the recorded parts built into the engine (engine/assets/, embedded by
 # cmake/EmbedFile.cmake; decoded on first use by recorded_bank.cpp).
 set(_caw_assets_out "${CMAKE_CURRENT_BINARY_DIR}/assets")
@@ -353,12 +353,12 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
   target_sources(caw_tests PRIVATE tests/bittern_test.cpp)  # 1.1.3: Bittern, the pipe organ
   target_sources(caw_tests PRIVATE tests/woodpecker_test.cpp)  # 1.1.3: Woodpecker, the tuned percussion
-  # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
+  # The Simulated piano's tables are generated (tools/starling_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
-  add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
-  target_include_directories(timber_piano_gen PRIVATE src include)
-  target_compile_options(timber_piano_gen PRIVATE ${_caw_fp_strict})
-  add_test(NAME timber_piano_tables_current COMMAND timber_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/timber_piano_tables.inc)
+  add_executable(starling_piano_gen tools/starling_piano_gen.cpp)
+  target_include_directories(starling_piano_gen PRIVATE src include)
+  target_compile_options(starling_piano_gen PRIVATE ${_caw_fp_strict})
+  add_test(NAME starling_piano_tables_current COMMAND starling_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/starling_piano_tables.inc)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
@@ -543,7 +543,7 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
   target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
   target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
   target_sources(caw_bench PRIVATE bench/flock_cost.cpp)  # 1.1.0: Flock's cost ceilings
-  target_sources(caw_bench PRIVATE bench/timber_cost.cpp)  # the modelled instruments' cost ceilings (Starling, Nightingale, Curlew, Bittern, Woodpecker)
+  target_sources(caw_bench PRIVATE bench/instrument_cost.cpp)  # the modelled instruments' cost ceilings (Starling, Nightingale, Curlew, Bittern, Woodpecker)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -595,7 +595,7 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 # engine's deterministic sine, not libm.
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
-set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
+set_source_files_properties(src/starling_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
 set_source_files_properties(src/bittern_render.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Bittern's voices give the same bits at any block size
 set_source_files_properties(src/builtin_woodpecker.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Woodpecker (its model and frame) renders the same bits on every build
 
