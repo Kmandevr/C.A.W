@@ -268,6 +268,12 @@ struct Bowed {
         v.tn.flush(), v.tb.flush();
         // The bow stopped: it leaves the string over 5 ms (lifted at once, its last force vanished in one sample, a
         // click at every release: 25-58 dB over the running step, instrument_glitch_scan).
+        // Released, the bow also leaves gradually over the last 40 % of its slowing: at a force that low the stick-slip
+        // fell into a sample-rate buzz (cello and bass, 24-27 dB over the running step) before the bow had stopped.
+        if (v.uStep < 0.0f) {
+            const float q = std::clamp(v.u / 0.7f, 0.0f, 1.0f);
+            v.liftG = std::min(v.liftG, q * q * (3.0f - 2.0f * q));
+        }
         if (v.uStep < 0.0f && v.u <= 0.0f) v.liftG = std::max(0.0f, v.liftG - static_cast<float>(kControlFrames / (0.005 * sr)));
         v.lifted = v.liftG <= 0.0f;
     }
@@ -359,7 +365,10 @@ struct Bowed {
                     const F4 t = timber::min4(one, (ratio - brk) * invSpan);
                     const I4 on = timber::and4(timber::and4(timber::gt4(vr, zero), timber::gt4(zz, zero)), timber::gt4(ratio, brk));
                     const F4 a = timber::sel4(on, t * t * (timber::f4(3.0f) - timber::f4(2.0f) * t), zero);
-                    const F4 g = one - a * ratio;
+                    // At most -1: as the bow's force falls (a release, a lighter pressure) the bristles' steady
+                    // deflection zss shrinks under the one they hold (z / zss up to 4) and they relax back; unbounded,
+                    // the step's 1 + B g crossed zero and one sample spiked 25-60 dB over the note (instrument_glitch_scan).
+                    const F4 g = timber::max4(one - a * ratio, zero - one);
                     // 1 / (1 + x) by its series, which holds only for small x: x kept within [0, 1].
                     const F4 x = timber::clamp4(B * g + timber::abs4(vr) * a * k2 * invZss, zero, one);
                     zn = zn + (vr * g - zn) * (one - x + x * x);
