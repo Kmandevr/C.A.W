@@ -732,7 +732,7 @@ void main() {
     expect(real.parameters.length, 230); // 1.0's 215, then 1.1.0's 15 (Raven's synthesis)
     // The engine's presets reach the browser (DevicePresets.engine reads the descriptor's list).
     expect(real.presets.map((p) => p.name).take(7), ['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic', 'Pluck', 'FM bell']);
-    expect(real.presets.length, 25); // then 1.1.0's 18 for Raven's synthesis
+    expect(real.presets.length, 28); // then 1.1.0's 18 for Raven's synthesis and 1.1.3's three keys (Timber's electric pianos and organ)
     expect([for (final p in real.parameters) p.id], [for (final p in flagship.parameters) p.id]);
     for (var i = 0; i < real.parameters.length; i++) {
       final a = real.parameters[i], b = flagship.parameters[i];
