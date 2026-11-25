@@ -6,6 +6,7 @@ import 'package:caw/engine/engine.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/model/device_target.dart';
 import 'package:caw/model/drums.dart';
+import 'package:caw/model/drums_needs.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/ui/devices/drums/drums_pads.dart';
@@ -176,6 +177,25 @@ void main() {
     expect(fake.calls.last.$4!.keys, contains('pc2_tune'), reason: '... and its piece\'s');
     expect(t.value('pc2_tune'), closeTo(tuneWas + 2 * after, 1e-9), reason: 'the piece took the result');
     await close(tester);
+  });
+
+  test('a Simulated pad\'s synth-only settings say what turns them on', () {
+    final s = newProjectWithRook();
+    final t = targetOf(s, id);
+    final layout = DrumsLayout.of(t.info!);
+    expect(t.value('a1_engine'), 1, reason: 'the studio kit\'s kick is Simulated');
+    for (final suffix in ['body_decay', 'pan', 'tune', 'drive', 'eq_low', 'punch', 'vel_level']) {
+      final n = drumUnmetNeed(t, layout, 0, suffix);
+      expect(n, isNotNull, reason: suffix);
+      expect(drumNeedText(t, layout, 0, n!), 'Synthesized pads only: set Engine to Synthesized', reason: suffix);
+    }
+    // What a Simulated pad does hear is not dimmed.
+    for (final suffix in ['level', 'rnd_pos', 'acou_artic']) {
+      expect(drumUnmetNeed(t, layout, 0, suffix), isNull, reason: suffix);
+    }
+    // A Synthesized pad's layer settings need their layer, as before.
+    t.set('a1_engine', 0);
+    expect(drumNeedText(t, layout, 0, drumUnmetNeed(t, layout, 0, 'noise_decay')!), 'Turn Noise on');
   });
 
   testWidgets('switching kinds animates the cards (motion on) and fits a 360 dp phone and its side', (tester) async {

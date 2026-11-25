@@ -263,7 +263,11 @@ const Map<String, List<DrumNeed>> _needs = {
 /// The first condition of [suffix] (a pad setting of [pad], or a kit-wide id with [pad] null) that fails now, or null
 /// when the setting is heard.
 DrumNeed? drumUnmetNeed(DeviceTarget t, DrumsLayout layout, int? pad, String suffix) {
-  for (final n in drumNeeds[suffix] ?? const <DrumNeed>[]) {
+  // A Simulated pad's strike variation moves its stick whatever its (synth) resonator does (1.1.3).
+  if (suffix == 'rnd_pos' && pad != null && t.value(layout.id(pad, 'engine')).round() == 1) return null;
+  // A Simulated pad's synth-only setting says so first (1.1.3): turning its layer on would not make it heard.
+  final all = [...?drumNeeds[suffix]]..sort((a, b) => (a.param == 'engine' ? 0 : 1).compareTo(b.param == 'engine' ? 0 : 1));
+  for (final n in all) {
     final v = n.kit || pad == null ? t.value(n.param) : t.value(layout.id(pad, n.param));
     final ok = n.only == null ? v.abs() > 1e-9 : n.only!.contains(v.round());
     if (!ok) return n;
@@ -276,6 +280,8 @@ String drumNeedText(DeviceTarget t, DrumsLayout layout, int? pad, DrumNeed n) {
   final id = n.kit || pad == null ? n.param : layout.id(pad, n.param);
   final p = t.param(id);
   final name = (p?.label ?? n.param).replaceFirst(RegExp(r'^[A-D]\d+ '), '');
+  // 1.1.3: a Simulated pad plays its piece; its synth settings are a Synthesized pad's.
+  if (n.param == 'engine' && !n.kit) return 'Synthesized pads only: set Engine to Synthesized';
   if (p != null && p.isChoice && n.only != null) {
     if (p.choices.length == 2 && p.choices.first == 'Off') return 'Turn $name on';
     final names = [for (final c in n.only!) if (c >= 0 && c < p.choices.length) p.choices[c]];
