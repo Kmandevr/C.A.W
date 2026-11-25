@@ -184,10 +184,11 @@ void main() {
     final t = targetOf(s, id);
     final layout = DrumsLayout.of(t.info!);
     expect(t.value('a1_engine'), 1, reason: 'the studio kit\'s kick is Simulated');
+    expect(DrumPadView(t, layout, 0).used, isTrue, reason: 'a Simulated pad plays (its tile shows its type)');
     for (final suffix in ['body_decay', 'pan', 'tune', 'drive', 'eq_low', 'punch', 'vel_level']) {
       final n = drumUnmetNeed(t, layout, 0, suffix);
       expect(n, isNotNull, reason: suffix);
-      expect(drumNeedText(t, layout, 0, n!), 'Synthesized pads only: set Engine to Synthesized', reason: suffix);
+      expect(drumNeedText(t, layout, 0, n!), 'Synthesized pads only', reason: suffix);
     }
     // What a Simulated pad does hear is not dimmed.
     for (final suffix in ['level', 'rnd_pos', 'acou_artic']) {

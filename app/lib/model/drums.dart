@@ -120,8 +120,8 @@ class DrumPadView {
   /// Whether layer [layer] of the pad is switched on (always for a layer without a switch).
   bool layerOn(DrumLayer layer) => layer.power == null || v(layer.power!) >= 0.5;
 
-  /// It makes sound: a sound layer on and its level above −60 dB.
-  bool get used => v('level') > -60 && drumSoundLayers.any((l) => on('${l}_on'));
+  /// It makes sound: Simulated (it strikes a piece, 1.1.3) or a sound layer on, and its level above −60 dB.
+  bool get used => v('level') > -60 && (v('engine').round() == 1 || drumSoundLayers.any((l) => on('${l}_on')));
 
   /// Its drum type's name (Kick, Snare, ...).
   String get typeName => formatChoice(t.param(id('type')), v('type'));
@@ -591,7 +591,7 @@ final _pieceId = RegExp(r'^pc\d+_');
 // The kinds' default kits and the presets' categories (1.1.3)
 
 /// Each kind's best kit, by [drumKitKinds]' order: what its kind card switches to. Chosen by ear and measured apart
-/// (`rook_kinds_default_kits_are_far_apart_spectrally`, engine/tests/rook_test.cpp, keeps the same three names).
+/// (`rook_kinds_default_kits_differ_in_character_pad_by_pad`, engine/tests/rook_test.cpp, keeps the same three names).
 const drumKindDefaults = ['Synth kit: 808-style', 'Produced kit: Pop', 'Acoustic kit: Studio'];
 
 
