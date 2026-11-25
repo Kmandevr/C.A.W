@@ -34,7 +34,9 @@ bool applyBuiltinPreset(std::string_view componentId, std::string_view name,
 std::string builtinPresetsJson(std::string_view componentId);
 
 // The synths that became Flagship presets (2026-11-10, owner: "one synth"): org.caw.synth.morph ("Morph pad"),
-// org.caw.bass ("Mono bass"), org.caw.synth.acid ("Acid 303") and org.caw.synth.basic ("Basic").
+// org.caw.bass ("Mono bass"), org.caw.synth.acid ("Acid 303") and org.caw.synth.basic ("Basic"); the old drums; and
+// Timber (org.caw.timber, removed in 1.1.3: its models play Starling, Nightingale, Curlew, Woodpecker, Bittern or
+// Kestrel, timber_migrate.h).
 bool isLegacyInstrument(std::string_view id);
 
 // Turns a retired synth's entry into Flagship's: `id` becomes org.caw.synth.flagship and `params` the preset's
@@ -43,9 +45,11 @@ bool isLegacyInstrument(std::string_view id);
 bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string, double>>& params,
                              std::string* preset = nullptr);
 
-// The Flagship parameter an automation lane on a retired synth's `param` moves now, when the old knob maps onto
-// one Flagship knob in the same units (cutoff, attack, glide...); empty when it doesn't (the lane is dropped).
-std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param);
+// The parameter an automation lane on a retired instrument's `param` moves now, when the old knob maps onto one
+// knob of its successor in the same units (cutoff, attack, glide...); empty when it doesn't (the lane is dropped).
+// Timber's depends on the model the entry played: `oldParams` are its values before the migration.
+std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param,
+                                    const std::vector<std::pair<std::string, double>>* oldParams = nullptr);
 
 // The JSON result of caw_migrate_instrument: {"ok": true, "migrated": bool, "id": ..., "preset": ...,
 // "params": {...}} for an entry {"id": ..., "params": {...}, "preset": ...}: a retired synth migrated, or an

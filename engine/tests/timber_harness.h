@@ -1,4 +1,4 @@
-// Timber's test harness: makes a model, plays timed notes and controllers in blocks, and measures pitch, partials, decay and brightness.
+// The modelled instruments' test harness (Timber's model library: Starling, Nightingale, Curlew, Woodpecker, Bittern): makes an instrument, plays timed notes and controllers in blocks, and measures pitch, partials, decay and brightness.
 #pragma once
 
 #include <algorithm>
@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "builtin_components.h"
-#include "builtin_timber.h"
 #include "caw/instrument.hpp"
 #include "fx_merged.h"
 #include "module_registry.h"
@@ -23,7 +22,6 @@ namespace timber_test {
 using namespace caw;
 using Values = std::vector<std::pair<std::string, double>>;
 constexpr double kPi = 3.14159265358979323846;
-constexpr const char* kTimber = "org.caw.timber";
 
 inline const ModuleRegistry& registry() {
     static const ModuleRegistry r = [] {
@@ -60,10 +58,12 @@ inline Values withModel(int model, Values v) {
     return v;
 }
 
-inline std::unique_ptr<ModuleProcessor> make(const Values& v, double sr = 48000, int tier = kQualityNormal) {
+// Built-in instrument `id` with values `v`, at a quality tier (0 Eco, 1 Normal, 2 High), activated.
+inline std::unique_ptr<ModuleProcessor> makeInstrument(const char* id, const Values& v, double sr = 48000,
+                                                       int tier = kQualityNormal) {
     static std::atomic<int> tiers[3] = {kQualityEco, kQualityNormal, kQualityHigh};
     const BuildingQuality building(&tiers[tier]);
-    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kTimber, v);
+    std::unique_ptr<ModuleProcessor> p = createComponent(registry(), id, v);
     if (p && !p->activate(sr, 512)) p.reset();
     return p;
 }

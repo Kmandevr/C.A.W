@@ -19,11 +19,11 @@ using Values = std::vector<std::pair<std::string_view, double>>;
 // builtin_flagship.cpp's numbers.
 enum : int { kBasic = 0, kAnalog = 1, kVocal = 2, kHarmonic = 3, kAdditive = 6 };  // tables
 enum : int {
-    kWarpFmOsc = 7, kWarpRm = 8, kWarpAm = 9, kWarpSync = 10, kStretch = 11, kOddEven = 13, kFormant = 14,
+    kWarpFm = 5, kWarpFmOsc = 7, kWarpRm = 8, kWarpAm = 9, kWarpSync = 10, kStretch = 11, kOddEven = 13, kFormant = 14,
     kSmear = 15, kDisperse = 16, kComb = 18
 };
 enum : int { kSvfLp = 3, kDiode = 9, kSallenKey = 10, kPhaser = 11, kCombNeg = 12, kVowel = 13 };  // filters
-enum : int { kSrcEnv2 = 2, kSrcLfo1 = 4, kSrcVelocity = 8, kSrcModWheel = 13, kSrcAccent = 14, kSrcLfo4 = 15, kSrcMacro1 = 16 };
+enum : int { kSrcEnv2 = 2, kSrcEnv3 = 3, kSrcLfo1 = 4, kSrcVelocity = 8, kSrcModWheel = 13, kSrcAccent = 14, kSrcLfo4 = 15, kSrcMacro1 = 16 };
 enum : int { kPrev = 0, kFromOsc1 = 1, kFromOsc2 = 2, kNoise = 4 };  // mod sources
 constexpr double kSaw = 1.0 / 3.0;  // the Basic table's saw
 
@@ -154,6 +154,35 @@ void appendRavenPresets(std::vector<BuiltinPreset>& out) {
                          {"macro1", 0.3}, {"macro2", 0.0}, {"env1_decay", 0.8}, {"env1_sustain", 0.5}},
                         slot(1, kSrcMacro1, "flt1_cutoff", 0.5), slot(2, kSrcMacro1, "osc1_warp_amt", 0.4),
                         slot(3, kSrcMacro1 + 1, "osc2_warp_amt", 0.6), chorus})});
+    // 1.1.3: the electric pianos and the tonewheel organ, Timber's keys as Kestrel presets (Timber's projects load as
+    // these: timber_migrate.cpp). FM for the pianos: a sine phase-modulated at its own pitch, the index falling from
+    // the strike (Env 2) and rising with velocity (the bark), and a short inharmonic partial for the tine's bell (Env
+    // 3); LFO 1 pans it (Tine's stereo tremolo, depth 0 here) or moves its level (Reed's). The organ: three sines
+    // at the 16', 8' and 5 1/3' drawbars' footages, no velocity, the chorus for the scanner and the slow rotary.
+    const Values ep = {{"osc1_frame", 0}, {"osc1_warp", kWarpFm}, {"osc1_fm_ratio", 1}, {"osc1_phase_rand", 0},
+                       {"osc2_on", 1}, {"osc2_frame", 0}, {"osc2_level", 0}, {"osc2_unison", 1}, {"osc2_phase_rand", 0},
+                       {"flt1_on", 0}, {"env1_attack", 0.002}, {"env1_sustain", 0}, {"env1_release", 0.12},
+                       {"env2_attack", 0.001}, {"env2_sustain", 0}, {"env3_attack", 0.001}, {"env3_sustain", 0},
+                       {"velocity", 0.8}, {"lfo1_rate", 4.0}};
+    out.push_back({"Electric piano (tine)", "A struck tine through its pickup: FM bark with velocity and a glassy bell, for soul and ballads",
+                   all({ep,
+                        {{"osc1_warp_amt", 0.1}, {"osc2_octave", 3}, {"osc2_semi", 10}, {"env1_decay", 3.0}, {"env2_decay", 0.5},
+                         {"env3_decay", 0.2}},
+                        slot(1, kSrcEnv2, "osc1_warp_amt", 0.25), slot(2, kSrcVelocity, "osc1_warp_amt", 0.2),
+                        slot(3, kSrcEnv3, "osc2_level", 0.2), slot(4, kSrcLfo1, "osc1_pan", 0.0, true)})});
+    out.push_back({"Electric piano (reed)", "A struck steel reed: a reedier, shorter FM tone that growls when played hard, for soul and rock",
+                   all({ep,
+                        {{"osc1_warp_amt", 0.22}, {"osc2_octave", 2}, {"osc2_semi", 0}, {"env1_decay", 2.0}, {"env2_decay", 0.3},
+                         {"env3_decay", 0.08}, {"fx_dist_on", 1}, {"fx_dist_type", 0}, {"fx_dist_drive", 1.3}},
+                        slot(1, kSrcEnv2, "osc1_warp_amt", 0.2), slot(2, kSrcVelocity, "osc1_warp_amt", 0.3),
+                        slot(3, kSrcEnv3, "osc2_level", 0.12), slot(4, kSrcLfo1, "osc1_level", 0.0, true)})});
+    out.push_back({"Tonewheel organ", "Sines at the 16', 8' and 5 1/3' drawbars (888), no velocity, a slow rotary-like chorus",
+                   all({{{"osc1_frame", 0}, {"osc1_level", 0.45}, {"osc1_phase_rand", 0}, {"osc2_on", 1}, {"osc2_frame", 0},
+                         {"osc2_octave", -1}, {"osc2_level", 0.45}, {"osc2_unison", 1}, {"osc2_phase_rand", 0}, {"osc3_on", 1},
+                         {"osc3_frame", 0}, {"osc3_semi", 7}, {"osc3_level", 0.45}, {"osc3_unison", 1}, {"osc3_phase_rand", 0},
+                         {"flt1_on", 0}, {"env1_attack", 0.004}, {"env1_decay", 0.1}, {"env1_sustain", 1}, {"env1_release", 0.02},
+                         {"velocity", 0}, {"fx_chorus_on", 1}, {"fx_chorus_rate", 0.8}, {"fx_chorus_depth", 0.5},
+                         {"fx_chorus_mix", 0.45}}})});
 }
 
 }  // namespace caw

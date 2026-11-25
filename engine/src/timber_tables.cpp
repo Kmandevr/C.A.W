@@ -1,4 +1,4 @@
-// Timber's shared read-only tables: the piano's synthesised soundboard excitations, the organ's sine and the pluck noise, built once at registration.
+// Timber's shared read-only tables: the piano's synthesised soundboard excitations (Starling's piano), built once at registration.
 #include "timber_dsp.h"
 
 #include <memory>
@@ -74,10 +74,6 @@ const Tables* build() {
     if (!t) return nullptr;
     for (int c = 0; c < Tables::kCharacters; ++c)
         for (int z = 0; z < Tables::kZones; ++z) buildExcitation(c, z, t->excitation[c][z]);
-    for (int i = 0; i <= Tables::kSine; ++i) t->sine[i] = static_cast<float>(detSin(kTwoPi * i / Tables::kSine));
-    Noise n;
-    n.s = 0xC0FFEEu;
-    for (int i = 0; i < Tables::kPluck; ++i) t->pluck[i] = n.next();
     return t;
 }
 

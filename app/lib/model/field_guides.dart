@@ -283,12 +283,6 @@ const fieldGuides = <String, FieldGuide>{
     ('Glue', 'A bus compressor on the whole kit.'),
     ('Kit drive', 'Warmth and grit on the whole kit.'),
   ], 'Kit: 808'),
-  'org.caw.timber': FieldGuide('Timber models real instruments with no samples: pianos, keys, plucked and bowed '
-      'strings, mallets and winds.', [
-    ('Tone', 'Darker or brighter, like playing softer or harder.'),
-    ('Body', 'How big the instrument is.'),
-    ('Space', 'The room around it.'),
-  ], 'Concert grand'),
   'org.caw.starling': FieldGuide('Starling is a real-sounding grand piano: modelled strings with a recorded grand\'s '
       'attack and noises.', [
     ('Hammer', 'Softer or harder hammers: darker or brighter.'),

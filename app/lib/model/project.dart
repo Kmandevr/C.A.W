@@ -318,12 +318,13 @@ class ComponentUseDoc {
   ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1, this.preset])
       : params = params ?? {};
 
-  /// The synths that became Flagship presets (one synth, 2026-11-10) and the drums that became org.caw.drums (one drum
-  /// instrument, 2026-11-11): a project naming one plays the successor with its values mapped
+  /// The synths that became Flagship presets (one synth, 2026-11-10), the drums that became org.caw.drums (one drum
+  /// instrument, 2026-11-11) and Timber (split in 1.1.3, timber_migrate.cpp): a project naming one plays the successor with its values mapped
   /// ([ProjectDoc.resolveInstruments]).
   static const retiredInstruments = {
     'org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.basic',
     'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit',
+    'org.caw.timber',  // 1.1.3: Timber's models became Starling, Nightingale, Curlew, Woodpecker, Bittern and Kestrel
   };
 
   /// The built-in preset the values start from (Flagship's "Mono bass"...), or null. The engine puts the preset's
@@ -726,11 +727,9 @@ class LayerDoc {
     if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId, {...?newInstrumentValues[componentId]});
   }
 
-  /// What a newly added instrument starts with besides its defaults: a new Timber piano plays Simulated (1.1.2; the
-  /// engine's default stays Classic so older projects and presets sound as they did; owner, 2026-11-20).
-  static const newInstrumentValues = <String, Map<String, double>>{
-    'org.caw.timber': {'sim': 1},
-  };
+  /// What a newly added instrument starts with besides its defaults (none at the moment: Timber's Simulated
+  /// default left with Timber in 1.1.3).
+  static const newInstrumentValues = <String, Map<String, double>>{};
 
   /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4).
   Map<String, dynamic> toJson({int Function(String assetId)? rateOf}) => {
