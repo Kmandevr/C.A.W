@@ -1,7 +1,7 @@
 // The 1.1.3 instruments' shared page in Kestrel's one-screen layout (Timber's, upgraded): the variant cards and the instrument drawn live on top with the variant's own knobs under it, the tone and space panels below, the mod-source strip at the bottom; a phone held upright swipes three named panels under the picture.
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../../model/arrange_fx.dart' show ArrangeFx;
 import '../../../model/device_display.dart';
 import '../../../model/device_target.dart';
 import '../../../model/sampler.dart' show noteName;
