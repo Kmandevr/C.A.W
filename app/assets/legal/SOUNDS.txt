@@ -21,3 +21,9 @@ Woodpecker's tuned percussion plays recorded mallet strokes from the Versilian C
 Source: https://github.com/sgossner/VCSL (marimba, xylophone, glockenspiel, vibraphone, Tubular Bells 1 and Timpani 1)
 
 Changes made for C.A.W: the first 174 ms (the timpani's 358 ms) of 152 strokes, trimmed, faded, folded to mono and normalised per clip, measured for their modes, and played together with C.A.W's modelled bars, tubes and drums.
+
+Rook's drums play recorded stick and beater transients, snare wires, hi-hat and cymbal hits and a kick pedal's noise from Karoryfer Samples' Unruly Drums and Big Rusty Drums, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ (no credit is required; it is given here with thanks).
+
+Sources: https://github.com/sfzinstruments/karoryfer.unruly-drums and https://github.com/sfzinstruments/karoryfer.big-rusty-drums (the toms)
+
+Changes made for C.A.W: 36 hits from the close mics, trimmed to their attacks and short tails, high-passed over the drum heads (which C.A.W synthesizes), faded, folded to mono and normalised per part, and played together with C.A.W's simulated drums.

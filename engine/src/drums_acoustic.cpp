@@ -928,7 +928,7 @@ void AcousticKit::startRecorded(Piece& p, int a, double vel, uint32_t delay) noe
             playRecorded(p, kPartKick, a == kArtClosed ? vel * 0.85 : vel, rec, std::sqrt(20.0 / clampd(p.set.size, 14, 26)), delay);
             // The pedal's own noise, at its recorded level against the kick (31 dB under it) at Noise 0.25.
             playRecorded(p, kPartKickPedal, 0.8, rec * std::pow(10.0, -31.0 / 20.0) * 4.0 * clampd(kit_.noise, 0, 1) /
-                                                     std::max(1e-3, kPartLevel[kPartKickPedal] / kPartLevel[kPartKick]),
+                                                     std::max(1e-3, double(kPartLevel[kPartKickPedal]) / kPartLevel[kPartKick]),
                          1.0, delay);
             break;
         case kPieceSnare: {

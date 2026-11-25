@@ -66,7 +66,7 @@ Future<void> main(List<String> args) async {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
     // Recorded sounds built into the engine (1.1.3): CC-BY needs the credit, the licence and what was changed.
-    yield LicenseEntryWithLineBreaks(['Salamander Grand Piano (Starling)'], await rootBundle.loadString('assets/legal/SOUNDS.txt'));
+    yield LicenseEntryWithLineBreaks(['Salamander Grand Piano (Starling)', 'Karoryfer drums (Rook)'], await rootBundle.loadString('assets/legal/SOUNDS.txt'));
   });
   Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
   ComponentBenchBackend.current = const EngineComponentBench(); // the plug-in benchmark (engine API 30)
