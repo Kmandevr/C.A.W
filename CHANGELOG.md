@@ -3,6 +3,18 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+The realistic instruments get their own pages.
+
+### New
+- **Starling, Nightingale, Curlew, Bittern and Woodpecker each have a page of their own**, in the same one-screen layout as the other instruments: the instrument drawn live on top, its own knobs under it, then tone and space; on a phone, swipe the three panels under the picture. Try these:
+  - **Nightingale:** drag the picture sideways to move the bow toward the bridge or over the fingerboard, and up to press harder; watch the string move under it as you play.
+  - **Curlew:** drag the picture up and down for the breath and watch the breath column and the bore's standing wave.
+  - **Bittern:** tap the stop pills to draw stops (drag one up and down for its level), watch the drawn ranks glow as you play, and try Cathedral, Loft and Dry.
+  - **Woodpecker:** switch between marimba, vibes, chimes and timpani, and drag up and down for a harder mallet; the woodpecker pecks the bar you play.
+  - **Starling:** play and watch the hammers rise and the dampers lift with the pedal; drag up and down for a harder hammer.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.

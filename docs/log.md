@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Log
 
+- 2026-11-25: the 1.1.3 instruments have pages of their own (Timber's one-screen layout, upgraded; [app](app.md), [ui](ui.md)): Starling's piano action, Nightingale's string under the bow, Curlew's bore and breath column, Bittern's pipe façade with drawknob stops and the Room's Cathedral, Loft and Dry, Woodpecker's bars, chimes and drum with the woodpecker at the strike point; one shared layout (`app/lib/ui/devices/instruments/`), the bird motifs moved to `kit/birds.dart`, descriptors in `test/fixtures/instruments_113.json`, tests and phone goldens. 1.1.3-alpha.3's changelog.
 - 2026-11-24: Nightingale's bow force rises behind its speed (C#4 had started on its octave for 140 ms; every key now settles within 110 ms), and its references use the new **Friction** class (chaotic within 1 dB: bowed strings differ that much between compilers).
 - 2026-11-24: devices renamed (the owner's names; display only, ids, files, classes and saved fields unchanged, each old name a search tag): Duck → **Swoop** (`org.caw.duck`), Swoop → **Stoop** (`org.caw.transient`), Lark → **Chirp**, Ricochet → **Mock**, Syrinx → **Coo**, Canopy → **Hover**, Lookout → **Spot**, Hollow → **Call**, Iris → **Molt** (also the engine descriptor's name), Pinion → **Puff**, Strobe → **Blink**; the Ducker's "Duck" variant and the music video's Strobe effect keep their names.
 - 2026-11-24: Woodpecker, the tuned percussion (1.1.3 step 5, [engine](engine.md#woodpecker-tuned-percussion-113)): `org.caw.woodpecker` with marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, modal models measured from VCSL (CC0) with their recorded strokes crossfaded in phase; tests, reference, rt and cost cases; in the app on the fallback page; the stress scenario's every-instrument project now plays it.
