@@ -65,7 +65,7 @@ inline constexpr double kTubeQ = 40.0;
 inline constexpr bool kDampers[kInstruments] = {false, false, false, true, true, false};
 
 // The smooth envelope of a mallet's force spectrum: the half-sine pulse of a Hertz contact (Hunt-Crossley, as
-// timber_sim.h's Contact) lasting tc seconds is flat to about 1 / (2 tc) and falls as f^-2 above.
+// Timber's old Hunt-Crossley mallet contact) lasting tc seconds is flat to about 1 / (2 tc) and falls as f^-2 above.
 inline double contactEnvelope(double hz, double tc) noexcept {
     const double x = 2.0 * hz * tc;
     return 1.0 / std::sqrt(1.0 + x * x * x * x);

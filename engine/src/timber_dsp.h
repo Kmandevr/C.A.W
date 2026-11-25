@@ -232,15 +232,4 @@ struct Mode {
     void flush() noexcept { zr = flushf(zr), zi = flushf(zi); }
 };
 
-// The shared read-only tables (built once, at registration, never on the audio thread).
-struct Tables {
-    // The piano's soundboard excitations: 3 characters (Grand, Upright, Felt) x 8 register zones of kExcLength
-    // 16-bit frames at kExcRate. Synthesised by Timber itself (timber_tables.cpp): no recording is used.
-    static constexpr int kCharacters = 3, kZones = 8, kExcLength = 14400;
-    static constexpr double kExcRate = 48000.0;
-    int16_t excitation[kCharacters][kZones][kExcLength];
-};
-// Builds them on first use (registerStarling calls it, so no voice ever does).
-const Tables& tables() noexcept;
-
 }  // namespace caw::timber

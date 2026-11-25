@@ -193,7 +193,6 @@ struct PianoModel : timber::Piano {
             Base::kPhantom};
         double q[Base::kModelParams] = {};
         for (uint32_t k = 0; k < kModelParams; ++k) q[kMap[k]] = p[k];
-        q[Base::kSim] = 1.0;
         // Touch is Starling's velocity curve (start()), not the finger's contact noise (too quiet to hear).
         touchCurve = clampd(p[kSTouch], 0, 1);
         q[Base::kTouch] = 0.0;

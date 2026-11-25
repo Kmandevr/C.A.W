@@ -121,7 +121,6 @@ V with(double variant, V v) {
 std::span<const fx::MergedDevice> mergedStarlingDevices() { return kDevices; }
 
 void registerStarling(ModuleRegistry& registry) {
-    (void)timber::tables();
     registry.replaceBuiltin(pianoDescriptor(), kVariants[0].create);
 }
 

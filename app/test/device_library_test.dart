@@ -114,6 +114,14 @@ void main() {
       expect(DeviceNames.rank('org.caw.compressor', 'bus'), 0, reason: 'its modes are tags');
     });
 
+    test('searching Timber (removed in 1.1.3) finds the instruments it was split into', () {
+      expect(DeviceNames.of('org.caw.timber'), isNull);
+      for (final id in ['org.caw.starling', 'org.caw.nightingale', 'org.caw.curlew', 'org.caw.bittern',
+          'org.caw.woodpecker', 'org.caw.synth.flagship']) {
+        expect(DeviceNames.rank(id, 'timber'), isNotNull, reason: '$id: an old name');
+      }
+    });
+
     test('the browser\'s entries rank by the same table', () {
       final eq = EffectCatalog.of('org.caw.eq')!;
       expect(eq.rank('EQ', 'Plume · EQ'), 0);

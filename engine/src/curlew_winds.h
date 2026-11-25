@@ -68,7 +68,6 @@ struct Winds : timber::Wind {
     }
 
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
-        padClicks = false;
         // [Assumption] a wind player's vibrato is breath and pitch together (the flute's is usually described as
         // mostly breath; not re-read): at Vibrato 1, 20 % of the breath and 50 cents, so the default 0.2 is 10 cents
         // and 4 % (Timber's 8 cents and 5 % at 1 gave 1.6 cents at the default: Vibrato rate could not be heard).
@@ -88,7 +87,7 @@ struct Winds : timber::Wind {
         q[Base::kBreath] = p[kCBreath], q[Base::kNoise] = p[kCNoise], q[Base::kReed] = p[kCReed];
         q[Base::kVibrato] = p[kCVibrato], q[Base::kVibRate] = p[kCVibRate], q[Base::kGrowl] = 0.0;
         growlAmount = timber::clampd(p[kCGrowl], 0, 1);
-        q[Base::kAttack] = p[kCAttack], q[Base::kSim] = 1.0, q[Base::kNoises] = 0.0;
+        q[Base::kAttack] = p[kCAttack];
         Base::control(q, s);
         bodyAmount = static_cast<float>(timber::clampd(s.body, 0, 1));
         body.load(bodyResponse(which), bodyAmount, sr);
