@@ -100,28 +100,46 @@ inline float softClip(float x) noexcept {
     return x * (27.0f + s) / (27.0f + 9.0f * s);
 }
 
+// atan(x) from exactly rounded operations only (+, -, *, / and sqrt), so every platform's library gives the same
+// bits (each libm rounds atan, sin and cos its own way: the Windows renders of Starling's strings differed by -91 dB).
+// |x| over 1 through pi/2 - atan(1/x), two halvings (atan x = 2 atan(x / (1 + sqrt(1 + x^2)))) to |x| <= tan(pi/16),
+// then its series to the 25th power (the next term under 1e-18).
+inline double detAtan(double x) noexcept {
+    const bool neg = x < 0.0;
+    if (neg) x = -x;
+    const bool inv = x > 1.0;
+    if (inv) x = 1.0 / x;
+    double y = x / (1.0 + std::sqrt(1.0 + x * x));
+    y = y / (1.0 + std::sqrt(1.0 + y * y));
+    const double y2 = y * y;
+    double sum = 0.0;
+    for (int k = 12; k >= 0; --k) sum = ((k & 1) ? -1.0 : 1.0) / (2 * k + 1) + y2 * sum;
+    double r = 4.0 * y * sum;
+    if (inv) r = 1.5707963267948966 - r;
+    return neg ? -r : r;
+}
 // The phase delay, in samples at `w` radians a sample, of the first-order allpass (a + z^-1) / (1 + a z^-1).
 inline double allpassDelay(double a, double w) noexcept {
-    return 1.0 - 2.0 / w * std::atan(a * std::sin(w) / (1.0 + a * std::cos(w)));
+    return 1.0 - 2.0 / w * detAtan(a * detSin(w) / (1.0 + a * detCos(w)));
 }
 // The coefficient of that allpass whose phase delay at `w` is `d` samples (0 < d < 2): exact at w, not only at DC.
 inline double allpassFor(double d, double w) noexcept {
     const double theta = 0.5 * w * (1.0 - d);
-    const double den = std::sin(w - theta);
-    return den == 0.0 ? 0.0 : std::sin(theta) / den;
+    const double den = detSin(w - theta);
+    return den == 0.0 ? 0.0 : detSin(theta) / den;
 }
 // The phase delay at `w` of the one-pole low-pass b / (1 - p z^-1).
 inline double onePoleDelay(double p, double w) noexcept {
-    return std::atan(p * std::sin(w) / (1.0 - p * std::cos(w))) / w;
+    return detAtan(p * detSin(w) / (1.0 - p * detCos(w))) / w;
 }
 // |b / (1 - p e^-jw)| / b.
 inline double onePoleMag(double p, double w) noexcept {
-    return 1.0 / std::sqrt(1.0 - 2.0 * p * std::cos(w) + p * p);
+    return 1.0 / std::sqrt(1.0 - 2.0 * p * detCos(w) + p * p);
 }
 // The pole p of a one-pole low-pass whose gain at `w` is `r` (0 < r < 1) times its gain at DC.
 inline double onePoleForRatio(double r, double w) noexcept {
     r = clampd(r, 1e-4, 0.999999);
-    const double r2 = r * r, c = std::cos(w);
+    const double r2 = r * r, c = detCos(w);
     const double b = 1.0 - r2 * c, a = 1.0 - r2;
     const double disc = b * b - a * a;
     return disc <= 0.0 ? 0.0 : clampd((b - std::sqrt(disc)) / a, 0.0, 0.9999);
@@ -175,23 +193,23 @@ struct Biquad {
     // A peak of `db` at `hz` with quality `q`.
     void peak(double hz, double q, double db, double sr) noexcept {
         const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr, A = detPow(10.0, db / 40.0);
-        const double al = std::sin(w) / (2.0 * q), c = std::cos(w);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w);
         norm(1 + al * A, -2 * c, 1 - al * A, 1 + al / A, -2 * c, 1 - al / A);
     }
     // A band-pass of unit peak gain at `hz` (a resonance).
     void band(double hz, double q, double sr) noexcept {
         const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr;
-        const double al = std::sin(w) / (2.0 * q), c = std::cos(w);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w);
         norm(al, 0, -al, 1 + al, -2 * c, 1 - al);
     }
     void lowpass(double hz, double q, double sr) noexcept {
         const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr;
-        const double al = std::sin(w) / (2.0 * q), c = std::cos(w);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w);
         norm((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + al, -2 * c, 1 - al);
     }
     void highpass(double hz, double q, double sr) noexcept {
         const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr;
-        const double al = std::sin(w) / (2.0 * q), c = std::cos(w);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w);
         norm((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + al, -2 * c, 1 - al);
     }
 };
@@ -220,7 +238,7 @@ struct Mode {
     void set(double hz, double t60, double sr) noexcept {
         const double w = kTwoPi * hz / sr;
         const double r = t60 > 0 ? detExp(-6.907755278982137 / (t60 * sr)) : 0.0;
-        c = static_cast<float>(r * std::cos(w)), s = static_cast<float>(r * std::sin(w));
+        c = static_cast<float>(r * detCos(w)), s = static_cast<float>(r * detSin(w));
     }
     float run(float x) noexcept {
         const float r = c * zr - s * zi + x;

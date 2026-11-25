@@ -48,7 +48,7 @@ struct ModeBank {
     void set(int k, double hz, double sigma, double cl_r, double cl_i, double cr_r, double cr_i, double sr) noexcept {
         if (hz >= 0.45 * sr) cl_r = cl_i = cr_r = cr_i = 0;  // above the band: silent (the state still decays)
         const double r = detExp(-sigma / sr), w = kTwoPi * hz / sr;
-        pr[k] = static_cast<float>(r * std::cos(w)), pi[k] = static_cast<float>(r * std::sin(w));
+        pr[k] = static_cast<float>(r * detCos(w)), pi[k] = static_cast<float>(r * detSin(w));
         // Re(c z) = c_r z_r - c_i z_i; the 1/sr is the impulse invariance's time step.
         lr[k] = static_cast<float>(cl_r / sr), li[k] = static_cast<float>(-cl_i / sr);
         rr[k] = static_cast<float>(cr_r / sr), ri[k] = static_cast<float>(-cr_i / sr);

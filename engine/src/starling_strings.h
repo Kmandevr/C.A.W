@@ -92,7 +92,7 @@ struct Tilt {
         return u;
     }
     void clear() noexcept { z1 = z2 = s = 0; }
-    static double warp(double hz, double sr) noexcept { return std::tan(timber::kPi * std::min(hz, 0.45 * sr) / sr); }
+    static double warp(double hz, double sr) noexcept { return detTan(timber::kPi * std::min(hz, 0.45 * sr) / sr); }
     void set(double f0, double pos, double posRec, double cutoff, double cutoffRec, double sr) noexcept {
         // Second order: (s^2/wr^2 + sqrt2 s/wr + 1) / (s^2/wn^2 + sqrt2 s/wn + 1), s = (1 - z^-1) / (1 + z^-1).
         const double wr = warp(cutoffRec, sr), wn = warp(cutoff, sr);
@@ -296,9 +296,9 @@ struct Strings {
     }
     // The loss (Smith's three-tap loop filter, p (1 - 2p) p): its gain at w over its gain at DC, and the p (0..0.25)
     // whose gain at wh is r times its gain at w0.
-    static double lossMag(double p, double w) noexcept { return 1.0 - 2.0 * p * (1.0 - std::cos(w)); }
+    static double lossMag(double p, double w) noexcept { return 1.0 - 2.0 * p * (1.0 - detCos(w)); }
     static double lossTaps(double r, double w0, double wh) noexcept {
-        const double c0 = 1.0 - std::cos(w0), ch = 1.0 - std::cos(wh), den = 2.0 * (ch - r * c0);
+        const double c0 = 1.0 - detCos(w0), ch = 1.0 - detCos(wh), den = 2.0 * (ch - r * c0);
         return den > 0 ? clampd((1.0 - r) / den, 0.0, 0.25) : 0.0;
     }
     // A palm mute (or a hand on the harp's strings) shortens every decay: 25 times at 1 (the guitar's 8 s E3 to 0.3 s).
