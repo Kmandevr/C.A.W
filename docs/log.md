@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Log
 
+- 2026-11-25: Bittern rebuilt from VCSL's organ (CC0) on the owner's report that it "sounds like a synth" ([engine](engine.md#bittern-the-pipe-organ-113), [decisions](decisions.md)): spectra measured per pipe family, the recording's speech noise and measured speech times (small pipes first), each pipe's own tuning (the chorus' measured 4.4 cents), wander, strike-to-strike variation and breath, one reservoir sagging under the pipes, the reed's attack and the valves' puffs; the stops grouped Great, Swell and Pedal, a Registration choice and five registration presets; a glitch scan (a key struck again had doubled for 5 ms: fixed), velocity as a tracker action; `engine/assets/bittern/speech.flac` (700 KB); references and the stress mix's every-instrument sound re-recorded; cost ceilings 31,000 and 46,000.
 - 2026-11-24: Nightingale's bow force rises behind its speed (C#4 had started on its octave for 140 ms; every key now settles within 110 ms), and its references use the new **Friction** class (chaotic within 1 dB: bowed strings differ that much between compilers).
 - 2026-11-24: devices renamed (the owner's names; display only, ids, files, classes and saved fields unchanged, each old name a search tag): Duck → **Swoop** (`org.caw.duck`), Swoop → **Stoop** (`org.caw.transient`), Lark → **Chirp**, Ricochet → **Mock**, Syrinx → **Coo**, Canopy → **Hover**, Lookout → **Spot**, Hollow → **Call**, Iris → **Molt** (also the engine descriptor's name), Pinion → **Puff**, Strobe → **Blink**; the Ducker's "Duck" variant and the music video's Strobe effect keep their names.
 - 2026-11-24: Woodpecker, the tuned percussion (1.1.3 step 5, [engine](engine.md#woodpecker-tuned-percussion-113)): `org.caw.woodpecker` with marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, modal models measured from VCSL (CC0) with their recorded strokes crossfaded in phase; tests, reference, rt and cost cases; in the app on the fallback page; the stress scenario's every-instrument project now plays it.

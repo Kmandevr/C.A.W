@@ -3,6 +3,11 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+### Changed
+- **Bittern sounds like a real pipe organ:** its pipes now have the tone of a real organ's (measured from VCSL's recorded organ, CC0), and each one speaks on its own with the recording's own chiff and breath, the small pipes first, slightly out of tune with its neighbours so a chorus shimmers, and all of them breathing from one wind that sags a little under a big chord. The usual combinations are one tap (Registration: Flutes, Principal chorus, Full organ, Reeds, Strings, also as presets), the stops are grouped Great, Swell and Pedal, and re-striking a key, drawing a stop while you hold a chord or moving the swell no longer clicks.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.

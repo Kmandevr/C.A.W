@@ -9,3 +9,9 @@ Woodpecker's tuned percussion plays recorded mallet strokes from the Versilian C
 Source: https://github.com/sgossner/VCSL (marimba, xylophone, glockenspiel, vibraphone, Tubular Bells 1 and Timpani 1)
 
 Changes made for C.A.W: the first 174 ms (the timpani's 358 ms) of 152 strokes, trimmed, faded, folded to mono and normalised per clip, measured for their modes, and played together with C.A.W's modelled bars, tubes and drums.
+
+Bittern's pipe organ plays the recorded speech of the pipe organ in the Versilian Community Sample Library (VCSL) by Versilian Studios LLC, dedicated to the public domain under Creative Commons CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/. The organ was sampled by Simon Dalzell of Ivy Audio (winter 2015-16); the library's notes encourage credit to both, given here with thanks.
+
+Source: https://github.com/sgossner/VCSL (Aerophones/Edge-blown Aerophones/Pipe Organ)
+
+Changes made for C.A.W: the pipes' spectra, speech, wander and noise measured from 64 notes in four registrations, and the first 400 ms of what each note holds beyond its harmonics (its speech noise) cut, faded, folded to mono and normalised per clip, and played together with C.A.W's modelled pipes.
