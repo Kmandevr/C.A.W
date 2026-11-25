@@ -9,7 +9,7 @@
 
 #include "builtin_effects.h"
 #include "presets.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 #include "woodpecker_bars.h"
 
 namespace caw::woodpecker {
@@ -31,16 +31,19 @@ constexpr PortDescriptor kPorts[] = {
 // decay, the attack's level and the tier; the bars with tubes the resonator; the vibraphone its motor and pedal, the
 // chimes their damper pedal.
 using P = Bars::P;
-constexpr uint32_t kOwnCount[kInstruments] = {5, 5, 4, 8, 5, 4};
+// (2026-11-25, the owner: no control that matters only after another moves, none that cannot be heard) The
+// glockenspiel has no Attack: its recorded stroke is the bar's own modes almost entirely (Attack 0..2 moved its first
+// 15 ms by 1.4 dB). The vibraphone's motor is one control, its rate (0 off): a real one's discs set the depth.
+constexpr uint32_t kOwnCount[kInstruments] = {5, 5, 3, 7, 5, 4};
 constexpr P kOwn[kInstruments][8] = {
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator},
-    {P::kHardness, P::kDecay, P::kAttack, P::kTier},
-    {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator, P::kSustain, P::kMotor, P::kMotorDepth},
+    {P::kHardness, P::kDecay, P::kTier},
+    {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator, P::kSustain, P::kMotor},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kSustain},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier},
 };
-constexpr double kNeutral[Bars::kAll] = {0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+constexpr double kNeutral[Bars::kAll] = {0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.6};  // the motor's depth: its discs' 0.6
 
 template <int I>
 struct At : Bars {
@@ -67,13 +70,15 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     const std::lock_guard<std::mutex> lock(guard);
     Built& b = store.emplace_back();
     fx::ParamTable& t = b.table;
-    // Timber's shared knobs (timber_core.h reads them by index). Dry by default (Space 0); Body 0.5 is the bar as
+    // Timber's shared knobs (instrument_core.h reads them by index). Dry by default (Space 0); Body 0.5 is the bar as
     // recorded; Release is how fast a damper stops a released note (the vibraphone's and the chimes').
     t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
     t.num("body", "Body", 0.5, 0.0, 1.0).group = "shared";
     t.num("space", "Space", 0.0, 0.0, 1.0).group = "shared";
     t.num("velocity", "Velocity", 0.8, 0.0, 1.0).group = "shared";
-    t.expo("release", "Release", 0.2, 0.005, 10.0, "s").group = "shared";
+    // A bar with no damper (all but the vibraphone and the chimes) rings on after its key: its Release is the
+    // player's hand stopping it (a dead stroke), 10 s by default (let ring, as before).
+    t.expo("release", "Release", kDampers[index] ? 0.2 : 10.0, 0.005, 10.0, "s").group = "shared";
     ParameterDescriptor& v = t.num("voices", "Voices", 24.0, 1.0, 32.0);
     v.step = 1.0, v.smoothingFrames = 0, v.group = "shared";
     t.num("level", "Level", 0.0, -48.0, 12.0, "dB").group = "shared";
@@ -84,7 +89,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
         switch (kOwn[index][k]) {
             case P::kHardness: t.num("hardness", index == kTimpani ? "Stick" : "Mallet hardness", hardness, 0.0, 1.0).group = "mallets"; break;
             case P::kDecay: t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "mallets"; break;
-            case P::kAttack: t.num("attack", "Attack level", 1.0, 0.0, 1.0).group = "mallets"; break;
+            case P::kAttack: t.num("attack", "Attack level", 1.0, 0.0, 2.0).group = "mallets"; break;  // 1 as recorded, 2 the stroke doubled
             case P::kTier: {
                 ParameterDescriptor& tier = t.pick("tier", "Quality", 0.0, kTiers);
                 tier.group = "mallets", tier.automatable = false, tier.modulatable = false;
@@ -93,7 +98,6 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
             case P::kResonator: t.num("resonator", "Resonator", 1.0, 0.0, 1.0).group = "mallets"; break;
             case P::kSustain: t.num("sustain", "Damper pedal", 0.0, 0.0, 1.0).group = "mallets"; break;
             case P::kMotor: t.num("motor", "Motor rate", 0.0, 0.0, 8.0, "Hz").group = "mallets"; break;
-            case P::kMotorDepth: t.num("motor_depth", "Motor depth", 0.6, 0.0, 1.0).group = "mallets"; break;
             default: break;
         }
     }

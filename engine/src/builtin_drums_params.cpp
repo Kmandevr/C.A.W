@@ -62,7 +62,7 @@ constexpr std::string_view kAccentOns[] = {"Beats", "Bar starts", "Off-beats", "
 constexpr std::string_view kGrooves[] = {"Off", "Shuffle", "Laid back", "Gallop", "Broken", "Half-time"};
 constexpr std::string_view kEchoSyncs[] = {"Free", "1/16", "1/8", "1/8 dotted", "1/4", "1/8 triplet"};
 // 1.1.2
-constexpr std::string_view kEngines[] = {"Layers", "Acoustic"};
+constexpr std::string_view kEngines[] = {"Synthesized", "Simulated"};  // 1.1.3 names (Layers, Acoustic before)
 constexpr std::string_view kPieceNames[] = {"Piece 1", "Piece 2",  "Piece 3",  "Piece 4",  "Piece 5",  "Piece 6",
                                             "Piece 7", "Piece 8",  "Piece 9",  "Piece 10", "Piece 11", "Piece 12",
                                             "Piece 13", "Piece 14", "Piece 15", "Piece 16"};
@@ -372,9 +372,10 @@ const Spec* acouSpecs() {
         {"acou_hat_pedal", "Hi-hat pedal", "acoustic", Kind::Num, 0, 1, 1, {}},
         {"acou_sympathy", "Sympathetic ring", "acoustic", Kind::Num, 0, 1, 0.5, {}},
         {"acou_bleed", "Mic bleed", "acoustic", Kind::Num, 0, 1, 0.5, {}},
-        {"acou_noise", "Mechanical noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
+        {"acou_noise", "Noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
         {"acou_level", "Acoustic level", "acoustic", Kind::Num, -60, 12, 0, "dB"},
         {"acou_room", "Room mic", "acoustic", Kind::Num, 0, 1, 0.3, {}},
+        {"randomness", "Randomness", "random", Kind::Num, 0, 1, 0.5, {}},
     };
     return specs;
 }
@@ -403,6 +404,7 @@ const Spec* pieceSpecs() {
         {"pan", "Position", "piece", Kind::Num, -1, 1, 0, {}},
         {"dist", "Distance to overheads", "piece", Kind::Num, 0.3, 2, 1, "m"},
         {"shell_level", "Shell ring", "piece", Kind::Num, 0, 1, 0.5, {}},
+        {"rec", "Recorded", "piece", Kind::Num, 0, 1, 0, {}},
     };
     return specs;
 }
@@ -630,7 +632,7 @@ const std::vector<NeedRule>& needs() {
             if (power == kPadParams || power == k || k == kBodyFreq) continue;  // body_freq: the sub's pitch too
             std::vector<Need> all = {on(power)};
             if (layer == "penv" && k != kPenvMode) all.push_back(in(kPenvMode, {kPenvPoints}));
-            if (k == kBodyPTime || k == kBodyPCurve) all.push_back(in(kPenvMode, {kPenvCurve}));
+            if (k == kBodyPTime || k == kBodyPCurve) all.push_back(in(kPenvMode, {kPenvCurve})), all.push_back(nonzero(kBodyPitch));  // no sweep, no shape
             if (k == kBodyP2Ratio) all.push_back(nonzero(kBodyP2Level));
             if (k == kSubFollow) all.push_back(on(kBodyOn));
             if (k == kNoiseBursts || k == kNoiseSpacing) all.push_back(in(kNoiseMode, {kNoiseClap}));
@@ -663,13 +665,31 @@ const std::vector<NeedRule>& needs() {
         add(kGlide, {on(kMono), on(kTrack)});
         add(kRoot, {on(kTrack)});
         add(kRelease, {in(kTrig, {kGate})});
-        add(kVelPunch, {on(kBodyOn)});
+        add(kVelPunch, {on(kBodyOn), nonzero(kBodyPitch)});  // it scales the pitch drop
         add(kVelClick, {on(kClickOn)});
         add(kRndPos, {on(kResOn)});
         add(kSwingGrid, {nonzero(kSwing)});
         add(kAccentOn, {nonzero(kAccent)});
         add(kFlamTime, {nonzero(kFlam)});
         add(kGrooveAmt, {in(kGroove, {1, 2, 3, 4, 5})});
+        // 1.1.3: a Simulated (Acoustic) pad strikes its piece: of the pad's own settings it hears only its note,
+        // channel, level, strike and velocity variation and groove; every other one needs Synthesized.
+        for (NeedRule& rule : r) {
+            const uint32_t k = rule.param;
+            if (rule.global || k == kNote || k == kChan || k == kType || k == kLevel || k == kRndPos || k == kRndLevel ||
+                (k >= kSwing && k <= kGrooveAmt) || k >= kEngine)
+                continue;
+            rule.all.push_back(in(kEngine, {kEngineLayers}));
+        }
+        {
+            std::vector<bool> has(kPadParams, false);
+            for (const NeedRule& rule : r)
+                if (!rule.global) has[rule.param] = true;
+            for (uint32_t k = 0; k < kPadParams; ++k)
+                if (!has[k] && !(k == kNote || k == kChan || k == kType || k == kLevel || k == kRndPos || k == kRndLevel ||
+                                 (k >= kSwing && k <= kGrooveAmt) || k >= kEngine))
+                    add(k, {in(kEngine, {kEngineLayers})});
+        }
         // 1.1.2: an Acoustic pad's piece and articulation need the engine; the acoustic layer is a Layers pad's.
         add(kAcouPiece, {in(kEngine, {kEngineAcoustic})});
         add(kAcouArtic, {in(kEngine, {kEngineAcoustic})});

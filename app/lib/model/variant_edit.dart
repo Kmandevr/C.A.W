@@ -72,7 +72,7 @@ extension VariantEdit on AppState {
     final next = valuesForVariant(use.params, from, base.variants[variant], variant);
     next.values.addAll(_known(base.variants[variant], also));
     final laneLayer = engineLayerId(layer), mappingLayer = t.layerId, slot = t.slot;
-    // A merged instrument (Timber's models) has its lanes and links as the track's instrument's, not a slot's.
+    // A merged instrument (Starling's, Nightingale's... models) has its lanes and links as the track's instrument's, not a slot's.
     final inst = t.isInstrument;
     final type = inst ? 'instrument' : 'component';
     bool mine(int? component) => inst || component == slot;

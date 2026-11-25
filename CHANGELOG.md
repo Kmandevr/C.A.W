@@ -3,16 +3,43 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+- **The new instruments, every knob heard:** Starling's Hammer runs from soft felt to hard (about 12 dB brighter), and Soft pedal, Touch, Resonance, Sympathy, Phantom partials and Noise all do what they say in normal playing; the Upright and Felt are their own pianos (the Felt darker and softer, the Upright boxy and shorter-lived), both with the grand's recorded attack processed to match; a key let go under the pedal sounds its damper when the pedal lifts. Curlew's Growl is a real growl and flutter-tongue, its Vibrato is heard at the default, and the sax has a body. Nightingale no longer spikes or buzzes as a note is released, and its vibrato comes in sooner. Woodpecker's Release damps the bars by hand, Attack level adds or removes the mallet's stroke, and the vibraphone's motor is one control.
+### Changed
+- **Timber has been split into the new instruments:** a project that used Timber now opens with each track on Starling (piano, and for now the plucked strings), Nightingale (bowed strings), Curlew (winds), Woodpecker (mallets), Bittern (a church-like organ) or Kestrel's new Electric piano and Tonewheel organ presets, with its settings carried over as closely as they go, and a one-time note says so. It sounds similar, not identical. Searching "Timber" finds the new instruments.
+The realistic instruments get their own pages.
+
+### New
+- **Bittern is now a real concert organ, after the Salt Lake Tabernacle's:** 26 of its stops by name, in its divisions (the Great, the Swell and Choir each in its swell box, the Antiphonal's Tuba Mirabilis, and a Pedal with two 32's), from principal choruses and harmonic flutes to celestes, a Hautbois, a Krummhorn and French trumpets, every stop with its own colour. The pedal plays your lowest key as a bass line under your hands (or every key); the mod wheel closes the Swell and Choir boxes and the tremulant shakes them, as on the real organ, while the Great stays steady. Nine registrations in one tap, from a soft accompaniment for a choir to the full organ with the Tuba on top, in a hall that rings like the Tabernacle (about 4 seconds).
+- **Starling's crossfade keeps the note's tone:** where the real recorded strike hands over to the modelled string, the model now takes the recording's balance of fundamental, octave and twelfth for each key, so the note no longer seems to drop an octave or change colour.
+- **Winds play legato:** Curlew plays one note at a time like a wind player, so a note played while another is held slurs to it without a new attack, and the held note comes back when you let go (Play: Legato; choose Poly for chords).
+- **Starling's Unison sounds like a piano going out of tune:** each key drifts its own way instead of every note chorusing alike.
+- **Starling, Nightingale, Curlew, Bittern and Woodpecker each have a page of their own**, in the same one-screen layout as the other instruments: the instrument drawn live on top, its own knobs under it, then tone and space; on a phone, swipe the three panels under the picture. Try these:
+  - **Nightingale:** drag the picture sideways to move the bow toward the bridge or over the fingerboard, and up to press harder; watch the string move under it as you play.
+  - **Curlew:** drag the picture up and down for the breath and watch the breath column and the bore's standing wave.
+  - **Bittern:** pick a registration or tap the stop pills to draw stops, division by division (drag one up and down for its level), watch the drawn ranks glow as you play, and try Hall, Loft and Dry.
+  - **Woodpecker:** switch between marimba, vibes, chimes and timpani, and drag up and down for a harder mallet; the woodpecker pecks the bar you play.
+  - **Starling:** play and watch the hammers rise and the dampers lift with the pedal; drag up and down for a harder hammer.
+### New
+- **Rook, drums that sound different by kind:** three cards over the pads (Synth, Produced, Acoustic) switch the whole kit to that kind's best kit, and a new Rook opens on a realistic, dry studio rock and pop kit: synthesized drum heads with real recorded sticks, shells, snare wires, hi-hat and cymbals (Karoryfer's CC0 kits). A Randomness knob sets how far the dice move a pad, and a randomized pad stays its type. Presets come in categories, the best kits first.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.
 
 ### New
 - **Woodpecker, tuned percussion:** marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, each with its real mallet stroke (VCSL, CC0) flowing into a ringing bar, tube or drum measured from the same recordings, in tune at A440. Listen for the stroke handing over to the ring with no dip or bump, the marimba's warm tube (the Resonator knob), the vibraphone's motor shimmer and damper pedal, and a brighter tone as you raise Mallet hardness. 15 presets.
+- **Starling's classical guitar and harp:** a nylon-string classical guitar (FreePats, CC0) and a concert pedal harp (VCSL, CC0) under Starling's Model, each the real instrument's pluck flowing into a modelled string measured from the same recordings, in tune at A440. Listen for the pluck handing over to the ringing string with no dip or bump, the harp's long ring (Let ring) against the guitar's stopped strings, brighter and thinner as you move Pluck position towards the bridge, the nail's snap on Finger / nail, and Palm mute. 15 presets. No steel-string guitar yet.
 
 ### Fixed
 - **Knobs and effects answer your finger again.** On 1.1.3-alpha.1 a phone's page scroll took most drags on a knob: holding a knob and dragging up or down scrolled the page instead (on every effect page), the "Up and down" setting never turned a knob on a scrolling page, and a sideways drag on an instrument's knob could swipe to the next panel. The knobs and visuals now use the phone's own touch distance, so a sideways drag turns a knob at once, a quarter-second hold then any direction turns it (also after a long hold), and only a quick up-and-down swipe scrolls the page. Swipe an instrument's panels from anywhere but a knob face. A fast sideways start near a modulated knob's centre no longer changes its modulation amount instead of the knob, and the sampler's panel buttons no longer run off a phone's screen.
 - The MIDI effects (Hop, Clutch, Perch, Mock, Ruffle) are out of the device library for now: added to an effect chain they did nothing. They come back with their own place on a track.
+
+### Known issues
+- Some knobs on the new instruments still move without changing the sound (Starling's Resonance, Sympathy, Touch and Noise, and its Upright and Felt still close to the grand; a few on Nightingale, Curlew, Bittern and Woodpecker). Fixed in 1.1.3-alpha.3.
+- The MIDI effects (Hop, Clutch, Perch, Mock, Ruffle) are out of the device library for now: on an effect chain they did nothing. They come back with MIDI routing.
+
 
 ## 1.1.3-alpha.1 (2026-11-24)
 

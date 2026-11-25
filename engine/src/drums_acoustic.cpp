@@ -2,6 +2,7 @@
 #include "drums_acoustic.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -36,6 +37,25 @@ constexpr uint32_t kLag = kRing / 2;
 // strength and the hat plates' clamping loss (per newton of contact).
 constexpr float kRattle = 150.0f, kRattleEco = 150.0f, kSwellScale = 4.0f, kHatDamp = 6.0f;
 // the sympathetic drive's delay (frames): 16, the longest chunk
+
+// 1.1.3: the recorded parts' clips (engine/tools/rook_assets.py writes rook_bank.inc): each part's layers in order.
+enum Part : uint32_t {
+    kPartKick, kPartSnare, kPartSnareEdge, kPartSnareRimshot, kPartSnareXstick, kPartWires, kPartTomHigh, kPartTomLow,
+    kPartHatClosed, kPartHatHalf, kPartHatOpen, kPartHatFoot, kPartCrash, kPartRide, kPartRideBell, kPartKickPedal,
+    kPartCount
+};
+struct Clip {
+    uint32_t start, frames;
+    float peak, vel;  // the clip's peak in the bank, and the velocity it stands for (its peak against the loudest's)
+};
+struct PartClips {
+    uint32_t first, count;
+};
+#include "rook_bank.inc"
+// Each part's level against the model's (a drum's recorded layer sits on its synthesized heads; a cymbal's replaces
+// its plate), measured with rook_recorded_parts_balance_against_the_model (drums_recorded_test.cpp).
+constexpr float kPartLevel[kPartCount] = {0.55f, 0.5f, 0.5f, 0.55f, 0.6f, 0.28f, 0.5f, 0.5f,
+                                          0.71f, 0.85f, 0.95f, 0.6f, 2.1f, 1.12f, 1.77f, 0.55f};
 
 double clampd(double v, double lo, double hi) noexcept {
     if (!(v == v)) return lo;
@@ -367,6 +387,8 @@ void AcousticKit::setPiece(uint32_t piece, const PieceSettings& s, int quality) 
 
 void AcousticKit::configure(Piece& p) noexcept {
     p.configured = true;
+    // 1.1.3: a hi-hat or cymbal played from recordings plays its model only for what the recordings leave.
+    p.simGain = rec_.pcm && !isDrumPiece(p.set.kind) ? static_cast<float>(1.0 - clampd(p.set.rec, 0, 1)) : 1.0f;
     p.seg[0] = p.seg[1] = p.seg[2] = Segment{};
     p.wires = 0;
     p.rattleGain = 0.0f;  // the wires (or Eco's stand-in) only while a snare has them on
@@ -501,6 +523,8 @@ void AcousticKit::configureDrum(Piece& p) noexcept {
     }
     if (s.kind == kPieceSnare && p.quality == 0 && s.wires > 0.0)  // Eco: a gated noise for the wires
         p.rattleGain = static_cast<float>(dbGain(clampd(s.wireLevel, -24, 12)) * 0.6 * (0.4 + clampd(s.wires, 0, 1)) * kRattleEco);
+    // 1.1.3: recorded wires take over the rattle's sound; the simulated ones still damp the head and answer the kick.
+    if (rec_.pcm) p.rattleGain *= static_cast<float>(1.0 - 0.6 * clampd(s.rec, 0, 1));
     p.rattleK = static_cast<float>(std::exp(-kTwoPi * 3000.0 / sr_));
     p.gain = static_cast<float>(s.kind == kPieceKick ? 0.14 : (s.kind == kPieceSnare ? 0.12 : 0.12));
 }
@@ -809,8 +833,10 @@ void AcousticKit::strike(uint32_t piece, int artic, double velocity, double jitt
             startStroke(p, s, vel, pos, a, false, false, 0);
             break;
     }
-    if (p.set.kind == kPieceKick) noiseBurst(0.025, 0.6, 0.25);  // the pedal's mechanism (its spring and cam)
+    // The pedal's mechanism (its spring and cam): recorded (startRecorded) as far as the kick is.
+    if (p.set.kind == kPieceKick) noiseBurst(0.025, 0.6 * (rec_.pcm ? 1.0 - clampd(p.set.rec, 0, 1) : 1.0), 0.25);
     if (kit_.stick == kStickBrushes && p.set.kind != kPieceKick && a != kArtChoke) noiseBurst(0.08, 0.5, 0.9);  // the swish
+    startRecorded(p, a, vel, 0);  // 1.1.3: the recorded parts, as far as pc<n>_rec says
 }
 
 bool AcousticKit::wakeHat(uint32_t piece) noexcept {
@@ -832,7 +858,205 @@ void AcousticKit::pressure(uint32_t noteId, double value) noexcept {
     if (!(value >= 0.5)) return;
     for (Piece& p : pieces_)
         if (p.awake && p.lastNote == noteId && isCymbalPiece(p.set.kind) && p.set.kind != kPieceHiHat)
-            for (uint32_t sg = 0; sg < 3; ++sg) applyDamp(p, sg, static_cast<float>(std::exp(-1.0 / (0.03 * sr_))));
+            for (uint32_t sg = 0; sg < 3; ++sg) applyDamp(p, sg, static_cast<float>(std::exp(-1.0 / (0.03 * sr_)))),
+                chokeRecorded(p, 0.08);
+}
+
+// ---------- Recorded parts (1.1.3) ----------
+
+// A clip of `part` at `velocity`: the layer nearest it (round robins alternate), scaled so the hit's peak follows
+// the recordings' velocity curve (0.9 v^1.6 at the loudest layer's level); played at `rate` (a smaller tom's shell
+// rings higher), `delay` frames from now. The oldest voice gives way when all four sound.
+void AcousticKit::playRecorded(Piece& p, uint32_t part, double velocity, double gain, double rate, uint32_t delay) noexcept {
+    if (!rec_.pcm || part >= kPartCount || !(gain > 0.0)) return;
+    const PartClips pc = kParts[part];
+    if (pc.count == 0) return;
+    const double v = clampd(velocity, 0.02, 1.6);
+    const double want = std::min(v, 1.0);
+    uint32_t best = pc.first;
+    double bestD = 1e9;
+    uint32_t ties = 0;
+    for (uint32_t c = pc.first; c < pc.first + pc.count; ++c) {
+        const double d = std::fabs(kClips[c].vel - want);
+        if (d < bestD - 1e-4) bestD = d, best = c, ties = 1;
+        else if (std::fabs(d - bestD) <= 1e-4 && (p.recHits % (++ties)) == 0) best = c;  // a round robin
+    }
+    const Clip& clip = kClips[best];
+    if (clip.start + clip.frames > rec_.frames || clip.frames < 4) return;
+    const double target = 0.9 * std::pow(v, 1.6);
+    const float g = static_cast<float>(gain * kPartLevel[part] * std::min(4.0, target / std::max(1e-4, double(clip.peak))));
+    // A free voice, else the one nearest its end.
+    uint32_t slot = 0;
+    double most = -1.0;
+    for (uint32_t k = 0; k < kRecVoices; ++k) {
+        const RecVoice& rv = p.recv[k];
+        if (!rv.on) {
+            slot = k;
+            break;
+        }
+        const double through = rv.pos / std::max<uint32_t>(1u, rv.frames) + (rv.fadeK < 1.0f ? 1.0 : 0.0);
+        if (through > most) most = through, slot = k;
+    }
+    RecVoice& rv = p.recv[slot];
+    rv.on = true;
+    rv.start = clip.start;
+    rv.frames = clip.frames;
+    rv.delay = delay;
+    rv.pos = 0.0;
+    rv.step = rec_.rate / sr_ * clampd(rate, 0.25, 4.0);
+    rv.gain = g;
+    rv.fadeK = 1.0f;
+    rv.decayK = 1.0f;
+    rv.part = static_cast<uint8_t>(part);
+    if (!isDrumPiece(p.set.kind)) {
+        // A hat's or cymbal's own settings act on its recording too: Tuning moves its pitch, Decay under 1 and
+        // Damping shorten its ring (Decay over 1 cannot lengthen a recording: the model's share carries it).
+        rv.step *= std::exp2(clampd(p.set.tune, -24, 24) / 12.0);
+        const double perSecond = 1.25 * std::max(0.0, 1.0 / clampd(p.set.decay, 0.25, 4) - 1.0) + 2.5 * clampd(p.set.damp, 0, 1);
+        rv.decayK = static_cast<float>(std::exp(-perSecond / sr_));
+    }
+}
+
+// Fades the sounding clips (of parts fromPart..toPart, or all) to silence in about `seconds`: a hand on a cymbal,
+// a hat closing.
+void AcousticKit::chokeRecorded(Piece& p, double seconds, int fromPart, int toPart) noexcept {
+    const float k = static_cast<float>(std::exp(-1.0 / (std::max(0.002, seconds) * 0.25 * sr_)));  // -35 dB in `seconds`
+    for (RecVoice& rv : p.recv)
+        if (rv.on && (fromPart < 0 || (rv.part >= fromPart && rv.part <= toPart))) rv.fadeK = std::min(rv.fadeK, k);
+}
+
+// The clips a stroke plays, by the piece's kind and the articulation (a, already the piece's own).
+void AcousticKit::startRecorded(Piece& p, int a, double vel, uint32_t delay) noexcept {
+    const double rec = clampd(p.set.rec, 0, 1);
+    if (!rec_.pcm || !(rec > 0.0)) return;
+    ++p.recHits;
+    const double tune = std::exp2(clampd(p.set.tune, -24, 24) / 24.0);  // the shell and rim follow half the tuning
+    switch (p.set.kind) {
+        case kPieceKick:
+            // A choke (the beater left on the head) plays no hit, only the pedal.
+            if (a != kArtChoke) playRecorded(p, kPartKick, a == kArtClosed ? vel * 0.85 : vel, rec, std::sqrt(20.0 / clampd(p.set.size, 14, 26)), delay);
+            // The pedal's own noise, at its recorded level against the kick (31 dB under it) at Noise 0.25.
+            playRecorded(p, kPartKickPedal, 0.8, rec * std::pow(10.0, -31.0 / 20.0) * 4.0 * clampd(kit_.noise, 0, 1) /
+                                                     std::max(1e-3, double(kPartLevel[kPartKickPedal]) / kPartLevel[kPartKick]),
+                         1.0, delay);
+            break;
+        case kPieceSnare: {
+            if (a == kArtChoke) {
+                chokeRecorded(p, 0.06);
+                break;
+            }
+            const bool rim = a == kArtCrossStick || a == kArtRimClick;
+            const uint32_t part = rim ? kPartSnareXstick
+                                      : (a == kArtRimshot ? kPartSnareRimshot : (a == kArtEdge || a == kArtOffCenter ? kPartSnareEdge : kPartSnare));
+            const double r = tune * std::sqrt(14.0 / clampd(p.set.size, 10, 16));
+            if (a == kArtFlam) {
+                playRecorded(p, part, vel * 0.35, rec, r, delay);
+                delay += static_cast<uint32_t>(0.022 * sr_);
+            }
+            playRecorded(p, part, a == kArtRimClick ? vel * 0.6 : vel, rec, r, delay);
+            const double wires = clampd(p.set.wires, 0, 1);
+            if (!rim && wires > 0.0)  // the snare-side wires: tighter wires buzz less long, the level as the wire knob
+                playRecorded(p, kPartWires, vel, rec * dbGain(clampd(p.set.wireLevel, -24, 12)) * (0.4 + wires), 1.0, delay);
+            break;
+        }
+        case kPieceTom: {
+            if (a == kArtChoke) {
+                chokeRecorded(p, 0.06);
+                break;
+            }
+            const double size = clampd(p.set.size, 6, 26);
+            const bool high = size < 15.0;
+            const double r = tune * std::sqrt((high ? 14.0 : 18.0) / size);
+            if (a == kArtFlam) {
+                playRecorded(p, high ? kPartTomHigh : kPartTomLow, vel * 0.35, rec, r, delay);
+                delay += static_cast<uint32_t>(0.022 * sr_);
+            }
+            playRecorded(p, high ? kPartTomHigh : kPartTomLow, a == kArtCrossStick || a == kArtRimClick ? vel * 0.4 : vel, rec, r, delay);
+            break;
+        }
+        case kPieceHiHat: {
+            p.recTilt = std::array<float, 4>{0.0f, 0.5f, -0.3f, -0.5f}[std::clamp(p.set.alloy, 0, 3)];
+            const double pedal = p.hatOverride >= 0 ? p.hatOverride / 1000.0 : kit_.hatPedal;
+            uint32_t part = pedal >= 0.85 ? kPartHatClosed : (pedal >= 0.35 ? kPartHatHalf : kPartHatOpen);
+            if (a == kArtClosed) part = kPartHatClosed;
+            if (a == kArtOpen) part = kPartHatOpen;
+            if (a == kArtFoot) part = kPartHatFoot;
+            // Closing the hat stops what rang open (the plates clamp); a stroke at the same opening rings on.
+            if (part == kPartHatClosed || part == kPartHatFoot) chokeRecorded(p, 0.04, kPartHatHalf, kPartHatOpen);
+            if (part == kPartHatHalf) chokeRecorded(p, 0.08, kPartHatOpen, kPartHatOpen);
+            const double r = std::sqrt(14.0 / clampd(p.set.size, 10, 18));
+            if (a == kArtFlam) {
+                playRecorded(p, part, vel * 0.35, rec, r, delay);
+                delay += static_cast<uint32_t>(0.022 * sr_);
+            }
+            playRecorded(p, part, a == kArtEdge ? vel * 1.1 : vel, rec, r, delay);
+            break;
+        }
+        case kPieceCrash:
+        case kPieceSplash:
+        case kPieceChina:
+        case kPieceRide: {
+            static constexpr float kAlloyTilt[] = {0.0f, 0.5f, -0.3f, -0.5f};  // B20, B8, brass, dark
+            p.recTilt = kAlloyTilt[std::clamp(p.set.alloy, 0, 3)] + static_cast<float>(0.8 * clampd(p.set.swell, 0, 1) * (std::min(vel, 1.0) - 0.6));
+            if (a == kArtChoke) {
+                chokeRecorded(p, 0.08);
+                break;
+            }
+            const bool ride = p.set.kind == kPieceRide;
+            const uint32_t part = ride ? (a == kArtBell ? kPartRideBell : kPartRide) : kPartCrash;
+            // A splash is a small crash, a china a lower one; a cymbal's size moves its pitch as the square root.
+            const double ref = ride ? 20.0 : 16.0;
+            double r = std::sqrt(ref / clampd(p.set.size, 6, 26));
+            if (p.set.kind == kPieceChina) r *= 0.85;
+            if (a == kArtFlam) {
+                playRecorded(p, part, vel * 0.35, rec, r, delay);
+                delay += static_cast<uint32_t>(0.022 * sr_);
+            }
+            playRecorded(p, part, a == kArtEdge && ride ? vel * 1.15 : vel, rec, r, delay);
+            break;
+        }
+        default: break;
+    }
+}
+
+// Adds the sounding clips to the piece's output (its model's share already in it).
+void AcousticKit::mixRecorded(Piece& p, uint32_t n) noexcept {
+    const float* const pcm = rec_.pcm;
+    float sum[kCell] = {};
+    bool any = false;
+    for (RecVoice& rv : p.recv) {
+        if (!rv.on) continue;
+        const double last = static_cast<double>(rv.frames) - 3.0;
+        for (uint32_t t = 0; t < n; ++t) {
+            if (rv.delay) {
+                --rv.delay;
+                continue;
+            }
+            if (rv.pos >= last || rv.gain < 1e-6f) {
+                rv.on = false;
+                break;
+            }
+            // 4-point cubic (Catmull-Rom) between the bank's samples.
+            const uint32_t i = static_cast<uint32_t>(rv.pos);
+            const float f = static_cast<float>(rv.pos - i);
+            const float* x = pcm + rv.start + i;
+            const float xm = i > 0 ? x[-1] : x[0];
+            const float c1 = 0.5f * (x[1] - xm), c2 = xm - 2.5f * x[0] + 2.0f * x[1] - 0.5f * x[2],
+                        c3 = 0.5f * (x[2] - xm) + 1.5f * (x[0] - x[1]);
+            sum[t] += rv.gain * (((c3 * f + c2) * f + c1) * f + x[0]);
+            any = true;
+            rv.pos += rv.step;
+            rv.gain *= rv.fadeK * rv.decayK;
+        }
+    }
+    if (!any) return;
+    // The tilt around 2.5 kHz (a one-pole split): + brighter (B8), - darker (brass, a dark lathed alloy).
+    const float k = static_cast<float>(1.0 - std::exp(-kTwoPi * 2500.0 / sr_)), tilt = p.recTilt;
+    for (uint32_t t = 0; t < n; ++t) {
+        p.recLp += k * (sum[t] - p.recLp);
+        p.out[t] += sum[t] + tilt * (sum[t] - p.recLp);
+    }
+    if (std::fabs(p.recLp) < 1e-20f) p.recLp = 0.0f;
 }
 
 // ---------- Running ----------
@@ -1300,8 +1524,9 @@ void AcousticKit::span(double* left, double* right, double* room, uint32_t n) no
                 const float jitter = unit(p.rollRng) * 0.04f;
                 Striker& s = p.stick[p.nextStick];
                 p.nextStick ^= 1u;
-                startStroke(p, s, p.rollVel * (0.85f + 0.1f * unit(p.rollRng)), std::clamp(p.rollPos + jitter, 0.02f, 0.95f), kArtRoll,
-                            true, false, p.rollIn);
+                const float rv = p.rollVel * (0.85f + 0.1f * unit(p.rollRng));
+                startStroke(p, s, rv, std::clamp(p.rollPos + jitter, 0.02f, 0.95f), kArtRoll, true, false, p.rollIn);
+                startRecorded(p, kArtRoll, rv * 0.8, p.rollIn);
                 p.rollIn += p.rollEvery;
             }
             p.rollIn -= n;
@@ -1310,12 +1535,22 @@ void AcousticKit::span(double* left, double* right, double* room, uint32_t n) no
         }
         if (isDrumPiece(p.set.kind)) {
             runDrum(p, n, clock_);
+        } else if (p.simGain <= 0.0f) {  // 1.1.3: a hi-hat or cymbal wholly from recordings runs no model
+            for (uint32_t t = 0; t < n; ++t) p.out[t] = noiseSample(p);  // a hand's or the pedal's noise still sounds
+            p.stick[0].active = p.stick[1].active = p.rim.active = false;
+            p.hatV = 0.0f;
         } else if (p.set.kind == kPieceHiHat) {
             p.hatTarget = pedalHeight(p.hatOverride >= 0 ? p.hatOverride / 1000.0 : kit_.hatPedal);
             runHat(p, n, clock_);
         } else {
             runCymbal(p, n, clock_);
         }
+        if (p.simGain < 1.0f && p.simGain > 0.0f)
+            for (uint32_t t = 0; t < n; ++t) p.out[t] *= p.simGain;
+        // A hat recorded open closes when its pedal does (CC 4), as its plates clamp.
+        if (p.set.kind == kPieceHiHat && p.hatOverride < 0 && kit_.hatPedal >= 0.85)
+            chokeRecorded(p, 0.05, kPartHatHalf, kPartHatOpen);
+        mixRecorded(p, n);
         // The guard: a non-finite or runaway output silences the piece (it starts over at its next stroke).
         bool bad = false;
         for (uint32_t t = 0; t < n; ++t) {
@@ -1399,7 +1634,9 @@ void AcousticKit::endCell() noexcept {
         }
         for (float* f : {&p.rattleHp[0], &p.rattleHp[1], &p.wireGate, &p.swellHp[0], &p.swellLp, &p.noiseLp, &p.swellEnv})
             if (std::fabs(*f) < 1e-20f) *f = 0.0f;
-        const bool busy = p.stick[0].active || p.stick[1].active || p.rim.active || p.rolling || p.noiseLeft ||
+        bool sounding = false;  // 1.1.3: a clip not started yet (a flam's) or still playing keeps the piece awake
+        for (const RecVoice& rv : p.recv) sounding = sounding || rv.on;
+        const bool busy = sounding || p.stick[0].active || p.stick[1].active || p.rim.active || p.rolling || p.noiseLeft ||
                           (p.set.kind == kPieceHiHat && std::fabs(p.hatV) > 1e-4f);
         p.quietFrames = p.peak < 1e-5f && !busy ? p.quietFrames + cellFrames_ : 0;
         p.peak = 0.0f;
@@ -1443,6 +1680,8 @@ void AcousticKit::quietState(Piece& p) noexcept {
     p.hatZ = p.hatTarget;
     p.noiseLeft = 0;
     p.noiseLp = 0.0f;
+    for (RecVoice& rv : p.recv) rv = RecVoice{};
+    p.recLp = 0.0f;
     p.rolling = false;
     p.quietFrames = 0;
     p.peak = 0.0f;

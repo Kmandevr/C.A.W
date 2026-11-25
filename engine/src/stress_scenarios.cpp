@@ -861,7 +861,7 @@ ProjectSpec sampleStream(const std::string& dir, int tracks, bool mixedRates, st
 std::vector<BenchmarkDevice> benchmarkInstruments() {
     // 1.1.2 (the owner: "make sure the benchmark actually tests all of the plugins"): the engine's own list of
     // built-ins (ModuleRegistry::builtinComponents: the retired ids are not in it, so an old project's synth is not
-    // played twice), each instrument with each of its models (`variant`), Timber's in both Classic and Simulated, and
+    // played twice), each instrument with each of its models (`variant`), and
     // Rook in each of its kit kinds (the first preset of each). Generated, so a new instrument is played the day it
     // is registered (stress_test.cpp checks it).
     ModuleRegistry registry;
@@ -871,17 +871,11 @@ std::vector<BenchmarkDevice> benchmarkInstruments() {
         if (d->role != ModuleRole::Instrument) continue;
         const std::string id(d->id), name = d->name.empty() ? id : std::string(d->name);
         const ParameterDescriptor* variant = nullptr;
-        bool sim = false;
-        for (uint32_t k = 0; k < d->parameterCount; ++k) {
+        for (uint32_t k = 0; k < d->parameterCount; ++k)
             if (d->parameters[k].id == "variant" && d->parameters[k].choiceCount > 1) variant = &d->parameters[k];
-            if (d->parameters[k].id == "sim") sim = true;
-        }
         if (variant) {
-            for (uint32_t v = 0; v < variant->choiceCount; ++v) {
-                const std::string label(variant->choices[v]);
-                out.push_back({id, name + " · " + label, {{"variant", variant->minimum + v}}, false});
-                if (sim) out.push_back({id, name + " · " + label + ", Simulated", {{"variant", variant->minimum + v}, {"sim", 1}}, false});
-            }
+            for (uint32_t v = 0; v < variant->choiceCount; ++v)
+                out.push_back({id, name + " · " + std::string(variant->choices[v]), {{"variant", variant->minimum + v}}, false});
         } else {
             out.push_back({id, name, {}, false});
         }

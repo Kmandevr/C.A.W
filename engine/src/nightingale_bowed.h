@@ -8,8 +8,8 @@
 #include <new>
 
 #include "body_bands.h"
-#include "timber_core.h"
-#include "timber_sim.h"  // CAW_TIMBER_NOINLINE
+#include "instrument_core.h"
+#include "instrument_noinline.h"  // CAW_TIMBER_NOINLINE
 
 namespace caw::nightingale {
 
@@ -131,6 +131,7 @@ struct Bowed {
         uint32_t age = 0;
         float z = 0, zd = 0, zt = 0, invZss = 1e9f;
         bool lifted = false;
+        float liftG = 1;  // the bow leaving the string: its force and the bridge's loss eased over 5 ms (1 on it, 0 off)
         float nEnv = 0, nHp = 0, nLp = 0;  // the bow noise's envelope and its band filter
         timber::Noise noise;
         uint32_t counted = 0;  // samples played (the tests read it)
@@ -201,7 +202,9 @@ struct Bowed {
         beta = 0.04 * detPow(5.0, position);
         pp = -0.1 + 1.2 * pressure;  // a little past each end of the window at the extremes
         constants();
-        nGain_ = static_cast<float>(kNoiseGain * noiseLevel / 0.35);
+        // Noise: 0.35 (the default) about 35 dB under the tone, as recorded; above it the rosin's scratch comes forward
+        // faster (a square law: 1 is about 17 dB under the tone, a close-miked, rough bow), below it fades out.
+        nGain_ = static_cast<float>(kNoiseGain * (noiseLevel / 0.35) * (noiseLevel / 0.35));
         // The bridge's loss in the loop: Timber's 4 kHz (2.5 kHz for cello and bass) made every note dull; against
         // the VSCO recordings the model was 10-20 dB short at 2-6 kHz, so the corner moved up (the body corrects the rest).
         lpk = static_cast<float>(1.0 - detExp(-timber::kTwoPi * (instrument >= 2 ? 6000.0 : 9000.0) / sr));
@@ -216,6 +219,7 @@ struct Bowed {
         v.vib = 0, v.vibAmount = 0, v.age = 0;
         v.z = v.zd = v.zt = 0, v.invZss = 1e9f;
         v.lifted = false;
+        v.liftG = 1;
         v.nEnv = v.nHp = v.nLp = 0;
         v.counted = 0;
         v.noise.s = 0xB0A1u + 17u * v.key;
@@ -251,18 +255,31 @@ struct Bowed {
     void voiceControl(Voice& v, const Shared&) noexcept {
         const double dt = kControlFrames / sr;
         v.age += kControlFrames;
-        if (v.age > 0.25 * sr) v.vibAmount = std::min(1.0f, v.vibAmount + static_cast<float>(dt / 0.4));
+        // The vibrato comes in after the bow has caught the string: from 0.12 s, over 0.25 s (it waited 0.25 s and
+        // took 0.4, so a short note never had any).
+        if (v.age > 0.12 * sr) v.vibAmount = std::min(1.0f, v.vibAmount + static_cast<float>(dt / 0.25));
         v.vib += vibRate * dt;
         v.vib -= std::floor(v.vib);
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
         v.target = static_cast<float>((0.05 + 0.25 * speed) * (0.45 + 0.55 * v.velocity)) * (1.0f + 0.8f * expr);
         refresh(v);
-        tune(v, 25.0 * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
+        // Wider on the low strings, where the same cents move fewer Hz: a cello's x 1.4, a bass's x 1.8.
+        static constexpr double kWidth[4] = {1.0, 1.15, 1.4, 1.8};
+        tune(v, 25.0 * kWidth[instrument] * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
         v.lp = timber::flushf(v.lp), v.dc = timber::flushf(v.dc), v.z = timber::flushf(v.z);
         v.zd = timber::flushf(v.zd), v.zt = timber::flushf(v.zt), v.nEnv = timber::flushf(v.nEnv);
         v.nHp = timber::flushf(v.nHp), v.nLp = timber::flushf(v.nLp);
         v.tn.flush(), v.tb.flush();
-        v.lifted = v.uStep < 0.0f && v.u <= 0.0f;
+        // The bow stopped: it leaves the string over 5 ms (lifted at once, its last force vanished in one sample, a
+        // click at every release: 25-58 dB over the running step, instrument_glitch_scan).
+        // Released, the bow also leaves gradually over the last 40 % of its slowing: at a force that low the stick-slip
+        // fell into a sample-rate buzz (cello and bass, 24-27 dB over the running step) before the bow had stopped.
+        if (v.uStep < 0.0f) {
+            const float q = std::clamp(v.u / 0.7f, 0.0f, 1.0f);
+            v.liftG = std::min(v.liftG, q * q * (3.0f - 2.0f * q));
+        }
+        if (v.uStep < 0.0f && v.u <= 0.0f) v.liftG = std::max(0.0f, v.liftG - static_cast<float>(kControlFrames / (0.005 * sr)));
+        v.lifted = v.liftG <= 0.0f;
     }
     // Per-sample constants, worked out at prepare and when the rate or a knob that sets them changes (control()).
     float dck_ = 0, k2_ = 0, invOneB_ = 0, cz_ = 0, cg_ = 0, c1_ = 0, c2_ = 0, B_ = 0, invSpan_ = 0, invVs2_ = 0;
@@ -293,7 +310,7 @@ struct Bowed {
         renderGroup(one, 1, buf, n);
         std::copy(buf[0], buf[0] + n, out);
     }
-    // Voices run four at a time (timber_core.h's GroupedModel), one a lane, so four voices' friction chains overlap
+    // Voices run four at a time (instrument_core.h's GroupedModel), one a lane, so four voices' friction chains overlap
     // instead of waiting on each other; lanes past `count` repeat the first voice and are thrown away. Each lane's
     // state is in locals (the delay lines' stores could otherwise alias it, and the compiler would reload all of it
     // every sample).
@@ -310,7 +327,7 @@ struct Bowed {
         const F4 invOneB = timber::f4(invOneB_), cz = timber::f4(cz_), cg = timber::f4(cg_), c1 = timber::f4(c1_), c2 = timber::f4(c2_);
         const F4 envK = timber::f4(envK_), hpK = timber::f4(hpK_), lpK2 = timber::f4(lpK2_), nGain = timber::f4(nGain_);
         const F4 lpk4 = timber::f4(lpk), muS4 = timber::f4(muS), muD4 = timber::f4(muD), tiny = timber::f4(1e-9f), big = timber::f4(1e9f);
-        F4 u, uStep, target, kF, reflect, z, zdL, zt, invZss, lp, dc, nEnv, nHp, nLp;
+        F4 u, uStep, target, kF, reflect, z, zdL, zt, invZss, lp, dc, nEnv, nHp, nLp, liftG;
         I4 lifted;
         Tap tn[4], tb[4];
         timber::Line neck[4], bridge[4];
@@ -319,7 +336,8 @@ struct Bowed {
             const Voice& v = *lane[l];
             u[l] = v.u, uStep[l] = v.uStep, target[l] = v.target, kF[l] = v.kF;
             lifted[l] = v.lifted ? -1 : 0;
-            reflect[l] = v.lifted ? 0.8f : 0.97f;
+            reflect[l] = v.lifted ? 0.8f : (v.liftG >= 1.0f ? 0.97f : 0.8f + 0.17f * v.liftG);
+            liftG[l] = v.liftG;
             z[l] = v.z, zdL[l] = v.zd, zt[l] = v.zt, invZss[l] = v.invZss, lp[l] = v.lp, dc[l] = v.dc;
             nEnv[l] = v.nEnv, nHp[l] = v.nHp, nLp[l] = v.nLp;
             tn[l] = v.tn, tb[l] = v.tb, neck[l] = v.neck, bridge[l] = v.bridge, noise[l] = v.noise;
@@ -351,7 +369,10 @@ struct Bowed {
                     const F4 t = timber::min4(one, (ratio - brk) * invSpan);
                     const I4 on = timber::and4(timber::and4(timber::gt4(vr, zero), timber::gt4(zz, zero)), timber::gt4(ratio, brk));
                     const F4 a = timber::sel4(on, t * t * (timber::f4(3.0f) - timber::f4(2.0f) * t), zero);
-                    const F4 g = one - a * ratio;
+                    // At most -1: as the bow's force falls (a release, a lighter pressure) the bristles' steady
+                    // deflection zss shrinks under the one they hold (z / zss up to 4) and they relax back; unbounded,
+                    // the step's 1 + B g crossed zero and one sample spiked 25-60 dB over the note (instrument_glitch_scan).
+                    const F4 g = timber::max4(one - a * ratio, zero - one);
                     // 1 / (1 + x) by its series, which holds only for small x: x kept within [0, 1].
                     const F4 x = timber::clamp4(B * g + timber::abs4(vr) * a * k2 * invZss, zero, one);
                     zn = zn + (vr * g - zn) * (one - x + x * x);
@@ -366,8 +387,8 @@ struct Bowed {
             zdL = timber::sel4(lifted, zero, zd);
             z = timber::sel4(lifted, zero, zNew);
             zt = timber::sel4(lifted, zero, ztNext);
-            const F4 f = timber::sel4(lifted, zero, ff);
-            const F4 slide = timber::sel4(lifted, zero, timber::abs4(vr));
+            const F4 f = timber::sel4(lifted, zero, ff * liftG);
+            const F4 slide = timber::sel4(lifted, zero, timber::abs4(vr) * liftG);
             const F4 e1 = one + vr * vr * invVs2;
             invZss = timber::sel4(timber::gt4(fn, tiny), timber::div4(s0 * e1, fc * e1 + fs - fc), big);
             const F4 toBridge = nb + f;

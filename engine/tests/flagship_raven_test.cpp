@@ -498,7 +498,7 @@ TEST(flagship_new_filter_models_shape_a_saw_as_their_kinds) {
 
 TEST(flagship_s_1_1_0_presets_play_and_use_the_new_synthesis) {
     // Every preset after the 1.0 seven sounds (finite, bounded, not silent) and sets a 1.1.0 warp, filter, source,
-    // table or parameter.
+    // table or parameter (but 1.1.3's three keys).
     Engine e(48000);
     const auto& all = builtinPresets(kId);
     CHECK(all.size() >= 7 + 12);
@@ -512,7 +512,10 @@ TEST(flagship_s_1_1_0_presets_play_and_use_the_new_synthesis) {
                    (s.size() > 4 && s.substr(s.size() - 4) == "_src" && v >= 15) || (s.substr(0, 4) == "lfo4") ||
                    (s.size() > 6 && s.substr(s.size() - 6) == "_table" && v == 6) || s.find("_mod_src") != std::string::npos;
         }
-        if (!uses) cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + " uses none of 1.1.0's synthesis");
+        // 1.1.3's keys (Timber's electric pianos and tonewheel organ, timber_migrate.cpp) use FM and plain sines: they
+        // only have to play.
+        const bool keys = preset.name == "Electric piano (tine)" || preset.name == "Electric piano (reed)" || preset.name == "Tonewheel organ";
+        if (!uses && !keys) cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + " uses none of 1.1.0's synthesis");
         std::unique_ptr<ModuleProcessor> p = make(e);
         if (!p) continue;
         const Stereo out = play(*p, chord(), 48000, presetValues(preset.name));

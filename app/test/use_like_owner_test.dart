@@ -274,6 +274,8 @@ Future<void> main() async {
               PointerDeviceKind.touch, true),
         ('mouse drag', const Offset(0, -6), 10, Duration.zero, _frame, PointerDeviceKind.mouse, true),
       ];
+      final scrolls = find.ancestor(of: f, matching: find.byWidgetPredicate((w) => w is Scrollable &&
+          axisDirectionToAxis(w.axisDirection) == Axis.vertical)).evaluate().isNotEmpty;
       // The fallback page's Knob has no parameter key: the one it moved is the one whose value changed.
       final was = p == null ? snapshot() : null;
       for (final (gesture, step, steps, rest, frame, kind, turns) in gestures) {
@@ -301,7 +303,8 @@ Future<void> main() async {
         }
         if (turns && movedParam == null) {
           findings.add(Finding(dev, control, gesture, 'did not move'));
-        } else if (!turns && movedParam != null) {
+        } else if (!turns && movedParam != null && scrolls) {
+          // Only under a vertical scroll: with none (a header's knob) the knob is the arena's last member and turns.
           findings.add(Finding(dev, control, gesture, 'turned the knob'));
         } else if (turns) {
           reached(movedParam!, gesture, control);
@@ -416,7 +419,9 @@ Future<void> main() async {
 
     // On a swipe panel: a quick sideways swipe that starts beside a knob's face (its label) changes the panel.
     Future<void> swipeBeside(PageController pc) async {
-      final knobs = find.byType(DeviceKnob).hitTestable().evaluate()
+      // Only the panel's own knobs: a header knob above the PageView (Rook's Randomness) is not on the panel.
+      final panel = find.byWidgetPredicate((w) => w is PageView && w.controller == pc);
+      final knobs = find.descendant(of: panel, matching: find.byType(DeviceKnob)).hitTestable().evaluate()
           .where((e) => tester.getRect(find.byWidget(e.widget)).bottom < phone.height - 120).toList();
       if (knobs.isEmpty) return;
       final r = tester.getRect(find.byWidget(knobs.first.widget));
@@ -527,7 +532,12 @@ Future<void> main() async {
                   return b >= (p.min + p.max) / 2 ? p.min : p.max;
                 });
               case Kind.power:
-                await tap(f, c.param, control, (b) => b >= 0.5 ? t.param(c.param)!.min : t.param(c.param)!.max);
+                // A choice whose first value is Off (Rook's drive type, filter) turns on to its last type, or its first
+                // (each control is tapped once here, from off, so the first).
+                await tap(f, c.param, control, (b) {
+                  final p = t.param(c.param)!;
+                  return b >= 0.5 ? p.min : (p.max > 1 ? p.min + 1 : p.max);
+                });
               case Kind.xy:
                 break;
             }

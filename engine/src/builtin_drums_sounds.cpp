@@ -722,6 +722,54 @@ const TypeRule& rule(int type) {
     return rules[type >= 0 && type < kTypeCount ? type : kTypePerc];
 }
 
+// 1.1.3 (owner, 2026-11-25: "Randomize must keep each pad clearly its type: no endless sustain, no plain
+// distortion"): whatever a draw or the sound it started from holds, a randomized pad ends within its type's length,
+// never holds (a straight, gated decay or a hold), plays one-shot, and keeps its drive and clipper mild.
+struct TypeLength {
+    double decay, metal;  // the longest decay of any layer (s); a hat's or cymbal's metal (with its openness)
+};
+TypeLength typeLength(int type) {
+    switch (type) {
+        case kTypeKick: return {1.8, 0.3};
+        case kTypeSnare: return {0.45, 0.3};
+        case kTypeClap: return {0.45, 0.2};
+        case kTypeClosedHat: case kTypePedalHat: return {0.12, 0.08};
+        case kTypeOpenHat: return {0.6, 0.08};
+        case kTypeTom: return {0.9, 0.3};
+        case kTypeCrash: return {3.0, 3.0};
+        case kTypeRide: return {3.5, 3.5};
+        case kTypeCymbal: return {2.5, 2.5};
+        case kTypeRim: return {0.12, 0.1};
+        case kTypeCowbell: return {0.5, 0.5};
+        case kTypeShaker: return {0.25, 0.2};
+        case kTypeBass: return {3.0, 0.5};
+        case kTypeFx: return {1.5, 1.5};
+        default: return {0.6, 0.6};
+    }
+}
+void keepType(Voice& v, int type) {
+    const TypeLength l = typeLength(type);
+    for (uint32_t k : {kBodyDecay, kSubDecay, kNoiseDecay, kFmDecay, kTexDecay, kResDecay, kSmpDecay})
+        v[k] = std::min(v[k], std::max(padParamDescriptor(0, k).minimum, l.decay));
+    v[kPhysDecay] = std::min(v[kPhysDecay], std::max(0.02, l.decay));
+    v[kMetalDecay] = std::min(v[kMetalDecay], l.metal);
+    // An open hat's openness stretches its decay (1 + 15 open^2): kept under its length.
+    v[kMetalOpen] = type == kTypeOpenHat ? std::min(v[kMetalOpen], std::sqrt(std::max(0.0, (l.decay / std::max(0.005, v[kMetalDecay]) - 1.0) / 15.0)))
+                                         : (type == kTypeClosedHat || type == kTypePedalHat ? 0.0 : std::min(v[kMetalOpen], 0.3));
+    for (uint32_t k : {kBodyHold, kSubHold, kSmpHold}) v[k] = std::min(v[k], 0.05);
+    for (uint32_t k : {kBodyDCurve, kSubDCurve, kNoiseDCurve, kMetalDCurve, kFmDCurve, kTexDCurve, kSmpDCurve}) v[k] = std::max(v[k], -0.2);
+    v[kLength] = std::min(v[kLength], 0.25);
+    if (type != kTypeBass) v[kTrig] = kOneShot;  // an 808 bass may stay gated (it is played as a note)
+    // Mild drive: at most 2, no hard or folding curves, no clipper, the Dirt macro at most a touch.
+    if (v[kDriveType] != kDriveOff && v[kDriveType] != kDriveSoft && v[kDriveType] != kDriveTube && v[kDriveType] != kDriveAsym)
+        v[kDriveType] = kDriveSoft;
+    v[kDrive] = std::min(v[kDrive], 2.0);
+    v[kClip] = kClipOff;  // a clipper squares a hit before its level is matched: it is the user's to add
+    v[kClipGain] = std::min(v[kClipGain], 3.0);
+    v[kDirt] = std::min(v[kDirt], 0.2);
+    v[kComp] = std::min(v[kComp], 0.35);
+}
+
 // A deterministic stream of numbers in 0..1 from a seed.
 struct Stream {
     uint32_t seed, n = 0;
@@ -779,6 +827,7 @@ Voice randomizeVoice(int type, uint32_t seed, double amount, const Voice& start,
     }
     for (uint32_t p : r.on) v[p] = 1.0;
     v[kType] = type;
+    keepType(v, type);
     // Level-matched: a hit (its first 0.4 s, rendered here) peaks near -1 dBFS whatever the draw did to its gain.
     std::vector<float> hit;
     if (levelMatch && renderVoice(v, 48000.0, 0.4, hit)) {
@@ -919,6 +968,52 @@ std::string drumsInfoJson() {
     return j;
 }
 
+namespace {
+// 1.1.3: a Simulated (Acoustic) pad's Randomize: its piece is varied within its kind (a snare stays a snare: its
+// tuning, damping, decay, size and wires move by `amount`; a cymbal's size, alloy and swell), and the pad's strike
+// point and velocity variation. Returns the piece's and the pad's new values as "params" members.
+std::string randomizeAcousticJson(uint32_t pad, const Voice& v, const Json* params, uint32_t seed, double amount) {
+    const double a = std::clamp(amount, 0.0, 1.0);
+    const uint32_t pc = static_cast<uint32_t>(std::clamp(v[kAcouPiece], 0.0, double(kPieces - 1)));
+    const std::string prefix = "pc" + std::to_string(pc + 1) + "_";
+    auto cur = [&](uint32_t k) {
+        const ParameterDescriptor& d = parameterTable()[pieceParam(pc, k)];
+        if (params && params->type == Json::Type::Object)
+            if (const Json* x = params->get(std::string(d.id)); x && x->type == Json::Type::Number) return x->num;
+        return d.defaultValue;
+    };
+    Stream rng{seed ^ 0x5eed1e55u};
+    auto u = [&] { return 2.0 * rng.next() - 1.0; };
+    const int kind = static_cast<int>(cur(kPcKind));
+    std::vector<std::pair<uint32_t, double>> out;
+    auto move = [&](uint32_t k, double by, double lo, double hi) { out.push_back({k, std::clamp(cur(k) + a * by * u(), lo, hi)}); };
+    if (isDrumPiece(kind)) {
+        const double size = cur(kPcSize);
+        const double lo = kind == kPieceKick ? 18 : (kind == kPieceSnare ? 12 : 8), hi = kind == kPieceKick ? 26 : (kind == kPieceSnare ? 15 : 18);
+        move(kPcSize, 1.5, std::min(lo, size), std::max(hi, size));
+        move(kPcTune, 4.0, -24, 24);
+        move(kPcDamp, 0.3, 0.0, 0.8);
+        out.push_back({kPcDecay, std::clamp(cur(kPcDecay) * std::exp2(0.7 * a * u()), 0.4, 2.0)});
+        move(kPcGlide, 0.3, 0.0, 1.0);
+        if (kind == kPieceSnare) move(kPcWires, 0.3, 0.2, 1.0);
+        if (kind == kPieceKick && rng.next() < a / 3.0) out.push_back({kPcBeater, std::floor(rng.next() * 3.0)});
+        if (rng.next() < a / 3.0) out.push_back({kPcHead, std::floor(rng.next() * 4.0)});
+    } else if (kind != kPieceOff) {
+        move(kPcSize, 2.0, kind == kPieceHiHat ? 12 : 8, kind == kPieceHiHat ? 16 : 24);
+        if (kind != kPieceHiHat) move(kPcSwell, 0.3, 0.0, 1.0);
+        if (rng.next() < a / 3.0) out.push_back({kPcAlloy, std::floor(rng.next() * 4.0)});
+        out.push_back({kPcDecay, std::clamp(cur(kPcDecay) * std::exp2(0.6 * a * u()), 0.4, 1.6)});
+    }
+    std::string j = "{\"ok\":true,\"type\":\"" + std::string(typeName(static_cast<int>(v[kType]))) + "\",\"pad\":\"" + padId(pad) +
+                    "\",\"piece\":" + std::to_string(pc + 1) + ",\"params\":{";
+    const std::string pp = padId(pad) + "_";
+    j += "\"" + pp + "rnd_pos\":" + number(std::clamp(0.2 + 0.3 * a * rng.next(), 0.0, 1.0)) + ",\"" + pp +
+         "rnd_level\":" + number(std::clamp(0.1 + 0.15 * a * rng.next(), 0.0, 1.0));
+    for (const auto& [k, x] : out) j += ",\"" + prefix + std::string(pieceParamSuffix(k)) + "\":" + number(x);
+    return j + "}}";
+}
+}  // namespace
+
 std::string drumsRandomizeJson(int type, uint32_t seed, double amount, int pad, std::string_view currentJson) {
     const uint32_t p = pad >= 0 && pad < static_cast<int>(kPads) ? static_cast<uint32_t>(pad) : 0;
     Voice start;
@@ -931,6 +1026,7 @@ std::string drumsRandomizeJson(int type, uint32_t seed, double amount, int pad, 
         if (params && params->type == Json::Type::Object && !params->obj.empty()) {
             start = voiceFrom(params, p, defaultVoice(p));
             haveCurrent = true;
+            if (static_cast<int>(start[kEngine]) == kEngineAcoustic) return randomizeAcousticJson(p, start, params, seed, amount);
         }
     }
     if (type < 0 || type >= kTypeCount) type = haveCurrent ? static_cast<int>(start[kType]) : kTypeKick;

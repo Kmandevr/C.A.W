@@ -24,7 +24,8 @@ class _Grab {
 }
 
 /// The hero of pad [pad]: drag the left quarter for the pitch sweep (up: depth, sideways: its time), anywhere else
-/// sideways for the decay and up or down for the pitch; in Points mode grab a point to move it.
+/// sideways for the decay and up or down for the pitch; in Points mode grab a point to move it. A Simulated pad's
+/// drag moves its piece's decay (sideways) and tune (up and down).
 class DrumHero extends StatefulWidget {
   const DrumHero({super.key, required this.pad, this.height = 190});
   final int pad;
@@ -115,7 +116,12 @@ class _DrumHeroState extends State<DrumHero> {
       }
     }
     final decay = DrumSketch.of(p).decayId;
-    g = at.dx < size.width * 0.25 && p.on('body_on')
+    // A Simulated pad (engine 1) plays its piece: sideways for the piece's decay, up and down for its tune.
+    final piece = 'pc${t.value(p.id('acou_piece')).round() + 1}_';
+    g = p.v('engine').round() == 1
+        ? _Grab(x: t.param('${piece}decay') == null ? null : '${piece}decay',
+            y: t.param('${piece}tune') == null ? null : '${piece}tune')
+        : at.dx < size.width * 0.25 && p.on('body_on')
         ? _Grab(x: shape.points ? null : p.id('body_ptime'), y: p.id('body_pitch'))
         : _Grab(x: decay, y: p.on('body_on') ? p.id('body_freq') : null);
     double pos(String? id) => id == null ? 0 : (t.param(id) == null ? 0 : taperOf(t.param(id)!).position(t.value(id)));

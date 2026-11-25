@@ -1,4 +1,4 @@
-// caw_bench's cost of the drums' 1.1.0 and 1.1.2 additions (Rook; `caw_bench SECONDS 300` and `323`): each new layer, the pad effects and groove on a busy pad, and the Acoustic kit's grooves per quality, against ceilings.
+// caw_bench's cost of the drums' 1.1.0, 1.1.2 and 1.1.3 additions (Rook; `caw_bench SECONDS 300` and `323`): each new layer, the pad effects and groove on a busy pad, and the Acoustic kit's grooves per quality, against ceilings.
 #include <atomic>
 #include <cstdio>
 #include <memory>
@@ -191,7 +191,8 @@ int rookCost(double seconds) {
     for (int step = 0; step < 16; step += 4)
         for (int key : {36, 38, 48, 45, 43, 42, 49, 51}) full.push_back({step, key});
     const Values rock = presetValues("Acoustic kit: Rock"), produced = presetValues("Produced kit: House"),
-                 synth = presetValues("Synth kit: 808-style"), old909 = presetValues("Kit: 909");
+                 synth = presetValues("Synth kit: 808-style"), old909 = presetValues("Kit: 909"),
+                 studio = presetValues("Acoustic kit: Studio");  // 1.1.3: a new Rook's kit, every piece recorded
     Values dryRock = rock;
     dryRock.push_back({"room", 0.0});
     struct KitCase {
@@ -210,10 +211,13 @@ int rookCost(double seconds) {
         {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 13000, 9600},  // 2.4 % of a phone core
         {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 7500, 0},
         {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 28500, 24000},
-        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 15000, 8000},
+        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 16600, 8000},
         {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 44500, 0},
         {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 20500, 0},
         {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 13500, 0},
+        // 1.1.3 (2026-11-25, `caw_bench 0.5 323` on a loaded box: 10,264 and 20,378): its hats and cymbals run no model.
+        {"Acoustic kit: Studio, typical groove (Normal)", &studio, &groove, kQualityNormal, 14500, 0},
+        {"Acoustic kit: Studio, full kit ringing (Normal)", &studio, &full, kQualityNormal, 28500, 0},
         {"Kit: 909 groove (1.1.0's Layers, for scale)", &old909, &groove, kQualityNormal, 16500, 0},
         {"Produced kit: House groove", &produced, &groove, kQualityNormal, 33000, 0},
         {"Synth kit: 808-style groove", &synth, &groove, kQualityNormal, 24500, 0},

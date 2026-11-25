@@ -12,7 +12,7 @@
 #include "curlew_winds.h"
 #include "presets.h"
 #include "test.h"
-#include "timber_harness.h"
+#include "instrument_harness.h"
 #include "tolerance.h"
 
 using namespace caw;
@@ -242,5 +242,29 @@ TEST(curlew_matches_its_reference_render) {
         // (the chaotic class's 0.1 dB is for the held sound), and the release has its own checks.
         s.l.resize(48000), s.r.resize(48000);
         CHECK_REFERENCE(refs, "curlew_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
+    }
+}
+
+// Legato (owner, 2026-11-25: a flute "restarts every time a note changes"; it should work like a one-voice synth):
+// a note played while one is held moves the sounding note to it, the held one gone from the sound, and when the newer
+// note ends the held one sounds again. Poly keeps both, as chords.
+TEST(curlew_legato_slurs_one_note_at_a_time) {
+    for (double mode : {0.0, 1.0}) {
+        const Values v = {{"variant", 0.0}, {"play", mode}, {"vibrato", 0.0}};
+        auto p = makeC(v);
+        CHECK(p != nullptr);
+        if (!p) return;
+        const double a = 72, b = 79;  // C5 held, G5 over it from 0.4 s to 0.9 s
+        const std::vector<float> x = play(*p, v, {{0.0, 1.4, a, 0.7}, {0.4, 0.9, b, 0.7}}, 1.4).mono();
+        const double held = bandDb(x, timber::noteHz(a), 31200, 8192, 48000);
+        const double over = bandDb(x, timber::noteHz(b), 31200, 8192, 48000);
+        const double back = bandDb(x, timber::noteHz(a), 52800, 8192, 48000);
+        if (verbose()) std::printf("play %g: C5 under G5 %.1f dB, G5 %.1f dB, C5 after %.1f dB\n", mode, held, over, back);
+        if (mode == 0) {
+            CHECK(over - held > 20);  // one note sounding: the G5, the C5 not under it
+            CHECK(back - held > 20);  // the held C5 returns when the G5 ends
+        } else {
+            CHECK(std::fabs(over - held) < 15);  // Poly: both sound
+        }
     }
 }

@@ -233,8 +233,8 @@ target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.
 target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 1.1.0: Lark (org.caw.pitchfix) and the clip pitch editor's engine
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
-target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
-target_sources(caw_core PRIVATE src/timber_piano_tables.cpp src/timber_piano_sim.cpp)  # 1.1.2: Timber's Simulated piano: its tables (generated: tools/timber_piano_gen.cpp) and per-sample code
+target_sources(caw_core PRIVATE src/timber_migrate.cpp)  # Timber's load-time alias (Timber removed in 1.1.3; its model library, timber_*.h, is what Starling, Nightingale, Curlew, Woodpecker and Bittern build on)
+target_sources(caw_core PRIVATE src/starling_piano_tables.cpp src/starling_piano_sim.cpp)  # the piano model (Starling's; Timber's Simulated piano, 1.1.2): its tables (generated: tools/starling_piano_gen.cpp) and per-sample code
 # 1.1.3: Starling (org.caw.starling) and the recorded parts built into the engine (engine/assets/, embedded by
 # cmake/EmbedFile.cmake; decoded on first use by recorded_bank.cpp).
 set(_caw_assets_out "${CMAKE_CURRENT_BINARY_DIR}/assets")
@@ -245,9 +245,27 @@ add_custom_command(OUTPUT "${_caw_embed_piano}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/piano.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
   COMMENT "Embedding Starling's recorded piano parts" VERBATIM)
 target_sources(caw_core PRIVATE src/builtin_starling.cpp src/recorded_bank.cpp "${_caw_embed_piano}")
+# 1.1.3: Starling's plucked strings, the classical guitar (FreePats, CC0) and the concert harp (VCSL, CC0).
+foreach(_caw_inst guitar harp)
+  set(_caw_embed_strings "${_caw_assets_out}/starling_${_caw_inst}_flac.cpp")
+  add_custom_command(OUTPUT "${_caw_embed_strings}"
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/${_caw_inst}.flac -DOUTPUT=${_caw_embed_strings}
+      -DSYMBOL=starling_${_caw_inst}_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/${_caw_inst}.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+    COMMENT "Embedding Starling's recorded ${_caw_inst} plucks" VERBATIM)
+  target_sources(caw_core PRIVATE "${_caw_embed_strings}")
+endforeach()
+target_sources(caw_core PRIVATE src/starling_strings.cpp)
 target_sources(caw_core PRIVATE src/builtin_nightingale.cpp src/nightingale_bodies.cpp)  # 1.1.3: Nightingale (org.caw.nightingale), the bowed strings
 target_sources(caw_core PRIVATE src/builtin_curlew.cpp src/curlew_bodies.cpp)  # 1.1.3: Curlew (org.caw.curlew), the winds
-target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp)  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
+# Bittern's recorded speech (engine/assets/bittern/, from tools/bittern_assets.py).
+set(_caw_embed_speech "${_caw_assets_out}/bittern_speech_flac.cpp")
+add_custom_command(OUTPUT ${_caw_embed_speech}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/bittern/speech.flac -DOUTPUT=${_caw_embed_speech}
+    -DSYMBOL=bittern_speech_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/bittern/speech.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  COMMENT "Embedding Bittern's recorded pipe speech" VERBATIM)
+target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp "${_caw_embed_speech}")  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
 # 1.1.3: Woodpecker (org.caw.woodpecker), the tuned percussion, and its recorded mallet attacks (VCSL, CC0).
 set(_caw_embed_mallets "${_caw_assets_out}/woodpecker_mallets_flac.cpp")
 add_custom_command(OUTPUT "${_caw_embed_mallets}"
@@ -256,6 +274,14 @@ add_custom_command(OUTPUT "${_caw_embed_mallets}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/woodpecker/mallets.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
   COMMENT "Embedding Woodpecker's recorded mallet attacks" VERBATIM)
 target_sources(caw_core PRIVATE src/builtin_woodpecker.cpp "${_caw_embed_mallets}")
+# 1.1.3: Rook's recorded kit parts (Karoryfer's Unruly and Big Rusty Drums, CC0): transients, wires, hats, cymbals.
+set(_caw_embed_rook "${_caw_assets_out}/rook_kit_flac.cpp")
+add_custom_command(OUTPUT "${_caw_embed_rook}"
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/rook/kit.flac -DOUTPUT=${_caw_embed_rook}
+    -DSYMBOL=rook_kit_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/rook/kit.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  COMMENT "Embedding Rook's recorded kit parts" VERBATIM)
+target_sources(caw_core PRIVATE "${_caw_embed_rook}")
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.
@@ -329,6 +355,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/drums_audit_test.cpp)  # org.caw.drums: every setting moves the sound; 1.1.0's groove
   target_sources(caw_tests PRIVATE tests/drums_compat_test.cpp)  # org.caw.drums: old presets bit-identical after 1.1.0
   target_sources(caw_tests PRIVATE tests/drums_acoustic_test.cpp)  # Rook 1.1.2: the Acoustic engine's realism, kits and builders
+  target_sources(caw_tests PRIVATE tests/rook_test.cpp)  # Rook 1.1.3: recorded parts, the kinds apart, every control, Randomize, the glitch scan
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
@@ -346,22 +373,22 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/lark_test.cpp src/capi_pitch_clip.cpp)  # 1.1.0: Lark (live correction, the clip pitch editor, API 42)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
-  target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
-  target_sources(caw_tests PRIVATE tests/timber_piano_compat_test.cpp)  # 1.1.2: the piano's 1.1.0 presets bit-identical
-  target_sources(caw_tests PRIVATE tests/timber_piano_sim_test.cpp)  # 1.1.2: the Simulated piano's realism, noises, patents guard
   target_sources(caw_tests PRIVATE tests/starling_piano_test.cpp)
+  target_sources(caw_tests PRIVATE tests/starling_model_test.cpp)  # 1.1.3: the piano model's physics (Timber's Simulated piano tests, ported)
+  target_sources(caw_tests PRIVATE tests/timber_migrate_test.cpp)  # 1.1.3: Timber's projects load as the new instruments
   target_sources(caw_tests PRIVATE tests/nightingale_test.cpp)  # 1.1.3: Nightingale, the bowed strings
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
   target_sources(caw_tests PRIVATE tests/bittern_test.cpp)  # 1.1.3: Bittern, the pipe organ
   target_sources(caw_tests PRIVATE tests/woodpecker_test.cpp)  # 1.1.3: Woodpecker, the tuned percussion
-  # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
+  target_sources(caw_tests PRIVATE tests/instrument_knobs_test.cpp)  # 1.1.3: every instrument knob is audible
+  target_sources(caw_tests PRIVATE tests/instrument_glitch_test.cpp)  # 1.1.3: no glitches, noises only at their moment
+  target_sources(caw_tests PRIVATE tests/starling_strings_test.cpp)  # 1.1.3: Starling's guitar and harp
+  # The Simulated piano's tables are generated (tools/starling_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
-  add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
-  target_include_directories(timber_piano_gen PRIVATE src include)
-  target_compile_options(timber_piano_gen PRIVATE ${_caw_fp_strict})
-  add_test(NAME timber_piano_tables_current COMMAND timber_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/timber_piano_tables.inc)
-  target_sources(caw_tests PRIVATE tests/timber_sim_test.cpp)  # 1.1.2: Timber's Simulated models (realism checks, block sizes, tiers, references)
-  target_sources(caw_tests PRIVATE tests/timber_compat_test.cpp)  # 1.1.2: Timber's 1.1.0 presets render bit-identically (models other than the piano)
+  add_executable(starling_piano_gen tools/starling_piano_gen.cpp)
+  target_include_directories(starling_piano_gen PRIVATE src include)
+  target_compile_options(starling_piano_gen PRIVATE ${_caw_fp_strict})
+  add_test(NAME starling_piano_tables_current COMMAND starling_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/starling_piano_tables.inc)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
@@ -495,8 +522,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_clean_rt_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
-  target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
-  target_sources(caw_rt_tests PRIVATE tests/timber_sim_rt_test.cpp)  # 1.1.2: Timber's Simulated models while playing
   target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
@@ -516,12 +541,12 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
-  target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
   target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
   target_sources(caw_rt_tests PRIVATE tests/nightingale_rt_test.cpp)  # 1.1.3: Nightingale
   target_sources(caw_rt_tests PRIVATE tests/curlew_rt_test.cpp)  # 1.1.3: Curlew
   target_sources(caw_rt_tests PRIVATE tests/bittern_rt_test.cpp)  # 1.1.3: Bittern
   target_sources(caw_rt_tests PRIVATE tests/woodpecker_rt_test.cpp)  # 1.1.3: Woodpecker
+  target_sources(caw_rt_tests PRIVATE tests/starling_strings_rt_test.cpp)  # 1.1.3: Starling's guitar and harp
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
@@ -548,8 +573,8 @@ target_include_directories(caw_cli PRIVATE src)
 add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp bench/pack_cost.cpp bench/raven_cost.cpp bench/rook_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
   target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
-  target_sources(caw_bench PRIVATE bench/timber_cost.cpp)  # 1.1.0: Timber's cost ceilings
   target_sources(caw_bench PRIVATE bench/flock_cost.cpp)  # 1.1.0: Flock's cost ceilings
+  target_sources(caw_bench PRIVATE bench/instrument_cost.cpp)  # the modelled instruments' cost ceilings (Starling, Nightingale, Curlew, Bittern, Woodpecker)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
@@ -571,14 +596,14 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
     add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
     add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
-    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
+    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # the modelled instruments (the name is Timber's, 1.1.0-1.1.2)
     add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
     add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
     # 1.1.1: no Benchmark scenario has a callback whose work (its fastest of 3 runs) is over 3 times the median's: a
     # rare costly block (a lazy build, a recompute on the audio thread) fails it; preemption does not.
     add_test(NAME caw_spike_check COMMAND caw_bench 1 602 --runs 3 --check 3)
     # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
-    # x64 runner then measured cases 10-20 % over their usual figure (Timber's organ 8,002 against 8,000 on PR #258).
+    # x64 runner then measured cases 10-20 % over their usual figure (an organ case 8,002 against 8,000 on PR #258).
     set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
                          caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost caw_spike_check
                          PROPERTIES RUN_SERIAL TRUE)
@@ -601,9 +626,10 @@ set_source_files_properties(src/tempo_map.cpp PROPERTIES COMPILE_OPTIONS "${_caw
 # engine's deterministic sine, not libm.
 set_source_files_properties(src/clip_stretch.cpp src/time_stretch.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")
 set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_vocoder.cpp src/builtin_flagship.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Arm64 fuses multiply-adds under CAW_FP_FLAGS, and these devices' high-Q filter banks and Carve's band detectors grew that rounding past the -120 dB stable null (PR #258 CI, 2026-11-19)
-set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
+set_source_files_properties(src/starling_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
 set_source_files_properties(src/bittern_render.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Bittern's voices give the same bits at any block size
 set_source_files_properties(src/builtin_woodpecker.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Woodpecker (its model and frame) renders the same bits on every build
+set_source_files_properties(src/starling_strings.cpp src/builtin_starling.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Starling's guitar and harp render the same bits on every build; builtin_starling.cpp too, where their frame (instrument_core.h) is instantiated (with the fast flags, clang-cl's linker kept that copy: 2026-11-25)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

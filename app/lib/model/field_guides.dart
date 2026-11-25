@@ -283,16 +283,10 @@ const fieldGuides = <String, FieldGuide>{
     ('Glue', 'A bus compressor on the whole kit.'),
     ('Kit drive', 'Warmth and grit on the whole kit.'),
   ], 'Kit: 808'),
-  'org.caw.timber': FieldGuide('Timber models real instruments with no samples: pianos, keys, plucked and bowed '
-      'strings, mallets and winds.', [
-    ('Tone', 'Darker or brighter, like playing softer or harder.'),
-    ('Body', 'How big the instrument is.'),
-    ('Space', 'The room around it.'),
-  ], 'Concert grand'),
-  'org.caw.starling': FieldGuide('Starling is a real-sounding grand piano: modelled strings with a recorded grand\'s '
-      'attack and noises.', [
-    ('Hammer', 'Softer or harder hammers: darker or brighter.'),
-    ('Noise', 'The keys and pedal you hear, up close or none.'),
+  'org.caw.starling': FieldGuide('Starling is real-sounding struck and plucked strings: a grand piano, a classical '
+      'guitar or a concert harp (pick it under Model), modelled strings with the real instrument\'s recorded attack.', [
+    ('Hammer', 'Piano: softer or harder hammers, darker or brighter.'),
+    ('Pluck position', 'Guitar and harp: near the bridge is thin and bright, the middle round and warm.'),
     ('Space', 'A room around it (off by default: add your own reverb).'),
   ], 'Grand piano'),
   'org.caw.nightingale': FieldGuide('Nightingale is a bowed string: violin, viola, cello or double bass, played by a '
@@ -307,12 +301,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Breath noise', 'The air you hear around the tone.'),
     ('Vibrato', 'A gentle waver in the note.'),
   ], 'Concert flute'),
-  'org.caw.bittern': FieldGuide('Bittern is a cathedral pipe organ: draw its stops and it fills a great stone '
-      'room.', [
-    ('Stops', 'Each rank of pipes: flutes, principals, strings, the trumpet.'),
-    ('Tremulant', 'A pulse in the wind, for a warm, vocal tone.'),
-    ('Space', 'The cathedral (on): turn it down for the organ loft.'),
-  ], 'Cathedral principal chorus'),
+  'org.caw.bittern': FieldGuide('Bittern is a great concert pipe organ, after the Salt Lake Tabernacle\'s: draw its '
+      'stops, or pick a registration, and it fills the hall.', [
+    ('Registration', 'The usual combinations in one tap, from a soft accompaniment to the full organ with the Tuba.'),
+    ('Pedal', 'The pedal stops play your lowest key, as a bass line under your hands, or every key.'),
+    ('Space', 'The hall (on): turn it down for the organ loft.'),
+  ], 'Hymn plenum'),
   'org.caw.woodpecker': FieldGuide('Woodpecker is tuned percussion: marimba, xylophone, glockenspiel, vibraphone, '
       'tubular bells or timpani, each with its recorded mallet stroke.', [
     ('Mallet hardness', 'Soft yarn and round, or hard and bright.'),

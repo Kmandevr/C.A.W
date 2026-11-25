@@ -2,7 +2,6 @@
 #include "builtin_instruments.h"
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
-#include "builtin_timber.h"
 #include "builtin_starling.h"
 #include "builtin_nightingale.h"
 #include "builtin_curlew.h"
@@ -15,11 +14,11 @@
 namespace caw {
 
 // The old drums (org.caw.drum.kick, .snare, .hats, .kit) became org.caw.drums (2026-11-11, owner: "one drum
-// instrument"); the retired synths are Flagship presets. Both load only through migration (presets.h).
+// instrument"); the retired synths are Flagship presets; Timber (org.caw.timber, removed in 1.1.3) became the
+// instruments below (timber_migrate.h). All load only through migration (presets.h).
 void registerBuiltinInstruments(ModuleRegistry& registry) {
     registerDrums(registry);          // org.caw.drums
     registerFlagshipSynth(registry);  // org.caw.synth.flagship
-    timber::registerTimber(registry);  // org.caw.timber (builtin_timber.cpp, 1.1.0)
     starling::registerStarling(registry);  // org.caw.starling (builtin_starling.cpp, 1.1.3)
     nightingale::registerNightingale(registry);  // org.caw.nightingale (builtin_nightingale.cpp, 1.1.3)
     curlew::registerCurlew(registry);  // org.caw.curlew (builtin_curlew.cpp, 1.1.3)

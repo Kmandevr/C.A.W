@@ -128,7 +128,7 @@ struct Case {
 }  // namespace
 
 // Prints each case and returns how many went over their ceilings. Ceilings: the owner's budgets (medium 2 %, heavy
-// 6 % of an S22+ core) over an assumed 2.5x slower phone core: 8000 and 24000 µs/s here (as bench/timber_cost.cpp).
+// 6 % of an S22+ core) over an assumed 2.5x slower phone core: 8000 and 24000 µs/s here (as Timber's were).
 int flockCost(double seconds) {
     loadBenchSample();
     const Case cases[] = {

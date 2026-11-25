@@ -8,7 +8,7 @@
 
 #include "caw/library/fastmath.hpp"
 #include "recorded_bank.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::woodpecker {
 
@@ -65,7 +65,7 @@ inline constexpr double kTubeQ = 40.0;
 inline constexpr bool kDampers[kInstruments] = {false, false, false, true, true, false};
 
 // The smooth envelope of a mallet's force spectrum: the half-sine pulse of a Hertz contact (Hunt-Crossley, as
-// timber_sim.h's Contact) lasting tc seconds is flat to about 1 / (2 tc) and falls as f^-2 above.
+// Timber's old Hunt-Crossley mallet contact) lasting tc seconds is flat to about 1 / (2 tc) and falls as f^-2 above.
 inline double contactEnvelope(double hz, double tc) noexcept {
     const double x = 2.0 * hz * tc;
     return 1.0 / std::sqrt(1.0 + x * x * x * x);
@@ -115,6 +115,7 @@ struct Bars {
         bool gated = false;
         uint32_t gateHold = 0;
         float gateT = 0, gateStep = 0;
+        float gateFloor = 0;  // the model's share while the recording holds: 1 - Attack (Attack 2: the stroke doubled)
         float gain = 1;  // Body
         uint32_t clickLeft = 0;
         float clickAmp = 0;
@@ -154,7 +155,7 @@ struct Bars {
     void control(const double* p, const Shared& s) noexcept {
         hardness = clampd(p[kHardness], 0, 1);
         decay = clampd(p[kDecay], 0.25, 4);
-        attack = clampd(p[kAttack], 0, 1);
+        attack = clampd(p[kAttack], 0, 2);
         const int t = static_cast<int>(clampd(p[kTier], 0, 3) + 0.5);
         tier = t == 0 ? s.quality : t - 1;
         modeCap = tier == kQualityHigh ? 12 : 8;  // Eco keeps Normal's modes (they carry the crossfade) and plays fewer voices
@@ -251,7 +252,13 @@ struct Bars {
         const double tcNow = contactTime(hardness), tcRec = contactTime(lay.hardness[set]);
         const double tilt0 = contactEnvelope(v.hz[0], tcNow) / contactEnvelope(v.hz[0], tcRec);
         const double ratio = detPow(2.0, (pitch - zone.key) / 12.0);  // the recording's speed: its pitch to the note's
-        const bool recorded = bank && !testMuteRecordings && attack > 1e-3 && std::fabs(pitch - zone.key) <= 4.5 &&
+        // Attack is the mallet's stroke: the recording over the model (which plays the same modes in phase with it),
+        // so 0 is the bar from its modes alone, no stroke; 1 the recording; 2 the recording plus its own stroke again
+        // (2 x recording - model, the part the modes do not hold). With a recording, the modes start in its phase at
+        // every Attack, so the knob moves the stroke and nothing else.
+        const bool hasRecording = bank && !testMuteRecordings && std::fabs(pitch - zone.key) <= 4.5 &&
+                                  static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
+        const bool recorded = hasRecording && attack > 1e-3 && std::fabs(pitch - zone.key) <= 4.5 &&
                               static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
         const double nRef = (lay.hold + 0.5 * lay.fade) * sr / ratio;  // the output frame where the recording is at ref
         double c1r = 0, c1i = 0;
@@ -260,10 +267,13 @@ struct Bars {
             if (k < modes && v.c[k / 4][k % 4] != 0.0f) {
                 const double tilt = clampd(contactEnvelope(v.hz[k], tcNow) / contactEnvelope(v.hz[k], tcRec) / tilt0, 0.25, 2.0);
                 double cr = g * tilt * clip.re[k], ci = g * tilt * clip.im[k];
-                // Carried back nRef + 1 frames along the mode (the render's first output is z0 times the pole).
-                const double m = nRef + 1.0, a = 6.907755278982137 / v.life[k], w = timber::kTwoPi * v.hz[k];
+                // Carried back nRef + 1 frames along the mode as recorded (the render's first output is z0 times the
+                // pole); Decay then shapes it forward from the strike (carried back along a shortened decay, a short
+                // Decay inflated the strike).
+                const double m = nRef + 1.0, a = 6.907755278982137 / std::max(0.02, static_cast<double>(zone.t60[k])),
+                             w = timber::kTwoPi * v.hz[k];
                 const double back = detExp(a * m / sr);
-                if (recorded) {
+                if (hasRecording) {
                     const double ph = -w * m / sr, cs = detCos(ph), sn = detSin(ph);
                     zr = back * (cr * cs - ci * sn), zim = back * (cr * sn + ci * cs);
                 } else {
@@ -290,11 +300,14 @@ struct Bars {
             p->hold = testUnfaded ? 0xFFFFFFFFu : hold, p->fadeStep = step;
             p->on = true;
             v.gated = true, v.gateHold = hold, v.gateT = 0, v.gateStep = step;
+            v.gateFloor = static_cast<float>(1.0 - attack);
+        } else if (hasRecording) {
+            // Attack 0: the modes alone from the strike, no stroke.
         } else {
             // The head's contact: a short noise burst as long as the contact, its level the strike's.
             const double tc = contactTime(hardness);
             v.clickLeft = static_cast<uint32_t>(std::max(2.0, tc * sr));
-            v.clickAmp = static_cast<float>(0.3 * R * (0.3 + 0.7 * hardness));
+            v.clickAmp = static_cast<float>(0.3 * R * (0.3 + 0.7 * hardness) * std::min(1.0, attack));
         }
     }
     // The resonator in its steady state for the fundamental from the first frame: the bar's share of it is cut so
@@ -326,8 +339,10 @@ struct Bars {
         for (int k = 0; k < kModes; ++k) v.life[k] = static_cast<float>(std::min<double>(v.life[k], std::max(0.02, s.release)));
         setModes(v);
     }
+    // Released: a damper (vibraphone, chimes) stops the note unless the pedal is down. The others have none: their
+    // Release is the player's hand on the bar (a dead stroke), 10 s (their default) letting it ring.
     void release(Voice& v, const Shared& s) noexcept {
-        if (kDampers[which] && !pedal) damp(v, s);
+        if (kDampers[which] ? !pedal : s.release < 9.5) damp(v, s);
     }
     void voiceControl(Voice& v, const Shared&) noexcept {
         if (v.pitch != v.tunedPitch) tune(v);
@@ -354,11 +369,11 @@ struct Bars {
             if (v.gated) {  // silent while the recording holds, then in as it fades out: t^2 (3 - 2 t)
                 if (v.gateHold) {
                     --v.gateHold;
-                    y = 0;
+                    y *= v.gateFloor;
                 } else {
                     v.gateT = std::min(1.0f, v.gateT + v.gateStep);
                     const float t = v.gateT;
-                    y *= t * t * (3.0f - 2.0f * t);
+                    y *= v.gateFloor + (1.0f - v.gateFloor) * (t * t * (3.0f - 2.0f * t));
                     if (t >= 1.0f) v.gated = false;
                 }
             }

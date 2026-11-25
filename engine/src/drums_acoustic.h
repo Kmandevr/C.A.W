@@ -18,6 +18,7 @@ struct PieceSettings {
     double air = 1;
     int alloy = kAlloyB20;
     double swell = 0.5, level = 0, pan = 0, dist = 1, shellLevel = 0.5;
+    double rec = 0;  // 1.1.3: how much comes from recordings (pc<n>_rec)
     bool operator==(const PieceSettings&) const = default;
 };
 struct KitSettings {
@@ -36,6 +37,24 @@ inline constexpr uint32_t kMaxWires = 16;
 inline constexpr uint32_t kResoWireModes = 12;  // the snare-side head's modes the wires touch
 inline constexpr uint32_t kRing = 32;           // the kit sum's history (sympathetic drive), a power of two
 inline constexpr uint32_t kCell = 16;           // the longest span process() takes (frames): a control period
+
+// 1.1.3: the recorded parts (engine/assets/rook/kit.flac, Karoryfer's CC0 kits): a piece plays clips over its
+// synthesized heads (a drum's stick or beater, shell, rim and wires) or in place of its model (a hi-hat's or a
+// cymbal's whole hit). The bank is the processor's (recorded::acquire); the kit only reads it.
+struct RecBank {
+    const float* pcm = nullptr;
+    uint64_t frames = 0;
+    double rate = 44100;
+};
+inline constexpr uint32_t kRecVoices = 4;  // per piece: clips sounding at once (a crash re-hit, a flam's grace)
+struct RecVoice {
+    bool on = false;
+    uint32_t start = 0, frames = 0, delay = 0;  // the clip in the bank; frames before it starts (a flam's main stroke)
+    double pos = 0, step = 1;                   // where it reads (bank frames) and how far a sample moves it
+    float gain = 0, fadeK = 1;                  // fadeK < 1: choked (gain falls by it every sample)
+    float decayK = 1;                           // a cymbal's Decay and Damping shortening its recorded ring
+    uint8_t part = 0;
+};
 
 // A part of a piece that rings: a run of modes in the piece's arrays.
 struct Segment {
@@ -125,6 +144,11 @@ struct Piece {
     float peak = 0;                    // loudest output since the last control
     float gain = 1;                    // output scale for the kind
     float out[16] = {};                // this chunk's output (mono, before the mics)
+    // 1.1.3: recorded parts (RecBank): the clips sounding, and the model's share (1 - rec for a cymbal or hat).
+    RecVoice recv[kRecVoices];
+    uint32_t recHits = 0;              // the piece's strokes (round robins)
+    float simGain = 1;
+    float recTilt = 0, recLp = 0;      // a cymbal's recorded tone: its alloy (and a hard hit's swell) tilting it
     // Mics: close (level, pan), overheads (level and delay each side), room send, bleed send.
     float closeL = 0, closeR = 0, ohL = 0, ohR = 0, roomSend = 0, bleedSend = 0;
     uint32_t ohDelayL = 0, ohDelayR = 0;
@@ -136,6 +160,9 @@ class AcousticKit {
 public:
     // Control thread: the delay lines (overheads, bleed) for `sampleRate`. False if out of memory.
     bool prepare(double sampleRate);
+    // Control thread, before the audio thread runs: the recorded parts (null: none, every piece plays its model).
+    void setRecordings(const RecBank& bank) noexcept { rec_ = bank; }
+    bool hasRecordings() const noexcept { return rec_.pcm != nullptr; }
     void reset() noexcept;
     // Audio thread, at control rate: the kit's settings, and a piece's (it re-tunes only when they moved).
     void setKit(const KitSettings& k) noexcept;
@@ -182,10 +209,15 @@ private:
     void control(Piece& p) noexcept;
     void span(double* left, double* right, double* room, uint32_t n) noexcept;
     void silence(uint32_t piece) noexcept;
+    void startRecorded(Piece& p, int artic, double velocity, uint32_t delay) noexcept;
+    void playRecorded(Piece& p, uint32_t part, double velocity, double gain, double rate, uint32_t delay) noexcept;
+    void chokeRecorded(Piece& p, double seconds, int fromPart = -1, int toPart = -1) noexcept;
+    void mixRecorded(Piece& p, uint32_t n) noexcept;
     void quietState(Piece& p) noexcept;
     static void applyDamp(Piece& p, uint32_t segment, float d) noexcept;
 
     double sr_ = 48000, dt_ = 1.0 / 48000;
+    RecBank rec_;
     KitSettings kit_;
     Piece pieces_[kPieces];
     uint32_t awake_ = 0;  // bit per piece

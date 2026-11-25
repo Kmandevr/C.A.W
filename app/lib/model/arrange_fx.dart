@@ -280,7 +280,17 @@ extension ArrangeFx on AppState {
       if (layer.instrument?.id != componentId) {
         p.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
       }
+      final fresh = layer.instrument?.id != componentId;
       layer.setInstrument(componentId);
+      // A new instrument that opens on one of its presets (a new Rook on its studio kit, 1.1.3).
+      final start = LayerDoc.newInstrumentPresets[componentId], use = layer.instrument;
+      if (fresh && start != null && use != null) {
+        final preset = componentCatalog.value[componentId]?.presets.where((p) => p.name == start).firstOrNull;
+        if (preset != null) {
+          use.params = {...preset.params, ...use.params};
+          use.preset = start;  // the header names it; the engine reads the same values either way
+        }
+      }
     });
   }
 

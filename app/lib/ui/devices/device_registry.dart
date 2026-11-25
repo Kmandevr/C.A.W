@@ -13,10 +13,10 @@ import 'flagship/flagship_inline.dart';
 import 'flagship/flagship_presets.dart';
 import 'flagship/flagship_tools.dart' show flagshipRandomKeeps, initFlagship;
 import 'generic_device_page.dart';
+import 'instruments/instrument_editors.dart';
 import 'kit/device_style.dart';
 import 'kit/presets.dart';
 import 'sampler/sampler_editor.dart';
-import 'timber/timber_editor.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
@@ -69,7 +69,7 @@ class DeviceEditors {
         inline: flagshipInline, randomKeeps: flagshipRandomKeeps, reset: initFlagship),
     ...drumEditors,
     ...samplerEditors,
-    ...timberEditors,
+    ...instrumentEditors,
     ...flockEditors,
   };
 

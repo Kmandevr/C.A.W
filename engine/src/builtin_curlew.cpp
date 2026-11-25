@@ -10,7 +10,7 @@
 #include "builtin_effects.h"
 #include "curlew_winds.h"
 #include "presets.h"
-#include "timber_core.h"
+#include "instrument_core.h"
 
 namespace caw::curlew {
 namespace {
@@ -18,6 +18,7 @@ namespace {
 using timber::Instrument;
 
 constexpr std::string_view kName = "Curlew";
+constexpr std::string_view kPlay[] = {"Legato", "Poly"};
 constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn"};
 constexpr uint32_t kCount = sizeof(kInstruments) / sizeof(kInstruments[0]);
 
@@ -42,7 +43,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     const std::lock_guard<std::mutex> lock(guard);
     Built& b = store.emplace_back();
     fx::ParamTable& t = b.table;
-    // Timber's shared knobs (timber_core.h reads them by index). Dry by default; Body 1 is the recorded body.
+    // Timber's shared knobs (instrument_core.h reads them by index). Dry by default; Body 1 is the recorded body.
     t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
     t.num("body", "Body", 1.0, 0.0, 1.0).group = "shared";
     t.num("space", "Space", 0.0, 0.0, 1.0).group = "shared";
@@ -59,6 +60,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     t.expo("vib_rate", "Vibrato rate", 5.0, 2.0, 9.0, "Hz").group = "winds";
     t.num("growl", "Growl", 0.0, 0.0, 1.0).group = "winds";
     t.expo("attack", "Attack", 0.04, 0.005, 2.0, "s").group = "winds";
+    t.pick("play", "Play", 0.0, kPlay).group = "winds";  // Legato: one note at a time, slurred
     b.params.assign(t.data(), t.data() + t.size());
     ParameterDescriptor model = fx::variantParameter(kInstruments, index);
     model.name = "Instrument";
@@ -81,7 +83,7 @@ const ModuleDescriptor& descriptor() {
     static const ModuleDescriptor& d = descriptorFor(I);
     return d;
 }
-static_assert(Winds::kModelParams == 7);
+static_assert(Winds::kModelParams == 8);  // breath .. attack, play
 
 template <int I>
 ModuleProcessor* make() noexcept {
