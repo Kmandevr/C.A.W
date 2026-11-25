@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -414,8 +415,10 @@ TEST(a_rebuilt_component_takes_over_while_playing_with_its_values_and_state) {
     const char* path = caw::test::nativeComponentPath();
     CHECK(path != nullptr);
     if (!path) return;
-    // The rebuild is a new file, as a real build is.
-    const std::string rebuild = std::string(path) + ".rebuild-test";
+    // The rebuild is a new file, as a real build is; one per test process, since ctest runs shards side by side and
+    // a shared name let one shard rewrite the library while another loaded it (a crash in dlsym, PR #264).
+    const std::string rebuild = std::string(path) + ".rebuild-test-" +
+                                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     {
         std::FILE* in = std::fopen(path, "rb");
         std::FILE* out = std::fopen(rebuild.c_str(), "wb");

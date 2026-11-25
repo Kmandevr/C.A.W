@@ -30,7 +30,11 @@ std::unique_ptr<ModuleProcessor> makeC(const Values& v, double sr = 48000) {
     if (p && !p->activate(sr, 512)) p.reset();
     return p;
 }
-curlew::Winds& modelOf(ModuleProcessor& p) { return static_cast<timber::Instrument<curlew::Winds>&>(p).model(); }
+curlew::Winds& modelOf(ModuleProcessor& p) {
+    curlew::Winds* m = curlew::curlewModelOf(p);  // each variant is Instrument<At<I>>
+    if (!m) std::abort();
+    return *m;
+}
 double ac(const std::vector<float>& x, size_t from, size_t n, double lag) {
     const size_t L = static_cast<size_t>(lag);
     const double f = lag - L;

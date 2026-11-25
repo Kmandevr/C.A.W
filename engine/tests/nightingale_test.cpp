@@ -29,8 +29,10 @@ std::unique_ptr<ModuleProcessor> makeN(const Values& v, double sr = 48000) {
     return p;
 }
 nightingale::Bowed& modelOf(ModuleProcessor& p) {
-    // Each variant is At<I>, a Bowed with nothing added: the model is a Bowed whatever the variant.
-    return static_cast<timber::Instrument<nightingale::Bowed>&>(p).model();
+    // Each variant is Instrument<At<I>> (At<I> a Bowed with nothing added); the engine finds which.
+    nightingale::Bowed* m = nightingale::nightingaleModelOf(p);
+    if (!m) std::abort();
+    return *m;
 }
 // The normalised autocorrelation of x[from, from + n) at a fractional lag.
 double ac(const std::vector<float>& x, size_t from, size_t n, double lag) {

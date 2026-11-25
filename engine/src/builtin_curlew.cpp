@@ -133,4 +133,14 @@ size_t curlewBytes(uint32_t variant, double sampleRate) noexcept {
     return static_cast<Instrument<At<0>>&>(*p).bytes();  // every variant is the same class but for its body
 }
 
+Winds* curlewModelOf(ModuleProcessor& p) noexcept {
+    if (auto* q = dynamic_cast<Instrument<At<0>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<1>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<2>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<3>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<4>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<5>>*>(&p)) return &q->model();
+    return nullptr;
+}
+
 }  // namespace caw::curlew

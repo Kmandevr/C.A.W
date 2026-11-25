@@ -143,4 +143,12 @@ size_t nightingaleBytes(uint32_t variant, double sampleRate) noexcept {
     }
 }
 
+Bowed* nightingaleModelOf(ModuleProcessor& p) noexcept {
+    if (auto* q = dynamic_cast<Instrument<At<0>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<1>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<2>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<3>>*>(&p)) return &q->model();
+    return nullptr;
+}
+
 }  // namespace caw::nightingale

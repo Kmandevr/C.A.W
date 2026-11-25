@@ -21,6 +21,9 @@ std::span<const fx::MergedDevice> mergedCurlewDevices();
 void registerCurlew(ModuleRegistry& registry);
 const std::vector<BuiltinPreset>* curlewPresets(std::string_view id);
 size_t curlewBytes(uint32_t variant, double sampleRate) noexcept;
+struct Winds;
+// The model inside a curlew processor (any variant), for tests; nullptr for another component.
+Winds* curlewModelOf(ModuleProcessor& p) noexcept;
 
 }  // namespace curlew
 }  // namespace caw
