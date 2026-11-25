@@ -12,11 +12,10 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
 - Guitar + harp: worktree-agent-a7fa15840664e0054 df0139b (based on 1061175).
 - Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc d78ecb5 (agent now cutting cost to 24000 and fixing dead knobs).
 - Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
-- Live-path gate test: worktree-agent-adafbe12bcaece343 f4ea097 (WIP; app wiring fine, all dead knobs are DSP).
+- Live-path gate test: worktree-agent-adafbe12bcaece343 f4ea097.
 
 ## Open
-- Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell encloses only the Swell?;
-  Rook kind cards' place and Studio as default; panel names; EP/tonewheel presets need listening.
+- Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell only the Swell?; Rook cards/Studio; panels; EP/tonewheel by ear.
 - Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
 - S22+ Benchmark (docs/performance.md 2026-11-25): Every effect and extreme songs drop out; low-latency live p99 over
   budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
