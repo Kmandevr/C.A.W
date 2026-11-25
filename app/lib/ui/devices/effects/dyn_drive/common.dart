@@ -121,9 +121,7 @@ class ChoiceChips extends StatelessWidget {
     if (p == null || !p.isChoice) return const SizedBox.shrink();
     final sel = (t.value(p.id) - p.min).round().clamp(0, p.choices.length - 1);
     final c = scope.accent;
-    // A Wrap, not a Row: a parameter with more choices than a phone's width (Talon's Bus) goes on to a second line.
-    return KeyParam(paramId: p.id, kind: KeyParamKind.choice, child: Wrap(crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 4, children: [
+    return KeyParam(paramId: p.id, kind: KeyParamKind.choice, child: Row(mainAxisSize: MainAxisSize.min, children: [
       Text(title, style: const TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)),
       const SizedBox(width: 6),
       for (var k = 0; k < p.choices.length; k++)
