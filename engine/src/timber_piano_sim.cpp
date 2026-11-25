@@ -115,6 +115,12 @@ void Piano::renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexc
         for (int s = 0; s < ns; ++s) v.line[s].push(w[s]);
         if (glides) v.energy += o * o;
         float y = o * gain;
+        if (v.phantomGain > 0) {  // High (Starling: Normal too): longitudinal modes driven by the transverse motion squared
+            const float d = o * o;
+            y += (modeRun(v.phantom[0], d) + 0.5f * modeRun(v.phantom[1], d)) * v.phantomGain;
+        }
+        // (before the gate: under Starling's recorded attack, the model's phantoms fade in with its strings; added
+        // after it, they sounded over the recording and a loud note rose 6 dB as the crossfade ended)
         if (v.gated) {  // Starling: the model fades in under the recorded attack (sin over the crossfade, power-complementary)
             float g = 0;
             if (v.gateHold > 0) {
@@ -126,10 +132,6 @@ void Piano::renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexc
                 g = t * (1.5704f + t * t * (0.0723f * t * t - 0.6427f));  // sin(pi t / 2) within 0.02 %, exactly 1 at t = 1
             }
             y *= g;
-        }
-        if (v.phantomGain > 0) {  // High: longitudinal modes driven by the transverse motion squared
-            const float d = o * o;
-            y += (modeRun(v.phantom[0], d) + 0.5f * modeRun(v.phantom[1], d)) * v.phantomGain;
         }
         out[i] = y;
         if (drives) busBridge[at + i] += y * (v.panL + v.panR);
