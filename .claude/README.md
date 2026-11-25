@@ -16,7 +16,7 @@ Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows
 | `skills/code-nav` | same | Using Graphify and Serena together, with `check.sh`, a self-test for both. |
 | `skills/handoff` | same | Writes `.claude/handoff.md`, a short snapshot to resume a multi-step task from. `check.sh` keeps every line of `must-keep.txt` in place and CLAUDE.md within its word budget. |
 | `agents/*.md` | description every session, body in the subagent's own context | Read-only reviewers that return findings only: `architect` (placement and boundaries), `code-reviewer` (defects), `audio-reviewer` (real-time safety, DSP correctness, determinism), `security-reviewer` (untrusted modules, auth, secrets, platform permissions). |
-| `rules/*.md` | when matching files are touched | Conventions scoped by `paths:` globs: `claude`, `docs`, `scripts`, `ci`, `engine`, `app`, `modules`. |
+| `rules/*.md` | when matching files are touched | Conventions scoped by `paths:` globs: `claude`, `docs`, `scripts`, `ci`, `engine`, `app`, `modules`, and `done` (the definition of done for instruments and devices). |
 | `workflows/change.js` | on call | Multi-agent plan, parallel build, parallel verify, then docs. Takes `args: { task, agents? }` and reads the project's checks from `CLAUDE.md`. Never commits. |
 | `settings.json` | every session | Allow rules for the tools and checks above, hook registration, `enabledMcpjsonServers`, `MCP_TIMEOUT`. |
 
