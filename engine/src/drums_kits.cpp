@@ -375,33 +375,41 @@ struct AcousticStyle {
     double extraSize;
     int alloy, stick, mics;
     double room, decay;
+    // 1.1.3: how much of the drums (stick, shell, wires) and of the hat and cymbals comes from recordings (pc<n>_rec;
+    // the recordings are of sticks, so brushes and calfskin kits keep their models)
+    double recDrums = 0, recCymbals = 0;
 };
 const std::vector<AcousticStyle>& acousticStyles() {
     static const std::vector<AcousticStyle> s = {
         {"Jazz", "A small, open kit tuned high: 18\" kick, a sensitive snare, toms in thirds, a dark ride, in a room",
          18, 14, 0.1, kBeaterFelt, 0, 14, 5.5, kShellMaple, 0.5, 3, {10, 12, 14}, 4, kHeadCoated, 14, 18, 20, kPieceOff, 0,
-         kAlloyDark, kStickSticks, kMicsRoom, 0.5, 1.2},
+         kAlloyDark, kStickSticks, kMicsRoom, 0.5, 1.2, 0.5, 0},
         {"Rock", "A big kit hit hard: 22\" kick, a fat 6.5\" snare, toms in fourths, loud cymbals",
          22, 18, 0.35, kBeaterFelt, 1, 14, 6.5, kShellMaple, 0.6, 0, {12, 13, 16}, 5, kHeadCoated2, 14, 18, 22, kPieceCrash, 16,
-         kAlloyB20, kStickSticks, kMicsStudio, 0.35, 1.0},
+         kAlloyB20, kStickSticks, kMicsStudio, 0.35, 1.0, 1, 0.6},
         {"Funk", "Tight and dry: a muffled kick, a cracking steel snare tuned up, a splash",
          20, 16, 0.45, kBeaterFelt, 1, 13, 5, kShellSteel, 0.7, 5, {10, 12, 14}, 5, kHeadCoated, 13, 16, 20, kPieceSplash, 10,
-         kAlloyB20, kStickSticks, kMicsDry, 0.15, 0.8},
+         kAlloyB20, kStickSticks, kMicsDry, 0.15, 0.8, 0.8, 0.6},
         {"Studio pop", "Controlled and polished: a damped kick, a birch snare, two-ply toms",
          22, 16, 0.5, kBeaterFelt, 1, 14, 5.5, kShellBirch, 0.55, 1, {10, 12, 16}, 4, kHeadCoated2, 14, 18, 21, kPieceCrash, 17,
-         kAlloyB20, kStickSticks, kMicsStudio, 0.25, 0.9},
+         kAlloyB20, kStickSticks, kMicsStudio, 0.25, 0.9, 1, 1},
         {"Vintage", "Calfskin heads, a mahogany snare, dark lathed cymbals in a warm room",
          20, 14, 0.25, kBeaterFelt, 0, 14, 5, kShellMahogany, 0.5, 0, {12, 13, 16}, 4, kHeadCalf, 14, 16, 20, kPieceOff, 0,
-         kAlloyDark, kStickSticks, kMicsRoom, 0.45, 0.8},
+         kAlloyDark, kStickSticks, kMicsRoom, 0.45, 0.8, 0, 0},
         {"Metal", "Fast and bright: a wood-beater kick, a brass snare, clear heads, a china",
          22, 20, 0.45, kBeaterWood, 1, 14, 6.5, kShellBrass, 0.65, 2, {10, 12, 16}, 5, kHeadClear2, 14, 19, 22, kPieceChina, 18,
-         kAlloyB8, kStickSticks, kMicsDry, 0.2, 0.9},
+         kAlloyB8, kStickSticks, kMicsDry, 0.2, 0.9, 1, 0.6},
         {"Brushes", "The jazz kit played with brushes: soft swishes, loose wires, a sizzling ride",
          18, 14, 0.15, kBeaterFleece, 0, 14, 5.5, kShellMaple, 0.45, 3, {10, 12, 14}, 4, kHeadCoated, 14, 18, 20, kPieceOff, 0,
-         kAlloyDark, kStickBrushes, kMicsRoom, 0.5, 1.2},
+         kAlloyDark, kStickBrushes, kMicsRoom, 0.5, 1.2, 0, 0},
         {"Big room", "A huge kit far from the overheads: 24\" kick, deep snare and toms, long cymbals",
          24, 18, 0.2, kBeaterFelt, 0, 14, 8, kShellBirch, 0.55, -1, {13, 16, 18}, 5, kHeadCoated, 15, 20, 22, kPieceCrash, 18,
-         kAlloyB20, kStickSticks, kMicsOverheads, 0.8, 1.3},
+         kAlloyB20, kStickSticks, kMicsOverheads, 0.8, 1.3, 0.8, 0.5},
+        // 1.1.3: the realistic kit (owner, 2026-11-25): a dry studio rock/pop kit, close-miked, its heads synthesized
+        // and its sticks, shells, wires, hi-hat and cymbals recorded.
+        {"Studio", "A dry, close-miked studio rock and pop kit: synthesized heads, recorded sticks, wires and cymbals",
+         22, 18, 0.45, kBeaterFelt, 1, 14, 5.5, kShellMaple, 0.6, 2, {12, 13, 16}, 5, kHeadCoated2, 14, 16, 20, kPieceCrash, 18,
+         kAlloyB20, kStickSticks, kMicsDry, 0.1, 0.9, 1, 1},
     };
     return s;
 }
@@ -537,6 +545,9 @@ void acousticKit(const AcousticStyle& st, uint32_t seed, int key, int map, State
     piece(kRoleCrash, kPieceCrash, st.crash);
     piece(kRoleRide, kPieceRide, st.ride);
     if (st.extraKind != kPieceOff) piece(kRoleExtra, st.extraKind, st.extraSize);
+    for (uint32_t role = 0; role < kRoleCount; ++role)  // 1.1.3: the recorded parts
+        if (static_cast<int>(pieceAt(s, role, kPcKind)) != kPieceOff)
+            pieceAt(s, role, kPcRec) = role <= kRoleTom3 ? st.recDrums : st.recCymbals;
     // Where they sit: from the drummer's seat (kick and snare in the middle, toms left to right, cymbals around).
     constexpr double kPan[kRoleCount] = {0.0, -0.15, -0.25, 0.1, 0.45, -0.55, -0.45, 0.55, 0.35};
     constexpr double kDist[kRoleCount] = {1.4, 1.0, 0.8, 0.8, 1.0, 0.7, 0.5, 0.6, 0.55};

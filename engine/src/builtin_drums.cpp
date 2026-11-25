@@ -4,6 +4,7 @@
 #include "component_samples.h"
 #include "drums_acoustic.h"
 #include "quality.h"
+#include "recorded_bank.h"
 
 #include <algorithm>
 #include <cmath>
@@ -759,6 +760,11 @@ public:
             echoL_.assign(echo, 0.0f);
             echoR_.assign(echo, 0.0f);
             if (!acoustic_.prepare(sr_)) return false;  // 1.1.2: the Acoustic kit's mic delay lines
+            // 1.1.3: the recorded kit parts (decoded on first use, shared, freed with the last Rook); without them
+            // every piece plays its model.
+            if (!bank_) bank_ = recorded::acquire(recorded::BankId::RookKit);
+            acoustic_.setRecordings(bank_ ? acoustic::RecBank{bank_->pcm.get(), bank_->frames, static_cast<double>(bank_->rate)}
+                                          : acoustic::RecBank{});
         } catch (...) {
             return false;
         }
@@ -2346,6 +2352,7 @@ private:
         s.pan = clampd(v(kPcPan), -1, 1);
         s.dist = clampd(v(kPcDist), 0.3, 2);
         s.shellLevel = clampd(v(kPcShellLevel), 0, 1);
+        s.rec = clampd(v(kPcRec), 0, 1);
         acoustic_.setPiece(pc, s, qualityNow(quality_));
     }
     // A stroke on the pad's piece: the velocity as the pad's level and accent scale it, the strike position
@@ -2577,6 +2584,7 @@ private:
     DisplayBuffer<kDisplayFloats> display_;
     bool watched_ = true;  // a UI read the display lately (publish): hits capture their waveform
     acoustic::AcousticKit acoustic_;  // 1.1.2: the Acoustic kit's 16 pieces
+    std::shared_ptr<const recorded::Bank> bank_;  // 1.1.3: its recorded parts (held while this Rook lives)
     const ParameterDescriptor* table_ = parameterTable();
     double lastPedal_ = -1.0;
     uint64_t acousticRead_ = ~0ull;  // the block its settings were last read in

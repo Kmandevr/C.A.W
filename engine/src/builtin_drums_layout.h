@@ -97,11 +97,16 @@ inline constexpr uint32_t kPadParams111 = kGrooveAmt + 1;  // before 1.1.2 (213)
 // Acoustic).
 enum AcouParam : uint32_t {
     kKitKind, kAcouMics, kAcouStick, kAcouHatPedal, kAcouSympathy, kAcouBleed, kAcouNoise, kAcouLevel, kAcouRoom,
+    // 1.1.3, appended: how far Randomize moves a pad (the app's Randomize reads it; no sound of its own)
+    kRandomness,
     kAcouCount
 };
 enum PieceParam : uint32_t {
     kPcKind, kPcSize, kPcDepth, kPcTune, kPcReso, kPcHead, kPcShell, kPcDamp, kPcDecay, kPcGlide, kPcWires,
     kPcWireLevel, kPcBeater, kPcPort, kPcAir, kPcAlloy, kPcSwell, kPcLevel, kPcPan, kPcDist, kPcShellLevel,
+    // 1.1.3, appended: how much of the piece comes from recordings (a drum's stick, shell and wires over its
+    // synthesized heads; a cymbal's or hi-hat's whole sound); 0 plays it as 1.1.2 did
+    kPcRec,
     kPieceParams
 };
 inline constexpr uint32_t kPieces = 16;
