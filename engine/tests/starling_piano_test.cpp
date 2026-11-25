@@ -210,7 +210,7 @@ TEST(starling_piano_plays_its_recorded_noises) {
 
 // The three characters are three pianos (the owner, 2026-11-25: "the simulation is not different for the Felt or the
 // Upright", and the Felt measured brighter than the grand). Compared loudness-normalised (a level alone is not a
-// difference): the spectral centroid and the 1/3-octave band energies (125 Hz..16 kHz, their mean taken off, RMS) over
+// difference): the spectral centroid of the 1/3-octave band energies and those energies (125 Hz..16 kHz, their mean taken off, RMS) over
 // 0.05..0.8 s, the attack time (to 3 dB under the peak of a 1 ms envelope) and the T60 (the envelope's slope over
 // 0.15..0.75 s). The Felt is darker and slower to speak than the grand, the Upright shorter-lived, every pair apart in
 // colour; each plays the recorded attack. The owner's phrase: 48, 60, 72, 84 at 0.7, held 0.8 s.
@@ -233,7 +233,6 @@ TEST(starling_piano_characters_are_three_pianos) {
         r.lvl = lv(0, 0.8), r.bright = db(rms(d, 0, 38400)) - r.lvl, r.early = lv(0, 0.1), r.late = lv(0.6, 0.8), r.tail = lv(0.9, 1.5);
         const double g = 1.0 / std::max(1e-9, rms(m, 0, 38400));  // loudness-normalised from here on
         for (float& x : m) x = static_cast<float>(x * g);
-        r.centroid = centroid(m, 2400, 36000, 48000);
         for (int b = 0; b < 24; ++b) {
             timber::Biquad q;
             q.band(125.0 * std::pow(2.0, b / 3.0), 4.32, 48000);
@@ -244,6 +243,12 @@ TEST(starling_piano_characters_are_three_pianos) {
             }
             r.band[b] = 10 * std::log10(e + 1e-30);
         }
+        double num = 0, den = 0;  // the centroid over the bands' energies (a DFT grid misses the partials between its bins)
+        for (int b = 0; b < 24; ++b) {
+            const double e = std::pow(10.0, r.band[b] / 10), hz = 125.0 * std::pow(2.0, b / 3.0);
+            num += hz * e, den += e;
+        }
+        r.centroid = num / den;
         std::vector<double> env;
         for (size_t i = 0; i + 48 <= 38400; i += 48) env.push_back(rms(m, i, 48));
         const double top = *std::max_element(env.begin(), env.end());
