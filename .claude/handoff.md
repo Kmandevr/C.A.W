@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 09df51d (1.1.3-alpha.2 merged as #266, release dispatched) (branch ccr-bd7ac4df-86w0bh; 1.1.3-alpha.1 released, Woodpecker merged as #265 but NOT released)
+Commit: 0584ac3 (alpha.2 shipped as #266; sound fixes cherry-picked onto this branch, tests pass)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
@@ -33,7 +33,8 @@ Fixed on this branch: version.dart appBuild 18; rules done.md; decisions 2026-11
    (spikes cause drops); no frame-rate work. 1.1.2 didn't drop: find what 1.1.3 changed.
    Check first: RecordedBanks decoding/allocating when unused or while playing (prepare() mutex), body filters
    running per silent voice, shared code the 1.1.3 PRs touched; diff the S22+ rows vs 1.1.2 on one bench build.
-1. Done: P0 shipped as 1.1.3-alpha.2 (#266). Next: the sound fixes branch, then the rest below.
+1. Done: alpha.2 (#266); sound fixes merged here (starling/nightingale/curlew/woodpecker/audibility/glitch/stress pass).
+   Next: timber-removal (expect rename conflicts with the sound fixes in timber_piano*/timber_mallet_wind.h).
 2. Merge in order: timber-removal, sound fixes, instrument-pages, guitar/harp, Bittern, Rook, gate test; resolve
    conflicts (stress hash/refs, changelogs, CMakeLists, device_names); a branch already a parent of 81b1cab merges
    with `git merge -s recursive <tip>` only after reverting nothing: use `git cherry-pick <base>..<tip>` instead.
