@@ -255,13 +255,17 @@ struct Bowed {
     void voiceControl(Voice& v, const Shared&) noexcept {
         const double dt = kControlFrames / sr;
         v.age += kControlFrames;
-        if (v.age > 0.25 * sr) v.vibAmount = std::min(1.0f, v.vibAmount + static_cast<float>(dt / 0.4));
+        // The vibrato comes in after the bow has caught the string: from 0.12 s, over 0.25 s (it waited 0.25 s and
+        // took 0.4, so a short note never had any).
+        if (v.age > 0.12 * sr) v.vibAmount = std::min(1.0f, v.vibAmount + static_cast<float>(dt / 0.25));
         v.vib += vibRate * dt;
         v.vib -= std::floor(v.vib);
         const float expr = static_cast<float>(std::max(v.pressure, modWheel));
         v.target = static_cast<float>((0.05 + 0.25 * speed) * (0.45 + 0.55 * v.velocity)) * (1.0f + 0.8f * expr);
         refresh(v);
-        tune(v, 25.0 * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
+        // Wider on the low strings, where the same cents move fewer Hz: a cello's x 1.4, a bass's x 1.8.
+        static constexpr double kWidth[4] = {1.0, 1.15, 1.4, 1.8};
+        tune(v, 25.0 * kWidth[instrument] * vibrato * v.vibAmount * lib::fastSinCycles(v.vib));
         v.lp = timber::flushf(v.lp), v.dc = timber::flushf(v.dc), v.z = timber::flushf(v.z);
         v.zd = timber::flushf(v.zd), v.zt = timber::flushf(v.zt), v.nEnv = timber::flushf(v.nEnv);
         v.nHp = timber::flushf(v.nHp), v.nLp = timber::flushf(v.nLp);

@@ -25,7 +25,7 @@ inline constexpr int kPullKeys = 40;
 // - no pad, key or valve click into the bore: it rang at the note's pitch on every note and slur, a pitched thump
 //   (the "piano on the flute"). The breath's own turbulence stays (Breath noise).
 // - the body: the instrument's recorded spectrum over the model's at the same notes (VSCO 2 Community Edition, CC0),
-//   as peaking bands after the voices' sum, Body scaling them; the saxophone has none yet (no free recording).
+//   as peaking bands after the voices' sum, Body scaling them; the saxophone (no free recording yet) its bell's radiation, chosen (curlew_bodies.cpp).
 // - its own pull (the reed's, jet's or lips' flattening, aimed off) measured over each instrument's whole range
 //   (curlew_tuning.inc), where Timber measured five keys of one range;
 // - dry by default (Space 0).
@@ -63,6 +63,10 @@ struct Winds : timber::Wind {
 
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         padClicks = false;
+        // [Assumption] a wind player's vibrato is mostly the breath, with a little pitch (the flute's is usually
+        // described so; not re-read): at Vibrato 1, 30 % of the breath and 20 cents. Timber's 5 % and 8 cents were too
+        // small to hear at the default 0.2.
+        vibBreath = 0.3, vibCents = 20.0;
         pullTable = kPull[which], pullFirst = kPullFirst[which], pullCount = kPullKeys;
         // Brass: the lips' resonance a little above the note (outward-striking lips, as Fletcher and Rossing describe
         // them); at Timber's 0.9 below it, a trombone or horn held only half its notes (measured 2026-11-24: 1.15
@@ -97,7 +101,7 @@ struct Winds : timber::Wind {
         Growl& g = growls[&v - voices];
         g.rate = timber::clampd(g.rate + 0.6 * g.wander.next(), 22.0, 31.0);
         const double flutter = 20.0 * growlAmount * lib::fastSinCycles(g.tongue);
-        tune(v, 8.0 * vibrato * lib::fastSinCycles(v.vib) + flutter);
+        tune(v, vibCents * vibrato * lib::fastSinCycles(v.vib) + flutter);
     }
     // The growl into each voice's breath (the mouth pressure, before the reed, jet or lips: the hum and the rolled
     // tongue modulate the air, and the excitation's nonlinearity mixes them with the note): the tongue's closures (a

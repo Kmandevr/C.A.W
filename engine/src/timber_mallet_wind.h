@@ -421,6 +421,8 @@ struct Wind {
         return pullTable[i] + (pullTable[i + 1] - pullTable[i]) * (k - i);
     }
     const float (*breathMod)[kControlFrames] = nullptr;  // Curlew (1.1.3): its growl, per lane and frame, times the breath
+    // The vibrato's depth at Vibrato 1: the breath's share (Simulated) and the pitch (cents). Timber 0.05 and 8.
+    double vibBreath = 0.05, vibCents = 8.0;
     bool lipsCloseWithBreath = false;  // Curlew (1.1.3): the lips' rest gap closes as the breath ends
     double lipSpan = 0;  // Curlew (1.1.3): the lips' tension range over Lips 0..1 (Timber: 0.02 from 0)
     bool padClicks = true;  // Curlew (1.1.3) turns them off: a click into the bore on every note was the "piano on the flute"
@@ -439,7 +441,7 @@ struct Wind {
         const double dt = kControlFrames / sr;
         v.vib += vibRate * dt;
         v.vib -= std::floor(v.vib);
-        tune(v, 8.0 * vibrato * lib::fastSinCycles(v.vib));
+        tune(v, vibCents * vibrato * lib::fastSinCycles(v.vib));
         // The growl (about 35 Hz): its gain now and at the next control point, in a line between.
         // No growl: exactly 1 and no step, without the two sines.
         const double amt = 0.4 * growl;
@@ -592,7 +594,7 @@ struct Wind {
             const float push = static_cast<float>(K == 3 ? 0.75 + 0.5 * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
             base[l] = (kLow[K] + kSpan[K] * static_cast<float>(breath)) * push;
             loud[l] = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
-            vibAm[l] = static_cast<float>(0.05 * vibrato * lib::fastSinCycles(v.vib));
+            vibAm[l] = static_cast<float>(vibBreath * vibrato * lib::fastSinCycles(v.vib));
             slope[l] = -static_cast<float>(0.19 + 0.06 * reed) / base[l];
             env[l] = v.env, envStep[l] = v.envStep, tongue[l] = v.tongue, tongueStep[l] = v.tongueStep, g[l] = v.g, gStep[l] = v.gStep;
             lp[l] = v.lp, dcx[l] = v.dcx, dcy[l] = v.dcy, lip1[l] = v.lip1, lip2[l] = v.lip2, reed1[l] = v.reed1, reed2[l] = v.reed2;

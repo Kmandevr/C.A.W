@@ -339,8 +339,10 @@ struct Bars {
         for (int k = 0; k < kModes; ++k) v.life[k] = static_cast<float>(std::min<double>(v.life[k], std::max(0.02, s.release)));
         setModes(v);
     }
+    // Released: a damper (vibraphone, chimes) stops the note unless the pedal is down. The others have none: their
+    // Release is the player's hand on the bar (a dead stroke), 10 s (their default) letting it ring.
     void release(Voice& v, const Shared& s) noexcept {
-        if (kDampers[which] && !pedal) damp(v, s);
+        if (kDampers[which] ? !pedal : s.release < 9.5) damp(v, s);
     }
     void voiceControl(Voice& v, const Shared&) noexcept {
         if (v.pitch != v.tunedPitch) tune(v);
