@@ -1,5 +1,6 @@
 // Starling's piano (1.1.3): the recordings' calibration to the model, load-on-use and freeing, the crossfade's continuity, the measured tuning, the recorded noises, block sizes and a reference render.
 #include <cmath>
+#include <utility>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -11,6 +12,7 @@
 #include "recorded_bank.h"
 #include "starling_piano.h"
 #include "test.h"
+#include "timber_dsp.h"
 #include "timber_harness.h"
 #include "tolerance.h"
 
@@ -205,15 +207,66 @@ TEST(starling_piano_plays_its_recorded_noises) {
     CHECK(ped > 4.0 * pedModel);
 }
 
-// Upright and Felt have no recording of their own: their strike is the model's, as Timber's.
-TEST(starling_piano_upright_and_felt_play_the_model_from_the_strike) {
-    for (double character : {1.0, 2.0}) {
-        const Values v = {{"variant", 0}, {"character", character}, {"noise", 0.0}};
-        auto p = makeStarling(v), q = makeStarling(v);
-        modelOf(*q).testMuteRecordings = true;
-        const std::vector<Note> n = {{0.0, 0.3, 60, 0.7}};
-        CHECK(same(play(*p, v, n, 0.4), play(*q, v, n, 0.4)));
-    }
+// The three characters are three pianos (the owner, 2026-11-25: "the simulation is not different for the Felt or the
+// Upright", and the Felt measured brighter than the grand). Each plays the recorded attack, processed as its own; the
+// Felt is darker and softer than the grand, the Upright shorter-lived; and every pair is far apart in colour (the octave
+// bands' levels, 125 Hz..16 kHz, their mean taken off, RMS). The owner's phrase: 48, 60, 72, 84 at 0.7, held 0.8 s.
+TEST(starling_piano_characters_are_three_pianos) {
+    struct M {
+        double lvl, bright, early, late, tail, band[8];
+    };
+    auto measure = [](double character, bool muted) {
+        const Values v = {{"variant", 0}, {"character", character}};
+        auto p = makeStarling(v);
+        if (muted) modelOf(*p).testMuteRecordings = true;
+        std::vector<Note> n;
+        for (double k : {48.0, 60.0, 72.0, 84.0}) n.push_back({0.0, 0.8, k, 0.7});
+        const std::vector<float> m = play(*p, v, n, 1.5).mono();
+        auto lv = [&](double a, double b) { return db(rms(m, static_cast<size_t>(a * 48000), static_cast<size_t>((b - a) * 48000))); };
+        std::vector<float> d(m.size());
+        for (size_t i = 1; i < m.size(); ++i) d[i] = m[i] - m[i - 1];
+        M r{lv(0, 0.8), db(rms(d, 0, 38400)) - lv(0, 0.8), lv(0, 0.1), lv(0.6, 0.8), lv(0.9, 1.5), {}};
+        for (int b = 0; b < 8; ++b) {
+            timber::Biquad q;
+            q.band(125.0 * std::pow(2.0, b), 1.41, 48000);
+            double e = 0;
+            for (size_t i = 0; i < 38400; ++i) {
+                const float y = q.run(m[i]);
+                if (i >= 2400) e += static_cast<double>(y) * y;
+            }
+            r.band[b] = 10 * std::log10(e + 1e-30);
+        }
+        return std::make_pair(r, m);
+    };
+    auto colour = [](const M& a, const M& b) {
+        double mean = 0, e = 0;
+        for (int k = 0; k < 8; ++k) mean += (a.band[k] - b.band[k]) / 8.0;
+        for (int k = 0; k < 8; ++k) e += std::pow(a.band[k] - b.band[k] - mean, 2) / 8.0;
+        return std::sqrt(e);
+    };
+    const auto [grand, g] = measure(0, false);
+    const auto [upright, u] = measure(1, false);
+    const auto [felt, f] = measure(2, false);
+    const char* names[3] = {"Grand", "Upright", "Felt"};
+    const M* all[3] = {&grand, &upright, &felt};
+    if (verbose())
+        for (int c = 0; c < 3; ++c)
+            std::printf("%-8s lvl %.1f bright %.1f early %.1f late %.1f tail %.1f dB\n", names[c], all[c]->lvl, all[c]->bright, all[c]->early,
+                        all[c]->late, all[c]->tail);
+    if (verbose())
+        for (int c = 0; c < 3; ++c) {
+            std::printf("%-8s bands", names[c]);
+            for (int k = 0; k < 8; ++k) std::printf(" %.1f", all[c]->band[k] - grand.band[k]);
+            std::printf(" (dB against the grand, 125 Hz..16 kHz)\n");
+        }
+    const double gu = colour(grand, upright), gf = colour(grand, felt), uf = colour(upright, felt);
+    if (verbose()) std::printf("colour distance: grand-upright %.1f, grand-felt %.1f, upright-felt %.1f dB\n", gu, gf, uf);
+    CHECK(felt.bright < grand.bright - 3.0);  // darker
+    CHECK(felt.early < grand.early - 1.5);    // a softer strike
+    CHECK(upright.late < grand.late - 3.0);   // shorter-lived
+    CHECK(gu > 1.3 && gf > 2.5 && uf > 2.5);  // three colours (the upright also by its shorter life, above)
+    // Both play the recorded attack (muting the recordings changes them).
+    for (double c : {1.0, 2.0}) CHECK(measure(c, true).second != (c == 1.0 ? u : f));
 }
 
 // The same bits at any block size, through the crossfade, the release and the pedal.
