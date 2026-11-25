@@ -6,6 +6,7 @@
 #include "builtin_starling.h"
 #include "builtin_nightingale.h"
 #include "builtin_curlew.h"
+#include "builtin_woodpecker.h"
 
 #include <cmath>
 #include <deque>
@@ -26,7 +27,7 @@ const std::vector<const MergedDevice*>& mergedDevices() {
                                                      mergedMeterDevices(), mergedVoiceDevices(), mergedPreenDevices(),
                                                      mergedHushDevices(), timber::mergedTimberDevices(),
                                                      starling::mergedStarlingDevices(), nightingale::mergedNightingaleDevices(),
-                                                     curlew::mergedCurlewDevices()})
+                                                     curlew::mergedCurlewDevices(), woodpecker::mergedWoodpeckerDevices()})
             for (const MergedDevice& d : family) v.push_back(&d);
         return v;
     }();

@@ -3,6 +3,13 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.2 (2026-11-25)
+
+Realistic instruments, part two: tuned percussion.
+
+### New
+- **Woodpecker, tuned percussion:** marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, each with its real mallet stroke (VCSL, CC0) flowing into a ringing bar, tube or drum measured from the same recordings, in tune at A440. Listen for the stroke handing over to the ring with no dip or bump, the marimba's warm tube (the Resonator knob), the vibraphone's motor shimmer and damper pedal, and a brighter tone as you raise Mallet hardness. 15 presets.
+
 ## 1.1.3-alpha.1 (2026-11-24)
 
 Realistic instruments, part one: a piano, bowed strings, winds and a cathedral organ that sound like the real thing.

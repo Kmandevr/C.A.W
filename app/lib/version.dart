@@ -1,5 +1,5 @@
 // The app's version as users see it (pubspec.yaml's version; a test keeps them equal). C.A.W is in open alpha.
-const String appVersion = '1.1.3-alpha.1';
+const String appVersion = '1.1.3-alpha.2';
 
 /// The build number (pubspec.yaml's `+N`; a test keeps them equal). Projects record it with [appVersion] as they save.
 const int appBuild = 17;

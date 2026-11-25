@@ -17,7 +17,7 @@ struct Bank {
     std::span<const float> samples() const noexcept { return {pcm.get(), static_cast<size_t>(frames)}; }
 };
 
-enum class BankId : uint32_t { StarlingPiano, kCount };
+enum class BankId : uint32_t { StarlingPiano, Woodpecker, kCount };
 
 // The bank, decoded now if no instrument holds it yet; null if it cannot be decoded (the instrument then plays
 // without it). Control thread only: it may allocate and decode (an instrument calls it from activate()). The
