@@ -1,4 +1,4 @@
-// The drums' editor (org.caw.drums) in the instruments' one-screen layout: the pads on top (lit by their hits), the picked pad's cards below in three panels (Sound, Shape, Groove & kit; a phone swipes between them, wide shows them side by side), and the Character and source strip at the bottom; and its inline view in the FX stack.
+// The drums' editor (org.caw.drums) in the instruments' one-screen layout: the kit-kind cards and the pads on top (lit by their hits), the picked pad's cards below in three panels (Sound, Shape, Groove & kit; a phone swipes between them, wide shows them side by side), and the Character and source strip at the bottom; and its inline view in the FX stack.
 import 'package:flutter/material.dart';
 
 import '../../../model/drums.dart';
@@ -11,6 +11,7 @@ import '../kit/device_style.dart';
 import '../kit/param_watch.dart';
 import 'drums_cards.dart';
 import 'drums_hero.dart';
+import 'drums_kinds.dart';
 import 'drums_kit.dart';
 import 'drums_pads.dart';
 import 'drums_voice.dart';
@@ -87,6 +88,8 @@ class DrumsPageState extends State<DrumsPage> {
         return ValueListenableBuilder<int>(valueListenable: sel.pad, builder: (context, pad, _) => Row(
           key: const ValueKey('drums-page'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SizedBox(width: 330, child: ListView(padding: const EdgeInsets.fromLTRB(8, 6, 4, 8), children: [
+              watchDevice(context, (_) => const DrumKindBar(height: 40)),
+              const SizedBox(height: 4),
               const DrumBankBar(),
               const SizedBox(height: 4),
               const DrumPadGrid(padHeight: 40, gap: 4),
@@ -104,6 +107,8 @@ class DrumsPageState extends State<DrumsPage> {
           // The centrepiece: the pads, lit by their hits.
           Padding(padding: const EdgeInsets.fromLTRB(8, 6, 8, 0), child: _narrow
               ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  watchDevice(context, (_) => DrumKindBar(height: short ? 38 : 44)),
+                  const SizedBox(height: 4),
                   const DrumBankBar(),
                   const SizedBox(height: 4),
                   DrumPadGrid(padHeight: short ? 30 : 40, gap: 4),
@@ -111,6 +116,8 @@ class DrumsPageState extends State<DrumsPage> {
                 ])
               : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   SizedBox(width: 380, child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    watchDevice(context, (_) => const DrumKindBar()),
+                    const SizedBox(height: 4),
                     const DrumBankBar(),
                     const SizedBox(height: 4),
                     DrumPadGrid(padHeight: short ? 46 : 58, gap: 5),

@@ -533,16 +533,35 @@ final _random = math.Random();
 
 /// A new sound of the pad's type ([layer]: only that layer's knobs take it), from the engine. False when the
 /// engine gave nothing.
+///
+/// How far it moves is the kit's Randomness knob (1.1.3): low keeps it near a library sound of its type, high draws
+/// far within the type. A Simulated pad (its engine 1) varies its piece instead (its tuning, damping, size...), so
+/// the engine gets the pad's values and its piece's.
 bool randomizePad(DeviceTarget t, DrumsLayout layout, int pad, {DrumLayer? layer, int? seed, DrumsApi? api}) {
   final type = t.value(layout.id(pad, 'type')).round();
-  final r = (api ?? DrumsApi.current).randomize(type, seed ?? _random.nextInt(1 << 31), 1, pad, null);
+  final amount = t.value(drumRandomnessId).clamp(0.0, 1.0);
+  final simulated = t.value(layout.id(pad, 'engine')).round() == 1;
+  final current = simulated ? {...padValues(t, layout, pad), ...pieceValues(t, t.value(layout.id(pad, 'acou_piece')).round())} : null;
+  final r = (api ?? DrumsApi.current).randomize(type, seed ?? _random.nextInt(1 << 31), amount, pad, current);
   return _apply(t, layout, pad, r, layer);
+}
+
+/// The kit's Randomness knob (1.1.3): how far Randomize moves a pad.
+const drumRandomnessId = 'randomness';
+
+/// Piece [piece]'s (0..15) values, by full id (`pc3_tune`).
+Map<String, double> pieceValues(DeviceTarget t, int piece) {
+  final prefix = 'pc${piece + 1}_';
+  return {for (final p in t.info?.parameters ?? const <ComponentParameterInfo>[]) if (p.id.startsWith(prefix)) p.id: t.value(p.id)};
 }
 
 /// The pad's sound moved [amount] of the way toward a random one of its type ([layer]: only that layer).
 bool mutatePad(DeviceTarget t, DrumsLayout layout, int pad, {DrumLayer? layer, double amount = 0.3, int? seed,
     DrumsApi? api}) {
-  final r = (api ?? DrumsApi.current).randomize(-1, seed ?? _random.nextInt(1 << 31), amount, pad, padValues(t, layout, pad));
+  final values = padValues(t, layout, pad);
+  final simulated = (values['engine'] ?? 0).round() == 1;  // a Simulated pad's piece moves too (1.1.3)
+  final current = simulated ? {...values, ...pieceValues(t, (values['acou_piece'] ?? 0).round())} : values;
+  final r = (api ?? DrumsApi.current).randomize(-1, seed ?? _random.nextInt(1 << 31), amount, pad, current);
   return _apply(t, layout, pad, r, layer);
 }
 
@@ -555,9 +574,47 @@ bool _apply(DeviceTarget t, DrumsLayout layout, int pad, Map<String, double>? r,
       if (e.key.startsWith(prefix) && (only == null || only.contains(e.key.substring(prefix.length))))
         e.key.substring(prefix.length): e.value,
   };
-  if (values.isEmpty) return false;
+  // A Simulated pad's piece (1.1.3): its settings come back by full id.
+  final piece = {for (final e in r.entries) if (layer == null && _pieceId.hasMatch(e.key)) e.key: e.value};
+  if (values.isEmpty && piece.isEmpty) return false;
+  for (final e in piece.entries) {
+    t.setLive(e.key, e.value);
+  }
   writePad(t, layout, pad, values);
   return true;
+}
+
+final _pieceId = RegExp(r'^pc\d+_');
+
+// ---------------------------------------------------------------------------------------------------------------
+// The kinds' default kits and the presets' categories (1.1.3)
+
+/// Each kind's best kit, by [drumKitKinds]' order: what its kind card switches to. Chosen by ear and measured apart
+/// (`rook_kinds_default_kits_are_far_apart_spectrally`, engine/tests/rook_test.cpp, keeps the same three names).
+const drumKindDefaults = ['Synth kit: 808-style', 'Produced kit: Pop', 'Acoustic kit: Studio'];
+
+
+/// The kind a kit's `kit_kind` value names (1 Synth, 2 Produced, 3 Acoustic), as an index of [drumKitKinds]; -1 for
+/// Custom (a kit made by hand or an older preset).
+int drumKindOf(DeviceTarget t) => t.value('kit_kind').round() - 1;
+
+/// A preset's category in the browser, and its place (lower first): the kinds' default kits first, then each kind's
+/// other kits (Acoustic, Produced, Synth), the classic kits, then the one-pad sounds by type.
+(String, int) drumPresetCategory(String name, Map<String, double> params) {
+  for (final (i, kind) in const ['Acoustic', 'Produced', 'Synth'].indexed) {
+    if (name.startsWith('$kind kit: ')) return ('$kind kits', drumKindDefaults.contains(name) ? i : 10 + i);
+  }
+  if (name.startsWith('Kit: ')) return ('Classic kits', 20);
+  final type = (params['a1_type'] ?? -1).round();
+  return switch (type) {
+    0 || 14 => ('Kicks & bass', 30),
+    1 || 2 || 10 => ('Snares & claps', 31),
+    3 || 4 || 5 => ('Hi-hats', 32),
+    6 => ('Toms', 33),
+    7 || 8 || 9 => ('Cymbals', 34),
+    15 => ('FX', 36),
+    _ => ('Percussion', 35),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

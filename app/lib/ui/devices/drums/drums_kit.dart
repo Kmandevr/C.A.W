@@ -1,4 +1,4 @@
-// The drums' kit cards: building a kit (Synth, Produced or Acoustic), mode and MIDI (channel, first note, volume, variation seed), the note map of a bank with Learn, the kit effects (glue, drive, room, echo, EQ, clip) and Explode to tracks.
+// The drums' kit cards: the kit's tools (tune, mutate, match, map, finish; the kind cards over the pads build kits), mode and MIDI (channel, first note, volume, variation seed), the note map of a bank with Learn, the kit effects (glue, drive, room, echo, EQ, clip) and Explode to tracks.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -25,7 +25,7 @@ List<Widget> drumKitCards(BuildContext context) {
   final c = scope.accent, c2 = scope.secondary;
   List<String> group(String g) => layout.kitGroups[g] ?? const [];
   return [
-    const DrumBuildCard(),
+    const DrumKitToolsCard(),
     FPanel(key: const ValueKey('drum-kit-midi'), title: 'MODE & MIDI', color: c, child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
         const LabeledRow('MODE', DeviceChoice('mode', labels: ['Kit · pads on notes', 'Single · A1 plays all'])),
@@ -80,20 +80,20 @@ class DrumNoteMapCard extends StatelessWidget {
   }
 }
 
-/// Building a kit (1.1.2): its kind and style, a key and an Acoustic kit's e-drum map; Build makes a new kit over
-/// this one (one undo step), and the kit tools (mutate, tune to the key, match loudness, map the pads, a finishing
-/// chain) work on the kit as it is. Minimal by design: the builder's own screens are the owner's to design.
-class DrumBuildCard extends StatefulWidget {
-  const DrumBuildCard({super.key});
+/// The kit's tools (1.1.3; the kind cards over the pads pick and build kits): tune to a key, mutate the kit, match
+/// its loudness, map an Acoustic kit's pads to an e-drum and put a finishing chain on the bus, each one undo step,
+/// on the kit as it is. Which tools show follows the kit's kind.
+class DrumKitToolsCard extends StatefulWidget {
+  const DrumKitToolsCard({super.key});
 
   @override
-  State<DrumBuildCard> createState() => _DrumBuildCardState();
+  State<DrumKitToolsCard> createState() => _DrumKitToolsCardState();
 }
 
-class _DrumBuildCardState extends State<DrumBuildCard> {
+class _DrumKitToolsCardState extends State<DrumKitToolsCard> {
   static const _keys = ['No key', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   static final _random = math.Random();
-  int _kind = 2, _style = 0, _key = 0, _map = 0, _chain = 0;
+  int _key = 0, _map = 0, _chain = 0;
 
   Widget _pick(String label, int value, List<String> items, ValueChanged<int> onChanged, {required String key}) =>
       LabeledRow(label, DropdownButton<int>(
@@ -110,10 +110,11 @@ class _DrumBuildCardState extends State<DrumBuildCard> {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final builders = DrumsApi.current.builders();
-    final styles = builders?[drumKitKinds[_kind].toLowerCase()] ?? const <String>[];
     final maps = builders?['maps'] ?? const <String>[];
     final chains = builders?['chains'] ?? const <String>[];
     final ready = t.isInstrument && builders != null;
+    final kind = drumKindOf(t);
+    final acoustic = kind == 2;
     String pickOf(List<String> l, int i) => l.isEmpty ? '' : l[i.clamp(0, l.length - 1)];
     Widget action(String id, String label, IconData icon, bool Function() run, String done) => Pressable(
         glow: scope.accent,
@@ -128,50 +129,27 @@ class _DrumBuildCardState extends State<DrumBuildCard> {
             icon: Icon(icon, size: 16),
             label: Text(label)));
     return DeviceExpandCard(
-      key: const ValueKey('drum-build-card'),
-      storageId: 'drums-build', title: 'BUILD A KIT', color: scope.accent, initiallyOpen: false,
-      summary: builders == null ? 'Needs the engine' : '${drumKitKinds[_kind]} · ${pickOf(styles, _style)}',
+      key: const ValueKey('drum-tools-card'),
+      storageId: 'drums-tools', title: 'KIT TOOLS', color: scope.accent, initiallyOpen: false,
+      summary: builders == null ? 'Needs the engine' : (kind < 0 ? 'Custom kit' : '${drumKitKinds[kind]} kit'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        LabeledRow('KIND', SegmentedButton<int>(
-          key: const ValueKey('drum-build-kind'),
-          segments: [for (final (i, k) in drumKitKinds.indexed) ButtonSegment(value: i, label: Text(k))],
-          selected: {_kind},
-          showSelectedIcon: false,
-          onSelectionChanged: (v) => setState(() {
-            _kind = v.first;
-            _style = 0;
-          }),
-        )),
-        _pick('STYLE', _style, styles, (v) => _style = v, key: 'drum-build-style'),
         _pick('KEY', _key, _keys, (v) => _key = v, key: 'drum-build-key'),
-        if (_kind == 2) _pick('E-DRUM MAP', _map, maps, (v) => _map = v, key: 'drum-build-map'),
+        if (acoustic) _pick('E-DRUM MAP', _map, maps, (v) => _map = v, key: 'drum-build-map'),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          Pressable(glow: scope.accent, child: FilledButton.icon(
-            key: const ValueKey('drum-build'),
-            onPressed: ready && styles.isNotEmpty
-                ? () {
-                    DeviceFeel.tap();
-                    final ok = buildDrumKit(t, kind: _kind, style: _style, seed: _random.nextInt(1 << 31), key: _key - 1,
-                        map: _map);
-                    drumsToast(context, ok ? 'New ${drumKitKinds[_kind]} kit · Undo restores' : 'Build needs the engine');
-                  }
-                : null,
-            icon: const Icon(Icons.auto_awesome, size: 16),
-            label: const Text('Build'))),
-          if (_kind != 2)
-            action('drum-build-mutate', 'Mutate kit', Icons.shuffle,
-                () => drumKitTool(t, 'mutate', {'amount': 0.15, 'seed': _random.nextInt(1 << 31)}), 'Kit mutated · Undo restores'),
           action('drum-build-tune', 'Tune to key', Icons.music_note,
               () => _key > 0 && drumKitTool(t, 'tune_to_key', {'key': _key - 1}), 'Tuned to ${_keys[_key]}'),
-          if (_kind != 2)
+          if (!acoustic)
+            action('drum-build-mutate', 'Mutate kit', Icons.shuffle,
+                () => drumKitTool(t, 'mutate', {'amount': 0.15, 'seed': _random.nextInt(1 << 31)}), 'Kit mutated · Undo restores'),
+          if (!acoustic)
             action('drum-build-loudness', 'Match loudness', Icons.equalizer, () => drumKitTool(t, 'match_loudness', {}),
                 'Pads level-matched'),
-          if (_kind == 2)
+          if (acoustic)
             action('drum-build-remap', 'Map pads', Icons.grid_view, () => drumKitTool(t, 'map', {'map': _map}),
                 'Pads follow ${pickOf(maps, _map)}'),
         ]),
-        if (_kind == 1) ...[
+        if (kind == 1) ...[
           const SizedBox(height: 8),
           _pick('FINISH', _chain, chains, (v) => _chain = v, key: 'drum-build-chain'),
           Align(alignment: Alignment.centerLeft, child: action('drum-build-finish', 'Finish the bus', Icons.tune,

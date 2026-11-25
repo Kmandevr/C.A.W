@@ -22,6 +22,7 @@ Map<String, List<DrumNeed>> _acousticNeeds() {
     'size': played, 'depth': drums, 'tune': played, 'reso': drums, 'head': drums, 'shell': drums, 'damp': played,
     'decay': played, 'glide': drums, 'wires': {2}, 'wire_level': {2}, 'beater': {1}, 'port': {1}, 'air': drums,
     'alloy': cymbals, 'swell': {5, 6, 7, 8}, 'level': played, 'pan': played, 'dist': played, 'shell_level': drums,
+    'rec': played,  // 1.1.3
   };
   return {
     for (var p = 1; p <= 16; p++)

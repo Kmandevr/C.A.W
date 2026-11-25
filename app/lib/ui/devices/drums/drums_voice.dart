@@ -12,6 +12,7 @@ import '../device_controls.dart';
 import '../device_scope.dart';
 import '../kit/feel.dart';
 import 'drums_hero.dart';
+import 'drums_kinds.dart';
 import 'drums_pads.dart';
 
 /// A knob's label inside its card: the descriptor's name without the pad ("A1 ") and the layer's own word.
@@ -28,7 +29,7 @@ String drumKnobLabel(ComponentParameterInfo p) {
   return s.isEmpty ? p.label : s[0].toUpperCase() + s.substring(1);
 }
 
-/// The picked pad's header row: its name and type, then Randomize (dice), Mutate and its menu.
+/// The picked pad's header row: its name and type, then Randomize (dice), Mutate, the Randomness knob and its menu.
 class DrumVoiceHeader extends StatelessWidget {
   const DrumVoiceHeader({super.key, required this.pad});
   final int pad;
@@ -57,6 +58,7 @@ class DrumVoiceHeader extends StatelessWidget {
         color: c, onTap: () {
           if (!mutatePad(t, layout, pad)) drumsToast(context, 'Mutate needs the engine');
         }),
+      const DrumRandomnessKnob(),
       Builder(builder: (context) => IconButton(
         key: const ValueKey('drum-pad-menu'),
         tooltip: 'Pad menu',
