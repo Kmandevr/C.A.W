@@ -1,4 +1,5 @@
 // Starling's piano (1.1.3): the recordings' calibration to the model, load-on-use and freeing, the crossfade's continuity, the measured tuning, the recorded noises, block sizes and a reference render.
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <cstdio>
@@ -208,12 +209,15 @@ TEST(starling_piano_plays_its_recorded_noises) {
 }
 
 // The three characters are three pianos (the owner, 2026-11-25: "the simulation is not different for the Felt or the
-// Upright", and the Felt measured brighter than the grand). Each plays the recorded attack, processed as its own; the
-// Felt is darker and softer than the grand, the Upright shorter-lived; and every pair is far apart in colour (the octave
-// bands' levels, 125 Hz..16 kHz, their mean taken off, RMS). The owner's phrase: 48, 60, 72, 84 at 0.7, held 0.8 s.
+// Upright", and the Felt measured brighter than the grand). Compared loudness-normalised (a level alone is not a
+// difference): the spectral centroid and the 1/3-octave band energies (125 Hz..16 kHz, their mean taken off, RMS) over
+// 0.05..0.8 s, the attack time (to 3 dB under the peak of a 1 ms envelope) and the T60 (the envelope's slope over
+// 0.15..0.75 s). The Felt is darker and slower to speak than the grand, the Upright shorter-lived, every pair apart in
+// colour; each plays the recorded attack. The owner's phrase: 48, 60, 72, 84 at 0.7, held 0.8 s.
 TEST(starling_piano_characters_are_three_pianos) {
     struct M {
-        double lvl, bright, early, late, tail, band[8];
+        double centroid = 0, attackMs = 0, t60 = 0, band[24] = {};
+        double lvl = 0, bright = 0, early = 0, late = 0, tail = 0;  // the owner's columns (printed)
     };
     auto measure = [](double character, bool muted) {
         const Values v = {{"variant", 0}, {"character", character}};
@@ -221,14 +225,18 @@ TEST(starling_piano_characters_are_three_pianos) {
         if (muted) modelOf(*p).testMuteRecordings = true;
         std::vector<Note> n;
         for (double k : {48.0, 60.0, 72.0, 84.0}) n.push_back({0.0, 0.8, k, 0.7});
-        const std::vector<float> m = play(*p, v, n, 1.5).mono();
+        std::vector<float> m = play(*p, v, n, 1.5).mono();
+        M r;
         auto lv = [&](double a, double b) { return db(rms(m, static_cast<size_t>(a * 48000), static_cast<size_t>((b - a) * 48000))); };
         std::vector<float> d(m.size());
         for (size_t i = 1; i < m.size(); ++i) d[i] = m[i] - m[i - 1];
-        M r{lv(0, 0.8), db(rms(d, 0, 38400)) - lv(0, 0.8), lv(0, 0.1), lv(0.6, 0.8), lv(0.9, 1.5), {}};
-        for (int b = 0; b < 8; ++b) {
+        r.lvl = lv(0, 0.8), r.bright = db(rms(d, 0, 38400)) - r.lvl, r.early = lv(0, 0.1), r.late = lv(0.6, 0.8), r.tail = lv(0.9, 1.5);
+        const double g = 1.0 / std::max(1e-9, rms(m, 0, 38400));  // loudness-normalised from here on
+        for (float& x : m) x = static_cast<float>(x * g);
+        r.centroid = centroid(m, 2400, 36000, 48000);
+        for (int b = 0; b < 24; ++b) {
             timber::Biquad q;
-            q.band(125.0 * std::pow(2.0, b), 1.41, 48000);
+            q.band(125.0 * std::pow(2.0, b / 3.0), 4.32, 48000);
             double e = 0;
             for (size_t i = 0; i < 38400; ++i) {
                 const float y = q.run(m[i]);
@@ -236,12 +244,22 @@ TEST(starling_piano_characters_are_three_pianos) {
             }
             r.band[b] = 10 * std::log10(e + 1e-30);
         }
+        std::vector<double> env;
+        for (size_t i = 0; i + 48 <= 38400; i += 48) env.push_back(rms(m, i, 48));
+        const double top = *std::max_element(env.begin(), env.end());
+        for (size_t i = 0; i < env.size(); ++i)
+            if (env[i] >= top * 0.7079) {
+                r.attackMs = static_cast<double>(i);
+                break;
+            }
+        const double e0 = db(rms(m, 7200, 4800)), e1 = db(rms(m, 31200, 4800));  // 0.15..0.25 s and 0.65..0.75 s
+        r.t60 = e1 < e0 ? 60.0 * 0.5 / (e0 - e1) : 99.0;
         return std::make_pair(r, m);
     };
-    auto colour = [](const M& a, const M& b) {
+    auto distance = [](const M& a, const M& b) {
         double mean = 0, e = 0;
-        for (int k = 0; k < 8; ++k) mean += (a.band[k] - b.band[k]) / 8.0;
-        for (int k = 0; k < 8; ++k) e += std::pow(a.band[k] - b.band[k] - mean, 2) / 8.0;
+        for (int k = 0; k < 24; ++k) mean += (a.band[k] - b.band[k]) / 24.0;
+        for (int k = 0; k < 24; ++k) e += std::pow(a.band[k] - b.band[k] - mean, 2) / 24.0;
         return std::sqrt(e);
     };
     const auto [grand, g] = measure(0, false);
@@ -251,20 +269,15 @@ TEST(starling_piano_characters_are_three_pianos) {
     const M* all[3] = {&grand, &upright, &felt};
     if (verbose())
         for (int c = 0; c < 3; ++c)
-            std::printf("%-8s lvl %.1f bright %.1f early %.1f late %.1f tail %.1f dB\n", names[c], all[c]->lvl, all[c]->bright, all[c]->early,
-                        all[c]->late, all[c]->tail);
-    if (verbose())
-        for (int c = 0; c < 3; ++c) {
-            std::printf("%-8s bands", names[c]);
-            for (int k = 0; k < 8; ++k) std::printf(" %.1f", all[c]->band[k] - grand.band[k]);
-            std::printf(" (dB against the grand, 125 Hz..16 kHz)\n");
-        }
-    const double gu = colour(grand, upright), gf = colour(grand, felt), uf = colour(upright, felt);
-    if (verbose()) std::printf("colour distance: grand-upright %.1f, grand-felt %.1f, upright-felt %.1f dB\n", gu, gf, uf);
-    CHECK(felt.bright < grand.bright - 3.0);  // darker
-    CHECK(felt.early < grand.early - 1.5);    // a softer strike
-    CHECK(upright.late < grand.late - 3.0);   // shorter-lived
-    CHECK(gu > 1.3 && gf > 2.5 && uf > 2.5);  // three colours (the upright also by its shorter life, above)
+            std::printf("%-8s centroid %.0f Hz, attack %.0f ms, T60 %.2f s | lvl %.1f bright %.1f early %.1f late %.1f tail %.1f dB\n", names[c],
+                        all[c]->centroid, all[c]->attackMs, all[c]->t60, all[c]->lvl, all[c]->bright, all[c]->early, all[c]->late, all[c]->tail);
+    const double gu = distance(grand, upright), gf = distance(grand, felt), uf = distance(upright, felt);
+    if (verbose()) std::printf("1/3-octave distance: grand-upright %.1f, grand-felt %.1f, upright-felt %.1f dB\n", gu, gf, uf);
+    CHECK(felt.centroid < 0.75 * grand.centroid);    // darker
+    CHECK(felt.centroid < 0.75 * upright.centroid);
+    CHECK(felt.attackMs > grand.attackMs + 2.0);     // slower to speak (the felt rail)
+    CHECK(upright.t60 < 0.8 * grand.t60);            // shorter-lived
+    CHECK(gu > 1.5 && gf > 3.0 && uf > 3.0);         // three colours
     // Both play the recorded attack (muting the recordings changes them).
     for (double c : {1.0, 2.0}) CHECK(measure(c, true).second != (c == 1.0 ? u : f));
 }

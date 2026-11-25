@@ -44,8 +44,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     fx::ParamTable& t = b.table;
     // Timber's shared knobs (timber_core.h reads them by index). Dry by default; Body 1 is the recorded body.
     t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
-    // The saxophone has no recorded body yet (curlew_winds.h): its Body says so.
-    t.num("body", index == 2 ? "Body (none yet)" : "Body", 1.0, 0.0, 1.0).group = "shared";
+    t.num("body", "Body", 1.0, 0.0, 1.0).group = "shared";
     t.num("space", "Space", 0.0, 0.0, 1.0).group = "shared";
     t.num("velocity", "Velocity", 0.8, 0.0, 1.0).group = "shared";
     t.expo("release", "Release", 0.08, 0.005, 10.0, "s").group = "shared";

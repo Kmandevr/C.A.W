@@ -109,7 +109,7 @@ def fit_bounded(edges, target, lo, hi):
 def refit(family, eng):
     path = os.path.join(eng, 'src', '%s_bodies.inc' % family)
     text = open(path).read()
-    edges = 50.0 * 2 ** (np.arange(0, 12 * np.log2(16000 / 50.0) + 1) / 24.0)
+    edges = 50.0 * 2 ** (np.arange(0, 24 * np.log2(16000 / 50.0) + 1) / 24.0)
     names, arrays = [], {}
     for name, body in re.findall(r'const BodyBand (\w+)\[\] = \{(.*?)\};', text, re.S):
         bands = [tuple(float(v) for v in b) for b in re.findall(r'\{([\d.e+-]+)f, ([\d.e+-]+)f, ([\d.e+-]+)f\}', body)]

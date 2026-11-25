@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "alloc_counter.h"
+#include "recorded_bank.h"
 #include "engine.h"
 #include "test.h"
 
@@ -53,4 +54,45 @@ TEST(starling_piano_never_allocates_on_the_audio_thread) {
         CHECK(sum > 0.0);
         CHECK(std::isfinite(sum));
     }
+}
+
+// The recorded bank (5.6 MB of PCM) is decoded and freed only on the control thread: a project that brings Starling in
+// decodes it in setProject(), and one that takes it out frees it only after the audio thread has handed the instrument
+// back (the engine's retire queue); the audio callback neither decodes nor frees it (no allocation and no free in it).
+TEST(starling_piano_bank_is_decoded_and_freed_off_the_audio_thread) {
+    ProjectSpec with;
+    with.bpm = 120;
+    with.loopBars = 1;
+    LayerSpec l;
+    l.id = "s";
+    l.hasInstrument = true;
+    l.instrument.id = "org.caw.starling";
+    l.instrument.params = {{"variant", 0}};
+    with.layers.push_back(l);
+    ProjectSpec without = with;
+    without.layers[0].instrument.id = "org.caw.test.osc";
+    without.layers[0].instrument.params = {};
+    const size_t before = recorded::residentBytes();
+    std::size_t audioOps = 0;
+    {
+        Engine e(48000);
+        std::vector<float> left(192), right(192);
+        if (e.setProject(with).find("\"ok\":true") == std::string::npos) cawtest::fail(__FILE__, __LINE__, "set");
+        CHECK(recorded::residentBytes() > before);  // decoded on this (the control) thread
+        {
+            e.noteOn("s", 1, 60, 0.8);  // a control call
+            cawtest::AllocationScope scope;
+            for (int k = 0; k < 40; ++k) e.process(left.data(), right.data(), 192);
+            audioOps += scope.count();
+        }
+        if (e.setProject(without).find("\"ok\":true") == std::string::npos) cawtest::fail(__FILE__, __LINE__, "unset");
+        {
+            cawtest::AllocationScope scope;  // the callback hands the old instrument back: it frees nothing itself
+            for (int k = 0; k < 40; ++k) e.process(left.data(), right.data(), 192);
+            audioOps += scope.count();
+        }
+        CHECK_EQ(audioOps, static_cast<std::size_t>(0));
+        for (int k = 0; k < 4; ++k) e.process(left.data(), right.data(), 192), e.setProject(without);
+    }
+    CHECK_EQ(recorded::residentBytes(), before);  // freed (on this thread) once the engine let the instrument go
 }
