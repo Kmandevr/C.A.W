@@ -111,17 +111,27 @@ class _Distance {
         top((d) => d.side), top((d) => d.onset), top((d) => d.fine), top((d) => d.wobble), top((d) => d.rate));
   }
 
-  /// Whether this is beyond what a listener hears and beyond [floor] (the same-setting distance) three times over.
-  bool audible(_Distance floor) =>
-      level > math.max(_minLevelDb, 3 * floor.level) ||
-      bands > math.max(_minBandsDb, 3 * floor.bands) ||
-      centroid > math.max(_minCentroidOct, 3 * floor.centroid) ||
-      envelope > math.max(_minEnvelopeDb, 3 * floor.envelope) ||
-      side > math.max(_minSideDb, 3 * floor.side) ||
-      onset > math.max(_minOnsetMs, 3 * floor.onset) ||
-      fine > math.max(_minFineDb, 3 * floor.fine) ||
-      wobble > math.max(_minWobbleDb, 3 * floor.wobble) ||
-      rate > math.max(_minRateOct, 3 * floor.rate);
+  /// Each measure's smallest over [all].
+  static _Distance smallest(List<_Distance> all) {
+    double low(double Function(_Distance d) f) => all.map(f).reduce(math.min);
+    return _Distance(low((d) => d.level), low((d) => d.bands), low((d) => d.centroid), low((d) => d.envelope),
+        low((d) => d.side), low((d) => d.onset), low((d) => d.fine), low((d) => d.wobble), low((d) => d.rate));
+  }
+
+  /// Whether this is beyond what a listener hears and beyond [floor] (the same-setting distance) [factor] times.
+  bool audible(_Distance floor, [double factor = 3]) =>
+      level > math.max(_minLevelDb, factor * floor.level) ||
+      bands > math.max(_minBandsDb, factor * floor.bands) ||
+      centroid > math.max(_minCentroidOct, factor * floor.centroid) ||
+      envelope > math.max(_minEnvelopeDb, factor * floor.envelope) ||
+      side > math.max(_minSideDb, factor * floor.side) ||
+      onset > math.max(_minOnsetMs, factor * floor.onset) ||
+      fine > math.max(_minFineDb, factor * floor.fine) ||
+      wobble > math.max(_minWobbleDb, factor * floor.wobble) ||
+      rate > math.max(_minRateOct, factor * floor.rate);
+
+  /// Whether every measure is (nearly) zero: two takes at one setting gave the same sound.
+  bool get still => level < 0.01 && bands < 0.01 && fine < 0.05 && envelope < 0.01;
 
   @override
   String toString() => 'level ${level.toStringAsFixed(2)} dB, bands ${bands.toStringAsFixed(2)} dB, centroid '
@@ -398,19 +408,34 @@ void main() {
           final f1 = take('t'), f2 = take('t'), f3 = take('t');
           final floor = _Distance.largest([_Distance.between(f1, f2), _Distance.between(f2, f3), _Distance.between(f1, f3)]);
           report.writeln('$name: same-setting $floor');
-          stderr.writeln('$name: same-setting $floor');
           // Each measured take follows a take at the knob's default, so both ends hear the same tail before them.
-          _Distance sweep(String id, double lo, double hi, double def) {
+          // A device whose takes differ at one setting (a random wind, a room) is heard three times at each end:
+          // the knob is heard when the nearest of its min-max pairs is further apart than the furthest same-end
+          // pair (1.5x) and the device's own floor.
+          final random = !floor.still;
+          bool heard(String id, double lo, double hi, double def, void Function(_Distance d) show) {
+            final lows = <_Features>[], highs = <_Features>[];
+            for (var k = 0; k < (random ? 3 : 1); k++) {
+              target.setLive(id, def);
+              take('t');
+              target.setLive(id, lo);
+              lows.add(take('t'));
+              target.setLive(id, def);
+              take('t');
+              target.setLive(id, hi);
+              highs.add(take('t'));
+            }
             target.setLive(id, def);
-            take('t');
-            target.setLive(id, lo);
-            final low = take('t');
-            target.setLive(id, def);
-            take('t');
-            target.setLive(id, hi);
-            final high = take('t');
-            target.setLive(id, def);
-            return _Distance.between(low, high);
+            final d = _Distance.smallest([for (final a in lows) for (final b in highs) _Distance.between(a, b)]);
+            show(d);
+            if (!random) return d.audible(floor);
+            final same = _Distance.largest([
+              for (final end in [lows, highs])
+                for (var a = 0; a < end.length; a++)
+                  for (var b = a + 1; b < end.length; b++) _Distance.between(end[a], end[b]),
+              floor,
+            ]);
+            return d.audible(same, 1.5);
           }
           for (final p in info.knobs) {
             if (p.max <= p.min) continue;
@@ -419,10 +444,10 @@ void main() {
               report.writeln('  tier ${p.id}: a CPU setting, not checked');
               continue;
             }
-            final d = sweep(p.id, p.min, p.max, home(p));
-            var verdict = d.audible(floor) ? 'ok  ' : 'DEAD';
-            var line = '  $verdict ${p.id} (${p.min}..${p.max}): $d';
-            if (verdict == 'DEAD') {
+            late _Distance d;
+            final ok = heard(p.id, p.min, p.max, home(p), (x) => d = x);
+            var line = '  ${ok ? 'ok  ' : 'DEAD'} ${p.id} (${p.min}..${p.max}): $d';
+            if (!ok) {
               // Gated by another setting? The sweep again with every other sound knob at its maximum (the level,
               // voices, release and room at their defaults).
               final others = {
@@ -430,12 +455,12 @@ void main() {
                   if (o.id != p.id && !_kept.contains(o.id) && o.max > o.min) o.id: o.max,
               };
               others.forEach(target.setLive);
-              final g = sweep(p.id, p.min, p.max, home(p));
+              late _Distance g;
+              final gate = heard(p.id, p.min, p.max, home(p), (x) => g = x);
               for (final o in info.knobs) {
                 target.setLive(o.id, home(o));
               }
-              if (g.audible(floor)) {
-                verdict = 'GATE';
+              if (gate) {
                 line = '  GATE ${p.id} (${p.min}..${p.max}): heard only with other knobs moved: $g';
                 gated.add('$name ${p.id} ("${p.name}")');
               } else {
@@ -443,7 +468,7 @@ void main() {
               }
             }
             report.writeln(line);
-            stderr.writeln(line);
+            if (!ok) stderr.writeln('$name$line');
           }
           e.notesOff();
         }

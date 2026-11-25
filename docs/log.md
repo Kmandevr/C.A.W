@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Log
 
+- 2026-11-25: the dead-knob gate (`app/test/live_params_audible_test.dart`, with `CAW_LIB`, [app](app.md)): every knob of the 1.1.3 instruments, each variant, is moved live from its minimum to its maximum through the app's set path and must change the sound measurably. It fails on Main on 1.1.3-alpha.2's dead knobs: Starling's touch and sympathy; Nightingale's bow noise; Curlew's vibrato rate (Flute, Clarinet) and the saxophone's body; Bittern's body, velocity, wind, chiff and tremulant rate; Woodpecker's release (Marimba, Xylophone, Glockenspiel, Timpani) and the glockenspiel's attack level. Knobs heard only with another setting are listed and pass. No app-side wiring fault was found: every variant's knobs reach the engine at the right index and id.
 - 2026-11-24: Nightingale's bow force rises behind its speed (C#4 had started on its octave for 140 ms; every key now settles within 110 ms), and its references use the new **Friction** class (chaotic within 1 dB: bowed strings differ that much between compilers).
 - 2026-11-24: devices renamed (the owner's names; display only, ids, files, classes and saved fields unchanged, each old name a search tag): Duck → **Swoop** (`org.caw.duck`), Swoop → **Stoop** (`org.caw.transient`), Lark → **Chirp**, Ricochet → **Mock**, Syrinx → **Coo**, Canopy → **Hover**, Lookout → **Spot**, Hollow → **Call**, Iris → **Molt** (also the engine descriptor's name), Pinion → **Puff**, Strobe → **Blink**; the Ducker's "Duck" variant and the music video's Strobe effect keep their names.
 - 2026-11-24: Woodpecker, the tuned percussion (1.1.3 step 5, [engine](engine.md#woodpecker-tuned-percussion-113)): `org.caw.woodpecker` with marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, modal models measured from VCSL (CC0) with their recorded strokes crossfaded in phase; tests, reference, rt and cost cases; in the app on the fallback page; the stress scenario's every-instrument project now plays it.
