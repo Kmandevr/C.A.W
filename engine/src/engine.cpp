@@ -1310,12 +1310,13 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (LayerSpec& l : migrated.layers) {
             if (!isLegacyInstrument(l.instrument.id)) continue;
             const std::string legacy = l.instrument.id;
+            const auto oldParams = l.instrument.params;  // Timber's lanes follow the model it played
             migrateLegacyInstrument(l.instrument.id, l.instrument.params);
             l.instrument.hasState = false;  // the old synths saved no state
             auto& lanes = migrated.automation;
             for (auto it = lanes.begin(); it != lanes.end();) {
                 if (it->targetType == "instrument" && it->moduleId == l.id) {
-                    it->target = migratedLegacyParameter(legacy, it->target);
+                    it->target = migratedLegacyParameter(legacy, it->target, &oldParams);
                     if (it->target.empty()) {  // an old knob with no Flagship knob in its units
                         it = lanes.erase(it);
                         continue;

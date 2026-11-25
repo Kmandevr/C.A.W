@@ -233,7 +233,7 @@ target_sources(caw_core PRIVATE src/builtin_fx_voice.cpp src/builtin_fx_exciter.
 target_sources(caw_core PRIVATE src/builtin_fx_lark.cpp src/lark_editor.cpp)  # 1.1.0: Lark (org.caw.pitchfix) and the clip pitch editor's engine
 target_sources(caw_core PRIVATE src/builtin_fx_preen.cpp src/builtin_fx_preen_denoise.cpp src/builtin_fx_hush.cpp)  # 1.1.0: Preen and Hush (clean-up)
 target_sources(caw_core PRIVATE src/builtin_pack.cpp src/builtin_pack_murmur.cpp src/builtin_pack_peck.cpp src/builtin_pack_bend.cpp src/builtin_pack_iris.cpp)  # 1.1.0: the AutoStacc beta pack
-target_sources(caw_core PRIVATE src/builtin_timber.cpp src/builtin_timber_presets.cpp src/timber_tables.cpp)  # 1.1.0: Timber (org.caw.timber), the modelled acoustic instrument
+target_sources(caw_core PRIVATE src/timber_tables.cpp src/timber_migrate.cpp)  # the model library Starling, Nightingale, Curlew, Woodpecker and Bittern build on (Timber's, 1.1.0), and Timber's load-time alias (removed in 1.1.3)
 target_sources(caw_core PRIVATE src/timber_piano_tables.cpp src/timber_piano_sim.cpp)  # 1.1.2: Timber's Simulated piano: its tables (generated: tools/timber_piano_gen.cpp) and per-sample code
 # 1.1.3: Starling (org.caw.starling) and the recorded parts built into the engine (engine/assets/, embedded by
 # cmake/EmbedFile.cmake; decoded on first use by recorded_bank.cpp).
@@ -346,9 +346,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/lark_test.cpp src/capi_pitch_clip.cpp)  # 1.1.0: Lark (live correction, the clip pitch editor, API 42)
   target_sources(caw_tests PRIVATE tests/fx_clean_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_tests PRIVATE tests/pack_test.cpp)  # 1.1.0: the AutoStacc beta pack (grain engine, Murmur, Peck, Bend, Iris)
-  target_sources(caw_tests PRIVATE tests/timber_test.cpp)  # 1.1.0: Timber (each model, the piano's realism checks, references)
-  target_sources(caw_tests PRIVATE tests/timber_piano_compat_test.cpp)  # 1.1.2: the piano's 1.1.0 presets bit-identical
-  target_sources(caw_tests PRIVATE tests/timber_piano_sim_test.cpp)  # 1.1.2: the Simulated piano's realism, noises, patents guard
   target_sources(caw_tests PRIVATE tests/starling_piano_test.cpp)
   target_sources(caw_tests PRIVATE tests/nightingale_test.cpp)  # 1.1.3: Nightingale, the bowed strings
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
@@ -360,8 +357,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_include_directories(timber_piano_gen PRIVATE src include)
   target_compile_options(timber_piano_gen PRIVATE ${_caw_fp_strict})
   add_test(NAME timber_piano_tables_current COMMAND timber_piano_gen --check ${CMAKE_CURRENT_SOURCE_DIR}/src/timber_piano_tables.inc)
-  target_sources(caw_tests PRIVATE tests/timber_sim_test.cpp)  # 1.1.2: Timber's Simulated models (realism checks, block sizes, tiers, references)
-  target_sources(caw_tests PRIVATE tests/timber_compat_test.cpp)  # 1.1.2: Timber's 1.1.0 presets render bit-identically (models other than the piano)
   target_sources(caw_tests PRIVATE tests/flock_test.cpp)  # 1.1.0: Flock (the granular instrument)
   # fx-filters end
   target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
@@ -495,8 +490,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/fx_clean_rt_test.cpp)  # 1.1.0: Preen and Hush
   target_sources(caw_rt_tests PRIVATE tests/fx_extras_rt_test.cpp)  # 1.1.0: around the effects
   target_sources(caw_rt_tests PRIVATE tests/pack_rt_test.cpp)  # 1.1.0: the AutoStacc beta pack while playing
-  target_sources(caw_rt_tests PRIVATE tests/timber_rt_test.cpp)  # 1.1.0: Timber while playing
-  target_sources(caw_rt_tests PRIVATE tests/timber_sim_rt_test.cpp)  # 1.1.2: Timber's Simulated models while playing
   target_sources(caw_rt_tests PRIVATE tests/flock_rt_test.cpp)  # 1.1.0: Flock while playing
   target_sources(caw_rt_tests PRIVATE tests/fx_merged_dynamics_rt_test.cpp)  # FX consolidation part A: Compressor variants while playing
   target_sources(caw_rt_tests PRIVATE tests/slot_tools_rt_test.cpp)  # 1.0.8: auto gain, slot meters and the Duck while playing
@@ -516,7 +509,6 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
-  target_sources(caw_rt_tests PRIVATE tests/timber_piano_rt_test.cpp)  # 1.1.2: Timber's Simulated piano
   target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
   target_sources(caw_rt_tests PRIVATE tests/nightingale_rt_test.cpp)  # 1.1.3: Nightingale
   target_sources(caw_rt_tests PRIVATE tests/curlew_rt_test.cpp)  # 1.1.3: Curlew
@@ -548,7 +540,6 @@ target_include_directories(caw_cli PRIVATE src)
 add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit_cost.cpp bench/voice_cost.cpp bench/clean_cost.cpp bench/pack_cost.cpp bench/raven_cost.cpp bench/rook_cost.cpp src/capi.cpp src/capi_modulation.cpp platform/audio_none.cpp)
   target_sources(caw_bench PRIVATE bench/lark_cost.cpp)  # 1.1.0: Lark's cost ceilings
   target_sources(caw_bench PRIVATE bench/sampler_cost.cpp)  # 1.1.0: the sampler's plain and stretched zones
-  target_sources(caw_bench PRIVATE bench/timber_cost.cpp)  # 1.1.0: Timber's cost ceilings
   target_sources(caw_bench PRIVATE bench/flock_cost.cpp)  # 1.1.0: Flock's cost ceilings
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
@@ -571,16 +562,15 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
     add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
     add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
     add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
-    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # 1.1.0: Timber (org.caw.timber)
     add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
     add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
     # 1.1.1: no Benchmark scenario has a callback whose work (its fastest of 3 runs) is over 3 times the median's: a
     # rare costly block (a lazy build, a recompute on the audio thread) fails it; preemption does not.
     add_test(NAME caw_spike_check COMMAND caw_bench 1 602 --runs 3 --check 3)
     # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
-    # x64 runner then measured cases 10-20 % over their usual figure (Timber's organ 8,002 against 8,000 on PR #258).
+    # x64 runner then measured cases 10-20 % over their usual figure (an organ case 8,002 against 8,000 on PR #258).
     set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
-                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost caw_spike_check
+                         caw_raven_cost caw_sampler_cost caw_rook_cost caw_flock_cost caw_spike_check
                          PROPERTIES RUN_SERIAL TRUE)
   endif()
 endif()

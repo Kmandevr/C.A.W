@@ -14,7 +14,6 @@
 
 #include "builtin_drums.h"
 #include "builtin_flagship.h"
-#include "builtin_timber.h"
 #include "builtin_starling.h"
 #include "builtin_nightingale.h"
 #include "builtin_curlew.h"
@@ -29,6 +28,7 @@
 #include "fx_merged.h"
 #include "fx_migrate.h"
 #include "json.h"
+#include "timber_migrate.h"
 
 namespace caw {
 
@@ -324,7 +324,6 @@ const std::vector<BuiltinPreset>& tablePresets(std::string_view componentId) {
     if (const auto* p = fx::voicePresets(componentId)) return *p;  // Glint, Mimic (1.1.0)
     if (const auto* p = fx::packPresets(componentId)) return *p;  // the AutoStacc beta pack (1.1.0)
     if (const auto* p = fx::larkPresets(componentId)) return *p;  // Chirp (1.1.0)
-    if (const auto* p = timber::timberPresets(componentId)) return *p;  // Timber (1.1.0)
     if (const auto* p = starling::starlingPresets(componentId)) return *p;  // Starling (1.1.3)
     if (const auto* p = nightingale::nightingalePresets(componentId)) return *p;  // Nightingale (1.1.3)
     if (const auto* p = curlew::curlewPresets(componentId)) return *p;  // Curlew (1.1.3)
@@ -389,11 +388,12 @@ std::string builtinPresetsJson(std::string_view componentId) {
 }
 
 bool isLegacyInstrument(std::string_view id) {
-    return id == kMorph || id == kBass || id == kAcid || id == kBasic || isLegacyDrum(id);
+    return id == kMorph || id == kBass || id == kAcid || id == kBasic || isLegacyDrum(id) || id == timber::kTimberId;
 }
 
 bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string, double>>& params, std::string* preset) {
     if (isLegacyDrum(id)) return migrateLegacyDrum(id, params, preset);  // the old drums: org.caw.drums (builtin_drums_sounds.cpp)
+    if (id == timber::kTimberId) return timber::migrateTimber(id, params, preset);  // 1.1.3: Timber's split (timber_migrate.cpp)
     if (!isLegacyInstrument(id)) return false;
     const char* name = id == kMorph ? "Morph pad" : id == kBass ? "Mono bass" : id == kAcid ? "Acid 303" : "Basic";
     std::vector<std::pair<std::string, double>> out;
@@ -408,8 +408,10 @@ bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string,
     return true;
 }
 
-std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param) {
+std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param,
+                                    const std::vector<std::pair<std::string, double>>* oldParams) {
     if (isLegacyDrum(legacyId)) return migratedLegacyDrumParameter(legacyId, param);
+    if (legacyId == timber::kTimberId) return timber::migratedTimberParameter(oldParams ? *oldParams : timber::Params{}, param);
     const bool morph = legacyId == kMorph, bass = legacyId == kBass, acid = legacyId == kAcid, basicSynth = legacyId == kBasic;
     if (!(morph || bass || acid || basicSynth)) return {};
     if (param == "cutoff") return "flt1_cutoff";
@@ -438,6 +440,7 @@ std::string migrateInstrumentJson(std::string_view entryJson) {
             if (v.type == Json::Type::Number && std::isfinite(v.num)) params.emplace_back(k, v.num);
     std::string preset;
     const std::string legacy = id;
+    const auto oldParams = params;
     const bool migrated = migrateLegacyInstrument(id, params, &preset);
     if (!migrated)
         if (const Json* named = j.get("preset"); named && named->type == Json::Type::String) {
@@ -458,10 +461,17 @@ std::string migrateInstrumentJson(std::string_view entryJson) {
             json += (first ? "\"" : ",\"") + std::string(k) + "\":\"" + to + "\"";
             first = false;
         }
+        if (legacy == timber::kTimberId)  // 1.1.3: its lanes follow the model the entry played
+            for (std::string_view k : timber::timberKnobs()) {
+                const std::string to = migratedLegacyParameter(legacy, k, &oldParams);
+                if (to.empty()) continue;
+                json += (first ? "\"" : ",\"") + std::string(k) + "\":\"" + to + "\"";
+                first = false;
+            }
         for (const char* k : {"shape", "drift", "unison", "detune", "spread", "cutoff", "resonance", "attack", "decay",
                               "sustain", "release", "volume", "wave", "sub", "env", "glide", "legato", "drive", "accent",
                               "slide", "wave1", "wave2", "mix"}) {
-            if (isLegacyDrum(legacy)) break;  // listed above
+            if (isLegacyDrum(legacy) || legacy == timber::kTimberId) break;  // listed above
             const std::string to = migratedLegacyParameter(legacy, k);
             if (to.empty()) continue;
             json += (first ? "\"" : ",\"") + std::string(k) + "\":\"" + to + "\"";

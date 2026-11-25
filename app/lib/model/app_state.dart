@@ -401,6 +401,12 @@ class AppState extends ChangeNotifier implements StressHost {
   /// A one-line note about the project just opened (its .caw sounds were dropped); cleared by the next open.
   String? openNotice;
 
+  /// Timber's id (removed in 1.1.3) and the note shown when a project that played it opens. Once: the project is
+  /// saved with the new instruments, so it never names Timber again.
+  static const timberId = 'org.caw.timber';
+  static const timberNotice = 'Timber was split into Starling, Nightingale, Curlew, Bittern and Woodpecker; '
+      "this project's instruments moved.";
+
   /// The files the open project plays that aren't on this device (project_dependencies.dart): the banner names
   /// them with Locate… and Replace…; what needs them stays silent until they are relinked.
   List<ProjectDependency> missingFiles = const [];
@@ -2530,6 +2536,8 @@ class AppState extends ChangeNotifier implements StressHost {
     _layerValueTicks.clear();
     // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
     // plays, so a project opened without the engine library still sounds right).
+    // Timber (removed in 1.1.3) as its new instruments: said once, in the notice line, when such a project opens.
+    final hadTimber = p.layers.any((l) => l.instrument?.id == timberId);
     if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
     // The retired effect ids as their merged devices (FX consolidation, 1.0.8), with their lanes, links and MIDI
     // mappings: one load step, not an undo step, like the instruments above.
@@ -2553,7 +2561,7 @@ class AppState extends ChangeNotifier implements StressHost {
     project = p;
     openError = null;
     openNotice = switch (p.droppedModules) {
-      [] => null,
+      [] => hadTimber ? timberNotice : null,
       final gone => 'C.A.W plays C++ now: ${gone.length == 1 ? 'one .caw sound was' : '${gone.length} .caw sounds were'} '
           'left out of this project (${gone.take(3).join(', ')}${gone.length > 3 ? '…' : ''}).',
     };

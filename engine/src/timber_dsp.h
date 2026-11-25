@@ -1,4 +1,4 @@
-// Timber's small DSP parts (org.caw.timber, 1.1.0): delay lines, first-order allpasses and their phase delays, one-poles, biquads, noise and the shared tables.
+// Timber's small DSP parts (1.1.0; the library the 1.1.3 instruments build on): delay lines, first-order allpasses and their phase delays, one-poles, biquads, noise and the shared tables.
 #pragma once
 
 #include <cmath>
@@ -239,15 +239,8 @@ struct Tables {
     static constexpr int kCharacters = 3, kZones = 8, kExcLength = 14400;
     static constexpr double kExcRate = 48000.0;
     int16_t excitation[kCharacters][kZones][kExcLength];
-    // A sine of kSine + 1 points (the last repeats the first): the organ's tonewheels, read without interpolation
-    // (its error, about -80 dB, sits under a tonewheel's own leakage).
-    static constexpr int kSine = 8192;
-    float sine[kSine + 1];
-    // A seeded noise burst for the plucked strings' excitation.
-    static constexpr int kPluck = 8192;
-    float pluck[kPluck];
 };
-// Builds them on first use (registerTimber calls it, so no voice ever does).
+// Builds them on first use (registerStarling calls it, so no voice ever does).
 const Tables& tables() noexcept;
 
 }  // namespace caw::timber
