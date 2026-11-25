@@ -9,6 +9,15 @@ updated: 2026-11-25
 
 The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The first native runtime slice now processes zero-parameter stereo effects on the live master path. The host uses fixed preallocated stereo stages, performs no host allocation/locking in the callback, sanitizes component output and keeps the safety limiter after native code; old chains are reclaimed off-thread. This path has not yet been benchmarked on low-end Android, and plugin-internal allocations/CPU remain the component author's responsibility and are not yet reported by ABI v1.
 
+## The owner's Benchmark on the S22+, 1.1.3-alpha.1 (2026-11-25)
+
+Full plan, 166 s, Android 16 (SDK 36), 8 cores (4 fast), sustained performance not supported, thermal status 2 throughout. Tiers: normal comfortable, heavy tight, extreme over. Limits: 51 tracks, 64 voices (capped), 64 effects (capped).
+- **Offline (256 frames, 5.33 ms):** Typical song 15.4 % mean / 18.7 % p99; with extras 21.6 / 29.4; Song 16 tracks 29.4 / 35.1; Kestrel 16 voices 18.6 / 20.1; Rook busy 7.0 / 9.4. Every instrument 25.9 / 64.9, worst 88.5 % (its first callback 6.4 ms, over the budget). **Every effect drops out** (7 of 750 callbacks, worst 168 %), as do Song 32 + heavy FX (22) and Worst case (16).
+- **Live:** at 1024 frames, Typical song 42.7 % mean / 73.1 % p99 and Song 16 47.3 / 82.8, no xruns. At the device's low-latency 192 frames: Typical song p99 100.3 % (22 callbacks over budget, worst 243 %), Song 16 p99 135.5 % (66 over, worst 400 %, 22 xruns in warm-up); no xruns after warm-up.
+- **Causes visible in the file:** the callback sometimes ran on a little core (Typical song at 192 frames: CPU 3, 1.57 GHz max 1.79) and big cores sat at low clocks (Song 16 ended at 634 MHz of 2.50 GHz, clock share 0.34); the performance hint is unsupported on this device (ADPF `is_feature_supported` 0). Song 8's cost: Kestrel 33.9 %, the engine itself 12.4 %, reverb 7.3 %, Rook 7.3 %, delay 6.4 %, EQ 6.3 %, Drive 5.7 %.
+- **Benchmark bugs:** the live scenarios' parts are "unprofiled" (99 % "other"), and the sustained run did not run (0 s, clocks -1).
+- **Open (proposals):** keep the callback on a big core where the OS allows it, find the cost spikes in Every effect and the extreme songs, fix the live parts profile and the sustained run, and give the low-latency path more headroom (Kestrel is the largest single cost).
+
 ## How it's measured
 
 **Callback cost at large layer counts (#133, done 2026-11-13):** the per-chunk loops (planning, solo, previews, overload, routing) visit only the slots in use since 2026-11-11, and Play's and the stopped monitoring scan since 2026-11-13 (A4), so callback cost follows the layers in use, not the capacity; the scans still over the capacity run once per event (Stop's end, a tempo change, clearing overloads), not per callback. Numbers in [engine performance](engine-performance.md#a4-per-callback-loops-over-the-slots-in-use-133).
