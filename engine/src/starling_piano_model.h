@@ -107,7 +107,7 @@ struct Piano {
     float dispA[3][89] = {};  // the fitted dispersion coefficient per tier and key (A0..C8), at this rate
     float dispU[3][89] = {};  // Starling: the same for the upright's strings (uprightStrings)
     psim::Board board;
-    psim::ModeBank<kRes, false> res;
+    psim::ModeBank<kRes, false, true> res;  // weighted: with the pedal up only the held keys' strings take the input
     psim::Resonator keyFrame, trapwork, damperRail;
     psim::Contact trap;
     float busBoard[kControlFrames] = {}, busFrame[kControlFrames] = {}, busBridge[kControlFrames] = {};
@@ -345,6 +345,15 @@ struct Piano {
         // or it still rings.
         heldKeys = 0;
         for (uint32_t k = 0; k < voiceCount; ++k) heldKeys += voices[k].active && voices[k].held ? 1 : 0;
+        // Which of the bank's strings are free to answer: every one with the pedal down; with it up, only the held
+        // keys' own (the rest are under their dampers). Driving them all rang each at its own pitch under a played
+        // note: stray partials a semitone or two away (E2, F2, G2 under a D#2, 24 dB down; the owner's "weird
+        // harmonics", 2026-11-25). Gated at the input, so a string never stops mid-ring.
+        for (int k = 0; k < kRes; ++k) {
+            bool open = pedal > 0 || !voicing;
+            for (uint32_t i = 0; i < voiceCount && !open; ++i) open = voices[i].active && voices[i].held && voices[i].key == 36 + k;
+            res.in[k] = open ? 1.0f : 0.0f;
+        }
         resRun = ((pedal > 0 || (resHeld > 0 && heldKeys > 0)) && resonance > 0) || resEnergy > 1e-14f;
         // The pedal's own noise (output only: it never reaches the resonance or the strings).
         const bool down = pedalDown ? pedal > 0.25 : pedal > 0.35;

@@ -151,7 +151,7 @@ struct PianoModel : timber::Piano {
     static constexpr int kPlayers = 48;
     static constexpr double kHoldS = 0.040, kFadeS = 0.120;
     // [Fact, Salamander's SFZ: Data/hammer.txt, Data/pedal.txt] its own playback levels for the noises.
-    static constexpr double kReleaseDb = -37.0, kPedalDb = -20.0, kReleaseVelTrack = 0.82;
+    static constexpr double kReleaseDb = -41.0, kPedalDb = -20.0, kReleaseVelTrack = 0.82;
 
     std::shared_ptr<const recorded::Bank> bank;
     Player players[kPlayers];
@@ -178,6 +178,7 @@ struct PianoModel : timber::Piano {
         void run(float* out, uint32_t n) noexcept { timber::toneEqRun(out, n, b0, b1, b2, a1, a2, z1, z2); }
     };
     ToneEq toneEq[kPool];
+    uint32_t releaseSkip[kReleaseClips] = {};  // each key-release recording's pre-roll (frames; prepare())
     void render(Voice& v, float* out, uint32_t n) noexcept {
         Base::render(v, out, n);
         if (ToneEq& e = toneEq[&v - voices]; e.on) e.run(out, n);
@@ -192,10 +193,35 @@ struct PianoModel : timber::Piano {
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         f1Cents = keyCents();
         recordedPedal = true;
-        voicing = true, resGain = kResGain, resHeld = 1.0, heldGain = kHeldGain, phantomNormal = true;
+                voicing = true, resGain = kResGain, resHeld = 1.0, heldGain = kHeldGain, phantomNormal = true;
         uprightStrings = true, uprightDamper = 1.6;
         buzzSound = 0.0f;  // the key-release recordings hold the dampers' sound
         if (!bank) bank = recorded::acquire(recorded::BankId::StarlingPiano);
+        // The key-release recordings start 20-150 ms before their damper is heard (the sampler's pre-roll): where
+        // each one's damper lands (its 5 ms level first over a tenth of its peak), less 10 ms, is skipped, so the
+        // damper meets the strings as the key comes up, not up to a quarter of a second later (the owner's "weird
+        // transients", 2026-11-25). Off the audio thread, once per prepare.
+        for (int i = 0; i < kReleaseClips; ++i) {
+            releaseSkip[i] = 0;
+            const Clip& k = kPianoClips[kFirstRelease + i];
+            if (!bank || static_cast<uint64_t>(k.first) + k.frames > bank->frames) continue;
+            const float* d = bank->pcm.get() + k.first;
+            constexpr uint32_t kWin = 240;  // 5 ms at the bank's 48 kHz
+            double peak = 0;
+            for (uint32_t a = 0; a + kWin <= k.frames; a += kWin) {
+                double e = 0;
+                for (uint32_t j = 0; j < kWin; ++j) e += static_cast<double>(d[a + j]) * d[a + j];
+                peak = std::max(peak, e);
+            }
+            for (uint32_t a = 0; a + kWin <= k.frames; a += kWin) {
+                double e = 0;
+                for (uint32_t j = 0; j < kWin; ++j) e += static_cast<double>(d[a + j]) * d[a + j];
+                if (e > 0.01 * peak) {  // a tenth of the peak's level
+                    releaseSkip[i] = a > 480 ? a - 480 : 0;
+                    break;
+                }
+            }
+        }
         double g[kAttacks];
         for (int i = 0; i < kAttacks; ++i) g[i] = kCalibration[i].level;
         std::nth_element(g, g + kAttacks / 2, g + kAttacks);
@@ -239,7 +265,9 @@ struct PianoModel : timber::Piano {
 
     // 0.35 (the default) plays Salamander's own levels; above it the noises come forward as from inside the lid (a
     // square law: 1 is 18 dB over the default, so a released chord's dampers and the pedal are plainly heard).
-    double noiseGain() const noexcept { return (noise / 0.35) * (noise / 0.35); }
+    // The recorded noises' gain: 1 at Noise 0.35 (as recorded), steeper above it (cubed: +27 dB at 1, the dampers and
+    // the pedal knocking hard) so the top of the knob is heard now that the release is its damper's contact alone.
+    double noiseGain() const noexcept { const double x = noise / 0.35; return x * x * x; }
 
     Player* freePlayer() noexcept {
         Player* pick = nullptr;
@@ -372,7 +400,15 @@ struct PianoModel : timber::Piano {
         const double g = toModel * noiseGain() * detPow(10.0, kReleaseDb / 20.0) *
                          ((1.0 - kReleaseVelTrack) + kReleaseVelTrack * vel * vel);
         const double ratio = detPow(2.0, (key - (21.0 + 4.0 * i)) / 12.0);
-        play(kFirstRelease + i, ratio, static_cast<float>(g * v.panL), static_cast<float>(g * v.panR), 0);
+        if (Player* p = play(kFirstRelease + i, ratio, static_cast<float>(g * v.panL), static_cast<float>(g * v.panR), 0)) {
+            const uint32_t skip = std::min(releaseSkip[i], p->frames > 2 ? p->frames - 2 : 0u);
+            p->data += skip, p->frames -= skip;  // from just before its damper lands
+            // Only the damper's contact: 60 ms, then out over 60 ms. The recording goes on with its own string dying
+            // away, which the model has already damped: heard alone after the note, a ghost of another key's tone
+            // (shifted from the nearest recorded one) up to 50 dB over what was left of the note (the owner, 2026-11-25:
+            // the odd sounds follow the Noise knob).
+            p->hold = static_cast<uint32_t>(0.06 * sr), p->fadeStep = static_cast<float>(1.0 / (0.06 * sr));
+        }
     }
 
     void pedalNoise(bool down) noexcept {
