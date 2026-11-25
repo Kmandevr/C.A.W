@@ -160,7 +160,7 @@ jobs:
       - name: Build engine library for native-backed app tests
         run: |
           cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCAW_TOOLS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build engine/build --parallel
+          cmake --build engine/build --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
           ccache --show-stats
       - name: Test
         working-directory: app

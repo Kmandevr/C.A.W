@@ -51,7 +51,7 @@ jobs:
       - name: Build caw_bench (Release)
         run: |
           cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF
-          cmake --build build --target caw_bench --parallel
+          cmake --build build --target caw_bench --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
       - name: Machine
         run: |
           uname -a
@@ -118,7 +118,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
             -DCMAKE_EXE_LINKER_FLAGS=-static
-          cmake --build build-android --target caw_bench --parallel
+          cmake --build build-android --target caw_bench --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
           file build-android/caw_bench
       - uses: actions/upload-artifact@v7
         with:

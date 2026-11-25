@@ -157,7 +157,7 @@ jobs:
         run: |
           cmake -S examples/cpp/minimal -B "$RUNNER_TEMP/caw-clap-build" -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/caw-sdk" -DCAW_BUILD_CLAP=ON -DCAW_BUILD_VST3=ON
-          cmake --build "$RUNNER_TEMP/caw-clap-build" --config Release --parallel
+          cmake --build "$RUNNER_TEMP/caw-clap-build" --config Release --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
           find "$RUNNER_TEMP/caw-clap-build/artifacts" -name '*.clap' | grep -q .
           find "$RUNNER_TEMP/caw-clap-build/artifacts" -path '*caw-minimal.vst3/Contents/*' -type f | grep -q .
       - name: Run the CLAP and VST3 test hosts against the engine registry
@@ -165,7 +165,7 @@ jobs:
         run: |
           cmake -S engine -B "$RUNNER_TEMP/caw-clap-tests" -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF -DCAW_CLAP=ON \
             -DCAW_VST3=ON
-          cmake --build "$RUNNER_TEMP/caw-clap-tests" --target caw_clap_tests caw_vst3_tests --parallel
+          cmake --build "$RUNNER_TEMP/caw-clap-tests" --target caw_clap_tests caw_vst3_tests --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
           ctest --test-dir "$RUNNER_TEMP/caw-clap-tests" -R 'caw_(clap|vst3)_tests' --output-on-failure
       - name: Upload the CLAP plug-in
         uses: actions/upload-artifact@v7
