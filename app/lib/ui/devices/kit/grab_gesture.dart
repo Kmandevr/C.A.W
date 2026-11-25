@@ -150,6 +150,7 @@ class _GrabGestureState extends State<GrabGesture> {
         _GrabScaleRecognizer: GestureRecognizerFactoryWithHandlers<_GrabScaleRecognizer>(
           () => _GrabScaleRecognizer(),
           (r) => r
+            ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
             ..grabs = widget.grabs
             ..onStart = (d) {
               _grabbing = true;
