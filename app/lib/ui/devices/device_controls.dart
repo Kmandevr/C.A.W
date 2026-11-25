@@ -334,7 +334,9 @@ class _DeviceKnobState extends State<DeviceKnob> {
                     _pressDragged = true;
                     start(_pressAt);
                   }
-                  update(d.localPosition.dy - _pressLast.dy);
+                  // As the drag would: sideways folded in when knobs turn sideways (a hold first, then any direction).
+                  final m = d.localPosition - _pressLast;
+                  update(KnobDrag.sideways ? m.dy - m.dx : m.dy);
                   _pressLast = d.localPosition;
                 },
                 onLongPressEnd: (_) {
@@ -356,6 +358,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
                 // A finger's vertical drag engages after a short rest or a slow start; a quick swipe scrolls the page
                 // (kit/touch_engage.dart). The mouse drags at once.
                 child: EngageKnobDrag(
+                // A finger starts it on the face and its rings, not the labels under it or the gap beside it.
+                grabs: (local) => (local - Offset(_width / 2, _box / 2)).distance <= _box / 2,
                 onStart: (d) => start(d.localPosition),
                 onUpdate: (d) => update(d.delta.dy),
                 onEnd: (_) => end(),

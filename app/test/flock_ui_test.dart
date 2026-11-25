@@ -170,8 +170,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('toggle-freeze')));
     await tester.pumpAndSettle();
     expect(target().value('freeze'), 1);
-    // Swiped from the panels' top edge: since 1.1.3 a sideways drag on a knob turns the knob (owner, 2026-11-24).
-    await tester.dragFrom(tester.getTopLeft(find.byKey(const ValueKey('flock-pages'))) + const Offset(24, 4), const Offset(-400, 0));
+    await tester.drag(find.byKey(const ValueKey('flock-pages')), const Offset(-400, 0));
     await tester.pumpAndSettle();
     expect(tester.widget<Text>(find.byKey(const ValueKey('flock-panel-name'))).data, 'SHAPE');
     expect(find.byKey(const ValueKey('dknob-release')), findsOneWidget);
