@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
 covers: [engine/bench/, engine/src/meters.cpp, engine/src/load_stabilizer.h, engine/src/buffer_tuner.h, app/lib/model/freeze_hint.dart, app/lib/ui/capped_ticker.dart, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Performance
@@ -292,7 +292,7 @@ The per-device ceilings (`caw_bench SECONDS 300`, alone as `301` tools, `302` dy
 - **Best of 9 runs:** each run's ratio is the device's total time over the reference's; the lowest is kept.
 - **Units:** the ratio times 1,800, the reference's interleaved µs/s on this x86 box idle (a long run alone reads about 1,640: its chunks start with colder caches). So a ceiling now means "cost relative to the reference", in that box's µs per second of audio, and every ceiling keeps its number: idle readings after the change are within the runs' noise of the earlier ones (Glint Exciter 4,079 against 4,178, Denoise 9,467 against 9,400, Duck 1,767 against 1,753). The bench prints the reference's long-run µs/s first, so a reader can see how loaded the machine was.
 - **Checked** (this box, 4 vCPUs, 2026-11-19): with two busy loops (the load of `stress --cpu 2`; `stress` is not installed) the four cost ctests passed 8 runs of 8 at `-j2` (the old wall-time timing read Mimic 2.6× and Duck's Carve 2.25× over their idle numbers under a parallel build, and failed); with a `-j2` build, 8 of 8; with a `-j4` build and the two loops together (about 10 runnable threads on 4 cores) 9 of 10, the miss Duck's 1.0.8 class (idle 88 % of its 2,000) at 2,460; the full `ctest -j4` passed 3 of 3. **[Assumption]** CI's runners load the machine less than that last case.
-- **Starling and Nightingale (1.1.3, 2026-11-24, `caw_bench SECONDS 321`):** Starling's piano 16 voices about 23,600 against 26,500 (heavy plus 10 %: its recordings, [decisions](decisions.md)), Eco 20,000; Nightingale 8 voices about 8,600-8,900 against 9,600, High 12,000 ([engine](engine.md#nightingale-the-bowed-strings-113)).
+- **Starling and Nightingale (1.1.3, 2026-11-24, `caw_bench SECONDS 321`):** Starling's piano 16 voices about 23,600 against 26,500 (heavy plus 10 %: its recordings, [decisions](decisions.md)), Eco 20,000; Nightingale 8 voices about 8,600-8,900 against 9,600, High 12,000 ([engine](engine.md#nightingale-the-bowed-strings-113)). Starling's guitar and harp (2026-11-25), 16 voices: 11,800-13,100 at each tier, ceilings 17,500-18,300 ([engine](engine.md#starlings-classical-guitar-and-harp-113)).
 - **Timber 1.1.2 and the Rook kits (2026-11-24):** Timber's Simulated cases (`caw_bench SECONDS 321`) no longer need their own ceiling: with voices run four at a time their latency-bound chains overlap, and they read 6,000-8,300 against 9,600 ([engine](engine.md#timber-the-modelled-acoustic-instrument-110)). The Rook kits' ceilings (`323`) are about 1.2 times the highest of three runs at CI's length. Readings on this box still move 10-20 % between runs of the same build (best of 9 inside each), more for the drums' short CI runs, so a change is judged on several interleaved runs, and on callgrind's instruction counts where the time is too noisy.
 
 ## One synth (2026-11-10)

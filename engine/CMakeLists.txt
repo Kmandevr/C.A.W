@@ -245,6 +245,17 @@ add_custom_command(OUTPUT "${_caw_embed_piano}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/piano.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
   COMMENT "Embedding Starling's recorded piano parts" VERBATIM)
 target_sources(caw_core PRIVATE src/builtin_starling.cpp src/recorded_bank.cpp "${_caw_embed_piano}")
+# 1.1.3: Starling's plucked strings, the classical guitar (FreePats, CC0) and the concert harp (VCSL, CC0).
+foreach(_caw_inst guitar harp)
+  set(_caw_embed_strings "${_caw_assets_out}/starling_${_caw_inst}_flac.cpp")
+  add_custom_command(OUTPUT "${_caw_embed_strings}"
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/${_caw_inst}.flac -DOUTPUT=${_caw_embed_strings}
+      -DSYMBOL=starling_${_caw_inst}_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/starling/${_caw_inst}.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+    COMMENT "Embedding Starling's recorded ${_caw_inst} plucks" VERBATIM)
+  target_sources(caw_core PRIVATE "${_caw_embed_strings}")
+endforeach()
+target_sources(caw_core PRIVATE src/starling_strings.cpp)
 target_sources(caw_core PRIVATE src/builtin_nightingale.cpp src/nightingale_bodies.cpp)  # 1.1.3: Nightingale (org.caw.nightingale), the bowed strings
 target_sources(caw_core PRIVATE src/builtin_curlew.cpp src/curlew_bodies.cpp)  # 1.1.3: Curlew (org.caw.curlew), the winds
 target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp)  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
@@ -354,6 +365,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/curlew_test.cpp)  # 1.1.3: Curlew, the winds
   target_sources(caw_tests PRIVATE tests/bittern_test.cpp)  # 1.1.3: Bittern, the pipe organ
   target_sources(caw_tests PRIVATE tests/woodpecker_test.cpp)  # 1.1.3: Woodpecker, the tuned percussion
+  target_sources(caw_tests PRIVATE tests/starling_strings_test.cpp)  # 1.1.3: Starling's guitar and harp
   # The Simulated piano's tables are generated (tools/timber_piano_gen.cpp, run during development): this test
   # regenerates them and fails if the committed file differs (beyond the last rounding step).
   add_executable(timber_piano_gen tools/timber_piano_gen.cpp)
@@ -522,6 +534,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/curlew_rt_test.cpp)  # 1.1.3: Curlew
   target_sources(caw_rt_tests PRIVATE tests/bittern_rt_test.cpp)  # 1.1.3: Bittern
   target_sources(caw_rt_tests PRIVATE tests/woodpecker_rt_test.cpp)  # 1.1.3: Woodpecker
+  target_sources(caw_rt_tests PRIVATE tests/starling_strings_rt_test.cpp)  # 1.1.3: Starling's guitar and harp
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component caw_bench_fixture)
@@ -604,6 +617,7 @@ set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_v
 set_source_files_properties(src/timber_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
 set_source_files_properties(src/bittern_render.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Bittern's voices give the same bits at any block size
 set_source_files_properties(src/builtin_woodpecker.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Woodpecker (its model and frame) renders the same bits on every build
+set_source_files_properties(src/starling_strings.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Starling's guitar and harp render the same bits on every build (builtin_starling.cpp, the piano, keeps its own)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)

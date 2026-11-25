@@ -1,10 +1,22 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Decisions
+
+## 2026-11-25: Starling's classical guitar and harp: recorded plucks carried on by a string filled from their own past (Claude, building the owner's 1.1.3 step 6)
+
+- **The instruments as built:** Starling's `variant` 1 (Classical guitar) and 2 (Harp), the piano untouched at 0 (its own file and compile flags, so its references hold bit for bit) ([engine](engine.md#starlings-classical-guitar-and-harp-113)). The string is Timber's extended Karplus-Strong loop from the shared `timber_*.h` library (not Timber's device), with measured dispersion and decays, a linear-phase loss and fitted bodies.
+- **In phase by filling the loop with the recording:** at the end of each clip's hold the delay line holds the recording's own last samples (its body taken off by the bands' exact inverse) and the loop's filters have run over them, so the string continues the recording rather than being aligned to it (Woodpecker fits modes; a string has too many partials for that). Each clip's pitch is measured over its crossfade and its first, faster decay too, so the handover neither drifts nor swells.
+- **No steel-string guitar:** **[Fact]** VCSL has no guitar; FreePats' steel guitar is GPL-3 with an exception (not permissive); Karoryfer's CC0 guitars (Emilyguitar, Shinyguitar, Black and Green) are electric; Malaclypse's Ella Gitauru steel acoustic is MIT but shipped as a RAR of unclear recording method (read 2026-11-25). Built what the recordings support: the nylon guitar and the harp. A steel guitar can be a later variant (index 3) once a CC0 or CC-BY source is found.
+- **Per-variant labels, one model:** the guitar's Finger / nail, Palm mute and Sustain pedal are the harp's Finger, Damping and Let ring (on by default: harp strings ring until damped).
+- **Strict floating point for `starling_strings.cpp`** (model and frame), so the references are Stable on every build.
+- **Dependencies:** none new (miniaudio's FLAC decoder). The script uses numpy, scipy and soundfile (BSD, development only); unpacking FreePats' 7z used py7zr locally (LGPL, a tool, never shipped or committed).
+- **Recordings** (CC0 1.0, both): FreePats' *Spanish Classical Guitar* SFZ+FLAC 2019-06-18 by Roberto for the FreePats project (<https://freepats.zenvoid.org/Guitar/acoustic-guitar.html>, read 2026-11-25; the archive 4,713,892 bytes, sha256 903916921a21662d2237ade7f0e98e55de93cb7b86da219e4e10f4ad385b8f5e), embedded as `engine/assets/starling/guitar.flac` (147,978 bytes: 16 clips of 134 ms and their histories); and VCSL's concert harp (<https://github.com/sgossner/VCSL>, commit c1ea7bcc, read 2026-11-25), embedded as `engine/assets/starling/harp.flac` (418,830 bytes: 46 clips of 149 ms and their histories). Credited in the app's licences and `engine/assets/starling/CREDITS.md`. Per file (source size):
+  - FreePats `samples/` (16 files, 1.29 MB): E2.flac 122,883, G2.flac 122,348, A2.flac 122,471, C3.flac 97,009, E3.flac 109,663, G3.flac 109,718, A#3.flac 65,413, C#4.flac 76,764, E4.flac 98,031, G4.flac 71,824, A#4.flac 67,526, C#5.flac 54,098, E5.flac 47,804, G5.flac 49,878, A#5.flac 44,256, C6.flac 34,382.
+  - VCSL `Chordophones/Composite Chordophones/Concert Harp` (45 files used, 82.6 MB; kB): KSHarp_E1_f1 3729, KSHarp_G1_f1 2786, KSHarp_B1_mf1 2284, KSHarp_B1_f1 4472, KSHarp_D2_mf1 1741, KSHarp_D2_f1 2452, KSHarp_F2_mf1 3086, KSHarp_F2_f1 4239, KSHarp_A2_mf1 2007, KSHarp_A2_f1 1956, KSHarp_C3_mf3 1886, KSHarp_C3_f2 2788, KSHarp_E3_mf1 2461, KSHarp_E3_f1 2811, KSHarp_G3_mf1 1806, KSHarp_G3_f1 2463, KSHarp_B3_mf1 1981, KSHarp_B3_f1 2095, KSHarp_D4_mf1 1921, KSHarp_D4_f1 1992, KSHarp_F4_mf1 1913, KSHarp_F4_f1 1873, KSHarp_A4_mf1 2143, KSHarp_A4_f1 2057, KSHarp_C5_mf1 1237, KSHarp_C5_f1 2238, KSHarp_E5_mf1 1171, KSHarp_E5_f1 1728, KSHarp_G5_mf1 1049, KSHarp_G5_f1 938, KSHarp_B5_mf1 779, KSHarp_B5_f1 739, KSHarp_D6_mf1 687, KSHarp_D6_f1 1314, KSHarp_F6_mf1 413, KSHarp_F6_f1 775, KSHarp_A6_mf1 636, KSHarp_A6_f1 544, KSHarp_B6_mf1 483, KSHarp_B6_f1 551, KSHarp_D7_p1 200, KSHarp_D7_f1 498, KSHarp_F7_p1 230, KSHarp_F7_f1 332 (all .wav; KSHarp_G1_mp1, 0.12 periodic over its crossfade, is replaced by G1_f1).
 
 ## 2026-11-24: Woodpecker, the tuned percussion: measured modes in phase with recorded attacks (Claude, building the owner's 1.1.3 step 5)
 

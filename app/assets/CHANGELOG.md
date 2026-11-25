@@ -9,6 +9,7 @@ Realistic instruments, part two: tuned percussion.
 
 ### New
 - **Woodpecker, tuned percussion:** marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, each with its real mallet stroke (VCSL, CC0) flowing into a ringing bar, tube or drum measured from the same recordings, in tune at A440. Listen for the stroke handing over to the ring with no dip or bump, the marimba's warm tube (the Resonator knob), the vibraphone's motor shimmer and damper pedal, and a brighter tone as you raise Mallet hardness. 15 presets.
+- **Starling's classical guitar and harp:** a nylon-string classical guitar (FreePats, CC0) and a concert pedal harp (VCSL, CC0) under Starling's Model, each the real instrument's pluck flowing into a modelled string measured from the same recordings, in tune at A440. Listen for the pluck handing over to the ringing string with no dip or bump, the harp's long ring (Let ring) against the guitar's stopped strings, brighter and thinner as you move Pluck position towards the bridge, the nail's snap on Finger / nail, and Palm mute. 15 presets. No steel-string guitar yet.
 
 ## 1.1.3-alpha.1 (2026-11-24)
 
