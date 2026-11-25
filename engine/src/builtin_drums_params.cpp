@@ -672,6 +672,24 @@ const std::vector<NeedRule>& needs() {
         add(kAccentOn, {nonzero(kAccent)});
         add(kFlamTime, {nonzero(kFlam)});
         add(kGrooveAmt, {in(kGroove, {1, 2, 3, 4, 5})});
+        // 1.1.3: a Simulated (Acoustic) pad strikes its piece: of the pad's own settings it hears only its note,
+        // channel, level, strike and velocity variation and groove; every other one needs Synthesized.
+        for (NeedRule& rule : r) {
+            const uint32_t k = rule.param;
+            if (rule.global || k == kNote || k == kChan || k == kType || k == kLevel || k == kRndPos || k == kRndLevel ||
+                (k >= kSwing && k <= kGrooveAmt) || k >= kEngine)
+                continue;
+            rule.all.push_back(in(kEngine, {kEngineLayers}));
+        }
+        {
+            std::vector<bool> has(kPadParams, false);
+            for (const NeedRule& rule : r)
+                if (!rule.global) has[rule.param] = true;
+            for (uint32_t k = 0; k < kPadParams; ++k)
+                if (!has[k] && !(k == kNote || k == kChan || k == kType || k == kLevel || k == kRndPos || k == kRndLevel ||
+                                 (k >= kSwing && k <= kGrooveAmt) || k >= kEngine))
+                    add(k, {in(kEngine, {kEngineLayers})});
+        }
         // 1.1.2: an Acoustic pad's piece and articulation need the engine; the acoustic layer is a Layers pad's.
         add(kAcouPiece, {in(kEngine, {kEngineAcoustic})});
         add(kAcouArtic, {in(kEngine, {kEngineAcoustic})});

@@ -20,6 +20,7 @@ import 'package:caw/ui/devices/drums/drums_hero.dart';
 import 'package:caw/ui/devices/drums/drums_pads.dart';
 import 'package:caw/ui/devices/drums/drums_samples.dart';
 import 'package:caw/ui/devices/drums/drums_voice.dart';
+import 'package:caw/ui/devices/kit/presets.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,6 +88,14 @@ void main() {
 
   Future<PreviewState> open(WidgetTester tester, {Size size = const Size(390, 844), PreviewState? state}) async {
     final s = state ?? stateWith(id, make: PreviewState.new) as PreviewState;
+    // These tests drive the editor on the engine's defaults, the 808 kit (a new Rook opens on the studio kit:
+    // rook_ui_test.dart).
+    if (state == null) {
+      s.project.layers.first.instrument!
+        ..params.clear()
+        ..preset = null;
+      DevicePresets.restoreRemembered(targetOf(s, id), null);
+    }
     Motion.setting = MotionLevel.off;
     states.add(s);
     late BuildContext ctx;
@@ -306,7 +315,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('drum-randomize')));
     await tester.pumpAndSettle();
     expect(fake.randomized.last.$1, t.value('a3_type').round());
-    expect(fake.randomized.last.$2, 1);
+    expect(fake.randomized.last.$2, t.value('randomness'), reason: 'the Randomness knob is its amount (1.1.3)');
     expect(fake.randomized.last.$3, 2);
     expect(fake.randomized.last.$4, isNull);
     expect(t.value('a3_body_freq'), 77);

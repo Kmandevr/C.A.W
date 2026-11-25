@@ -434,7 +434,7 @@ const std::vector<MapPad>& mapPads(int map) {
     static const std::vector<MapPad> gm = with({
         {36, kRoleKick, kArtHit},   {35, kRoleKick, kArtHit},       {37, kRoleSnare, kArtCrossStick}, {38, kRoleSnare, kArtHit},
         {40, kRoleSnare, kArtRimshot}, {50, kRoleTom1, kArtHit},    {48, kRoleTom1, kArtHit},       {47, kRoleTom2, kArtHit},
-        {45, kRoleTom2, kArtHit},   {43, kRoleTom3, kArtHit},       {41, kRoleTom3, kArtHit},       {42, kRoleHat, kArtClosed},
+        {45, kRoleTom2, kArtHit},   {43, kRoleTom3, kArtHit},       {41, kRoleTom3, kArtHit},       {42, kRoleHat, kArtHit},
         {44, kRoleHat, kArtFoot},   {46, kRoleHat, kArtOpen},       {49, kRoleCrash, kArtHit},      {57, kRoleExtra, kArtHit},
         {51, kRoleRide, kArtHit},   {59, kRoleRide, kArtEdge},      {53, kRoleRide, kArtBell},      {52, kRoleExtra, kArtEdge},
         {55, kRoleExtra, kArtHit}});

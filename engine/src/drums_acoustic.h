@@ -52,6 +52,7 @@ struct RecVoice {
     uint32_t start = 0, frames = 0, delay = 0;  // the clip in the bank; frames before it starts (a flam's main stroke)
     double pos = 0, step = 1;                   // where it reads (bank frames) and how far a sample moves it
     float gain = 0, fadeK = 1;                  // fadeK < 1: choked (gain falls by it every sample)
+    float decayK = 1;                           // a cymbal's Decay and Damping shortening its recorded ring
     uint8_t part = 0;
 };
 
@@ -147,6 +148,7 @@ struct Piece {
     RecVoice recv[kRecVoices];
     uint32_t recHits = 0;              // the piece's strokes (round robins)
     float simGain = 1;
+    float recTilt = 0, recLp = 0;      // a cymbal's recorded tone: its alloy (and a hard hit's swell) tilting it
     // Mics: close (level, pan), overheads (level and delay each side), room send, bleed send.
     float closeL = 0, closeR = 0, ohL = 0, ohR = 0, roomSend = 0, bleedSend = 0;
     uint32_t ohDelayL = 0, ohDelayR = 0;
