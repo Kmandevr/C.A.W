@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: b35881e (branch ccr-bd7ac4df-86w0bh; 1.1.3-alpha.1 released, Woodpecker merged as #265 but NOT released)
+Commit: 67120ee (branch ccr-bd7ac4df-86w0bh; 1.1.3-alpha.1 released, Woodpecker merged as #265 but NOT released)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
@@ -23,7 +23,6 @@ Fixed on this branch: version.dart appBuild 18; rules done.md; decisions 2026-11
 - Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell encloses only the Swell?;
   Rook kind cards' place and Studio as default; panel names; EP/tonewheel presets need listening.
 - Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
-- No steel-string guitar (no CC0/CC-BY source).
 - S22+ Benchmark (docs/performance.md 2026-11-25): Every effect and extreme songs drop out; low-latency live p99 over
   budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
 
