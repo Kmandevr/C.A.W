@@ -218,7 +218,7 @@ struct Bars {
         v.tubeFor = tubeCents;
     }
     void tune(Voice& v) noexcept {
-        const double pitch = clampd(v.pitch, kLow[which] - 12.0, kHigh[which] + 12.0);
+        const double pitch = clampd(v.pitch, 12.0, 120.0);  // every key its own note: past the recorded range the nearest zone's modes carry on
         v.hzRef = timber::noteHz(pitch);
         for (int k = 0; k < kModes; ++k) v.hz[k] = k < v.modes ? static_cast<float>(v.hzRef * v.zone->ratio[k]) : 0.0f;
         setModes(v);
@@ -237,7 +237,7 @@ struct Bars {
 
     void start(Voice& v, const Shared& s) noexcept {
         const Layout& lay = kLayouts[which];
-        const double pitch = clampd(v.pitch, kLow[which] - 12.0, kHigh[which] + 12.0);
+        const double pitch = clampd(v.pitch, 12.0, 120.0);  // every key its own note: past the recorded range the nearest zone's modes carry on
         int zi = 0;
         for (int z = 1; z < lay.zones; ++z)
             if (std::fabs(pitch - kZones[lay.firstZone + z].key) < std::fabs(pitch - kZones[lay.firstZone + zi].key)) zi = z;
@@ -277,7 +277,10 @@ struct Bars {
                                   static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
         const bool recorded = hasRecording && attack > 1e-3 && std::fabs(pitch - zone.key) <= 4.5 &&
                               static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
-        const double nRef = (lay.hold + 0.5 * lay.fade) * sr / ratio;  // the output frame where the recording is at ref
+        // The output frame where the recording is at ref (played at the note's ratio); with no recording (a key past
+        // the recorded range), the recording's own time: carried back over a slowed recording's longer time, a key
+        // two octaves under the range started its modes 30 dB too loud.
+        const double nRef = (lay.hold + 0.5 * lay.fade) * sr / (std::fabs(pitch - zone.key) <= 4.5 ? ratio : 1.0);
         double c1r = 0, c1i = 0;
         for (int k = 0; k < kModes; ++k) {
             double zr = 0, zim = 0;
