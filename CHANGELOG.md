@@ -11,13 +11,14 @@ Versions keep the `-alpha.N` suffix until the official release.
 The realistic instruments get their own pages.
 
 ### New
+- **Bittern is now a real concert organ, after the Salt Lake Tabernacle's:** 26 of its stops by name, in its divisions (the Great, the Swell and Choir each in its swell box, the Antiphonal's Tuba Mirabilis, and a Pedal with two 32's), from principal choruses and harmonic flutes to celestes, a Hautbois, a Krummhorn and French trumpets, every stop with its own colour. The pedal plays your lowest key as a bass line under your hands (or every key); the mod wheel closes the Swell and Choir boxes and the tremulant shakes them, as on the real organ, while the Great stays steady. Nine registrations in one tap, from a soft accompaniment for a choir to the full organ with the Tuba on top, in a hall that rings like the Tabernacle (about 4 seconds).
 - **Starling's crossfade keeps the note's tone:** where the real recorded strike hands over to the modelled string, the model now takes the recording's balance of fundamental, octave and twelfth for each key, so the note no longer seems to drop an octave or change colour.
 - **Winds play legato:** Curlew plays one note at a time like a wind player, so a note played while another is held slurs to it without a new attack, and the held note comes back when you let go (Play: Legato; choose Poly for chords).
 - **Starling's Unison sounds like a piano going out of tune:** each key drifts its own way instead of every note chorusing alike.
 - **Starling, Nightingale, Curlew, Bittern and Woodpecker each have a page of their own**, in the same one-screen layout as the other instruments: the instrument drawn live on top, its own knobs under it, then tone and space; on a phone, swipe the three panels under the picture. Try these:
   - **Nightingale:** drag the picture sideways to move the bow toward the bridge or over the fingerboard, and up to press harder; watch the string move under it as you play.
   - **Curlew:** drag the picture up and down for the breath and watch the breath column and the bore's standing wave.
-  - **Bittern:** tap the stop pills to draw stops (drag one up and down for its level), watch the drawn ranks glow as you play, and try Cathedral, Loft and Dry.
+  - **Bittern:** pick a registration or tap the stop pills to draw stops, division by division (drag one up and down for its level), watch the drawn ranks glow as you play, and try Hall, Loft and Dry.
   - **Woodpecker:** switch between marimba, vibes, chimes and timpani, and drag up and down for a harder mallet; the woodpecker pecks the bar you play.
   - **Starling:** play and watch the hammers rise and the dampers lift with the pedal; drag up and down for a harder hammer.
 ### New

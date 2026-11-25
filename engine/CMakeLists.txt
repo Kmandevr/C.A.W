@@ -258,7 +258,14 @@ endforeach()
 target_sources(caw_core PRIVATE src/starling_strings.cpp)
 target_sources(caw_core PRIVATE src/builtin_nightingale.cpp src/nightingale_bodies.cpp)  # 1.1.3: Nightingale (org.caw.nightingale), the bowed strings
 target_sources(caw_core PRIVATE src/builtin_curlew.cpp src/curlew_bodies.cpp)  # 1.1.3: Curlew (org.caw.curlew), the winds
-target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp)  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
+# Bittern's recorded speech (engine/assets/bittern/, from tools/bittern_assets.py).
+set(_caw_embed_speech "${_caw_assets_out}/bittern_speech_flac.cpp")
+add_custom_command(OUTPUT ${_caw_embed_speech}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/bittern/speech.flac -DOUTPUT=${_caw_embed_speech}
+    -DSYMBOL=bittern_speech_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/bittern/speech.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  COMMENT "Embedding Bittern's recorded pipe speech" VERBATIM)
+target_sources(caw_core PRIVATE src/builtin_bittern.cpp src/bittern_tables.cpp src/bittern_render.cpp "${_caw_embed_speech}")  # 1.1.3: Bittern (org.caw.bittern), the pipe organ
 # 1.1.3: Woodpecker (org.caw.woodpecker), the tuned percussion, and its recorded mallet attacks (VCSL, CC0).
 set(_caw_embed_mallets "${_caw_assets_out}/woodpecker_mallets_flac.cpp")
 add_custom_command(OUTPUT "${_caw_embed_mallets}"

@@ -6,6 +6,15 @@ updated: 2026-11-25
 
 # Decisions
 
+## 2026-11-25: Bittern is the Salt Lake Tabernacle organ's divisions, on one keyboard (Claude, owner's request)
+
+- **Owner:** "put a lot of work in ... the organ ... it shouldn't just be a bunch of instruments bundled together it should be a genuine organ, use the one that the Mormon Tabernacle choir uses at Temple square."
+- **Decision:** Bittern models that organ's structure ([organ research](organ-research-tabernacle.md), section 6): 26 of its stops by their names and pitches in the Great, Swell, Choir, Antiphonal and Pedal, built on the measured pipes of the rebuilt-from-recordings organ ([engine](engine.md), Bittern). The open question "should the swell box enclose only the Swell" is settled by the real organ (a fact, not a preference): the Swell and the Choir are enclosed, so the box and the tremulant act on those only.
+- **One keyboard plays manuals and pedal:** the Pedal's stops play the lowest key held (or every key, the Pedal choice), and every manual division sounds on every key, as if coupled to the Great; separate couplers would do nothing with one keyboard. **[Assumption]** what a one-keyboard player wants; the owner can ask for a split point instead.
+- **Ids kept:** the alpha's stop ids stay on the stop of the same kind of pipe, so alpha projects load; `celeste8` is now part of the Viole Céleste II. Alpha projects sound different (the alpha compatibility policy: similar, not the same).
+- **Silent speech clips:** 13 of the speech asset's 64 clips are empty (the generator kept clips with near-zero residuals and large scales). The organ marks them when the bank loads and never plays one; regenerating the asset is left for when its source recordings are re-fetched.
+- **Not built:** the Antiphonal behind the listener (a voice is mono before the pan), the Solo, Positiv and Bombarde divisions, and the 32' Montre extension.
+
 ## 2026-11-25: MIDI effects leave the device library until MIDI routing (Claude, in the 1.1.3-alpha.2 knob fix)
 
 - **Fact:** a MIDI effect (role `event_processor`: Hop, Clutch, Perch, Mock, Ruffle) plays only from a track's MIDI components, which the app has no UI for; placed on an effect chain, the engine leaves it out, so its knobs did nothing (part of "the knobs do nothing", 1.1.3-alpha.1).

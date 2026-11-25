@@ -1,4 +1,4 @@
-// Bittern's page (org.caw.bittern, pipe organ): the pipe façade drawn live, its drawn ranks glowing (drag a rank up and down for its stop's level) beside the swell box's shutters, the thirteen stops as drawknob pills, and the Stops, Wind and Room panels with the room's Cathedral, Loft and Dry.
+// Bittern's page (org.caw.bittern, pipe organ): the pipe façade drawn live, its drawn ranks glowing (drag a rank up and down for its stop's level) beside the swell box's shutters, its 26 stops as drawknob pills by division under the registration, and the Stops, Wind and Room panels with the room's Hall, Loft and Dry.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../model/device_target.dart';
 import '../../motion.dart';
 import '../../theme.dart';
+import '../device_controls.dart';
 import '../device_scope.dart';
 import '../kit/birds.dart';
 import '../kit/feel.dart';
@@ -15,27 +16,48 @@ import 'instrument_page.dart';
 
 const bitternComponentId = 'org.caw.bittern';
 
-/// The stops in the engine's order (engine/src/builtin_bittern.cpp), as the pills name them, with each rank's
-/// sounding length in feet (the façade's pipe heights; the Mixture's IV ranks drawn at 2').
-const bitternStops = <({String id, String name, String foot, double feet})>[
-  (id: 'bourdon16', name: 'Bourdon', foot: "16'", feet: 16),
-  (id: 'principal8', name: 'Principal', foot: "8'", feet: 8),
-  (id: 'rohrflute8', name: 'Rohrflöte', foot: "8'", feet: 8),
-  (id: 'gamba8', name: 'Gamba', foot: "8'", feet: 8),
-  (id: 'celeste8', name: 'Céleste', foot: "8'", feet: 8),
-  (id: 'octave4', name: 'Octave', foot: "4'", feet: 4),
-  (id: 'flute4', name: 'Flute', foot: "4'", feet: 4),
-  (id: 'nazard', name: 'Nazard', foot: "2 2/3'", feet: 2.67),
-  (id: 'fifteenth2', name: 'Fifteenth', foot: "2'", feet: 2),
-  (id: 'tierce', name: 'Tierce', foot: "1 3/5'", feet: 1.6),
-  (id: 'mixture', name: 'Mixture', foot: 'IV', feet: 2),
-  (id: 'trumpet8', name: 'Trumpet', foot: "8'", feet: 8),
-  (id: 'subbass32', name: 'Subbass', foot: "32'", feet: 32),
+/// The divisions, as the Tabernacle organ has them (engine/src/bittern_organ.h): the Great, the Swell and the Choir
+/// (each in its swell box), the Antiphonal and the Pedal.
+const bitternDivisions = ['GREAT', 'SWELL', 'CHOIR', 'ANTIPHONAL', 'PEDAL'];
+
+/// The stops in the engine's order (engine/src/builtin_bittern.cpp), as the pills name them, with each one's division
+/// and its rank's sounding length in feet (the façade's pipe heights; the mixtures' IV ranks drawn at 2', the two-rank
+/// celestes at 8').
+const bitternStops = <({String id, String name, String foot, double feet, int division})>[
+  (id: 'subprincipal16', name: 'Subprincipal', foot: "16'", feet: 16, division: 0),
+  (id: 'principal8', name: 'Principal', foot: "8'", feet: 8, division: 0),
+  (id: 'flute_harm8', name: 'Flûte Harm.', foot: "8'", feet: 8, division: 0),
+  (id: 'octave4', name: 'Octave', foot: "4'", feet: 4, division: 0),
+  (id: 'fifteenth2', name: 'Super Octave', foot: "2'", feet: 2, division: 0),
+  (id: 'mixture', name: 'Fourniture', foot: 'IV', feet: 2, division: 0),
+  (id: 'trumpet8', name: 'Trumpet', foot: "8'", feet: 8, division: 0),
+  (id: 'geigen8', name: 'Geigen', foot: "8'", feet: 8, division: 1),
+  (id: 'rohrflute8', name: 'Gedeckt', foot: "8'", feet: 8, division: 1),
+  (id: 'gamba8', name: 'Viole Céleste', foot: 'II', feet: 8, division: 1),
+  (id: 'flute4', name: 'Fl. Traverso', foot: "4'", feet: 4, division: 1),
+  (id: 'nazard', name: 'Nazard', foot: "2 2/3'", feet: 2.67, division: 1),
+  (id: 'tierce', name: 'Tierce', foot: "1 3/5'", feet: 1.6, division: 1),
+  (id: 'plein_jeu', name: 'Plein Jeu', foot: 'IV', feet: 2, division: 1),
+  (id: 'trompette8', name: 'Trompette', foot: "8'", feet: 8, division: 1),
+  (id: 'hautbois8', name: 'Hautbois', foot: "8'", feet: 8, division: 1),
+  (id: 'concert_flute8', name: 'Concert Flute', foot: "8'", feet: 8, division: 2),
+  (id: 'erzahler8', name: 'Kl. Erzähler', foot: 'II', feet: 8, division: 2),
+  (id: 'krummhorn8', name: 'Krummhorn', foot: "8'", feet: 8, division: 2),
+  (id: 'tuba8', name: 'Tuba Mirabilis', foot: "8'", feet: 8, division: 3),
+  (id: 'subbass32', name: 'Contre Bourdon', foot: "32'", feet: 32, division: 4),
+  (id: 'ped_principal16', name: 'Principal', foot: "16'", feet: 16, division: 4),
+  (id: 'bourdon16', name: 'Bourdon', foot: "16'", feet: 16, division: 4),
+  (id: 'ped_principal8', name: 'Principal', foot: "8'", feet: 8, division: 4),
+  (id: 'trombone16', name: 'Trombone', foot: "16'", feet: 16, division: 4),
+  (id: 'bombarde32', name: 'Bombarde', foot: "32'", feet: 32, division: 4),
 ];
 
-/// The Room choices and the Room (`space`) each sets: the engine's own presets' (Cathedral the default 0.45, the
+/// The reed stops (their pipes drawn flared).
+const _reeds = {'trumpet8', 'trompette8', 'hautbois8', 'krummhorn8', 'tuba8', 'trombone16', 'bombarde32'};
+
+/// The Room choices and the Room (`space`) each sets: the engine's own presets' (the Tabernacle's hall the default 0.45, the
 /// Loft preset's 0.15, the Dry one's 0).
-const bitternRooms = <(String, double)>[('Cathedral', 0.45), ('Loft', 0.15), ('Dry', 0)];
+const bitternRooms = <(String, double)>[('Hall', 0.45), ('Loft', 0.15), ('Dry', 0)];
 
 /// The façade's area (the swell box takes the right).
 Rect _facade(Size s) => Rect.fromLTRB(s.width * 0.03, s.height * 0.14, s.width * 0.8, s.height * 0.96);
@@ -94,7 +116,7 @@ class BitternPainter extends CustomPainter {
       final cx = f.left + w * (i + 0.5);
       final glow = drawn ? 0.25 + 0.45 * level + 0.3 * p.energy : 0.0;
       final c = drawn ? p.accent : Neon.dim;
-      final pipes = st.id == 'mixture' ? 4 : 3;
+      final pipes = st.foot == 'IV' ? 3 : 2;
       for (var j = 0; j < pipes; j++) {
         final pw = w * 0.7 / pipes;
         final x = cx - w * 0.35 + pw * (j + 0.5);
@@ -105,7 +127,7 @@ class BitternPainter extends CustomPainter {
         canvas.drawRect(body, Paint()..color = c.withValues(alpha: drawn ? 0.12 + glow * (lit ? 0.9 : 0.55) : 0.06));
         canvas.drawRect(body, instrumentLine(c.withValues(alpha: drawn ? 0.5 + 0.5 * glow : 0.25), 0.9));
         // The mouth (a flue's) or the reed's flared resonator, then the foot into the windchest.
-        if (st.id == 'trumpet8') {
+        if (_reeds.contains(st.id)) {
           canvas.drawPath(Path()
             ..moveTo(body.left - pw * 0.15, top)
             ..lineTo(body.right + pw * 0.15, top)
@@ -153,8 +175,9 @@ class BitternPainter extends CustomPainter {
   bool shouldRepaint(covariant BitternPainter o) => true;
 }
 
-/// The thirteen stops as drawknob pills: a tap draws or pushes in a stop (back to its default level, or full when
-/// that is none), an up-and-down drag sets its level, shown as the pill's fill.
+/// The registration (the usual combinations, one tap) over the stops as drawknob pills by division: a tap draws or
+/// pushes in a stop (back to its default level, or full when that is none), an up-and-down drag sets its level, shown
+/// as the pill's fill; the Pedal's division says which key its stops play.
 class BitternStops extends StatelessWidget {
   const BitternStops({super.key});
 
@@ -162,8 +185,20 @@ class BitternStops extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
     final cols = box.maxWidth >= 600 ? 7 : box.maxWidth >= 380 ? 4 : 3;
     final w = (box.maxWidth - 6 * (cols - 1)) / cols;
-    return Padding(padding: const EdgeInsets.only(top: 4), child: Wrap(spacing: 6, runSpacing: 6, children: [
-      for (final st in bitternStops) SizedBox(width: w, child: _Drawknob(st.id, st.name, st.foot)),
+    Widget label(String text) => Padding(padding: const EdgeInsets.only(top: 10, bottom: 6),
+        child: Text(text, style: const TextStyle(fontSize: 9.5, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Neon.dim)));
+    return Padding(padding: const EdgeInsets.only(top: 4), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [label('REGISTRATION'), const Spacer(), const DeviceChoice('registration')]),
+      for (var d = 0; d < bitternDivisions.length; d++) ...[
+        Row(children: [
+          label(bitternDivisions[d]),
+          if (d == bitternDivisions.length - 1) ...[const Spacer(), const DeviceChoice('pedal')],
+        ]),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final st in bitternStops)
+            if (st.division == d) SizedBox(width: w, child: _Drawknob(st.id, st.name, st.foot)),
+        ]),
+      ],
     ]));
   });
 }
@@ -240,7 +275,7 @@ class _DrawknobState extends State<_Drawknob> {
   }
 }
 
-/// The room: Cathedral, Loft or Dry, each setting the Room knob to its preset's value; the one nearest the knob is lit.
+/// The room: Hall, Loft or Dry, each setting the Room knob to its preset's value; the one nearest the knob is lit.
 class BitternRoom extends StatelessWidget {
   const BitternRoom({super.key});
 

@@ -1,6 +1,6 @@
 ---
 title: Organ research - Salt Lake Tabernacle
-summary: Sourced facts on the Salt Lake Tabernacle organ (builders, size, divisions, wind, full 2024 stoplist, voicing, the room's acoustics), free-licence recordings and impulse responses, and a proposed 24-stop model with 8 presets for the Bittern organ.
+summary: Sourced facts on the Salt Lake Tabernacle organ (builders, size, divisions, wind, full 2024 stoplist, voicing, the room's acoustics), free-licence recordings and impulse responses, and the 24-stop model with 8 registrations that Bittern is built on.
 updated: 2026-11-25
 ---
 
@@ -127,9 +127,9 @@ The Pedal 32' reed is named "Bombarde", not "Contra Bombarde", in [S1]. A photo 
   - The audb mirror lists the OpenAIR dataset as "CC-BY-4.0" and gives 1st Baptist Nashville a reverberation time of 2.59.
   - **Licence per entry not verified:** check each entry page before use.
 
-## 6. Recommended model (proposal)
+## 6. The model (built 2026-11-25: [engine](engine.md), Bittern)
 
-**Proposal:** model one organ: real divisions on separate windchests, a Swell box, couplers and one shared wind and room. Every stop is a real stop from [S1], with its real name and pitch. The cut keeps the Great's principal chorus, the Swell's French reeds and celestes, a Choir accompaniment group, the signature Tuba Mirabilis and a Pedal with both 32's. The 24 stops below come to about 32 ranks (mixtures counted by rank). Rank counts are from [S1]; the cost per rank is an **assumption**.
+**Built (2026-11-25; Bittern adds the Swell's Nazard and Tierce, 26 stops):** model one organ: real divisions on separate windchests, a Swell box, couplers and one shared wind and room. Every stop is a real stop from [S1], with its real name and pitch. The cut keeps the Great's principal chorus, the Swell's French reeds and celestes, a Choir accompaniment group, the signature Tuba Mirabilis and a Pedal with both 32's. The 24 stops below come to about 32 ranks (mixtures counted by rank). Rank counts are from [S1]; the cost per rank is an **assumption**.
 
 | Division | Stops (pitch) |
 |---|---|
@@ -140,7 +140,7 @@ The Pedal 32' reed is named "Bombarde", not "Contra Bombarde", in [S1]. A photo 
 | Pedal (6) | Contre Bourdon 32', Principal 16', Bourdon 16', Principal 8', Trombone 16', Bombarde 32' |
 | Couplers | Swell to Great, Choir to Great, Great to Pedal, Swell to Pedal |
 
-The Montre 32' is skipped. In the real organ it is an extension of the Great Subprincipal [S1], so a model could add it as an extension at almost no cost (**proposal**).
+Not built: the couplers (one keyboard plays everything; [decisions](decisions.md), 2026-11-25) and the Antiphonal's place behind the listener. The Montre 32' is skipped. In the real organ it is an extension of the Great Subprincipal [S1], so a model could add it as an extension at almost no cost (**proposal**).
 
 **Presets (proposal; registrations are assumptions, see section 3):**
 1. **Soft accompaniment**: Sw Gedeckt 8' and Viole Céleste II, box mostly closed; Ch Kleine Erzähler II; Ped Bourdon 16' with Sw to Ped.

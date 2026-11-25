@@ -14,6 +14,7 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/ui/devices/device_controls.dart';
 import 'package:caw/ui/devices/device_editor.dart';
 import 'package:caw/ui/devices/device_registry.dart';
+import 'package:caw/ui/devices/instruments/bittern_page.dart';
 import 'package:caw/ui/devices/instruments/instrument_editors.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/material.dart';
@@ -200,7 +201,14 @@ void main() {
               final id = w.paramId;
               final p = target().param(id)!;
               final next = (target().value(id) - p.min).round() == 0 ? 1 : 0;
-              await tester.tap(find.byKey(ValueKey('dchoice-$id-$next')));
+              final segment = find.byKey(ValueKey('dchoice-$id-$next'));
+              if (segment.evaluate().isNotEmpty) {
+                await tester.tap(segment);
+              } else {  // a long choice is a menu: open it, pick the item
+                await tester.tap(find.byKey(ValueKey('dchoice-$id')));
+                await tester.pumpAndSettle();
+                await tester.tap(find.text(p.choices[next]).last);
+              }
               await tester.pumpAndSettle();
               expect(target().value(id), p.min + next, reason: '$k variant $v: $id');
               checked.add(id);
@@ -215,8 +223,7 @@ void main() {
           }
         }
         // Every parameter but the variant and Bittern's stops (their drawknobs, tested below) has a control.
-        final stops = {'bourdon16', 'principal8', 'rohrflute8', 'gamba8', 'celeste8', 'octave4', 'flute4', 'nazard', 'fifteenth2',
-          'tierce', 'mixture', 'trumpet8', 'subbass32'};
+        final stops = {for (final st in bitternStops) st.id};
         final all = {for (final vi in info.variants.isEmpty ? [info] : info.variants) for (final p in vi.parameters) p.id}
           ..remove('variant')..removeAll(stops);
         // Phantom partials show only at High quality (the tier choice was flipped off Setting above, to Eco).
@@ -270,16 +277,16 @@ void main() {
 
     await open(tester, 'org.caw.bittern');
     r = await picture('bittern');
-    // The Gamba's rank (the fourth of thirteen across the façade) pulled up from nothing.
+    // The Viole Céleste's rank (the tenth of 26 across the façade) pulled up from nothing.
     expect(target().value('gamba8'), 0);
-    final x = r.left + r.width * (0.03 + 0.77 * 3.5 / 13);
+    final x = r.left + r.width * (0.03 + 0.77 * 9.5 / 26);
     await slowDrag(tester, Offset(x, r.center.dy), const Offset(0, -40));
     expect(target().value('gamba8'), greaterThan(0));
     expect(target().value('principal8'), 1, reason: 'its neighbours stay');
     await close(tester);
   });
 
-  testWidgets('Bittern: a drawknob draws and pushes in its stop, a drag sets its level; the room picks Cathedral, Loft or Dry',
+  testWidgets('Bittern: a drawknob draws and pushes in its stop, a drag sets its level; the room picks Hall, Loft or Dry',
       (tester) async {
     await open(tester, 'org.caw.bittern');
     expect(find.byKey(const ValueKey('bittern-stop-trumpet8')), findsOneWidget);
@@ -295,7 +302,7 @@ void main() {
     final before = target().value('octave4');
     await slowDrag(tester, tester.getCenter(find.byKey(const ValueKey('bittern-stop-octave4'))), const Offset(0, 30));
     expect(target().value('octave4'), lessThan(before), reason: 'down lowers its level');
-    // The room: on by default (Cathedral), the Loft and Dry presets' values.
+    // The room: on by default (the hall), the Loft and Dry presets' values.
     for (var i = 0; i < 2; i++) {
       await nextPanel(tester, 'bittern');
     }

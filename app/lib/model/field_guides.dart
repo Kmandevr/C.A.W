@@ -301,12 +301,12 @@ const fieldGuides = <String, FieldGuide>{
     ('Breath noise', 'The air you hear around the tone.'),
     ('Vibrato', 'A gentle waver in the note.'),
   ], 'Concert flute'),
-  'org.caw.bittern': FieldGuide('Bittern is a cathedral pipe organ: draw its stops and it fills a great stone '
-      'room.', [
-    ('Stops', 'Each rank of pipes: flutes, principals, strings, the trumpet.'),
-    ('Tremulant', 'A pulse in the wind, for a warm, vocal tone.'),
-    ('Space', 'The cathedral (on): turn it down for the organ loft.'),
-  ], 'Cathedral principal chorus'),
+  'org.caw.bittern': FieldGuide('Bittern is a great concert pipe organ, after the Salt Lake Tabernacle\'s: draw its '
+      'stops, or pick a registration, and it fills the hall.', [
+    ('Registration', 'The usual combinations in one tap, from a soft accompaniment to the full organ with the Tuba.'),
+    ('Pedal', 'The pedal stops play your lowest key, as a bass line under your hands, or every key.'),
+    ('Space', 'The hall (on): turn it down for the organ loft.'),
+  ], 'Hymn plenum'),
   'org.caw.woodpecker': FieldGuide('Woodpecker is tuned percussion: marimba, xylophone, glockenspiel, vibraphone, '
       'tubular bells or timpani, each with its recorded mallet stroke.', [
     ('Mallet hardness', 'Soft yarn and round, or hard and bright.'),

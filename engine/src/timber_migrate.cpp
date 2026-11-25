@@ -185,7 +185,9 @@ void mapMallets(const Params& in, Params& out, int instrument) {
 
 void mapOrganPipe(const Params& in, Params& out) {
     // Timber's drawbars are pure sines: the flue stops nearest each footage.
-    for (const char* k : {"principal8", "gamba8", "celeste8", "octave4", "trumpet8", "subbass32"}) put(out, k, 0.0);
+    // Bittern's default stops off; its Pedal on every key, as the 16' drawbar sounded under every note.
+    for (const char* k : {"principal8", "octave4"}) put(out, k, 0.0);
+    put(out, "pedal", 1.0);
     put(out, "bourdon16", std::max(bar(in, "db16", 8), 0.5 * bar(in, "db513", 8)));
     put(out, "rohrflute8", bar(in, "db8", 8));
     put(out, "flute4", bar(in, "db4", 0));

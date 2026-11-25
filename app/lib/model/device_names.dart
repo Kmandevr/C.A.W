@@ -165,7 +165,7 @@ class DeviceNames {
     'org.caw.curlew': DeviceName('Curlew', 'Winds', tags: ['winds', 'woodwind', 'brass', 'flute', 'clarinet',
       'saxophone', 'sax', 'trumpet', 'trombone', 'french horn', 'horn', 'realistic', 'timber'], purposes: {_g}),
     'org.caw.bittern': DeviceName('Bittern', 'Pipe organ', tags: ['organ', 'pipe organ', 'church organ',
-      'cathedral', 'principal', 'flute', 'mixture', 'realistic', 'timber'], purposes: {_g}),
+      'cathedral', 'tabernacle', 'principal', 'flute', 'mixture', 'reed', 'tuba', 'realistic', 'timber'], purposes: {_g}),
     'org.caw.woodpecker': DeviceName('Woodpecker', 'Tuned percussion', tags: ['tuned percussion', 'marimba',
       'xylophone', 'glockenspiel', 'glock', 'vibraphone', 'vibes', 'tubular bells', 'chimes', 'timpani', 'mallets',
       'orchestral', 'realistic', 'timber'], purposes: {_g}),
