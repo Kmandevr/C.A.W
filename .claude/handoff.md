@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 81b1cab (branch ccr-bd7ac4df-86w0bh; 1.1.3-alpha.1 released, Woodpecker merged as #265 but NOT released)
+Commit: b35881e (branch ccr-bd7ac4df-86w0bh; 1.1.3-alpha.1 released, Woodpecker merged as #265 but NOT released)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
@@ -28,6 +28,10 @@ Fixed on this branch: version.dart appBuild 18; rules done.md; decisions 2026-11
   budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
 
 ## Next
+0. All agents were STOPPED by the owner (usage). Their tips are parents of b35881e (pushed). Resume work
+   yourself, one piece at a time, pushing after each step; don't spawn many agents at once.
+   Performance goal (owner): close the gap between the 1% high (p99) CPU and the mean, keeping the mean low
+   (spikes cause drops); no frame-rate work. 1.1.2 didn't drop: find what 1.1.3 changed.
 1. Merge the P0 branch, full flutter test, PR, release 1.1.3-alpha.2 (app.yml dispatch on Main, release=true).
 2. Merge in order: timber-removal, sound fixes, instrument-pages, guitar/harp, Bittern, Rook, gate test; resolve
    conflicts (stress hash/refs, changelogs, CMakeLists, device_names); a branch already a parent of 81b1cab merges
