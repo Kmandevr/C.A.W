@@ -9,26 +9,29 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
     constexpr float kFrac = 1.0f / static_cast<float>(1u << kShift);
     constexpr uint32_t kMask = (1u << kShift) - 1u;
     const float gk = gainK;
-    // Each pipe's level this render: its line across the control block, from the voice's place in it.
-    const float at0 = static_cast<float>(v.pos);
+    // Each pipe's lines this render: from their start (lineAt) on the voice's clock.
     float steps[kControlFrames];
-    for (uint32_t i = 0; i < n; ++i) steps[i] = at0 + static_cast<float>(i + 1);
-    v.pos += n;
+    for (uint32_t i = 0; i < n; ++i) steps[i] = static_cast<float>(i + 1);
+    const uint32_t clock = v.clock;
+    v.clock += n;
     for (int k = 0; k < kStops; ++k) {
         if (v.env[k] <= 0.0f && v.envStep[k] <= 0.0f) continue;
-        const float e0 = v.env[k], es = v.envStep[k], g0 = v.gain[k], gs = v.gStep[k];
+        const float o = static_cast<float>(clock - v.lineAt[k]);
+        const float es = v.envStep[k], gs = v.gStep[k], ws = v.spokeStep[k];
+        const float e0 = v.env[k], g0 = v.gain[k], w0 = v.spoke[k];  // at the line's start: sample t = o + i + 1 of it
+        float t[kControlFrames];
+        for (uint32_t i = 0; i < n; ++i) t[i] = o + steps[i];  // whole numbers: exact
         const float* s = v.steady[k];
         const float* e = v.speaking[k];
         const uint32_t inc = v.step[k], ph = v.phase[k];
-        const float w0 = v.spoke[k], ws = v.spokeStep[k];
         // The pipe's level each sample: its speech or release (squared) and its level, both lines across the block.
         float amp[kControlFrames];
         if (es == 0.0f && e0 == 1.0f) {
-            for (uint32_t i = 0; i < n; ++i) amp[i] = g0 + gs * steps[i];
+            for (uint32_t i = 0; i < n; ++i) amp[i] = g0 + gs * t[i];
         } else {
             for (uint32_t i = 0; i < n; ++i) {
-                const float x = e0 + es * steps[i];
-                amp[i] = x * x * (g0 + gs * steps[i]);
+                const float x = e0 + es * t[i];
+                amp[i] = x * x * (g0 + gs * t[i]);
             }
         }
         if (w0 >= 1.0f && ws == 0.0f) {
@@ -45,7 +48,7 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
                 const uint32_t at = p >> kShift;
                 const float f = static_cast<float>(p & kMask) * kFrac;
                 const float a = s[at] + (s[at + 1] - s[at]) * f, b = e[at] + (e[at + 1] - e[at]) * f;
-                acc[i] += (b + (a - b) * (w0 + ws * steps[i])) * amp[i];
+                acc[i] += (b + (a - b) * (w0 + ws * t[i])) * amp[i];
             }
         }
         v.phase[k] = ph + n * inc;

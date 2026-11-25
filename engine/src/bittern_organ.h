@@ -127,19 +127,22 @@ struct Organ {
         const float* steady[kStops] = {};
         const float* speaking[kStops] = {};
         float rms[kStops] = {};
-        // Its speech and release (0..1; the pipe sounds env^2): a one-pole worked out per control block, env at
-        // the block's start and envTo at its end, a line across it (envStep a sample).
-        float env[kStops] = {}, envTo[kStops] = {}, envStep[kStops] = {};
-        // How far it has spoken (the spectrum, speaking 0 to steady 1): a line across each control block, spoke at
-        // its start and spokeTo at its end.
-        float spoke[kStops] = {}, spokeTo[kStops] = {}, spokeStep[kStops] = {};
+        // Each pipe is worked out every other control block (half of them each block, by the parity of their
+        // index) and runs on lines from then (lineAt, on the voice's clock of samples) until the next time: so no
+        // sample's level depends on the last one's and any block size gives the same bits.
+        // Its speech and release (0..1; the pipe sounds env^2): a one-pole, env at the line's start, envStep a sample.
+        float env[kStops] = {}, envStep[kStops] = {};
+        uint32_t lineAt[kStops] = {};
+        uint32_t clock = 0;
+        float drawOf[kStops] = {}, toneOf[kStops] = {};  // its last share of the wind's draw and of the breath
+        // How far it has spoken (the spectrum, speaking 0 to steady 1), on its line.
+        float spoke[kStops] = {}, spokeStep[kStops] = {};
         float rise[kStops] = {};     // its one-pole's decay over a control block while it speaks
-        // Its level (the stop, its wander, the wind): eased toward the knob per control block (about 5 ms), and a
-        // line from the block's start (gain) to its end (gainTo) across it, sample by sample (gStep a sample; pos the
-        // voice's place in the block), so no sample's level depends on the last one's and any block size gives the
-        // same bits.
-        float gain[kStops] = {}, gainTo[kStops] = {}, gStep[kStops] = {};
-        uint32_t pos = 0;
+        // Its level (the stop, its wander, the wind): eased toward the knob (about 5 ms), on its line.
+        float gain[kStops] = {}, gStep[kStops] = {};
+        float envAt(int k) const noexcept { return env[k] + envStep[k] * static_cast<float>(clock - lineAt[k]); }
+        float gainAt(int k) const noexcept { return gain[k] + gStep[k] * static_cast<float>(clock - lineAt[k]); }
+        float spokeAt(int k) const noexcept { return spoke[k] + spokeStep[k] * static_cast<float>(clock - lineAt[k]); }
         float tuning[kStops] = {};   // its fixed tuning error (cents)
         float strikeRise[kStops] = {};  // this strike's own speed of speech (a factor near 1)
         float settle[kStops] = {}, settleK[kStops] = {};  // its speech's pitch error (cents) and its decay a block
@@ -188,6 +191,7 @@ struct Organ {
     int tierBands = 2, maxPlayers = 2;
     float body = 0;  // Body as -1 (narrow scale, brighter) .. 1 (wide, rounder), 0 at Body 0.5: as measured
     float blockK = 0.12f;   // a pipe's level eased over about 5 ms, two control blocks at a time (prepare())
+    float noiseGain = 0;    // the breath against the pipes' tone (prepare(), from kNoiseDb)
     std::shared_ptr<const recorded::Bank> bank;
     Voice* voices = nullptr;
     uint32_t count = 0;
@@ -203,6 +207,7 @@ struct Organ {
         sr = rate;
         voices = v, count = n;
         gainK = static_cast<float>(1.0 - detExp(-1.0 / (0.005 * sr)));
+        noiseGain = static_cast<float>(kOut * detPow(10.0, noiseDb() / 20.0));
         blockK = static_cast<float>(1.0 - detExp(-2.0 * kControlFrames / (0.005 * sr)));  // over two blocks
         buildTables();
         if (!bank) bank = recorded::acquire(recorded::BankId::Bittern);
@@ -306,7 +311,7 @@ struct Organ {
     // no reed was recorded).
     void open(Voice& v, int k) noexcept {
         v.on[k] = true;
-        if (v.env[k] < 0.05f) v.spoke[k] = v.spokeTo[k] = v.spokeStep[k] = 0;
+        if (v.envAt(k) < 0.05f) v.spoke[k] = v.spokeStep[k] = 0;
         v.strikeRise[k] = 1.0f + 0.2f * v.rng.next();
         v.strikeLevel[k] = 0.035f * v.rng.next();
         setRise(v, k);
@@ -315,7 +320,7 @@ struct Organ {
             v.settle[k] = -(12.5f + 2.5f * v.rng.next()) * (1.0f - v.env[k]);
             v.puff += static_cast<float>(level[k] * v.rms[k] * kOut * 0.06 * chiffAmt / 0.5) * (1.0f - v.env[k]);
         }
-        v.gain[k] = v.gainTo[k] = level[k], v.gStep[k] = 0;
+        v.gain[k] = level[k], v.gStep[k] = 0;
     }
     void start(Voice& v, const Shared& s) noexcept {
         v.rng.s = 0xB177E2Du + 977u * v.key + 7919u * notes;
@@ -340,15 +345,17 @@ struct Organ {
             v.tuning[k] = (k == kCeleste8 ? 6.0f : 0.0f) + 5.6f * narrow * (pipe.next() + pipe.next());
             v.strikeRise[k] = 1.0f, v.strikeLevel[k] = 0;
             if (was) {
-                v.phase[k] = was->phase[k], v.env[k] = v.envTo[k] = was->envTo[k], v.spoke[k] = v.spokeTo[k] = was->spokeTo[k];
-                v.gain[k] = v.gainTo[k] = was->gainTo[k], v.wPitch[k] = was->wPitch[k], v.wLevel[k] = was->wLevel[k];
+                v.phase[k] = was->phase[k], v.env[k] = was->envAt(k), v.spoke[k] = was->spokeAt(k);
+                v.gain[k] = was->gainAt(k), v.wPitch[k] = was->wPitch[k], v.wLevel[k] = was->wLevel[k];
             } else {
                 v.phase[k] = static_cast<uint32_t>((0.5 + 0.5 * v.rng.next()) * 4294967295.0);
-                v.env[k] = v.envTo[k] = v.spoke[k] = v.spokeTo[k] = 0;
-                v.gain[k] = v.gainTo[k] = level[k];
+                v.env[k] = v.spoke[k] = 0;
+                v.gain[k] = level[k];
                 v.wPitch[k] = v.rng.next(), v.wLevel[k] = v.rng.next();
             }
             v.wPitchTo[k] = v.wPitch[k], v.wLevelTo[k] = v.wLevel[k];
+            v.envStep[k] = v.spokeStep[k] = v.gStep[k] = 0, v.lineAt[k] = 0;
+            v.drawOf[k] = v.toneOf[k] = 0;
             v.on[k] = false;
             v.settle[k] = 0;
         }
@@ -382,19 +389,13 @@ struct Organ {
         if (!was) v.bodyLp = 0;
         else v.bodyLp = was->bodyLp;
         v.speech = 1;
-        v.tick = 0;
+        v.tick = 0, v.clock = 0;
         // The frame fades the old voice out over 5 ms (a step of 1 / max(1, 0.005 sr) a sample); this one comes in by
         // the same steps, so the two (the same pipes in the same phase) always sum to one.
         v.inFade = was ? 0.0f : 1.0f;
         v.inStep = static_cast<float>(1.0 / std::max(1.0, 0.005 * sr));
         startSpeech(v, was ? was->env : nullptr);
         voiceControl(v, s);
-        // Started between two control points: the levels hold until the next one, from this sample of the block.
-        v.pos = static_cast<uint32_t>(s.clock % kControlFrames);
-        for (int k = 0; k < kStops; ++k) {
-            v.gain[k] = v.gainTo[k], v.gStep[k] = 0, v.envTo[k] = v.env[k], v.envStep[k] = 0;
-            v.spokeTo[k] = v.spoke[k], v.spokeStep[k] = 0;
-        }
     }
     // The recorded speech: for each flue stop drawn, its family's recording nearest the key (within 2 semitones; the
     // clip is played at the ratio to the key), at the stop's level, summed where stops share a clip (so a note plays
@@ -456,7 +457,7 @@ struct Organ {
         for (int k = 0; k < kStops; ++k) {
             v.on[k] = false;
             if (kFamilyOf[k] == kReed) continue;
-            const float a = v.env[k] * v.env[k] * v.gainTo[k] * v.rms[k];
+            const float e = v.envAt(k), a = e * e * v.gainAt(k) * v.rms[k];
             tone += a * a;
         }
         v.puff += static_cast<float>(std::sqrt(tone) * kOut * 0.04 * chiffAmt / 0.5);
@@ -484,59 +485,59 @@ struct Organ {
         const float follow = static_cast<float>(std::min(1.0, 4.0 * kControlFrames / sr));
         const float jump = static_cast<float>(1.0 - 4.0 * kControlFrames / sr);
         const uint32_t parity = v.tick++ & 1u;
+        constexpr float kLine = 1.0f / (2 * kControlFrames);  // a line runs two blocks
         float tone = 0;
-        v.pos = 0;
         const float bk = blockK;
         for (int k = 0; k < kStops; ++k) {
-            const float carry = v.gStep[k];  // the level's line carries on over a block its pipe is not worked out in
-            v.gain[k] = v.gainTo[k], v.gStep[k] = 0;
-            v.env[k] = v.envTo[k], v.envStep[k] = 0;
             const bool want = v.held && level[k] > 0.0f;
-            bool now = all || ((static_cast<uint32_t>(k) & 1u) == parity);
-            if (want && !v.on[k]) open(v, k), now = true;
-            if (!want) v.on[k] = false;
-            if (!v.on[k] && v.env[k] < 1e-5f) {
-                v.env[k] = v.envTo[k] = 0;
+            const bool due = all || ((static_cast<uint32_t>(k) & 1u) == parity) || want != v.on[k];
+            if (!due) {
+                drawNext += v.drawOf[k];
+                tone += v.toneOf[k];
                 continue;
             }
-            // Up, the pipe at its full level (0.05 % from it).
-            if (v.on[k] && v.env[k] > 0.9995f) v.env[k] = 1.0f;
-            const float target = v.on[k] ? 1.0f : 0.0f;
-            v.envTo[k] = target + (v.env[k] - target) * (v.on[k] ? v.rise[k] : v.relD);
-            v.envStep[k] = (v.envTo[k] - v.env[k]) * (1.0f / kControlFrames);
+            // Where its lines are now; then new ones for the next two blocks.
+            float env = v.envAt(k), gain = v.gainAt(k), spoke = v.spokeAt(k);
+            v.lineAt[k] = v.clock;
+            if (want && !v.on[k]) open(v, k), gain = v.gain[k], spoke = v.spoke[k];
+            if (!want) v.on[k] = false;
+            if (!v.on[k] && env < 1e-5f) {
+                v.env[k] = v.envStep[k] = v.drawOf[k] = v.toneOf[k] = 0;
+                v.gain[k] = gain, v.gStep[k] = 0, v.spoke[k] = spoke, v.spokeStep[k] = 0;
+                continue;
+            }
+            if (v.on[k] && env > 0.9995f) env = 1.0f;  // up: the pipe at its full level (0.05 % from it)
+            const float target = v.on[k] ? 1.0f : 0.0f, d = v.on[k] ? v.rise[k] : v.relD;
+            const float envEnd = target + (env - target) * (d * d);
+            v.env[k] = env, v.envStep[k] = (envEnd - env) * kLine;
             // Spoken (the tier's speakEnd of its level reached), the steady table alone.
-            v.spoke[k] = v.spokeTo[k];
-            v.spokeTo[k] = std::max(v.spoke[k], std::min(1.0f, v.envTo[k] / speakEnd));
-            if (v.spokeTo[k] > 0.999f) v.spokeTo[k] = 1.0f;
-            v.spokeStep[k] = (v.spokeTo[k] - v.spoke[k]) * (1.0f / kControlFrames);
-            if (now) {
-                const float u = v.rng.next();  // one draw: a new pitch target at one end, a new level one at the other
-                if (u > jump) v.wPitchTo[k] = v.rng.next();
-                else if (u < -jump) v.wLevelTo[k] = v.rng.next();
-                v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
-                v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
-                v.settle[k] *= v.settleK[k] * v.settleK[k];
-                const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
-                v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod);
-            }
-            // A stop retired holds its gain (its pipe releases); a stop drawn or moving takes its new level.
-            if (level[k] > 0.0f && !now) {
-                v.gStep[k] = carry, v.gainTo[k] = v.gain[k] + carry * kControlFrames;
-            } else if (level[k] > 0.0f) {
+            float spokeEnd = std::max(spoke, std::min(1.0f, envEnd / speakEnd));
+            if (spokeEnd > 0.999f) spokeEnd = 1.0f;
+            if (spoke > 0.999f) spoke = 1.0f;
+            v.spoke[k] = spoke, v.spokeStep[k] = (spokeEnd - spoke) * kLine;
+            const float u = v.rng.next();  // one draw: a new pitch target at one end, a new level one at the other
+            if (u > jump) v.wPitchTo[k] = v.rng.next();
+            else if (u < -jump) v.wLevelTo[k] = v.rng.next();
+            v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
+            v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
+            v.settle[k] *= v.settleK[k] * v.settleK[k];
+            const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
+            v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod);
+            // A stop retired holds its gain (its pipe releases); a stop drawn or moving eases to its new level.
+            v.gain[k] = gain, v.gStep[k] = 0;
+            if (level[k] > 0.0f) {
                 const float to = level[k] * levelMod * (1.0f + 0.345f * wd * v.wLevel[k]) * (1.0f + v.strikeLevel[k]);
-                // Eased over the two blocks to its next working-out, a line across both.
-                const float goal = v.gain[k] + (to - v.gain[k]) * bk;
-                v.gStep[k] = (goal - v.gain[k]) * (1.0f / (2 * kControlFrames));
-                v.gainTo[k] = v.gain[k] + v.gStep[k] * kControlFrames;
+                v.gStep[k] = (to - gain) * bk * kLine;
             }
-            const float e2 = v.env[k] * v.env[k] * v.gainTo[k];
-            drawNext += e2 * kDraw[k];
+            const float e2 = env * env * gain;
             const float a = e2 * v.rms[k];
-            tone += a * a;
+            v.drawOf[k] = e2 * kDraw[k], v.toneOf[k] = a * a;
+            drawNext += v.drawOf[k];
+            tone += v.toneOf[k];
         }
         // The steady wind noise: [Measured] the flue registrations' residual, kNoiseDb under their tone, at Living
         // wind 0.3 (it grows as the square root of the knob: +5 dB at 1, none at 0).
-        v.nGainTo = static_cast<float>(std::sqrt(tone * scale) * kOut * detPow(10.0, noiseDb() / 20.0));
+        v.nGainTo = static_cast<float>(std::sqrt(tone * scale)) * noiseGain;
         for (int b = 0; b < kBreathBands; ++b) v.nLp[b] = timber::flushf(v.nLp[b]), v.nBp[b] = timber::flushf(v.nBp[b]);
         v.bodyLp = timber::flushf(v.bodyLp);
         v.puff = timber::flushf(v.puff);
