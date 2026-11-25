@@ -1,14 +1,12 @@
 # Handoff
 
-Commit: 86a660e (alpha.2 shipped as #266; sound fixes cherry-picked onto this branch, tests pass)
+Commit: 4f14faf (merged here: sound fixes, Timber removal, instrument pages; Unison per key)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
 Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber removal, guitar/harp, Bittern, Rook; then 1.1.4+.
 
 ## Done and verified (each an agent branch; commit 81b1cab has every tip as a parent, so all are on GitHub)
-- Pages: instrument-pages 00f0ec9 (five instrument pages; goldens sent to the owner).
-- Timber removed: timber-removal 2be8f21 (mapping in timber_migrate.cpp; files moved to instrument_core.h etc.).
 - Guitar + harp: worktree-agent-a7fa15840664e0054 df0139b (based on 1061175).
 - Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc d78ecb5 (agent now cutting cost to 24000 and fixing dead knobs).
 - Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
@@ -26,6 +24,8 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
   Strings: no low end or body (8 narrow bands): build a full measured body (convolution or many bands) per instrument.
   Woodpecker needs more settings: strike position, mallet type, bar material/ratios, resonator tuning, rolls,
   dead strokes, timpani pedal glide, stereo layout (each audible, in the knob test).
+  Curlew: mono legato by default (a new note while held slurs: no re-attack; a gap re-tongues; Poly option), and
+  most of the wind family (piccolo, alto flute, recorder, oboe, cor anglais, bassoon, bass clarinet, saxes, tuba...).
 0. All agents were STOPPED by the owner (usage). Their tips are parents of b35881e (pushed). Resume work
    yourself, one piece at a time, pushing after each step; don't spawn many agents at once.
    Performance goal (owner): close the gap between the 1% high (p99) CPU and the mean, keeping the mean low
