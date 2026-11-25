@@ -427,6 +427,7 @@ TEST(instrument_noises_sound_only_at_their_moment) {
     }
     // Woodpecker: the recorded stroke at the hit, and nothing of it before.
     for (int var = 0; var < 6; ++var) {
+        if (var == 2) continue;  // the glockenspiel has no Attack (its stroke is the bar's own modes)
         static constexpr double kKey[6] = {60, 72, 84, 65, 64, 48};
         Take t;
         t.notes = {{0.2, 1.4, kKey[var], 0.7}, {0.9, 1.4, kKey[var], 0.7}};
