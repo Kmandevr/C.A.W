@@ -32,6 +32,8 @@ Fixed on this branch: version.dart appBuild 18; rules done.md; decisions 2026-11
    yourself, one piece at a time, pushing after each step; don't spawn many agents at once.
    Performance goal (owner): close the gap between the 1% high (p99) CPU and the mean, keeping the mean low
    (spikes cause drops); no frame-rate work. 1.1.2 didn't drop: find what 1.1.3 changed.
+   Check first: RecordedBanks decoding/allocating when unused or while playing (prepare() mutex), body filters
+   running per silent voice, shared code the 1.1.3 PRs touched; diff the S22+ rows vs 1.1.2 on one bench build.
 1. Merge the P0 branch, full flutter test, PR, release 1.1.3-alpha.2 (app.yml dispatch on Main, release=true).
 2. Merge in order: timber-removal, sound fixes, instrument-pages, guitar/harp, Bittern, Rook, gate test; resolve
    conflicts (stress hash/refs, changelogs, CMakeLists, device_names); a branch already a parent of 81b1cab merges
