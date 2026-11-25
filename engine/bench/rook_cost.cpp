@@ -211,7 +211,7 @@ int rookCost(double seconds) {
         {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 13000, 9600},  // 2.4 % of a phone core
         {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 7500, 0},
         {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 28500, 24000},
-        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 15000, 8000},
+        {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 16600, 8000},
         {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 44500, 0},
         {"Acoustic kit: typical groove with its room (Normal)", &rock, &groove, kQualityNormal, 20500, 0},
         {"Acoustic kit: typical groove with its room (Eco)", &rock, &groove, kQualityEco, 13500, 0},

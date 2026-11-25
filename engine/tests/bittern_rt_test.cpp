@@ -18,7 +18,7 @@ TEST(bittern_never_allocates_on_the_audio_thread) {
         l.id = "s";
         l.hasInstrument = true;
         l.instrument.id = "org.caw.bittern";
-        l.instrument.params = {{"mixture", 0.6}, {"trumpet8", 0.5}, {"celeste8", 0.5}, {"tremulant", 0.4}, {"subbass32", static_cast<double>(tier - 1) * 0.5}};
+        l.instrument.params = {{"mixture", 0.6}, {"trumpet8", 0.5}, {"gamba8", 0.5}, {"erzahler8", 0.5}, {"tuba8", 0.4}, {"tremulant", 0.4}, {"subbass32", static_cast<double>(tier - 1) * 0.5}};
         p.layers.push_back(l);
         Engine e(48000);
         const std::string set = e.setProject(p);
