@@ -403,8 +403,17 @@ struct Piano {
         v.strings = n;
         static constexpr double kSpreadCents[3][3] = {{0, 0, 0}, {-0.5, 0.5, 0}, {-0.6, 0.15, 0.55}};
         const double spread = key < 34 ? 1.0 : unison;  // a single string's polarisations: a fixed split
+        // An out-of-tune piano (owner, 2026-11-25: Unison "just makes it sound weird"): every key has drifted its own
+        // way, so the detune pattern and a small whole-note offset are fixed per key (hashed, the same every strike)
+        // rather than one pattern on every key, which only sounded like a chorus. At Unison 1 (a tuned grand) the
+        // offsets are tiny; at 6 a key's strings sit up to about ±9 cents apart and the note up to ±4 cents off.
+        uint32_t h = static_cast<uint32_t>(key) * 2654435761u;
+        auto rnd = [&h]() noexcept { h ^= h << 13; h ^= h >> 17; h ^= h << 5; return static_cast<double>(h & 0xFFFF) / 65535.0; };
+        const double drift = std::max(0.0, unison - 1.0) / 5.0;  // 0 at a tuned grand, 1 at the most worn
+        const double noteOff = drift * 4.0 * (2.0 * rnd() - 1.0);
         for (int s = 0; s < n; ++s) {
-            const double hz = noteHz(pitch + (cents + spread * kSpreadCents[n - 1][s]) / 100.0) * std::sqrt(1.0 + B);
+            const double own = 1.0 + drift * 1.5 * (2.0 * rnd() - 1.0);  // this string's share of the spread, per key
+            const double hz = noteHz(pitch + (cents + noteOff + spread * own * kSpreadCents[n - 1][s] * (1.0 + drift * 1.5)) / 100.0) * std::sqrt(1.0 + B);
             const double w = kTwoPi * hz / sr;
             const double fixed = v.disp * allpassDelay(v.a, w) + onePoleDelay(p, w);
             v.rest[s] = std::max(2.5, sr / hz - fixed);
