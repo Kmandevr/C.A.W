@@ -47,6 +47,9 @@ class RecordingEngine implements Engine {
   Future<List<NativeComponentInfo>> nativeComponents() async => _catalog;
 
   @override
+  Map<int, ({String state, int version})> componentStates(String? layerId) => const {};
+
+  @override
   List<String> lastProjectWarnings = const [];
 
   @override
@@ -97,6 +100,9 @@ enum Kind { knob, slider, choice, mode, toggle, power, xy }
   if ((m = RegExp(r'^dslider-(.+)$').firstMatch(k)) != null) return (kind: Kind.slider, param: m!.group(1)!, choice: null, param2: null);
   if ((m = RegExp(r'^dchoice-(.+)-(\d+)$').firstMatch(k)) != null) {
     return (kind: Kind.choice, param: m!.group(1)!, choice: int.parse(m.group(2)!), param2: null);
+  }
+  if ((m = RegExp(r'^chip-(.+)-(\d+)$').firstMatch(k)) != null) {
+    return (kind: Kind.mode, param: m!.group(1)!, choice: int.parse(m.group(2)!), param2: null);
   }
   if ((m = RegExp(r'^mode-(.+)-(\d+)$').firstMatch(k)) != null) {
     return (kind: Kind.mode, param: m!.group(1)!, choice: int.parse(m.group(2)!), param2: null);
@@ -441,6 +447,7 @@ Future<void> main() async {
             await visual(e, id);
           }
           for (final (key, c) in candidates) {
+            if (find.byKey(key).evaluate().isEmpty) continue;  // a visual's drag rebuilt the page without it
             final f = find.byKey(key).first;
             if (f.hitTestable().evaluate().isEmpty) continue;
             done.add('$key');
