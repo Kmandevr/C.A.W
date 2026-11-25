@@ -106,6 +106,8 @@ struct Piano {
         bool gated = false;         // this voice's output is still crossing from the recording into the model
         uint32_t gateHold = 0;      // frames of the model held silent (the recording alone)
         float gateT = 0, gateStep = 0;  // the crossfade's progress 0..1 and its step per frame
+        float hardK = 0, hardLpK = 0, hardY = 0;  // a hard hammer's shelf on the force (Starling's voicing; 0: none)
+        bool damperNoiseDue = false;  // Starling: released under the pedal, its damper lands (and sounds) when the pedal lifts
     };
 
     // Shared by every voice of the instance (read at control points).
@@ -130,6 +132,7 @@ struct Piano {
     double noise = 0.35, touch = 0, glide = 0.5, sympathy = 0.5, phantomLevel = 0.5;
     bool action = false;
     float dispA[3][89] = {};  // the fitted dispersion coefficient per tier and key (A0..C8), at this rate
+    float dispU[3][89] = {};  // Starling: the same for the upright's strings (uprightStrings)
     psim::Board board;
     psim::ModeBank<kRes, false> res;
     psim::Resonator keyFrame, trapwork, damperRail;
@@ -158,6 +161,21 @@ struct Piano {
     bool recordedPedal = false;      // the pedal's noise is recorded: report pedal moves instead of simulating them
     float buzzSound = 1.0f;          // the dampers' buzz into the board (0: its sound is recorded; it still damps the string)
     int pedalEvent = 0;              // 1 down, 2 up: the last pedal move, for the recorded noise (read and cleared)
+    // Starling's voicing (1.1.3, 2026-11-25: its hammer, soft pedal, resonance and sympathy were too small to hear).
+    bool voicing = false;    // hammer and the soft pedal filter the strike's force; a key pressed silently is a played velocity of 0..3
+    double resGain = 1.0;    // the register bank's drive (pedal down) and its sympathetic share without the pedal
+    double resHeld = 0.0;    // the bank's drive with the pedal up, from the undamped strings of the held keys
+    double heldGain = 1.0;   // a silently held key's share of the bridge sum
+    bool phantomNormal = false;  // phantom partials at Normal too (Timber: High only)
+    int heldKeys = 0;        // keys held (struck) at the last control point
+    // Starling's Upright and Felt (an upright with a felt rail): their own strings and dampers. [Assumption] typical
+    // magnitudes, not measured: an upright's bass strings are shorter, so stiffer for their pitch (B up to 2.2 x the
+    // grand's at A0, the same from C5 up; Conklin, JASA 100(2), 1996 describes the trend, not these numbers), and
+    // its dampers, pressing from the front of the strings, take longer to stop them (1.6 x the release).
+    bool uprightStrings = false;
+    double uprightDamper = 1.0;
+    static double uprightB(double key) noexcept { return 1.0 + 1.2 * clampd((72.0 - key) / 51.0, 0.0, 1.0); }
+    bool strungUpright() const noexcept { return uprightStrings && character != 0; }
 
     static uint32_t lineSize(double sr, double lowestHz) noexcept { return pow2At(static_cast<uint32_t>(sr / lowestHz) + 64); }
     // Floats per voice and for the bank at `sr` (the lowest string of each slot: A0, A#0..A2, A#2 up; C2 for the bank).
@@ -333,7 +351,8 @@ struct Piano {
     void dampedLoss(Voice& v, double release) const noexcept {
         const double pitch = clampd(v.pitch, 21.0, 120.0);
         const double f0 = noteHz(pitch);
-        const double g = detPow(10.0, -3.0 / (clampd(release, 0.02, 10.0) * f0));
+        const double slow = v.sim && strungUpright() ? uprightDamper : 1.0;
+        const double g = detPow(10.0, -3.0 / (clampd(release * slow, 0.02, 10.0) * f0));
         const double p = std::max<double>(v.pUndamped, 0.5);
         v.pDamped = static_cast<float>(p);
         v.bDamped = static_cast<float>(std::min(0.999 * (1.0 - p), g / onePoleMag(p, kTwoPi * f0 / sr)));
@@ -553,6 +572,10 @@ struct Piano {
             for (int k = 0; k <= 88; ++k) {
                 const double key = 21.0 + k, B = piano_curves::inharmonicity(key);
                 dispA[t][k] = psim::fitDispersion(noteHz(key) * std::sqrt(1.0 + B), B, simStages(key, t), sr);
+                if (uprightStrings) {
+                    const double Bu = B * uprightB(key);
+                    dispU[t][k] = psim::fitDispersion(noteHz(key) * std::sqrt(1.0 + Bu), Bu, simStages(key, t), sr);
+                }
             }
         static constexpr double kFrameHz[8] = {180, 310, 470, 690, 980, 1450, 2100, 3200};
         static constexpr double kFrameT[8] = {0.09, 0.07, 0.06, 0.05, 0.04, 0.035, 0.03, 0.025};
@@ -607,9 +630,17 @@ struct Piano {
         board.design(sr, tier == kQualityEco ? 0 : (tier == kQualityHigh ? 2 : 1), character);
         if (stretch != resStretch) tuneRes();
         res.groups = tier == kQualityEco ? kRes / 8 : kRes / 4;  // Eco: the lower 12
+        // Starling: the pedal up and no key held, the dampers are on every string the bank stands for: it stops in
+        // about 0.2 s (as the strings' own dampers do) instead of ringing its seconds out.
+        if (voicing && pedal < 0.1 && heldKeys == 0 && resEnergy > 0) {
+            const float d = static_cast<float>(detExp(-6.907755278982137 * kControlFrames / (0.2 * sr)));
+            for (int k = 0; k < kRes; ++k) res.zr[k] *= d, res.zi[k] *= d;
+        }
         // On the control grid only (so any block size gives the same bits): the bank runs while the pedal feeds it
         // or it still rings.
-        resRun = (pedal > 0 && resonance > 0) || resEnergy > 1e-14f;
+        heldKeys = 0;
+        for (uint32_t k = 0; k < voiceCount; ++k) heldKeys += voices[k].active && voices[k].held ? 1 : 0;
+        resRun = ((pedal > 0 || (resHeld > 0 && heldKeys > 0)) && resonance > 0) || resEnergy > 1e-14f;
         // The pedal's own noise (output only: it never reaches the resonance or the strings).
         const bool down = pedalDown ? pedal > 0.25 : pedal > 0.35;
         if (down != pedalDown) {
@@ -648,7 +679,8 @@ struct Piano {
     void tuneSim(Voice& v) noexcept {
         const double pitch = clampd(v.pitch, 21.0, 120.0), key = std::min(pitch, 108.0);
         const double cents = stretchCents(pitch);
-        const double B = piano_curves::inharmonicity(key);
+        const bool upright = strungUpright();
+        const double B = piano_curves::inharmonicity(key) * (upright ? uprightB(key) : 1.0);
         const double f0 = noteHz(pitch + cents / 100.0) * std::sqrt(1.0 + B);
         const double T = psim::simT60(key) * decay;
         const double Th = T * (0.12 + 0.25 * clampd((key - 21) / 87.0, 0, 1));
@@ -665,7 +697,8 @@ struct Piano {
         const double kf = clampd(key - 21.0, 0, 88);
         const int k0 = static_cast<int>(kf);
         const int k1 = std::min(k0 + 1, 88);
-        v.a = dispA[t][k0] + (dispA[t][k1] - dispA[t][k0]) * static_cast<float>(kf - k0);
+        const float (*disp)[89] = upright ? dispU : dispA;
+        v.a = disp[t][k0] + (disp[t][k1] - disp[t][k0]) * static_cast<float>(kf - k0);
         // At least two lanes (the SIMD lanes run either way): a single bass string's two polarisations, slightly
         // apart, give its two-stage decay as a unison pair does.
         int n = key < 46 ? 2 : 3;
@@ -724,14 +757,17 @@ struct Piano {
         const double vel = v.velocity, key = clampd(v.pitch, 21, 108);
         // The hammer: its speed from the velocity (0.5..6 m/s), the force pulses of the two nearest zones and
         // speeds; `hammer` (voicing) and the soft pedal move the pulse's shape along the speeds, not its force.
-        const bool silent = vel < 0.03;  // a key pressed too slowly to throw the hammer: its strings only listen
+        // A key pressed too slowly to throw the hammer: its strings only listen. Starling: the played velocity (before the
+        // Velocity knob's scaling) under 0.03, MIDI 1..3, as a key pressed down silently on a keyboard.
+        const bool silent = vel < 0.03 || (voicing && s.velocity > 0.05 && 0.75 + (vel - 0.75) / s.velocity < 0.03);
         const double speed = 0.5 * detPow(12.0, vel);
         double lp = 0;
         for (int i = 0; i + 1 < piano_curves::kLayers; ++i)
             if (speed > piano_curves::kLayerSpeed[i])
                 lp = i + std::min(1.0, detLog(speed / piano_curves::kLayerSpeed[i]) /
                                            detLog(piano_curves::kLayerSpeed[i + 1] / piano_curves::kLayerSpeed[i]));
-        const double shape = clampd(lp + (hammer - 0.5) * 1.5 - 0.8 * soft - (character == 2 ? 0.6 : 0.0), 0, piano_curves::kLayers - 1.0);
+        const double shape = clampd(lp + (hammer - 0.5) * (voicing ? 2.5 : 1.5) - (voicing ? 1.4 : 0.8) * soft - (character == 2 ? 0.6 : 0.0) + (voicing && character == 1 ? 0.4 : 0.0), 0,
+                                    piano_curves::kLayers - 1.0);
         const double zp = (key - 21.0) / 87.0 * (piano_curves::kZones - 1);
         const int z0 = std::min(static_cast<int>(zp), piano_curves::kZones - 2), l0 = std::min(static_cast<int>(shape), piano_curves::kLayers - 2);
         const int f0l = std::min(static_cast<int>(lp), piano_curves::kLayers - 2);
@@ -758,6 +794,21 @@ struct Piano {
         v.tap = static_cast<float>(strikePoint(key) / f1 * piano_curves::kPulseRate);
         v.felt = character == 2 ? static_cast<float>(1.0 - detExp(-kTwoPi * 1500.0 / sr)) : 1.0f;
         v.feltY = 0;
+        v.hardK = 0, v.hardLpK = 0, v.hardY = 0;
+        if (voicing) {
+            // The hammer's felt: softer than the middle, a low-pass on the force from 21 kHz (0.5) down to 600 Hz (0);
+            // harder, a shelf over 1 kHz up to +10 dB (1). The soft pedal moves the strike toward the softer felt.
+            const double h = clampd(hammer - 0.4 * soft, 0, 1);
+            // The Felt's rail: its felt between hammer and string, 700 Hz (in series with the hammer's own).
+            double fc = h < 0.5 ? 600.0 * detPow(35.0, 2.0 * h) : 0.0;
+            if (character == 2) fc = fc > 0 ? 1.0 / (1.0 / fc + 1.0 / 700.0) : 700.0;
+            if (fc > 0) v.felt = static_cast<float>(1.0 - detExp(-kTwoPi * std::min(fc, 0.45 * sr) / sr));
+            if (h > 0.5) {
+                v.hardK = static_cast<float>(4.4 * (h - 0.5));
+                v.hardLpK = static_cast<float>(1.0 - detExp(-kTwoPi * 1000.0 / sr));
+            }
+            v.pgain *= static_cast<float>(1.0 - 0.3 * soft);  // una corda: two strings struck of three, about 3 dB down
+        }
         // The action: off, the hammer meets the strings at note-on; on, 2-30 ms later by velocity, as a real one.
         v.wait = action ? static_cast<uint32_t>((0.002 + 0.028 * (1.0 - vel) * (1.0 - vel)) * sr) : 0u;
         v.strikeFrame = silent ? -1.0 : static_cast<double>(v.wait);
@@ -784,9 +835,9 @@ struct Piano {
         // Struck strings drive the bridge; strings held down without a strike listen to it. So no string both drives
         // and listens across voices, and the coupling cannot feed back on itself (a delayed loop between voices
         // would not be passive).
-        v.sympC = silent ? static_cast<float>(sympathy * kHeldGain) : 0.0f;
+        v.sympC = silent ? static_cast<float>(sympathy * kHeldGain * heldGain) : 0.0f;
         v.phantomGain = 0;
-        if (tier == kQualityHigh && phantomLevel > 0) {
+        if ((tier == kQualityHigh || (phantomNormal && tier == kQualityNormal)) && phantomLevel > 0) {
             const double fl2 = psim::longitudinalHz(key);
             v.phantom[0].set(fl2, 0.6, sr), v.phantom[0].clear();
             v.phantom[1].set(std::min(2.0 * fl2, 0.45 * sr), 0.4, sr), v.phantom[1].clear();

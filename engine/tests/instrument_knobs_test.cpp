@@ -24,15 +24,18 @@ constexpr double kSr = 48000;
 // One held note (phrase 4) adds the pitch's wobble: its deviation (cents RMS) and rate (Hz, from its zero
 // crossings), from the fundamental's peak in 40 ms windows every 20 ms over 0.4..1.4 s.
 struct Features {
-    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0;
+    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0, flutter = 0, strike = 0, sbright = 0, sub = 0;
 };
-constexpr int kFeatures = 10;
-constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate"};
+constexpr int kFeatures = 14;
+constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate", "flutter", "strike", "sbright", "sub"};
 // What counts as heard: about 1 dB of a level, 5 cents, 2 ms of onset, 0.5 dB of envelope fluctuation, 3 cents of
-// wobble, 1 Hz of its rate.
-constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5, 3.0, 1.0};
+// wobble, 1 Hz of its rate, 5 % of flutter (the envelope's strongest modulation at 18..40 Hz, a growl's or a flutter-
+// tongue's, as a share of its mean). strike: the level over 0..15 ms and sbright the brightness over 0..30 ms (a
+// mallet's or hammer's stroke, over in a few ms), 1 dB each. sub (held note): the strongest component under the
+// fundamental (0.4..0.6 of it, a growl's hummed pitch and its sidebands) against the fundamental, 3 dB.
+constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5, 3.0, 1.0, 5.0, 1.0, 1.0, 3.0};
 double featureAt(const Features& f, int k) {
-    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod, f.wobble, f.rate};
+    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod, f.wobble, f.rate, f.flutter, f.strike, f.sbright, f.sub};
     return v[k];
 }
 
@@ -51,6 +54,8 @@ Features measure(const std::vector<float>& m, double lowest, bool held = false) 
     for (size_t i = 1; i < m.size(); ++i) d[i] = m[i] - m[i - 1];
     f.bright = rmsOf(d, 0, s08) - f.lvl;
     f.early = rmsOf(m, 0, static_cast<size_t>(0.1 * kSr));
+    f.strike = rmsOf(m, 0, static_cast<size_t>(0.015 * kSr));
+    f.sbright = rmsOf(d, 0, static_cast<size_t>(0.03 * kSr)) - rmsOf(m, 0, static_cast<size_t>(0.03 * kSr));
     f.late = rmsOf(m, static_cast<size_t>(0.6 * kSr), s08);
     f.tail = std::max(-120.0, rmsOf(m, static_cast<size_t>(0.9 * kSr), static_cast<size_t>(1.5 * kSr)));
     const double ref = 440.0 * std::pow(2.0, (lowest - 69) / 12.0);
@@ -90,6 +95,27 @@ Features measure(const std::vector<float>& m, double lowest, bool held = false) 
         }
         f.wobble = std::sqrt(e / static_cast<double>(c.size()));
         f.rate = f.wobble > 1.0 ? 0.5 * crossings / 1.0 : 0.0;
+        const size_t w = static_cast<size_t>(0.002 * kSr);
+        std::vector<double> env;
+        for (size_t i = static_cast<size_t>(0.4 * kSr); i + w <= static_cast<size_t>(1.4 * kSr); i += w)
+            env.push_back(std::sqrt(std::pow(10.0, rmsOf(m, i, i + w) / 10.0)));
+        double em = 0;
+        for (double x : env) em += x;
+        em /= static_cast<double>(env.size());
+        double best = 0;
+        for (double hz = 18; hz <= 40; hz += 0.5) {
+            double re = 0, im = 0;
+            for (size_t i = 0; i < env.size(); ++i) {
+                const double ph = 2 * kPi * hz * i * 0.002;
+                re += (env[i] - em) * std::cos(ph), im += (env[i] - em) * std::sin(ph);
+            }
+            best = std::max(best, 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(env.size()));
+        }
+        f.flutter = em > 0 ? 100.0 * best / em : 0.0;
+        const size_t a0 = static_cast<size_t>(0.4 * kSr), na = static_cast<size_t>(kSr);
+        double under = -300;
+        for (double r = 0.4; r <= 0.6; r += 0.005) under = std::max(under, bandDb(m, ref * r, a0, na, kSr));
+        f.sub = under - bandDb(m, peakHz(m, ref, 60, a0, na, kSr), a0, na, kSr);
     }
     return f;
 }
@@ -150,6 +176,11 @@ const Context* contextFor(const std::string& device, const std::string& param) {
 // Knobs a test of ends cannot judge: the variant itself; Quality, a CPU choice meant to sound alike (it only has to
 // change something, checked below); voices is the polyphony cap (checked with the chord: one voice drops three notes).
 bool skipped(const std::string& param) { return param == "variant"; }
+// A knob whose label says it does nothing on this variant ("Release (no dampers)", "Body (none yet)"): printed only.
+bool labelledUnused(const ParameterDescriptor& p) {
+    const std::string n(p.name);
+    return n.find("(no ") != std::string::npos || n.find("(none") != std::string::npos;
+}
 
 struct Device {
     const char* id;
@@ -290,7 +321,7 @@ TEST(instrument_every_knob_is_audible) {
                                         which >= 0 ? " by " : "", which >= 0 ? kFeatureNames[which] : "");
                             if (ctx) std::printf("               (context: %s)\n", ctx->why);
                         }
-                        if (!heard && dev.checked) {
+                        if (!heard && dev.checked && !labelledUnused(pd)) {
                             ++failures;
                             std::printf("not heard: %s %s %s (%s vs %s)\n", dev.name, vname.c_str(), id.c_str(), ends[i].first.c_str(),
                                         ends[j].first.c_str());

@@ -73,7 +73,9 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     t.num("body", "Body", 0.5, 0.0, 1.0).group = "shared";
     t.num("space", "Space", 0.0, 0.0, 1.0).group = "shared";
     t.num("velocity", "Velocity", 0.8, 0.0, 1.0).group = "shared";
-    t.expo("release", "Release", 0.2, 0.005, 10.0, "s").group = "shared";
+    // A bar with no damper (all but the vibraphone and the chimes) rings on after its key whatever Release says: its
+    // label says so (Release is a shared knob, read by its place, so it cannot leave the descriptor).
+    t.expo("release", kDampers[index] ? "Release" : "Release (no dampers)", 0.2, 0.005, 10.0, "s").group = "shared";
     ParameterDescriptor& v = t.num("voices", "Voices", 24.0, 1.0, 32.0);
     v.step = 1.0, v.smoothingFrames = 0, v.group = "shared";
     t.num("level", "Level", 0.0, -48.0, 12.0, "dB").group = "shared";
@@ -84,7 +86,7 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
         switch (kOwn[index][k]) {
             case P::kHardness: t.num("hardness", index == kTimpani ? "Stick" : "Mallet hardness", hardness, 0.0, 1.0).group = "mallets"; break;
             case P::kDecay: t.expo("decay", "Decay", 1.0, 0.25, 4.0, "x").group = "mallets"; break;
-            case P::kAttack: t.num("attack", "Attack level", 1.0, 0.0, 1.0).group = "mallets"; break;
+            case P::kAttack: t.num("attack", "Attack level", 1.0, 0.0, 2.0).group = "mallets"; break;  // 1 as recorded, 2 the stroke doubled
             case P::kTier: {
                 ParameterDescriptor& tier = t.pick("tier", "Quality", 0.0, kTiers);
                 tier.group = "mallets", tier.automatable = false, tier.modulatable = false;

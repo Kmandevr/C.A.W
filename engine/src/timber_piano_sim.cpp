@@ -42,7 +42,12 @@ void Piano::renderSimFrames(Voice& v, float* out, uint32_t n, uint32_t at) noexc
         } else if (v.exciting) {
             const float F0 = pulseAt(v, v.ppos), F = F0 - pulseAt(v, v.ppos - v.tap);
             v.feltY += v.felt * (F - v.feltY);
-            x = v.feltY * v.pgain;
+            float y = v.feltY;
+            if (v.hardK != 0.0f) {  // Starling: a hard hammer's shelf over 1 kHz
+                v.hardY += v.hardLpK * (y - v.hardY);
+                y += v.hardK * (y - v.hardY);
+            }
+            x = y * v.pgain;
             busBoard[at + i] += F0 * v.thump * noiseK;
             v.ppos += v.pstep;
             if (v.ppos - v.tap >= piano_curves::kPulseFrames) v.exciting = false;
@@ -141,7 +146,10 @@ void Piano::postSim(float* l, float* r, uint32_t n, const Shared& s) noexcept {
     if (bridgeNeeded)
         for (uint32_t i = 0; i < n; ++i) bridge[static_cast<uint32_t>(simPos + i) & 31u] = busBridge[i];
     // The register bank (pedal down), fed by the strings alone: no noise ever reaches it.
-    const float drive = static_cast<float>(kResDrive * resonance * pedal);
+    // Starling: with the pedal up, the held keys' undamped strings still answer (resHeld, by how many are down, times
+    // Sympathy).
+    const double held = resHeld > 0 ? resHeld * sympathy * std::min(1.0, heldKeys / 4.0) : 0.0;
+    const float drive = static_cast<float>(kResDrive * resGain * resonance * std::max(pedal, held));
     if (resRun) {
         float rin[kControlFrames];
         for (uint32_t i = 0; i < n; ++i) rin[i] = x[i] * drive, resInputEnergy += static_cast<double>(rin[i]) * rin[i];
