@@ -164,8 +164,7 @@ struct Context {
 };
 const Context kContexts[] = {
     {"org.caw.starling", "resonance", {{"sustain", 1.0}}, 0, "the sustain pedal down"},
-    {"org.caw.starling", "sympathy", {}, 3, "silently held keys (MIDI velocity 1-3) under staccato strikes"},
-    {"org.caw.starling", "phantom", {{"tier", 3}}, 0, "Quality High (the only tier with phantom partials)"},
+    {"org.caw.starling", "sympathy", {}, 0, "the chord's keys held (their undamped strings answer)"},
     {"org.caw.starling", "glide", {{"velocity", 1.0}}, 2, "a loud bass note"},
     {"org.caw.starling", "velocity", {}, 1, "soft notes"},
     {"org.caw.nightingale", "velocity", {}, 1, "soft notes"},
@@ -188,11 +187,7 @@ const Context* contextFor(const std::string& device, const std::string& param) {
 // Knobs a test of ends cannot judge: the variant itself; Quality, a CPU choice meant to sound alike (it only has to
 // change something, checked below); voices is the polyphony cap (checked with the chord: one voice drops three notes).
 bool skipped(const std::string& param) { return param == "variant"; }
-// A knob whose label says it does nothing on this variant ("Release (no dampers)", "Body (none yet)"): printed only.
-bool labelledUnused(const ParameterDescriptor& p) {
-    const std::string n(p.name);
-    return n.find("(no ") != std::string::npos || n.find("(none") != std::string::npos;
-}
+
 
 struct Device {
     const char* id;
@@ -339,7 +334,7 @@ TEST(instrument_every_knob_is_audible) {
                                         which >= 0 ? " by " : "", which >= 0 ? (which == kFeatures ? "colour" : kFeatureNames[which]) : "");
                             if (ctx) std::printf("               (context: %s)\n", ctx->why);
                         }
-                        if (!heard && dev.checked && !labelledUnused(pd)) {
+                        if (!heard && dev.checked) {
                             ++failures;
                             std::printf("not heard: %s %s %s (%s vs %s)\n", dev.name, vname.c_str(), id.c_str(), ends[i].first.c_str(),
                                         ends[j].first.c_str());

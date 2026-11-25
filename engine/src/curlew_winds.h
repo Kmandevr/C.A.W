@@ -64,9 +64,9 @@ struct Winds : timber::Wind {
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         padClicks = false;
         // [Assumption] a wind player's vibrato is mostly the breath, with a little pitch (the flute's is usually
-        // described so; not re-read): at Vibrato 1, 30 % of the breath and 20 cents. Timber's 5 % and 8 cents were too
+        // described so; not re-read): at Vibrato 1, 20 % of the breath and 20 cents. Timber's 5 % and 8 cents were too
         // small to hear at the default 0.2.
-        vibBreath = 0.3, vibCents = 20.0;
+        vibBreath = 0.2, vibCents = 20.0;
         pullTable = kPull[which], pullFirst = kPullFirst[which], pullCount = kPullKeys;
         // Brass: the lips' resonance a little above the note (outward-striking lips, as Fletcher and Rossing describe
         // them); at Timber's 0.9 below it, a trombone or horn held only half its notes (measured 2026-11-24: 1.15
