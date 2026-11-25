@@ -6,6 +6,11 @@ updated: 2026-11-25
 
 # Decisions
 
+## 2026-11-25: MIDI effects leave the device library until MIDI routing (Claude, in the 1.1.3-alpha.2 knob fix)
+
+- **Fact:** a MIDI effect (role `event_processor`: Hop, Clutch, Perch, Mock, Ruffle) plays only from a track's MIDI components, which the app has no UI for; placed on an effect chain, the engine leaves it out, so its knobs did nothing (part of "the knobs do nothing", 1.1.3-alpha.1).
+- **Decision:** the library no longer offers them for chains (`app/lib/model/files_catalog.dart`, test "the library offers no MIDI effect for a chain"). They return with the MIDI routing work (roadmap 1.1.4). Old projects keep them in their files.
+
 ## 2026-11-25: How work is checked before the owner gets it (owner's feedback on 1.1.3-alpha.1, with the advisor session's review)
 
 The owner found that in 1.1.3-alpha.1 most knobs and all effects seemed to do nothing, Felt and Upright sounded like the grand, several knobs were dead, Bittern sounded like a synth, Curlew's growl was wrong, Nightingale had stray peaks, noises came at the wrong moments, the new instruments had no pages, and hours went into Timber, which they replace. These are standing rules from now on; nobody needs to restate them:

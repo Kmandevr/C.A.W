@@ -14,6 +14,11 @@ Realistic instruments, part two: tuned percussion.
 - **Knobs and effects answer your finger again.** On 1.1.3-alpha.1 a phone's page scroll took most drags on a knob: holding a knob and dragging up or down scrolled the page instead (on every effect page), the "Up and down" setting never turned a knob on a scrolling page, and a sideways drag on an instrument's knob could swipe to the next panel. The knobs and visuals now use the phone's own touch distance, so a sideways drag turns a knob at once, a quarter-second hold then any direction turns it (also after a long hold), and only a quick up-and-down swipe scrolls the page. Swipe an instrument's panels from anywhere but a knob face. A fast sideways start near a modulated knob's centre no longer changes its modulation amount instead of the knob, and the sampler's panel buttons no longer run off a phone's screen.
 - The MIDI effects (Hop, Clutch, Perch, Mock, Ruffle) are out of the device library for now: added to an effect chain they did nothing. They come back with their own place on a track.
 
+### Known issues
+- Some knobs on the new instruments still move without changing the sound (Starling's Resonance, Sympathy, Touch and Noise, and its Upright and Felt still close to the grand; a few on Nightingale, Curlew, Bittern and Woodpecker). Fixed in 1.1.3-alpha.3.
+- The MIDI effects (Hop, Clutch, Perch, Mock, Ruffle) are out of the device library for now: on an effect chain they did nothing. They come back with MIDI routing.
+
+
 ## 1.1.3-alpha.1 (2026-11-24)
 
 Realistic instruments, part one: a piano, bowed strings, winds and a cathedral organ that sound like the real thing.
