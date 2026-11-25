@@ -21,15 +21,18 @@ constexpr double kSr = 48000;
 // 0.9..1.5 s (all dB); tune: the lowest note's fundamental in cents against equal temperament (0.1..0.7 s);
 // onset: ms to the first sample 40 dB under the peak; mod: the envelope's fluctuation (10 ms frames' dB against
 // their 80 ms running mean, RMS over 0.15..0.8 s: vibrato through a body, tremolo, beating, flutter).
+// One held note (phrase 4) adds the pitch's wobble: its deviation (cents RMS) and rate (Hz, from its zero
+// crossings), from the fundamental's peak in 40 ms windows every 20 ms over 0.4..1.4 s.
 struct Features {
-    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0;
+    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0;
 };
-constexpr int kFeatures = 8;
-constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod"};
-// What counts as heard: about 1 dB of a level, 5 cents, 2 ms of onset, 0.5 dB of envelope fluctuation.
-constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5};
+constexpr int kFeatures = 10;
+constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate"};
+// What counts as heard: about 1 dB of a level, 5 cents, 2 ms of onset, 0.5 dB of envelope fluctuation, 3 cents of
+// wobble, 1 Hz of its rate.
+constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5, 3.0, 1.0};
 double featureAt(const Features& f, int k) {
-    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod};
+    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod, f.wobble, f.rate};
     return v[k];
 }
 
@@ -40,7 +43,7 @@ double rmsOf(const std::vector<float>& x, size_t a, size_t b) {
     return 10 * std::log10(e / std::max<size_t>(1, b - a) + 1e-20);
 }
 
-Features measure(const std::vector<float>& m, double lowest) {
+Features measure(const std::vector<float>& m, double lowest, bool held = false) {
     Features f;
     const size_t s08 = static_cast<size_t>(0.8 * kSr);
     f.lvl = rmsOf(m, 0, s08);
@@ -72,6 +75,22 @@ Features measure(const std::vector<float>& m, double lowest) {
         acc += (e[i] - mean) * (e[i] - mean), ++cnt;
     }
     f.mod = cnt ? std::sqrt(acc / cnt) : 0;
+    if (held) {
+        std::vector<double> c;
+        for (double t = 0.4; t + 0.04 <= 1.4; t += 0.02)
+            c.push_back(cents(peakHz(m, ref, 80, static_cast<size_t>(t * kSr), static_cast<size_t>(0.04 * kSr), kSr), ref));
+        double mean = 0;
+        for (double x : c) mean += x;
+        mean /= static_cast<double>(c.size());
+        double e = 0;
+        int crossings = 0;
+        for (size_t i = 0; i < c.size(); ++i) {
+            e += (c[i] - mean) * (c[i] - mean);
+            if (i > 0 && (c[i] - mean) * (c[i - 1] - mean) < 0) ++crossings;
+        }
+        f.wobble = std::sqrt(e / static_cast<double>(c.size()));
+        f.rate = f.wobble > 1.0 ? 0.5 * crossings / 1.0 : 0.0;
+    }
     return f;
 }
 
@@ -143,16 +162,25 @@ constexpr Device kDevices[] = {
     {"org.caw.bittern", "Bittern", false},
 };
 
-// The variant's chord: a spread voicing moved by octaves to where the variant sounds loudest.
-Phrase variantChord(const char* id, const Values& base) {
-    const std::vector<double> steps = {0, 7, 16, 23};
-    double bestDb = -1e9, best = 48;
-    for (double b : {48.0, 36.0, 60.0, 24.0, 72.0}) {
-        const Phrase ph = chord(b, steps);
-        const double l = rmsOf(render(id, base, ph).mono(), 0, static_cast<size_t>(0.8 * kSr));
-        if (l > bestDb + 1.0) bestDb = l, best = b;
-    }
-    return chord(best, steps);
+// The variant's chord: a spread voicing from the variant's own range (a narrow one: a closer voicing).
+Phrase variantChord(const std::string& id, int var) {
+    struct R {
+        const char* id;
+        double lo[6], hi[6];
+    };
+    static const R kRanges[] = {
+        {"org.caw.starling", {48}, {108}},
+        {"org.caw.nightingale", {55, 48, 36, 28}, {96, 88, 76, 60}},
+        {"org.caw.curlew", {60, 50, 49, 54, 40, 41}, {96, 89, 80, 82, 72, 77}},
+        {"org.caw.woodpecker", {48, 65, 79, 53, 60, 40}, {96, 108, 108, 89, 77, 57}},
+        {"org.caw.bittern", {48}, {96}},
+    };
+    for (const R& r : kRanges)
+        if (id == r.id) {
+            const double lo = r.lo[var], hi = r.hi[var];
+            return chord(lo, hi - lo >= 24 ? std::vector<double>{0, 7, 16, 23} : std::vector<double>{0, 4, 7, 12});
+        }
+    return chord(48, {0, 7, 16, 23});
 }
 
 Phrase phraseFor(int kind, const Phrase& c) {
@@ -179,7 +207,7 @@ Phrase phraseFor(int kind, const Phrase& c) {
         }
         case 4: {
             Phrase p;
-            p.notes = {{0.0, 0.8, c.lowest + 12, 0.7}};
+            p.notes = {{0.0, 1.4, c.lowest + 12, 0.7}};
             p.lowest = c.lowest + 12;
             return p;
         }
@@ -216,7 +244,7 @@ TEST(instrument_every_knob_is_audible) {
                                     : std::string("-");
             for (uint32_t k = 0; k < d.parameterCount; ++k)
                 if (d.parameters[k].id == "variant" && d.parameters[k].choices) vname = std::string(d.parameters[k].choices[var]);
-            const Phrase c = variantChord(dev.id, base);
+            const Phrase c = variantChord(dev.id, var);
             if (verbose()) std::printf("\n%s / %s (chord on %.0f)\n", dev.name, vname.c_str(), c.lowest);
             for (uint32_t k = 0; k < d.parameterCount; ++k) {
                 const ParameterDescriptor& pd = d.parameters[k];
@@ -240,7 +268,7 @@ TEST(instrument_every_knob_is_audible) {
                     Values v = with;
                     v.emplace_back(id, x);
                     outs.push_back(render(dev.id, v, ph));
-                    fs.push_back(measure(outs.back().mono(), ph.lowest));
+                    fs.push_back(measure(outs.back().mono(), ph.lowest, ctx && ctx->phrase == 4));
                 }
                 // Every pair of ends (choices: every pair) must differ by a threshold in some feature.
                 for (size_t i = 0; i < ends.size(); ++i)
