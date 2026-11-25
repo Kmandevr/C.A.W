@@ -319,8 +319,8 @@ class ComponentUseDoc {
       : params = params ?? {};
 
   /// The synths that became Flagship presets (one synth, 2026-11-10), the drums that became org.caw.drums (one drum
-  /// instrument, 2026-11-11) and Timber (split in 1.1.3, timber_migrate.cpp): a project naming one plays the successor with its values mapped
-  /// ([ProjectDoc.resolveInstruments]).
+  /// instrument, 2026-11-11) and Timber (split in 1.1.3, the engine's timber_migrate.cpp): a project naming one plays
+  /// the successor with its values mapped ([ProjectDoc.resolveInstruments]).
   static const retiredInstruments = {
     'org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.basic',
     'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit',

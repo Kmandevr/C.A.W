@@ -135,7 +135,6 @@ struct PianoModel : timber::Piano {
             Base::kPhantom};
         double q[Base::kModelParams] = {};
         for (uint32_t k = 0; k < kModelParams; ++k) q[kMap[k]] = p[k];
-        q[Base::kSim] = 1.0;
         pedalEvent = 0;
         Base::control(q, s);
         if (pedalEvent != 0) pedalNoise(pedalEvent == 1);

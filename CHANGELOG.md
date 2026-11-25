@@ -3,6 +3,11 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+### Changed
+- **Timber has been split into the new instruments:** a project that used Timber now opens with each track on Starling (piano, and for now the plucked strings), Nightingale (bowed strings), Curlew (winds), Woodpecker (mallets), Bittern (a church-like organ) or Kestrel's new Electric piano and Tonewheel organ presets, with its settings carried over as closely as they go, and a one-time note says so. It sounds similar, not identical. Searching "Timber" finds the new instruments.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.
