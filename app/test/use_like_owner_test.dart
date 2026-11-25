@@ -25,9 +25,13 @@ import 'device_ui_fixture.dart' show FakeDisplay, builtinInfos, fakeFrame;
 class RecordingEngine implements Engine {
   final sent = <(String? layer, int index, String param, double value)>[];
 
+  /// Every parameter the app moved, for the real engine's check.
+  final moved = <(String? layer, int index, String param)>{};
+
   @override
   bool setComponentParam(String? layerId, int index, String param, double value) {
     sent.add((layerId, index, param, value));
+    moved.add((layerId, index, param));
     return true;
   }
 
@@ -107,8 +111,9 @@ class Finding {
 Future<void> main() async {
   final lib = Platform.environment['CAW_LIB'];
   final withLib = lib != null && lib.isNotEmpty;
-  // Set CAW_SLOP=8 to run as an Android phone does (MediaQuery.gestureSettings), not kTouchSlop's 18.
-  final slop = double.tryParse(Platform.environment['CAW_SLOP'] ?? '');
+  // An Android phone's touch slop (MediaQuery.gestureSettings: about 8 logical px, where the page's scroll and
+  // swipe panels claim a move), not kTouchSlop's 18; CAW_SLOP=18 runs as a test does by default.
+  final slop = double.tryParse(Platform.environment['CAW_SLOP'] ?? '') ?? 8;
   final only = Platform.environment['CAW_ONLY'];
   late DeviceDisplaySource source;
   var motion = MotionLevel.full;
@@ -151,7 +156,7 @@ Future<void> main() async {
     s.engine = engine;
     tester.view.physicalSize = phone;
     tester.view.devicePixelRatio = 1;
-    if (slop != null) tester.view.gestureSettings = ui.GestureSettings(physicalTouchSlop: slop);
+    tester.view.gestureSettings = ui.GestureSettings(physicalTouchSlop: slop);
     addTearDown(tester.view.reset);
     late BuildContext ctx;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (c) {
@@ -358,6 +363,17 @@ Future<void> main() async {
       testWidgets(name(c), (tester) async {
         final (s, t, engine) = await open(tester, c);
         final findings = await work(tester, c, s, t, engine);
+        // With the engine (CAW_LIB): the project as the app sends it plays this device, and each parameter the page
+        // moved is one the playing chain has at the index the app sent it to.
+        final real = _real;
+        if (real != null) {
+          await tester.runAsync(() => real.setProject(s.engineJsonOf(s.project)));
+          for (final m in engine.moved) {
+            if (!real.setComponentParam(m.$1, m.$2, m.$3, t.value(m.$3))) {
+              findings.add(Finding(name(c), m.$3, 'engine', 'the playing chain has no ${m.$3} at ${m.$1}/${m.$2}'));
+            }
+          }
+        }
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(seconds: 1));
         s.dispose();

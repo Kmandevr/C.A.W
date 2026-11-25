@@ -10,6 +10,9 @@ Realistic instruments, part two: tuned percussion.
 ### New
 - **Woodpecker, tuned percussion:** marimba, xylophone, glockenspiel, vibraphone, tubular bells and timpani, each with its real mallet stroke (VCSL, CC0) flowing into a ringing bar, tube or drum measured from the same recordings, in tune at A440. Listen for the stroke handing over to the ring with no dip or bump, the marimba's warm tube (the Resonator knob), the vibraphone's motor shimmer and damper pedal, and a brighter tone as you raise Mallet hardness. 15 presets.
 
+### Fixed
+- **Knobs and effects answer your finger again.** On 1.1.3-alpha.1 a phone's page scroll took most drags on a knob: holding a knob and dragging up or down scrolled the page instead (on every effect page), the "Up and down" setting never turned a knob on a scrolling page, and a sideways drag on an instrument's knob could swipe to the next panel. The knobs and visuals now use the phone's own touch distance, so a sideways drag turns a knob at once, a short hold then any direction turns it, and only a quick up-and-down swipe scrolls the page.
+
 ## 1.1.3-alpha.1 (2026-11-24)
 
 Realistic instruments, part one: a piano, bowed strings, winds and a cathedral organ that sound like the real thing.
