@@ -213,7 +213,9 @@ struct PianoModel : timber::Piano {
             }
     }
 
-    double noiseGain() const noexcept { return noise / 0.35; }  // 0.35 (the default) plays Salamander's own levels
+    // 0.35 (the default) plays Salamander's own levels; above it the noises come forward as from inside the lid (a
+    // square law: 1 is 18 dB over the default, so a released chord's dampers and the pedal are plainly heard).
+    double noiseGain() const noexcept { return (noise / 0.35) * (noise / 0.35); }
 
     Player* freePlayer() noexcept {
         Player* pick = nullptr;

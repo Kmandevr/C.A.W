@@ -31,16 +31,19 @@ constexpr PortDescriptor kPorts[] = {
 // decay, the attack's level and the tier; the bars with tubes the resonator; the vibraphone its motor and pedal, the
 // chimes their damper pedal.
 using P = Bars::P;
-constexpr uint32_t kOwnCount[kInstruments] = {5, 5, 4, 8, 5, 4};
+// (2026-11-25, the owner: no control that matters only after another moves, none that cannot be heard) The
+// glockenspiel has no Attack: its recorded stroke is the bar's own modes almost entirely (Attack 0..2 moved its first
+// 15 ms by 1.4 dB). The vibraphone's motor is one control, its rate (0 off): a real one's discs set the depth.
+constexpr uint32_t kOwnCount[kInstruments] = {5, 5, 3, 7, 5, 4};
 constexpr P kOwn[kInstruments][8] = {
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator},
-    {P::kHardness, P::kDecay, P::kAttack, P::kTier},
-    {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator, P::kSustain, P::kMotor, P::kMotorDepth},
+    {P::kHardness, P::kDecay, P::kTier},
+    {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kResonator, P::kSustain, P::kMotor},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier, P::kSustain},
     {P::kHardness, P::kDecay, P::kAttack, P::kTier},
 };
-constexpr double kNeutral[Bars::kAll] = {0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+constexpr double kNeutral[Bars::kAll] = {0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.6};  // the motor's depth: its discs' 0.6
 
 template <int I>
 struct At : Bars {
@@ -95,7 +98,6 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
             case P::kResonator: t.num("resonator", "Resonator", 1.0, 0.0, 1.0).group = "mallets"; break;
             case P::kSustain: t.num("sustain", "Damper pedal", 0.0, 0.0, 1.0).group = "mallets"; break;
             case P::kMotor: t.num("motor", "Motor rate", 0.0, 0.0, 8.0, "Hz").group = "mallets"; break;
-            case P::kMotorDepth: t.num("motor_depth", "Motor depth", 0.6, 0.0, 1.0).group = "mallets"; break;
             default: break;
         }
     }
