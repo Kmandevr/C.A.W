@@ -268,7 +268,10 @@ struct Organ {
         const double hz = timber::noteHz(clampd(v.pitch, 12.0, 120.0)) * kFoot[k];
         double t50 = kFamilyOf[k] == kReed ? 0.012 : riseSeconds(std::max(hz, 20.0));
         if (kFamilyOf[k] == kString) t50 *= 1.5;
-        const double tau = std::max(0.004, t50 * v.strikeRise[k] / 1.23);
+        // [Assumption] a tracker action: a key struck faster opens its pallet faster, so the pipe speaks a little
+        // sooner (and with more of its speech: startSpeech); as measured at the frame's velocity 0.75.
+        const double vel = 1.3 - 0.4 * clampd(v.velocity, 0, 1);
+        const double tau = std::max(0.004, t50 * vel * v.strikeRise[k] / 1.23);
         v.rise[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
         v.settleK[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
     }
@@ -367,7 +370,7 @@ struct Organ {
     void startSpeech(Voice& v, const float* still) noexcept {
         v.playersOn = 0;
         if (!bank || testMuteSpeech || chiffAmt <= 0) return;
-        const float amount = static_cast<float>(chiffAmt / 0.5);  // Chiff 0.5: as recorded
+        const float amount = static_cast<float>(chiffAmt / 0.5 * (0.4 + 0.8 * clampd(v.velocity, 0, 1)));  // Chiff 0.5: as recorded
         for (int k = 0; k < kStops; ++k) {
             if (level[k] <= 0.0f) continue;
             const int fam = kFamilyOf[k];

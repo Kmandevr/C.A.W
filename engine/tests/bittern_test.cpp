@@ -165,6 +165,16 @@ TEST(bittern_small_pipes_speak_first) {
     CHECK(t2 > 0.03 && t2 < t8 * 0.8);
 }
 
+// Velocity (a tracker action): with Velocity 1, a key struck hard speaks sooner than one struck softly.
+TEST(bittern_a_key_struck_faster_speaks_sooner) {
+    const Values v = only("principal8", {{"velocity", 1.0}});
+    auto p = makeB(v), q = makeB(v);
+    const double hard = halfTime(play(*p, v, {{0.0, -1, 48, 1.0}}, 1.0).mono());
+    const double soft = halfTime(play(*q, v, {{0.0, -1, 48, 0.1}}, 1.0).mono());
+    if (verbose()) std::printf("half level: struck hard %.0f ms, softly %.0f ms\n", 1e3 * hard, 1e3 * soft);
+    CHECK(hard < soft * 0.8);
+}
+
 // The recorded speech: with Chiff the attack carries the recording's own speech (more in the first 100 ms than
 // without), and from 0.5 s on nothing of it is left (the two renders identical: no noise off the note's start).
 TEST(bittern_speech_is_recorded_and_only_at_the_start) {
