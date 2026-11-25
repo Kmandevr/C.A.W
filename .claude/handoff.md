@@ -4,8 +4,7 @@ Commit: 86a660e (alpha.2 shipped as #266; sound fixes cherry-picked onto this br
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
-Make 1.1.3 usable: P0 knob fix first (ships alone as 1.1.3-alpha.2 with Woodpecker), then 1.1.3-alpha.3 with the
-instrument fixes, pages, Timber removal, guitar/harp, Bittern rebuild and Rook. Then 1.1.4+ toward 1.2.0.
+Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber removal, guitar/harp, Bittern, Rook; then 1.1.4+.
 
 ## Done and verified (each an agent branch; commit 81b1cab has every tip as a parent, so all are on GitHub)
 - Pages: instrument-pages 00f0ec9 (five instrument pages; goldens sent to the owner).
@@ -26,6 +25,8 @@ instrument fixes, pages, Timber removal, guitar/harp, Bittern rebuild and Rook. 
 - Owner (2026-11-25, on alpha.2): Starling Unison sounds weird, not out-of-tune; Noise/Resonance/Pitch glide/Sympathy/Phantom
   inaudible; Upright/Felt unrealistic; a high, distortion-like sound at note ends (probe: scratchpad zz_starling_probe.cpp).
   Strings: no low end or body (8 narrow bands): build a full measured body (convolution or many bands) per instrument.
+  Woodpecker needs more settings: strike position, mallet type, bar material/ratios, resonator tuning, rolls,
+  dead strokes, timpani pedal glide, stereo layout (each audible, in the knob test).
 0. All agents were STOPPED by the owner (usage). Their tips are parents of b35881e (pushed). Resume work
    yourself, one piece at a time, pushing after each step; don't spawn many agents at once.
    Performance goal (owner): close the gap between the 1% high (p99) CPU and the mean, keeping the mean low
