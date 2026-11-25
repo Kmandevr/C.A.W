@@ -52,21 +52,23 @@ struct Winds : timber::Wind {
     // A released note fades with its breath at the output too (the envelope's level, in a line over each block): the
     // breath alone let a low brass note's bore and lips go on sounding, -33 dB, after its release had ended, and a
     // flute's jet fall into a lower regime with a 6 dB blip as it died.
-    float releaseGain[Base::kPool] = {};
+    // The step is set on the control grid (voiceControl), so any block size gives the same bits.
+    float releaseGain[Base::kPool] = {}, releaseStep[Base::kPool] = {};
     void fadeReleased(Voice& v, float* out, uint32_t n) noexcept {
         if (v.envStep >= 0.0f) return;
-        float& g = releaseGain[&v - voices];
-        const float to = std::clamp(v.env, 0.0f, 1.0f), step = (to - g) / static_cast<float>(n);
-        for (uint32_t i = 0; i < n; ++i) g += step, out[i] *= g;
-        g = to;
+        const auto k = &v - voices;
+        float g = releaseGain[k];
+        const float step = releaseStep[k];
+        for (uint32_t i = 0; i < n; ++i) g = std::max(0.0f, g + step), out[i] *= g;
+        releaseGain[k] = g;
     }
 
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         padClicks = false;
-        // [Assumption] a wind player's vibrato is mostly the breath, with a little pitch (the flute's is usually
-        // described so; not re-read): at Vibrato 1, 20 % of the breath and 20 cents. Timber's 5 % and 8 cents were too
-        // small to hear at the default 0.2.
-        vibBreath = 0.2, vibCents = 20.0;
+        // [Assumption] a wind player's vibrato is breath and pitch together (the flute's is usually described as
+        // mostly breath; not re-read): at Vibrato 1, 20 % of the breath and 50 cents, so the default 0.2 is 10 cents
+        // and 4 % (Timber's 8 cents and 5 % at 1 gave 1.6 cents at the default: Vibrato rate could not be heard).
+        vibBreath = 0.2, vibCents = 50.0;
         pullTable = kPull[which], pullFirst = kPullFirst[which], pullCount = kPullKeys;
         // Brass: the lips' resonance a little above the note (outward-striking lips, as Fletcher and Rossing describe
         // them); at Timber's 0.9 below it, a trombone or horn held only half its notes (measured 2026-11-24: 1.15
@@ -91,11 +93,16 @@ struct Winds : timber::Wind {
         Base::start(v, s);
         Growl& g = growls[&v - voices];
         g.tongue = 0, g.hum = 0, g.rate = 26;
-        releaseGain[&v - voices] = 1.0f;
+        releaseGain[&v - voices] = 1.0f, releaseStep[&v - voices] = 0.0f;
         g.wander.s = 0x6A09u + 131u * v.key;
     }
     void voiceControl(Voice& v, const Shared& s) noexcept {
         Base::voiceControl(v, s);
+        if (v.envStep < 0.0f) {  // released: the output's gain toward the breath's level at the next control point
+            const auto k = &v - voices;
+            const float to = std::clamp(v.env + v.envStep * timber::kControlFrames, 0.0f, 1.0f);
+            releaseStep[k] = (to - releaseGain[k]) / timber::kControlFrames;
+        }
         if (growlAmount <= 0) return;
         // The tongue's roll wanders (24..30 Hz), and the pitch flutters with it (up to 20 cents at Growl 1).
         Growl& g = growls[&v - voices];

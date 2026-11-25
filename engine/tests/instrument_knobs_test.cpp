@@ -171,7 +171,6 @@ const Context kContexts[] = {
     {"org.caw.curlew", "velocity", {}, 1, "soft notes"},
     {"org.caw.woodpecker", "velocity", {}, 1, "soft notes"},
     {"org.caw.bittern", "velocity", {}, 1, "soft notes"},
-    {"org.caw.woodpecker", "motor_depth", {{"motor", 5.0}}, 0, "the motor turning"},
     {"org.caw.curlew", "vib_rate", {{"vibrato", 0.6}}, 4, "vibrato on"},
     {"org.caw.curlew", "vibrato", {}, 4, "one note"},
     {"org.caw.curlew", "growl", {}, 4, "one note"},
