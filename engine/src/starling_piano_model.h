@@ -217,7 +217,7 @@ struct Piano {
     void dampedLoss(Voice& v, double release) const noexcept {
         const double pitch = clampd(v.pitch, 21.0, 120.0);
         const double f0 = noteHz(pitch);
-        const double slow = v.sim && strungUpright() ? uprightDamper : 1.0;
+        const double slow = strungUpright() ? uprightDamper : 1.0;
         const double g = detPow(10.0, -3.0 / (clampd(release * slow, 0.02, 10.0) * f0));
         const double p = std::max<double>(v.pUndamped, 0.5);
         v.pDamped = static_cast<float>(p);
