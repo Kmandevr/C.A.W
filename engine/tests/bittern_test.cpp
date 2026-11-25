@@ -165,6 +165,59 @@ TEST(bittern_small_pipes_speak_first) {
     CHECK(t2 > 0.03 && t2 < t8 * 0.8);
 }
 
+// Body is the pipes' scale: wider (1) rounder, its upper partials down against the fundamental; narrower (0) brighter.
+TEST(bittern_body_is_the_pipes_scale) {
+    const double f = 440.0 * std::pow(2.0, (48 - 69) / 12.0);
+    auto bright = [&](double body) {
+        const Values v = only("principal8", {{"body", body}});
+        auto p = makeB(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, 48, 0.7}}, 1.0).mono();
+        return 10 * std::log10(powerAt(m, 6 * f, 24000, 19200) / powerAt(m, f, 24000, 19200));
+    };
+    const double narrow = bright(0.0), measured = bright(0.5), wide = bright(1.0);
+    if (verbose()) std::printf("6th harmonic against the fundamental: narrow %.1f, as measured %.1f, wide %.1f dB\n", narrow, measured, wide);
+    CHECK(narrow > measured + 3.0);
+    CHECK(wide < measured - 3.0);
+}
+
+// Every knob of its own is heard (the owner's rule: no dead or dimmed knobs): from its lowest to its highest, the
+// render of a held chord (dry) changes by a difference at most 20 dB under the chord (the Chiff over the speech's
+// first 150 ms, the Tremulant rate with the Tremulant on, Velocity as soft against hard keys at its default).
+TEST(bittern_every_knob_is_heard) {
+    const std::vector<Note> chord = {{0.0, 1.4, 48, 0.8}, {0.0, 1.4, 55, 0.8}, {0.0, 1.4, 64, 0.8}};
+    auto render = [&](Values v, const std::vector<Note>& n) {
+        v.emplace_back("space", 0.0);
+        auto p = makeB(v);
+        return play(*p, v, n, 1.5).mono();
+    };
+    auto diffDb = [&](const std::vector<float>& a, const std::vector<float>& b, size_t from, size_t len) {
+        std::vector<float> d(a.size());
+        for (size_t i = 0; i < a.size(); ++i) d[i] = a[i] - b[i];
+        return 20 * std::log10((rmsOf(d, from, len) + 1e-12) / (rmsOf(a, from, len) + 1e-12));
+    };
+    struct K {
+        const char* id;
+        double lo, hi;
+        Values extra;
+        size_t from, len;
+    } knobs[] = {{"tremulant", 0, 1, {}, 9600, 48000},     {"trem_rate", 2, 9, {{"tremulant", 1.0}}, 9600, 48000},
+                 {"wind", 0, 1, {}, 9600, 48000},          {"chiff", 0, 1, {}, 0, 7200},
+                 {"body", 0, 1, {}, 9600, 48000},          {"registration", 0, 5, {}, 9600, 48000}};
+    for (const K& k : knobs) {
+        Values a = k.extra, b = k.extra;
+        a.emplace_back(k.id, k.lo), b.emplace_back(k.id, k.hi);
+        const double d = diffDb(render(a, chord), render(b, chord), k.from, k.len);
+        if (verbose()) std::printf("%-12s lowest to highest: the difference %.1f dB against the chord\n", k.id, d);
+        CHECK(d > -20.0);
+    }
+    std::vector<Note> soft = chord, hard = chord;
+    for (Note& n : soft) n.velocity = 0.15;
+    for (Note& n : hard) n.velocity = 1.0;
+    const double dv = diffDb(render({}, hard), render({}, soft), 0, 9600);
+    if (verbose()) std::printf("velocity     soft to hard keys: the difference %.1f dB over the first 200 ms\n", dv);
+    CHECK(dv > -20.0);
+}
+
 // Velocity (a tracker action): with Velocity 1, a key struck hard speaks sooner than one struck softly.
 TEST(bittern_a_key_struck_faster_speaks_sooner) {
     const Values v = only("principal8", {{"velocity", 1.0}});

@@ -20,7 +20,7 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         const float* s = v.steady[k];
         const float* e = v.speaking[k];
         const uint32_t inc = v.step[k], ph = v.phase[k];
-        const float spoke = v.spoke[k];
+        const float w0 = v.spoke[k], ws = v.spokeStep[k];
         // The pipe's level each sample: its speech or release (squared) and its level, both lines across the block.
         float amp[kControlFrames];
         if (es == 0.0f && e0 == 1.0f) {
@@ -31,7 +31,7 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
                 amp[i] = x * x * (g0 + gs * steps[i]);
             }
         }
-        if (spoke >= 1.0f) {
+        if (w0 >= 1.0f && ws == 0.0f) {
             for (uint32_t i = 0; i < n; ++i) {
                 const uint32_t p = ph + i * inc;  // wraps at 2^32: a whole cycle
                 const uint32_t at = p >> kShift;
@@ -45,12 +45,24 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
                 const uint32_t at = p >> kShift;
                 const float f = static_cast<float>(p & kMask) * kFrac;
                 const float a = s[at] + (s[at + 1] - s[at]) * f, b = e[at] + (e[at + 1] - e[at]) * f;
-                acc[i] += (b + (a - b) * spoke) * amp[i];
+                acc[i] += (b + (a - b) * (w0 + ws * steps[i])) * amp[i];
             }
         }
         v.phase[k] = ph + n * inc;
     }
+    // Body: the pipes' scale (see Voice::bodyLp); at Body 0.5 the pipes as measured, bit for bit.
+    // At Body 0.5 the filter rests on the pipes' last sample, so turning Body starts it without a step.
+    const float bk = v.bodyK, bg = body > 0.0f ? 0.75f * body : body;
+    if (bg != 0.0f) {
+        for (uint32_t i = 0; i < n; ++i) {
+            v.bodyLp += bk * (acc[i] - v.bodyLp);
+            acc[i] += bg * (v.bodyLp - acc[i]);
+        }
+    } else if (n > 0) {
+        v.bodyLp = acc[n - 1];
+    }
     const float nTo = v.nGainTo, pk = v.puffK;
+    const int bands = v.bands;
     float ng = v.nGain, puff = v.puff;
     for (uint32_t i = 0; i < n; ++i) {
         // The breath: the noise through the key's harmonic bands, at the pipes' level and the valves' puffs.
@@ -60,7 +72,7 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         const float level = ng + puff;
         if (level > 1e-9f) {
             const float x = v.noise.next() * level;
-            for (int b = 0; b < kBreathBands; ++b) {
+            for (int b = 0; b < bands; ++b) {
                 v.nLp[b] += v.nF[b] * v.nBp[b];
                 const float hp = x - v.nLp[b] - kBreathDamp * v.nBp[b];
                 v.nBp[b] += v.nF[b] * hp;
@@ -84,16 +96,18 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         for (int j = 0; j < v.playersOn; ++j) {
             Player& p = v.players[j];
             if (!p.data) continue;
-            for (uint32_t i = 0; i < n; ++i) {
-                const uint32_t at = static_cast<uint32_t>(p.pos);
-                if (at + 1 >= p.frames) {
-                    p.data = nullptr;
-                    break;
-                }
-                const float f = static_cast<float>(p.pos - at);
+            // The frames left before its end, then those without a check each.
+            const uint64_t last = static_cast<uint64_t>(p.frames - 1) << 32;
+            const uint32_t m = p.pos >= last ? 0u : static_cast<uint32_t>(std::min<uint64_t>(n, (last - p.pos + p.step - 1) / p.step));
+            constexpr float kTo = 1.0f / 4294967296.0f;
+            for (uint32_t i = 0; i < m; ++i) {
+                const uint64_t q = p.pos + i * p.step;
+                const uint32_t at = static_cast<uint32_t>(q >> 32);
+                const float f = static_cast<float>(static_cast<uint32_t>(q)) * kTo;
                 add[i] += (p.data[at] + (p.data[at + 1] - p.data[at]) * f) * p.gain;
-                p.pos += p.step;
             }
+            p.pos += m * p.step;
+            if (m < n) p.data = nullptr;
         }
         for (uint32_t i = 0; i < n; ++i) {
             sp -= sp * rk;

@@ -47,7 +47,7 @@ const ModuleDescriptor& descriptor() {
         t.num("tone", "Tone", 0.0, -1.0, 1.0).group = "shared";
         t.num("body", "Body", 0.5, 0.0, 1.0).group = "shared";
         t.num("space", "Space", 0.45, 0.0, 1.0).group = "shared";
-        t.num("velocity", "Velocity", 0.3, 0.0, 1.0).group = "shared";  // an organ barely follows the key's speed
+        t.num("velocity", "Velocity", 0.6, 0.0, 1.0).group = "shared";  // a tracker action: a key struck hard speaks sooner
         t.expo("release", "Release", 0.12, 0.005, 10.0, "s").group = "shared";
         ParameterDescriptor& v = t.num("voices", "Voices", 16.0, 1.0, 24.0);
         v.step = 1.0, v.smoothingFrames = 0, v.group = "shared";
@@ -56,7 +56,7 @@ const ModuleDescriptor& descriptor() {
         t.num("tremulant", "Tremulant", 0.0, 0.0, 1.0).group = "wind";
         t.num("wind", "Living wind", 0.3, 0.0, 1.0).group = "wind";
         t.num("chiff", "Chiff", 0.5, 0.0, 1.0).group = "wind";
-        t.expo("trem_rate", "Tremulant rate", 5.5, 2.0, 9.0, "Hz").group = "wind";
+        t.expo("trem_rate", "Tremulant rate", 6.0, 2.0, 9.0, "Hz").group = "wind";
         // Last, so every earlier knob keeps its place: a project from before it plays its stops as drawn.
         ParameterDescriptor& r = t.pick("registration", "Registration", 0.0, kRegistrationNames);
         r.group = "registration", r.modulatable = false;
@@ -124,7 +124,7 @@ const std::vector<BuiltinPreset>* bitternPresets(std::string_view id) {
         {"Deep pedal", "Bourdon 16' and Subbass 32': the floor shaking under everything", reg({{"bourdon16", 0.9}, {"subbass32", 1}, {"principal8", 0.4}})},
         {"Loft (close)", "The principal chorus heard from the organ loft: much less room", reg({{"bourdon16", 0.6}, {"principal8", 1}, {"rohrflute8", 0.5}, {"octave4", 0.7}, {"space", 0.15}})},
         {"Dry organ", "The principal chorus with no room, for your own reverb", reg({{"bourdon16", 0.6}, {"principal8", 1}, {"rohrflute8", 0.5}, {"octave4", 0.7}, {"space", 0.0}})},
-        {"Drunken organ", "A living, unsteady wind and a slow tremulant: a haunted, wavering organ", reg({{"principal8", 0.8}, {"gamba8", 0.6}, {"wind", 1}, {"tremulant", 0.4}, {"trem_rate", 3.0}})},
+        {"Drunken organ", "A living, unsteady wind and a slow tremulant: a haunted, wavering organ", reg({{"principal8", 0.8}, {"gamba8", 0.6}, {"wind", 1}, {"tremulant", 0.6}, {"trem_rate", 3.5}})},
     };
     return id == kBitternId ? &p : nullptr;
 }
