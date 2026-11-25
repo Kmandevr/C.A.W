@@ -8,20 +8,25 @@
 
 namespace caw {
 
-// One band of a body: an RBJ peaking filter.
+// One band of a body: an RBJ peaking filter, a low or high shelf (its corner `hz`), or a high-pass (below the
+// instrument's lowest note: a body does not radiate under its lowest string, and nothing of the bow's push gets out).
 struct BodyBand {
+    enum Kind : int { kPeak, kLowShelf, kHighShelf, kHighPass };
     float hz, q, db;
+    int kind = kPeak;
 };
 struct BodyResponse {
     const BodyBand* bands;
     uint32_t count;
 };
 
-// Up to kBands bands designed at the rate, left and right as two SIMD lanes (one pass a band), the gains scaled by
+// Up to kBands bands designed at the rate (only those the body has run), left and right as two SIMD lanes (one pass a
+// band), the gains scaled by
 // `amount` (1 the recorded instrument, 0 flat: no comb from a dry/wet mix). load() at prepare or at a control point;
 // process() never allocates.
 struct BodyFilter {
-    static constexpr int kBands = 8;
+    static constexpr int kBands = 12;
+    int used = 0;  // the body's bands (the stages past them are flat and skipped: the same bits as running them)
     struct Stage {
         timber::F4 b0, b1, b2, a1, a2, z1, z2;
     };
@@ -34,9 +39,16 @@ struct BodyFilter {
     void load(BodyResponse r, float amount, double sr) noexcept {
         if (r.bands == bandsFor && amount == amountFor && sr == srFor) return;
         bandsFor = r.bands, amountFor = amount, srFor = sr;
+        used = static_cast<int>(r.count < static_cast<uint32_t>(kBands) ? r.count : static_cast<uint32_t>(kBands));
         for (int k = 0; k < kBands; ++k) {
             timber::Biquad q;
-            if (static_cast<uint32_t>(k) < r.count) q.peak(r.bands[k].hz, r.bands[k].q, r.bands[k].db * amount, sr);
+            if (static_cast<uint32_t>(k) < r.count) {
+                const BodyBand& b = r.bands[k];
+                if (b.kind == BodyBand::kLowShelf) q.lowShelf(b.hz, b.q, b.db * amount, sr);
+                else if (b.kind == BodyBand::kHighShelf) q.highShelf(b.hz, b.q, b.db * amount, sr);
+                else if (b.kind == BodyBand::kHighPass) q.highpass(b.hz, b.q, sr);  // not scaled by Body: always there
+                else q.peak(b.hz, b.q, b.db * amount, sr);
+            }
             Stage& st = stage[k];
             st.b0 = timber::f4(q.b0), st.b1 = timber::f4(q.b1), st.b2 = timber::f4(q.b2);
             st.a1 = timber::f4(q.a1), st.a2 = timber::f4(q.a2);
@@ -45,11 +57,11 @@ struct BodyFilter {
     void process(float* l, float* r, uint32_t n) noexcept {
         using timber::F4;
         F4 z1[kBands], z2[kBands];
-        for (int k = 0; k < kBands; ++k) z1[k] = stage[k].z1, z2[k] = stage[k].z2;
+        for (int k = 0; k < used; ++k) z1[k] = stage[k].z1, z2[k] = stage[k].z2;
         for (uint32_t i = 0; i < n; ++i) {
             F4 x = {};
             x[0] = l[i], x[1] = r[i];
-            for (int k = 0; k < kBands; ++k) {  // transposed direct form II, as timber::Biquad
+            for (int k = 0; k < used; ++k) {  // transposed direct form II, as timber::Biquad
                 const Stage& st = stage[k];
                 const F4 y = st.b0 * x + z1[k];
                 z1[k] = st.b1 * x - st.a1 * y + z2[k];
@@ -58,7 +70,7 @@ struct BodyFilter {
             }
             l[i] = x[0], r[i] = x[1];
         }
-        for (int k = 0; k < kBands; ++k) stage[k].z1 = z1[k], stage[k].z2 = z2[k];
+        for (int k = 0; k < used; ++k) stage[k].z1 = z1[k], stage[k].z2 = z2[k];
         // Tiny values flushed on the control grid only (the instrument's chunks never straddle a control point), so
         // any block size flushes at the same frames and gives the same bits.
         fill += n;
