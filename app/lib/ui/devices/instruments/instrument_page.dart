@@ -199,12 +199,16 @@ class InstrumentOwnControls extends StatelessWidget {
         if (c.choices.isNotEmpty) ...[
           const SizedBox(height: 4),
           LayoutBuilder(builder: (context, box) {
-            final cols = box.maxWidth >= 600 ? c.choices.length : c.choices.length.clamp(1, 2);
+            // Two to a row on a phone (all in one when wide); a choice of four or more takes a row of its own there,
+            // after the paired ones, as does a last one left alone.
+            final wide = box.maxWidth >= 600;
+            final cols = wide ? c.choices.length : c.choices.length.clamp(1, 2);
             final w = (box.maxWidth - 8 * (cols - 1)) / cols;
-            final alone = c.choices.length % cols == 1 && c.choices.length > 1;
+            bool long(String id) => !wide && (t.param(id)?.choices.length ?? 0) >= 4;
+            final paired = [for (final id in c.choices) if (!long(id)) id];
             return Wrap(spacing: 8, runSpacing: 6, children: [
-              for (final (i, id) in c.choices.indexed)
-                SizedBox(width: alone && i == c.choices.length - 1 ? box.maxWidth : w,
+              for (final id in [...paired, for (final id in c.choices) if (long(id)) id])
+                SizedBox(width: long(id) || (paired.length.isOdd && id == paired.last && paired.length > 1) ? box.maxWidth : w,
                     child: DeviceChoice(id, maxSegments: 4, label: labels[id] ?? t.param(id)?.label)),
             ]);
           }),

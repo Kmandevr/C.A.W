@@ -89,7 +89,7 @@ class NightingalePainter extends CustomPainter {
         width: 1.5 + press * 4, glow: live);
     // Where the hair meets the string, pressed in by the pressure.
     canvas.drawCircle(Offset(x, cy + press * 3), 2.5 + press * 2.5, Paint()..color = p.secondary.withValues(alpha: 0.7));
-    paintLabel(canvas, _place(p.value('position')), Offset(x, s.height * 0.2), Neon.dim, size: 7.5, align: 0);
+    paintLabel(canvas, _place(p.value('position')), Offset(x - tilt - 10, s.height * 0.2), Neon.dim, size: 7.5, align: 1);
   }
 
   /// The bow's x for [position] in a picture [s] wide (matching the drag: half the width over the whole range).
