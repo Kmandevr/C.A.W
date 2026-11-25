@@ -11,6 +11,7 @@ Versions keep the `-alpha.N` suffix until the official release.
 The realistic instruments get their own pages.
 
 ### New
+- **Starling's crossfade keeps the note's tone:** where the real recorded strike hands over to the modelled string, the model now takes the recording's balance of fundamental, octave and twelfth for each key, so the note no longer seems to drop an octave or change colour.
 - **Winds play legato:** Curlew plays one note at a time like a wind player, so a note played while another is held slurs to it without a new attack, and the held note comes back when you let go (Play: Legato; choose Poly for chords).
 - **Starling's Unison sounds like a piano going out of tune:** each key drifts its own way instead of every note chorusing alike.
 - **Starling, Nightingale, Curlew, Bittern and Woodpecker each have a page of their own**, in the same one-screen layout as the other instruments: the instrument drawn live on top, its own knobs under it, then tone and space; on a phone, swipe the three panels under the picture. Try these:

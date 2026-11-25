@@ -65,6 +65,7 @@ struct Calibration {
     float level;
     int lag;
     int sign;
+    float eq[3];  // the recording's partials 1..3 over the model's at 80..160 ms (dB, shape only): the model's tone match
 };
 #include "starling_piano_calibration.inc"
 
@@ -157,6 +158,40 @@ struct PianoModel : timber::Piano {
     uint32_t pedalCount = 0;
     double toModel = 1;  // every recording's gain: the attacks' median calibration, so the middle keys keep the model's level
     bool testMuteRecordings = false;  // the tests' A/B (never used for sound)
+    // Each voice's tone match: three peaking filters on its partials 1..3 (RBJ, Q 6), set at the strike, in floats.
+    struct ToneEq {
+        bool on = false;
+        float b0[3] = {}, b1[3] = {}, b2[3] = {}, a1[3] = {}, a2[3] = {}, z1[3] = {}, z2[3] = {};
+        void set(int h, double f, double gdb, double rate) noexcept {
+            z1[h] = z2[h] = 0;
+            if (!(f < 0.45 * rate) || std::fabs(gdb) < 0.05) {
+                b0[h] = 1, b1[h] = b2[h] = a1[h] = a2[h] = 0;
+                return;
+            }
+            const double A = std::pow(10.0, gdb / 40.0), w = 6.283185307179586 * f / rate, al = std::sin(w) / (2.0 * 6.0);
+            const double c = std::cos(w), a0 = 1.0 + al / A;
+            b0[h] = static_cast<float>((1.0 + al * A) / a0), b1[h] = static_cast<float>(-2.0 * c / a0);
+            b2[h] = static_cast<float>((1.0 - al * A) / a0), a1[h] = b1[h], a2[h] = static_cast<float>((1.0 - al / A) / a0);
+        }
+        void run(float* out, uint32_t n) noexcept {
+            for (int h = 0; h < 3; ++h) {
+                float s1 = z1[h], s2 = z2[h];
+                const float c0 = b0[h], c1 = b1[h], c2 = b2[h], d1 = a1[h], d2 = a2[h];
+                for (uint32_t i = 0; i < n; ++i) {  // transposed direct form II
+                    const float x = out[i], y = c0 * x + s1;
+                    s1 = c1 * x - d1 * y + s2;
+                    s2 = c2 * x - d2 * y;
+                    out[i] = y;
+                }
+                z1[h] = s1, z2[h] = s2;  // no flush here: render's chunks follow the blocks (same bits at any size)
+            }
+        }
+    };
+    ToneEq toneEq[kPool];
+    void render(Voice& v, float* out, uint32_t n) noexcept {
+        Base::render(v, out, n);
+        if (ToneEq& e = toneEq[&v - voices]; e.on) e.run(out, n);
+    }
     double touchCurve = 0;  // Touch: 0 the velocity as played .. 1 a light action
     int characterNow = 0;
     CharacterBody characterBody;
@@ -247,6 +282,7 @@ struct PianoModel : timber::Piano {
         Base::start(v, s);
         v.gated = false;
         v.damperNoiseDue = false;
+        toneEq[&v - voices].on = false;
         if (!bank || !v.exciting) return;  // a silent key
         const double pitch = clampd(v.pitch, 21.0, 108.0);
         const int zone = std::clamp(static_cast<int>(std::floor((pitch - 21.0) / 3.0 + 0.5)), 0, kAttackZones - 1);
@@ -299,6 +335,18 @@ struct PianoModel : timber::Piano {
         }
         if (!any) return;
         v.out *= static_cast<float>(toModel * R / M);
+        // The model takes the recording's tone (owner, 2026-11-25: the crossfade "changes pitch and tone"): its first
+        // three partials brought to the played recordings' balance (the calibration's eq, by the layers' weights), so
+        // the hand-over keeps the note's colour and the strength of its fundamental and octave.
+        {
+            ToneEq& e = toneEq[&v - voices];
+            const double f0 = timber::noteHz(pitch);
+            for (int h = 0; h < 3; ++h) {
+                const double gdb = (1.0 - sw) * kCalibration[p0].eq[h] + sw * kCalibration[p1].eq[h];
+                e.set(h, f0 * (h + 1), gdb, sr);
+            }
+            e.on = true;
+        }
         // The model's own thump and keybed contact are in the recording; its string fades in under it.
         v.thump = 0;
         v.keybedPending = false;
