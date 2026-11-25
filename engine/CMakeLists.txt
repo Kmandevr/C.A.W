@@ -267,6 +267,14 @@ add_custom_command(OUTPUT "${_caw_embed_mallets}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/woodpecker/mallets.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
   COMMENT "Embedding Woodpecker's recorded mallet attacks" VERBATIM)
 target_sources(caw_core PRIVATE src/builtin_woodpecker.cpp "${_caw_embed_mallets}")
+# 1.1.3: Rook's recorded kit parts (Karoryfer's Unruly and Big Rusty Drums, CC0): transients, wires, hats, cymbals.
+set(_caw_embed_rook "${_caw_assets_out}/rook_kit_flac.cpp")
+add_custom_command(OUTPUT "${_caw_embed_rook}"
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/assets/rook/kit.flac -DOUTPUT=${_caw_embed_rook}
+    -DSYMBOL=rook_kit_flac -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/rook/kit.flac ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+  COMMENT "Embedding Rook's recorded kit parts" VERBATIM)
+target_sources(caw_core PRIVATE "${_caw_embed_rook}")
 target_sources(caw_core PRIVATE src/builtin_flock.cpp src/builtin_flock_presets.cpp src/flock_source.cpp)  # 1.1.0: Flock (org.caw.flock), the granular instrument
 target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 # The pre-load scan (1.0.7): ELF64/PE32+ reader, findings, capability declarations, policy, SHA-256, verdict cache.

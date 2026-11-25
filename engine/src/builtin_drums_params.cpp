@@ -62,7 +62,7 @@ constexpr std::string_view kAccentOns[] = {"Beats", "Bar starts", "Off-beats", "
 constexpr std::string_view kGrooves[] = {"Off", "Shuffle", "Laid back", "Gallop", "Broken", "Half-time"};
 constexpr std::string_view kEchoSyncs[] = {"Free", "1/16", "1/8", "1/8 dotted", "1/4", "1/8 triplet"};
 // 1.1.2
-constexpr std::string_view kEngines[] = {"Layers", "Acoustic"};
+constexpr std::string_view kEngines[] = {"Synthesized", "Simulated"};  // 1.1.3 names (Layers, Acoustic before)
 constexpr std::string_view kPieceNames[] = {"Piece 1", "Piece 2",  "Piece 3",  "Piece 4",  "Piece 5",  "Piece 6",
                                             "Piece 7", "Piece 8",  "Piece 9",  "Piece 10", "Piece 11", "Piece 12",
                                             "Piece 13", "Piece 14", "Piece 15", "Piece 16"};
@@ -372,9 +372,10 @@ const Spec* acouSpecs() {
         {"acou_hat_pedal", "Hi-hat pedal", "acoustic", Kind::Num, 0, 1, 1, {}},
         {"acou_sympathy", "Sympathetic ring", "acoustic", Kind::Num, 0, 1, 0.5, {}},
         {"acou_bleed", "Mic bleed", "acoustic", Kind::Num, 0, 1, 0.5, {}},
-        {"acou_noise", "Mechanical noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
+        {"acou_noise", "Noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
         {"acou_level", "Acoustic level", "acoustic", Kind::Num, -60, 12, 0, "dB"},
         {"acou_room", "Room mic", "acoustic", Kind::Num, 0, 1, 0.3, {}},
+        {"randomness", "Randomness", "kind", Kind::Num, 0, 1, 0.5, {}},
     };
     return specs;
 }
@@ -403,6 +404,7 @@ const Spec* pieceSpecs() {
         {"pan", "Position", "piece", Kind::Num, -1, 1, 0, {}},
         {"dist", "Distance to overheads", "piece", Kind::Num, 0.3, 2, 1, "m"},
         {"shell_level", "Shell ring", "piece", Kind::Num, 0, 1, 0.5, {}},
+        {"rec", "Recorded", "piece", Kind::Num, 0, 1, 0, {}},
     };
     return specs;
 }
