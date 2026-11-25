@@ -143,10 +143,9 @@ std::vector<Event> eventsOf(const std::vector<Hit>& hits) {
 }
 constexpr uint32_t kGrooveFrames = 5 * 24000;
 
-// The long-term spectrum in third-octave bands (25 Hz .. 16 kHz), each band's share of the total power, in dB.
-std::vector<double> thirdOctaves(const std::vector<float>& x) {
-    std::vector<double> bands;
-    constexpr size_t kN = 4096;
+constexpr size_t kN = 4096;
+// The power per bin (kN / 2 + 1 bins of kSr / kN Hz), summed over Hann windows half overlapping.
+std::vector<double> powerOf(const std::vector<float>& x) {
     std::vector<double> power(kN / 2 + 1, 0.0);
     for (size_t at = 0; at + kN <= x.size(); at += kN / 2) {
         // A plain DFT per window is too slow; the power per bin by Goertzel over the band centres would miss
@@ -173,6 +172,20 @@ std::vector<double> thirdOctaves(const std::vector<float>& x) {
         }
         for (size_t k = 0; k <= kN / 2; ++k) power[k] += re[k] * re[k] + im[k] * im[k];
     }
+    return power;
+}
+// The spectral centroid (Hz).
+double centroidOf(const std::vector<float>& x) {
+    const std::vector<double> power = powerOf(x);
+    double num = 0.0, den = 0.0;
+    for (size_t k = 1; k <= kN / 2; ++k) num += power[k] * (k * kSr / kN), den += power[k];
+    return den > 0 ? num / den : 0.0;
+}
+// The long-term spectrum in third-octave bands (25 Hz .. 16 kHz), each band's share of the total power, in dB
+// (so a louder render has the same bands: loudness-normalised).
+std::vector<double> thirdOctaves(const std::vector<float>& x) {
+    std::vector<double> bands;
+    const std::vector<double> power = powerOf(x);
     double total = 0.0;
     for (double p : power) total += p;
     for (double fc = 25.0; fc <= 16000.0; fc *= std::exp2(1.0 / 3.0)) {
@@ -274,20 +287,85 @@ TEST(rook_recorded_parts_balance_against_the_model) {
 
 // ---------- The three kinds ----------
 
-TEST(rook_kinds_default_kits_are_far_apart_spectrally) {
-    // The owner, after 1.1.2: "Rook: I see no difference." The same bar through each kind's default kit: every pair's
-    // third-octave spectra (loudness-normalised) at least 4 dB RMS apart, and each kit sounds.
-    std::vector<std::vector<double>> spectra;
-    for (const char* name : kKindDefaults) {
-        const std::vector<float> x = mono(render(presetValues(name), eventsOf(groove()), kGrooveFrames));
-        CHECK(peakOf(x) > 0.05f);
-        spectra.push_back(thirdOctaves(x));
+namespace {
+// One hit's character, independent of its level: the spectral centroid and third-octave shares over its first
+// 500 ms, its attack (from the onset, the first 1 ms frame over -40 dB of the peak frame, to the peak frame, ms) and
+// its T60 (from the peak frame to the first frame 60 dB under it; extrapolated from the -5..-35 dB slope when the 2 s
+// render ends first, s).
+struct Character {
+    double centroid = 0, attackMs = 0, t60 = 0;
+    std::vector<double> bands;
+};
+Character characterOf(const std::vector<float>& x) {
+    Character c;
+    const size_t n = std::min(x.size(), static_cast<size_t>(0.5 * kSr));
+    std::vector<float> head(x.begin(), x.begin() + static_cast<long>(n));
+    head.resize(kN * 6, 0.0f);
+    c.centroid = centroidOf(head);
+    c.bands = thirdOctaves(head);
+    const size_t f = static_cast<size_t>(0.001 * kSr);
+    std::vector<double> env;
+    for (size_t at = 0; at + f <= x.size(); at += f) {
+        double e = 0.0;
+        for (size_t i = at; i < at + f; ++i) e += static_cast<double>(x[i]) * x[i];
+        env.push_back(10.0 * std::log10(e / f + 1e-30));
     }
+    const size_t peak = static_cast<size_t>(std::max_element(env.begin(), env.end()) - env.begin());
+    size_t onset = 0;
+    while (onset < peak && env[onset] < env[peak] - 40.0) ++onset;
+    c.attackMs = static_cast<double>(peak - onset);
+    size_t k = peak, at5 = 0, at35 = 0;
+    for (; k < env.size() && env[k] > env[peak] - 60.0; ++k) {
+        if (!at5 && env[k] < env[peak] - 5.0) at5 = k;
+        if (!at35 && env[k] < env[peak] - 35.0) at35 = k;
+    }
+    if (k < env.size()) c.t60 = (k - peak) * 0.001;
+    else if (at5 && at35 > at5) c.t60 = (at35 - at5) * 0.001 * 60.0 / 30.0;
+    else c.t60 = env.size() * 0.001 * 2.0;  // still within 35 dB at the end: long
+    return c;
+}
+}  // namespace
+
+TEST(rook_kinds_default_kits_differ_in_character_pad_by_pad) {
+    // The owner, after 1.1.2: "Rook: I see no difference." Each kind's default kit plays its kick, snare, closed hat,
+    // a tom and its crash alone (GM keys, velocity 0.9). Level never counts: each hit's character is measured
+    // independent of its loudness (characterOf). Between two kinds a pad differs when its third-octave shares are
+    // 3 dB RMS apart, its centroid half an octave, its attack 3 ms or its T60 1.5 times; every pair of kinds must
+    // differ on at least 4 of the 5 pads, and its mean band distance be 3 dB or more.
+    struct Role {
+        const char* name;
+        int key;
+    };
+    const Role roles[] = {{"kick", 36}, {"snare", 38}, {"closed hat", 42}, {"tom", 45}, {"crash", 49}};
+    Character ch[3][5];
+    for (int kind = 0; kind < 3; ++kind)
+        for (int r = 0; r < 5; ++r) {
+            const std::vector<float> x = mono(render(presetValues(kKindDefaults[kind]), {notes::noteOn(0, 1, static_cast<uint8_t>(roles[r].key), 0.9)}, 96000));
+            if (!(peakOf(x) > 1e-3f)) cawtest::fail(__FILE__, __LINE__, std::string(kKindDefaults[kind]) + ": silent " + roles[r].name);
+            ch[kind][r] = characterOf(x);
+            std::printf("rook character: %-22s %-10s centroid %6.0f Hz, attack %3.0f ms, T60 %5.2f s\n", kKindDefaults[kind], roles[r].name,
+                        ch[kind][r].centroid, ch[kind][r].attackMs, ch[kind][r].t60);
+        }
     for (int a = 0; a < 3; ++a)
         for (int b = a + 1; b < 3; ++b) {
-            const double d = spectralDistance(spectra[a], spectra[b]);
-            std::printf("rook kinds: %s vs %s: %.1f dB RMS apart\n", kKindDefaults[a], kKindDefaults[b], d);
-            if (d < 4.0) cawtest::fail(__FILE__, __LINE__, std::string(kKindDefaults[a]) + " sounds too like " + kKindDefaults[b]);
+            int differ = 0;
+            double bandSum = 0.0;
+            for (int r = 0; r < 5; ++r) {
+                const Character &x = ch[a][r], &y = ch[b][r];
+                const double band = spectralDistance(x.bands, y.bands);
+                const double oct = std::fabs(std::log2(std::max(1.0, x.centroid) / std::max(1.0, y.centroid)));
+                const double attack = std::fabs(x.attackMs - y.attackMs);
+                const double t60 = std::fabs(std::log2(std::max(0.01, x.t60) / std::max(0.01, y.t60)));
+                const bool d = band >= 3.0 || oct >= 0.5 || attack >= 3.0 || t60 >= std::log2(1.5);
+                differ += d;
+                bandSum += band;
+                std::printf("rook kinds: %s vs %s, %-10s: bands %4.1f dB, centroid %4.2f oct, attack %3.0f ms, T60 x%4.2f%s\n",
+                            kKindDefaults[a], kKindDefaults[b], roles[r].name, band, oct, attack, std::exp2(t60), d ? "" : "  (alike)");
+            }
+            std::printf("rook kinds: %s vs %s: %d of 5 pads differ, mean band distance %.1f dB\n", kKindDefaults[a],
+                        kKindDefaults[b], differ, bandSum / 5.0);
+            if (differ < 4 || bandSum / 5.0 < 3.0)
+                cawtest::fail(__FILE__, __LINE__, std::string(kKindDefaults[a]) + " sounds too like " + kKindDefaults[b]);
         }
 }
 
