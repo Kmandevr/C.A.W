@@ -8,9 +8,8 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
 
 ## Done and verified (each an agent branch; commit 81b1cab has every tip as a parent, so all are on GitHub)
 - Guitar + harp: worktree-agent-a7fa15840664e0054 df0139b (based on 1061175).
-- Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc d78ecb5 (agent now cutting cost to 24000 and fixing dead knobs).
+- Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc caec31f (WIP: cost over 24000, dead knobs; redo as the Tabernacle organ).
 - Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
-
 ## Open
 - Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Bittern swell only the Swell?; Rook cards/Studio; panels; EP/tonewheel by ear.
 - Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
