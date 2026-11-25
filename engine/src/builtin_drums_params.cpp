@@ -375,7 +375,7 @@ const Spec* acouSpecs() {
         {"acou_noise", "Noise", "acoustic", Kind::Num, 0, 1, 0.25, {}},
         {"acou_level", "Acoustic level", "acoustic", Kind::Num, -60, 12, 0, "dB"},
         {"acou_room", "Room mic", "acoustic", Kind::Num, 0, 1, 0.3, {}},
-        {"randomness", "Randomness", "kind", Kind::Num, 0, 1, 0.5, {}},
+        {"randomness", "Randomness", "random", Kind::Num, 0, 1, 0.5, {}},
     };
     return specs;
 }
@@ -632,7 +632,7 @@ const std::vector<NeedRule>& needs() {
             if (power == kPadParams || power == k || k == kBodyFreq) continue;  // body_freq: the sub's pitch too
             std::vector<Need> all = {on(power)};
             if (layer == "penv" && k != kPenvMode) all.push_back(in(kPenvMode, {kPenvPoints}));
-            if (k == kBodyPTime || k == kBodyPCurve) all.push_back(in(kPenvMode, {kPenvCurve}));
+            if (k == kBodyPTime || k == kBodyPCurve) all.push_back(in(kPenvMode, {kPenvCurve})), all.push_back(nonzero(kBodyPitch));  // no sweep, no shape
             if (k == kBodyP2Ratio) all.push_back(nonzero(kBodyP2Level));
             if (k == kSubFollow) all.push_back(on(kBodyOn));
             if (k == kNoiseBursts || k == kNoiseSpacing) all.push_back(in(kNoiseMode, {kNoiseClap}));
@@ -665,7 +665,7 @@ const std::vector<NeedRule>& needs() {
         add(kGlide, {on(kMono), on(kTrack)});
         add(kRoot, {on(kTrack)});
         add(kRelease, {in(kTrig, {kGate})});
-        add(kVelPunch, {on(kBodyOn)});
+        add(kVelPunch, {on(kBodyOn), nonzero(kBodyPitch)});  // it scales the pitch drop
         add(kVelClick, {on(kClickOn)});
         add(kRndPos, {on(kResOn)});
         add(kSwingGrid, {nonzero(kSwing)});

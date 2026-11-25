@@ -241,7 +241,8 @@ void main() {
       final t = targetOf(s, id);
       expect(drumKindOf(t), 2);
       expect(t.value('pc1_rec'), 1, reason: 'the studio kit plays its recordings');
-      expect(t.value('acou_mics'), 0, reason: 'close-miked and dry');
+      expect(t.value('acou_mics'), 1, reason: 'close mics and overheads');
+      expect(t.value('acou_room'), lessThan(0.2), reason: 'almost dry');
       for (final name in drumKindDefaults) {
         expect(DevicePresets.factory(t).where((p) => p.name == name), hasLength(1), reason: name);
       }

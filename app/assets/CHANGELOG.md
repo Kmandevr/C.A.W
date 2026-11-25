@@ -3,6 +3,11 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.3 (2026-11-25)
+
+### New
+- **Rook, drums that sound different by kind:** three cards over the pads (Synth, Produced, Acoustic) switch the whole kit to that kind's best kit, and a new Rook opens on a realistic, dry studio rock and pop kit: synthesized drum heads with real recorded sticks, shells, snare wires, hi-hat and cymbals (Karoryfer's CC0 kits). A Randomness knob sets how far the dice move a pad, and a randomized pad stays its type. Presets come in categories, the best kits first.
+
 ## 1.1.3-alpha.2 (2026-11-25)
 
 Realistic instruments, part two: tuned percussion.
