@@ -405,11 +405,11 @@ const std::vector<AcousticStyle>& acousticStyles() {
         {"Big room", "A huge kit far from the overheads: 24\" kick, deep snare and toms, long cymbals",
          24, 18, 0.2, kBeaterFelt, 0, 14, 8, kShellBirch, 0.55, -1, {13, 16, 18}, 5, kHeadCoated, 15, 20, 22, kPieceCrash, 18,
          kAlloyB20, kStickSticks, kMicsOverheads, 0.8, 1.3, 0.8, 0.5},
-        // 1.1.3: the realistic kit (owner, 2026-11-25): a dry studio rock/pop kit, close-miked, its heads synthesized
-        // and its sticks, shells, wires, hi-hat and cymbals recorded.
+        // 1.1.3: the realistic kit (owner, 2026-11-25): a dry studio rock/pop kit, close mics and overheads with
+        // almost no room, its heads synthesized and its sticks, shells, wires, hi-hat and cymbals recorded.
         {"Studio", "A dry, close-miked studio rock and pop kit: synthesized heads, recorded sticks, wires and cymbals",
          22, 18, 0.45, kBeaterFelt, 1, 14, 5.5, kShellMaple, 0.6, 2, {12, 13, 16}, 5, kHeadCoated2, 14, 16, 20, kPieceCrash, 18,
-         kAlloyB20, kStickSticks, kMicsDry, 0.1, 0.9, 1, 1},
+         kAlloyB20, kStickSticks, kMicsStudio, 0.1, 0.9, 1, 1},
     };
     return s;
 }

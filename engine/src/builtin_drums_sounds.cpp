@@ -760,13 +760,14 @@ void keepType(Voice& v, int type) {
     for (uint32_t k : {kBodyDCurve, kSubDCurve, kNoiseDCurve, kMetalDCurve, kFmDCurve, kTexDCurve, kSmpDCurve}) v[k] = std::max(v[k], -0.2);
     v[kLength] = std::min(v[kLength], 0.25);
     if (type != kTypeBass) v[kTrig] = kOneShot;  // an 808 bass may stay gated (it is played as a note)
-    // Mild drive: under 3.5, no hard or folding curves, the clipper under 6 dB, the Dirt macro at most a touch.
+    // Mild drive: at most 2, no hard or folding curves, no clipper, the Dirt macro at most a touch.
     if (v[kDriveType] != kDriveOff && v[kDriveType] != kDriveSoft && v[kDriveType] != kDriveTube && v[kDriveType] != kDriveAsym)
         v[kDriveType] = kDriveSoft;
-    v[kDrive] = std::min(v[kDrive], 3.5);
-    v[kClipGain] = std::min(v[kClipGain], 6.0);
+    v[kDrive] = std::min(v[kDrive], 2.0);
+    v[kClip] = kClipOff;  // a clipper squares a hit before its level is matched: it is the user's to add
+    v[kClipGain] = std::min(v[kClipGain], 3.0);
     v[kDirt] = std::min(v[kDirt], 0.2);
-    v[kComp] = std::min(v[kComp], 0.5);
+    v[kComp] = std::min(v[kComp], 0.35);
 }
 
 // A deterministic stream of numbers in 0..1 from a seed.

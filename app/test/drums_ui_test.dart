@@ -530,7 +530,7 @@ void main() {
         expect([for (final n in e.value as List) '${n['param']}|${n['kit']}|${(n['in'] as List?)?.join(',')}'],
           [for (final n in drumNeeds[e.key]!) '${n.param}|${n.kit}|${n.only?.join(',')}'], reason: e.key);
       }
-      expect(drums.parameters.length, 14263);  // 1.1.2 appended 4 a pad and the Acoustic kit
+      expect(drums.parameters.length, 14280);  // 1.1.2 appended 4 a pad and the Acoustic kit; 1.1.3 Randomness and each piece's Recorded
       // Randomize and explode through the real engine.
       final r = const EngineDrumsApi().randomize(0, 3, 1, 5, null)!;
       expect(r.keys.where((k) => k.startsWith('a6_')).length, 217);
