@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show ValueNotifier;
 import '../../../engine/component_info.dart';
 import '../../../model/merged_devices.dart';
 import '../../../model/device_target.dart';
+import '../../../model/drums.dart' show drumsComponentId, drumPresetCategory;
 import '../../../model/user_presets.dart';
 
 /// A named set of values for a device; parameters it leaves out go to their defaults, and values for parameters
@@ -47,11 +48,25 @@ class DevicePresets {
   /// Mono bass, Acid 303 and Basic. The engine's "Init" is Flagship's defaults, the same as the browser's own.
   static List<DevicePreset>? Function(DeviceTarget target)? engine = fromDescriptor;
 
-  static List<DevicePreset> fromDescriptor(DeviceTarget target) => [
-        for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
-          if (p.name != 'Init' && !(hidden[target.componentId]?.contains(p.name) ?? false))
-            DevicePreset(p.name, p.params, category: 'Factory'),
-      ];
+  static List<DevicePreset> fromDescriptor(DeviceTarget target) {
+    final list = [
+      for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
+        if (p.name != 'Init' && !(hidden[target.componentId]?.contains(p.name) ?? false))
+          DevicePreset(p.name, p.params, category: 'Factory'),
+    ];
+    final arrange = arranged[target.componentId];
+    return arrange == null ? list : arrange(list);
+  }
+
+  /// Devices whose engine list is shown in categories, best first (Rook's 116 presets, 1.1.3).
+  static final Map<String, List<DevicePreset> Function(List<DevicePreset>)> arranged = {
+    drumsComponentId: (list) {
+      final keyed = [
+        for (final (i, p) in list.indexed) (p, drumPresetCategory(p.name, p.values), i),
+      ]..sort((a, b) => a.$2.$2 != b.$2.$2 ? a.$2.$2.compareTo(b.$2.$2) : a.$3.compareTo(b.$3));
+      return [for (final (p, (category, _), _) in keyed) DevicePreset(p.name, p.values, category: category)];
+    },
+  };
 
   /// The engine's presets the browser leaves out of its list, by component: each is found by scrolling past the
   /// list's end ([hiddenOf]).

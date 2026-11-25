@@ -731,6 +731,12 @@ class LayerDoc {
   /// default left with Timber in 1.1.3).
   static const newInstrumentValues = <String, Map<String, double>>{};
 
+  /// The engine preset a newly added instrument opens on, its values under [newInstrumentValues]: a new Rook plays
+  /// its realistic studio kit (1.1.3; the engine's defaults stay the 808 kit so older projects sound as they did).
+  static const newInstrumentPresets = <String, String>{
+    'org.caw.drums': 'Acoustic kit: Studio',
+  };
+
   /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4).
   Map<String, dynamic> toJson({int Function(String assetId)? rateOf}) => {
         'id': id,

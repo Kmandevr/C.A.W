@@ -348,6 +348,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/drums_audit_test.cpp)  # org.caw.drums: every setting moves the sound; 1.1.0's groove
   target_sources(caw_tests PRIVATE tests/drums_compat_test.cpp)  # org.caw.drums: old presets bit-identical after 1.1.0
   target_sources(caw_tests PRIVATE tests/drums_acoustic_test.cpp)  # Rook 1.1.2: the Acoustic engine's realism, kits and builders
+  target_sources(caw_tests PRIVATE tests/rook_test.cpp)  # Rook 1.1.3: recorded parts, the kinds apart, every control, Randomize, the glitch scan
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
   target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
