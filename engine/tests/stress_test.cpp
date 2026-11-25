@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -90,8 +91,14 @@ std::string hex(uint64_t v) {
     return b;
 }
 
+// One folder per test process: ctest runs shards side by side, and a shared folder let one shard rewrite loop.wav
+// while another read it (song8_extras 0.8 dB off on Windows, PR #264).
 std::string workDir() {
-    const std::string d = (std::filesystem::temp_directory_path() / "caw_stress_test").string();
+    static const std::string d = [] {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const std::string name = "caw_stress_test_" + std::to_string(stamp) + "_" + std::to_string(reinterpret_cast<uintptr_t>(&stamp) & 0xFFFFFF);
+        return (std::filesystem::temp_directory_path() / name).string();
+    }();
     std::filesystem::create_directories(d);
     return d;
 }
