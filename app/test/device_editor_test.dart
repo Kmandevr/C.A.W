@@ -4,6 +4,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'dart:ui' as ui;
+
 import 'package:caw/engine/component_info.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
@@ -183,7 +185,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       final before = synth().value('osc1_level');
       final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
-      await tester.pump(const Duration(milliseconds: 150)); // a finger rests first, or the swipe scrolls the page
+      await tester.pump(const Duration(milliseconds: 270)); // a finger rests first, or the swipe scrolls the page
       for (var i = 0; i < 8; i++) {
         await g.moveBy(const Offset(0, -5));
         await tester.pump(const Duration(milliseconds: 16));
@@ -244,7 +246,25 @@ void main() {
       final pos = await top(tester);
       final before = synth().value('osc1_level');
       final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
-      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump(const Duration(milliseconds: 270));
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(0, -6));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(synth().value('osc1_level'), greaterThan(before));
+      expect(pos.pixels, 0);
+    });
+
+    // 1.1.3-alpha.2 (owner on alpha.1: "most of the knobs ... don't do anything"): at an Android phone's touch slop
+    // (about 8 px, MediaQuery.gestureSettings) the knob used Flutter's 18 and the page's scroll always won.
+    wtest('at a phone\'s 8 px touch slop a rested knob still turns and the page stays', (tester) async {
+      tester.view.gestureSettings = const ui.GestureSettings(physicalTouchSlop: 8);
+      final pos = await top(tester);
+      final before = synth().value('osc1_level');
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      await tester.pump(const Duration(milliseconds: 270));
       for (var i = 0; i < 8; i++) {
         await g.moveBy(const Offset(0, -6));
         await tester.pump(const Duration(milliseconds: 16));
@@ -274,13 +294,19 @@ void main() {
       expect(synth().value('osc1_level'), lessThan(up));
     });
 
-    wtest('a drag that starts slowly turns the knob', (tester) async {
+    // The touch research (owner-approved, 2026-11-24): a finger that stays within the slop for the 250 ms rest
+    // (knobEngageHold) unlocks every direction, so a creeping start turns the knob.
+    wtest('a drag that creeps within the slop through the rest turns the knob', (tester) async {
       final pos = await top(tester);
       final before = synth().value('osc1_level');
       final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
-      for (var i = 0; i < 12; i++) {
+      for (var i = 0; i < 14; i++) {
         await tester.pump(const Duration(milliseconds: 20));
-        await g.moveBy(const Offset(0, -3)); // 150 px a second
+        await g.moveBy(const Offset(0, -1)); // 50 px a second, inside the slop for 280 ms
+      }
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await g.moveBy(const Offset(0, -3));
       }
       await g.up();
       await tester.pumpAndSettle();
@@ -472,6 +498,46 @@ void main() {
       expect(find.byKey(const ValueKey('mod-sheet')), findsNothing);
       expect(synth().value('mod${slot}_amt'), greaterThan(0.3));
       expect(synth().value('osc1_level'), 0.7);
+    });
+
+    // 1.1.3-alpha.2: the knob reads its rim from where the finger came down, not where the sideways drag was
+    // claimed (DragStartBehavior.start put a quick thumb's start on the ring and set the route's amount instead).
+    wtest('a quick sideways drag from near a modulated knob\'s centre turns the knob, not its ring', (tester) async {
+      await openSynth(tester);
+      final slot = ModMatrix(synth()).add(ModSource.lfo1, 'osc1_level')!;
+      await tester.pump();
+      final amount = synth().value('mod${slot}_amt');
+      final before = synth().value('osc1_level');
+      final r = tester.getRect(find.byKey(const ValueKey('dknob-osc1_level')));
+      // The face's centre: the knob's box is its width across and 58 px high (size 40 + 18).
+      final g = await tester.startGesture(Offset(r.center.dx + 4, r.top + 29));
+      for (var i = 0; i < 6; i++) {
+        await g.moveBy(const Offset(14, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(synth().value('mod${slot}_amt'), amount, reason: 'the ring is untouched');
+      expect(synth().value('osc1_level'), isNot(before));
+    });
+
+    // A finger held past the long-press, then moved sideways, turns the knob as the sideways drag does.
+    wtest('a knob held past the long-press, then dragged sideways, turns', (tester) async {
+      await openSynth(tester);
+      final pos = tester.state<ScrollableState>(synthScroll()).position;
+      final at = pos.pixels;
+      final before = synth().value('osc1_level');
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('dknob-osc1_level'))));
+      await tester.pump(const Duration(milliseconds: 800));
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(6, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(synth().value('osc1_level'), greaterThan(before));
+      expect(pos.pixels, at);
     });
 
     wtest('two fingers on a knob drag the selected route\'s amount', (tester) async {

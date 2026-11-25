@@ -36,13 +36,13 @@ void main() {
       Knob(key: const ValueKey('lin'), value: lin, min: 20, max: 20000, label: 'Linear',
         onChanged: (v) => setState(() => lin = v)),
     ])))));
-    // 200 px covers the travel; 18 px of slop is used up before the drag starts.
+    // 200 px covers the travel; the drag counts from the touch (1.1.3-alpha.2: DragStartBehavior.down), slop included.
     await tester.drag(find.byKey(const ValueKey('exp')), const Offset(0, -68));
     await tester.drag(find.byKey(const ValueKey('lin')), const Offset(0, -68));
     await tester.pumpAndSettle();
     // The same travel t on both: linear 20 + t × 19980, exponential 20 × 1000^t.
     final t = (lin - 20) / 19980;
-    expect(t, inInclusiveRange(0.2, 0.26));
+    expect(t, inInclusiveRange(0.31, 0.37));
     expect(exp, closeTo(20 * math.pow(1000, t), 2));
     await tester.tap(find.byKey(const ValueKey('exp')));
     await tester.pump(const Duration(milliseconds: 50));

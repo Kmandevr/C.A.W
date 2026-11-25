@@ -1,10 +1,22 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-24
+updated: 2026-11-25
 ---
 
 # Decisions
+
+## 2026-11-25: How work is checked before the owner gets it (owner's feedback on 1.1.3-alpha.1, with the advisor session's review)
+
+The owner found that in 1.1.3-alpha.1 most knobs and all effects seemed to do nothing, Felt and Upright sounded like the grand, several knobs were dead, Bittern sounded like a synth, Curlew's growl was wrong, Nightingale had stray peaks, noises came at the wrong moments, the new instruments had no pages, and hours went into Timber, which they replace. These are standing rules from now on; nobody needs to restate them:
+
+- **"No listening gates" means Claude verifies, not less checking.** Nothing ships that the owner cannot use on the phone as they use it. A small complete release beats a big half-done one.
+- **Every control does something audible:** every parameter of every built-in, every variant and every preset differs measurably (an automated test sweeps each one; a dead knob is a failing test). Variants of one instrument must differ spectrally (Felt, Upright and Grand).
+- **Never work on what is being replaced:** before starting, ask whether it is the end state. Timber was being replaced, so tuning it was wasted; the new instruments stand alone.
+- **A headline feature ships with its UI** in the same release (never the generic knob page for a new instrument; "resemble and upgrade" is the look approval for instrument pages).
+- **A global interaction change is tested on every control type** before it ships: knobs, sliders, XY pads, envelope handles, choices and effect pages, inside scroll views and sideways panels, with touch and mouse, as the owner holds the phone.
+- **Before a release, render every preset to audio and analyse it:** peak against RMS (stray peaks), the spectral distance between variants (identical sounds), noise events against note onsets (noises at the wrong moment), and each instrument's spectrum against a CC0 recording of the real one (a synth-like organ). Add a "use it like the owner" widget test: a new project, add the instrument, open its page at phone size, turn every control with the shipped gesture, play, and check the engine got the values; and check it can be found from a fresh project.
+- **CI:** run the full local suite (and the Arm64 qemu build for engine changes) before pushing; push once per complete fix, not per tweak.
 
 ## 2026-11-24: Woodpecker, the tuned percussion: measured modes in phase with recorded attacks (Claude, building the owner's 1.1.3 step 5)
 

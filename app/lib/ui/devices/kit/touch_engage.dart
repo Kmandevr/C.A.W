@@ -9,6 +9,13 @@ import 'package:flutter/widgets.dart';
 /// slop sooner than this belongs to the scroll.
 const Duration touchEngageHold = kPressTimeout;
 
+/// How long a finger rests on a knob before any direction turns it (the owner-approved touch research, 2026-11-24):
+/// longer than a visual's [touchEngageHold], so a scroll that starts with a brief pause on a knob still scrolls.
+const Duration knobEngageHold = Duration(milliseconds: 250);
+
+/// A knob claims a move this close to horizontal at once (the research's 35°: |dy| ≤ tan 35° · |dx|).
+const double knobSidewaysSlope = 0.7002;
+
 /// Whether a pointer of [kind] waits for [touchEngageHold] before a control takes it: fingers and pens do; a
 /// mouse or trackpad engages at once (a desktop's drag is never a scroll).
 bool waitsToEngage(PointerDeviceKind kind) =>
@@ -17,18 +24,22 @@ bool waitsToEngage(PointerDeviceKind kind) =>
 // The gesture binding's sampling clock: the wall clock in the app, the test's fake clock under test.
 DateTime _now() => GestureBinding.instance.samplingClock.now();
 
-/// A vertical drag (a knob's) that a finger engages only after resting [touchEngageHold] on the control: a drag
+/// A vertical drag (a knob's) that a finger engages only after resting [knobEngageHold] on the control: a drag
 /// that starts slowly (or with two fingers on the control) is the control's at the usual slop, and one that crosses
 /// the slop sooner is left to the page's scroll (with no scroll around it the control still gets it, as the arena's last member). It never wins on the
 /// hold alone, so a tap, a double-tap and a long-press on the same control still work.
 class EngageVerticalDragRecognizer extends VerticalDragGestureRecognizer {
   EngageVerticalDragRecognizer({super.debugOwner});
 
+  /// Where a finger may start the drag (a knob's face; null: anywhere); a mouse may start it anywhere.
+  bool Function(Offset local)? grabs;
+
   final Map<int, DateTime> _downAt = {};
   int? _pointer; // the pointer of the event being handled
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
+    if (_downAt.isEmpty && waitsToEngage(event.kind) && !(grabs?.call(event.localPosition) ?? true)) return;
     _downAt[event.pointer] = _now();
     super.addAllowedPointer(event);
   }
@@ -44,7 +55,7 @@ class EngageVerticalDragRecognizer extends VerticalDragGestureRecognizer {
     final down = _downAt[_pointer];
     // Two fingers on the control (a knob's amount) are never the page's scroll.
     if (waitsToEngage(pointerDeviceKind) && down != null && _downAt.length < 2 &&
-        _now().difference(down) < touchEngageHold) {
+        _now().difference(down) < knobEngageHold) {
       return false;
     }
     return super.hasSufficientGlobalDistanceToAccept(pointerDeviceKind, deviceTouchSlop);
@@ -63,8 +74,12 @@ class EngageVerticalDragRecognizer extends VerticalDragGestureRecognizer {
 /// [child] with a vertical drag through [EngageVerticalDragRecognizer]: what a knob's `onVerticalDrag…` callbacks
 /// become, so the page under it still scrolls on a swipe.
 class EngageVerticalDrag extends StatelessWidget {
-  const EngageVerticalDrag({super.key, required this.child, this.onStart, this.onUpdate, this.onEnd, this.onCancel});
+  const EngageVerticalDrag({super.key, required this.child, this.onStart, this.onUpdate, this.onEnd, this.onCancel,
+    this.grabs});
   final Widget child;
+
+  /// Where a finger may start the drag ([EngageVerticalDragRecognizer.grabs]).
+  final bool Function(Offset local)? grabs;
   final GestureDragStartCallback? onStart;
   final GestureDragUpdateCallback? onUpdate;
   final GestureDragEndCallback? onEnd;
@@ -78,6 +93,10 @@ class EngageVerticalDrag extends StatelessWidget {
             EngageVerticalDragRecognizer: GestureRecognizerFactoryWithHandlers<EngageVerticalDragRecognizer>(
               () => EngageVerticalDragRecognizer(debugOwner: this),
               (r) => r
+                ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
+                // onStart gets where the finger came down (a knob reads its rim from it), not where it was claimed.
+                ..dragStartBehavior = DragStartBehavior.down
+                ..grabs = grabs
                 ..onStart = onStart
                 ..onUpdate = onUpdate
                 ..onEnd = onEnd
@@ -128,7 +147,7 @@ mixin EngageOnHold on OneSequenceGestureRecognizer {
   void handleEvent(PointerEvent event) {
     if (_waiting && event is PointerMoveEvent && event.pointer == _first) {
       final d = event.position - _from;
-      if (d.dx.abs() >= kTouchSlop / 2 && d.dx.abs() * 2 >= d.dy.abs()) _engage();
+      if (d.dx.abs() >= (gestureSettings?.touchSlop ?? kTouchSlop) / 2 && d.dx.abs() * 2 >= d.dy.abs()) _engage();
     }
     super.handleEvent(event);
   }
@@ -154,17 +173,21 @@ mixin EngageOnHold on OneSequenceGestureRecognizer {
 
 /// How knobs take a drag (owner, 2026-11-24): `sideways` (the default) turns a knob with a deliberate sideways drag at
 /// once, and a hold first still takes any direction for fine moves, so an up-and-down swipe scrolls the page; off, the
-/// old up-and-down drag after [touchEngageHold] ([EngageVerticalDrag]). Settings › Haptics and menus sets it.
+/// old up-and-down drag after [knobEngageHold] ([EngageVerticalDrag]). Settings › Haptics and menus sets it.
 abstract final class KnobDrag {
   static bool sideways = true;
 }
 
 /// A knob's pan: claimed at once by a mouse; by a finger on a deliberate sideways move (past half the touch slop
-/// within about 27° of horizontal) at once, or, once it has rested [touchEngageHold] (or with a second finger), on any
+/// within 35° of horizontal) at once, or, once it has rested [knobEngageHold] (or with a second finger), on any
 /// move past the pan slop; a quick vertical swipe goes to the scroll. Like [EngageVerticalDragRecognizer] it never
 /// wins on the hold alone, so a tap, a double-tap and a long-press (the knob's menu) still work.
 class EngageKnobPanRecognizer extends PanGestureRecognizer {
   EngageKnobPanRecognizer({super.debugOwner});
+
+  /// Where a finger may start the drag (the knob's face; null: anywhere): one that comes down beside it (its label, the
+  /// gap to the next knob) is left to the page's scroll and a swipe panel. A mouse may start it anywhere.
+  bool Function(Offset local)? grabs;
 
   final Map<int, (DateTime, Offset)> _down = {};
   int? _pointer;
@@ -172,6 +195,7 @@ class EngageKnobPanRecognizer extends PanGestureRecognizer {
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
+    if (_down.isEmpty && waitsToEngage(event.kind) && !(grabs?.call(event.localPosition) ?? true)) return;
     _down[event.pointer] = (_now(), event.position);
     super.addAllowedPointer(event);
   }
@@ -192,10 +216,10 @@ class EngageKnobPanRecognizer extends PanGestureRecognizer {
     if (_down.length >= 2) return true;  // two fingers on the knob (its amount) are never the page's scroll
     final m = _at - down.$2;
     final slop = deviceTouchSlop ?? kTouchSlop;
-    if (m.dx.abs() >= slop / 2 && m.dx.abs() * 2 >= m.dy.abs()) return true;  // a deliberate sideways move
+    if (m.dx.abs() >= slop / 2 && m.dy.abs() <= m.dx.abs() * knobSidewaysSlope) return true;  // a deliberate sideways move
     // A quick swipe is the page's scroll; after the hold any move past the touch slop is the knob's (as the
     // up-and-down drag's, so the scroll does not take it first).
-    if (_now().difference(down.$1) < touchEngageHold) return false;
+    if (_now().difference(down.$1) < knobEngageHold) return false;
     return m.distance >= slop;
   }
 
@@ -212,8 +236,12 @@ class EngageKnobPanRecognizer extends PanGestureRecognizer {
 /// A knob's drag, as [KnobDrag] says: sideways, its handlers get a vertical delta made of both axes (right or up turns
 /// it up: `dy - dx`), so a knob written for the up-and-down drag needs no change; otherwise [EngageVerticalDrag].
 class EngageKnobDrag extends StatelessWidget {
-  const EngageKnobDrag({super.key, required this.child, this.onStart, this.onUpdate, this.onEnd, this.onCancel});
+  const EngageKnobDrag({super.key, required this.child, this.onStart, this.onUpdate, this.onEnd, this.onCancel,
+    this.grabs});
   final Widget child;
+
+  /// Where a finger may start the drag: the knob's face ([EngageKnobPanRecognizer.grabs]).
+  final bool Function(Offset local)? grabs;
   final GestureDragStartCallback? onStart;
   final GestureDragUpdateCallback? onUpdate;
   final GestureDragEndCallback? onEnd;
@@ -233,7 +261,8 @@ class EngageKnobDrag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!KnobDrag.sideways) {
-      return EngageVerticalDrag(onStart: onStart, onUpdate: onUpdate, onEnd: onEnd, onCancel: onCancel, child: child);
+      return EngageVerticalDrag(onStart: onStart, onUpdate: onUpdate, onEnd: onEnd, onCancel: onCancel, grabs: grabs,
+          child: child);
     }
     final update = onUpdate;
     return RawGestureDetector(
@@ -243,6 +272,10 @@ class EngageKnobDrag extends StatelessWidget {
           EngageKnobPanRecognizer: GestureRecognizerFactoryWithHandlers<EngageKnobPanRecognizer>(
             () => EngageKnobPanRecognizer(debugOwner: this),
             (r) => r
+              ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
+              // onStart gets where the finger came down (a knob reads its rim from it), not where it was claimed.
+              ..dragStartBehavior = DragStartBehavior.down
+              ..grabs = grabs
               ..onStart = onStart
               ..onUpdate = update == null ? null : (d) { update(folded(d)); }
               ..onEnd = onEnd

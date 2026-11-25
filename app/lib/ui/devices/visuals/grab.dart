@@ -76,6 +76,7 @@ class _GrabPanState extends State<GrabPan> {
         _GrabRecognizer: GestureRecognizerFactoryWithHandlers<_GrabRecognizer>(
           () => _GrabRecognizer(),
           (r) => r
+            ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context)
             ..grabs = widget.grabs
             ..onStart = ((d) => widget.onStart(d.localPosition))
             ..onUpdate = ((d) => widget.onUpdate(d.localPosition, d.delta))

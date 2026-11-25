@@ -238,8 +238,10 @@ extension FilesCatalog on AppState {
   FileAsset _moduleAsset(ModuleDoc m) => FileAsset._('mod:${m.id}', m.name, FileAssetType.pattern, module: m);
 
   List<FileAsset> get builtinAssets => [
-        // Modulators go in a track's Modulators (modulation.dart), never on a chain.
-        for (final c in nativeCatalog.where((c) => c.builtin && !isModulatorInfo(c)))
+        // Modulators go in a track's Modulators (modulation.dart), never on a chain. MIDI effects (role
+        // event_processor) play only from a track's midiComponents, which the app has no UI for yet: on a chain the
+        // engine leaves them out, so their knobs would do nothing (1.1.3-alpha.2).
+        for (final c in nativeCatalog.where((c) => c.builtin && !isModulatorInfo(c) && c.role != 'event_processor'))
           FileAsset._('native:${c.id}', c.label, FileAssetType.builtinEffect, native: c),
       ]..sort(_byName);
 
