@@ -13,6 +13,7 @@ import 'flagship/flagship_inline.dart';
 import 'flagship/flagship_presets.dart';
 import 'flagship/flagship_tools.dart' show flagshipRandomKeeps, initFlagship;
 import 'generic_device_page.dart';
+import 'instruments/instrument_editors.dart';
 import 'kit/device_style.dart';
 import 'kit/presets.dart';
 import 'sampler/sampler_editor.dart';
@@ -70,6 +71,7 @@ class DeviceEditors {
     ...drumEditors,
     ...samplerEditors,
     ...timberEditors,
+    ...instrumentEditors,
     ...flockEditors,
   };
 
