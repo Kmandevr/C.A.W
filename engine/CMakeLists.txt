@@ -629,7 +629,7 @@ set_source_files_properties(src/builtin_fx_duck_level_carve.cpp src/builtin_fx_v
 set_source_files_properties(src/starling_piano_sim.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Timber's Simulated piano is block-size independent only without reassociation (its contacts and banks, 2026-11-20)
 set_source_files_properties(src/bittern_render.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Bittern's voices give the same bits at any block size
 set_source_files_properties(src/builtin_woodpecker.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Woodpecker (its model and frame) renders the same bits on every build
-set_source_files_properties(src/starling_strings.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Starling's guitar and harp render the same bits on every build (builtin_starling.cpp, the piano, keeps its own)
+set_source_files_properties(src/starling_strings.cpp src/builtin_starling.cpp PROPERTIES COMPILE_OPTIONS "${_caw_fp_strict}")  # strict: Starling's guitar and harp render the same bits on every build; builtin_starling.cpp too, where their frame (instrument_core.h) is instantiated (with the fast flags, clang-cl's linker kept that copy: 2026-11-25)
 
 # CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
 if(CAW_CLAP AND CAW_TOOLS)
