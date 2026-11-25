@@ -1,13 +1,12 @@
 # Handoff
 
-Commit: e15e0bd (merged here: sound fixes, Timber removal, instrument pages; Unison per key)
+Commit: 8d2ff8d (merged here: sound fixes, Timber removal, pages, legato, Unison, crossfade tone, guitar+harp)
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
 Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber removal, guitar/harp, Bittern, Rook; then 1.1.4+.
 
 ## Done and verified (each an agent branch; commit 81b1cab has every tip as a parent, so all are on GitHub)
-- Guitar + harp: worktree-agent-a7fa15840664e0054 df0139b (based on 1061175).
 - Bittern rebuilt: worktree-agent-a2bd9b4251d2239fc caec31f (WIP: cost over 24000, dead knobs; redo as the Tabernacle organ).
 - Rook: worktree-agent-a9a7423dda65ed684 a34a276 (kinds, Studio kit, presets, Randomness).
 ## Open
@@ -19,7 +18,7 @@ Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber remova
 ## Next
 - Starling crossfade (owner): pitch/tone jumps. Measured: dominant partial differs rec vs model (key57 x2->x1, key48
   x1->x2); treble model 13-40 dB below the attack within 0.3 s; keys 105/108 recording strongest an octave below.
-  Fix: per-zone partial-balance correction filter on the model (fit in starling_piano_assets.py), treble decay, top zones.
+  Tone match done (b7126bf); left: treble decay, top zones; guitar's level jump above its recorded range.
 - Owner (2026-11-25, on alpha.2): Starling (Unison done) Noise/Resonance/Pitch glide/Sympathy/Phantom
   inaudible; Upright/Felt unrealistic; a high, distortion-like sound at note ends (probe: scratchpad zz_starling_probe.cpp).
   Strings: no low end or body (8 narrow bands): build a full measured body (convolution or many bands) per instrument.
