@@ -607,16 +607,20 @@ struct Wind {
             click[l] = v.click;
         }
         const F4 zero = f4(0.0f), one = f4(1.0f);
+        F4 bms[kControlFrames];  // the growl's breath, gathered once a block (no branch in the loop)
+        for (uint32_t i = 0; i < n; ++i) {
+            bms[i] = one;
+            if (breathMod)
+                for (uint32_t l = 0; l < 4; ++l) bms[i][l] = breathMod[l < count ? l : 0][i];
+        }
         F4 nz = zero, clk = zero, b = zero, eta = zero;  // per-lane reads (the unused lanes read none: they stay 0)
         for (uint32_t i = 0; i < n; ++i) {
             env = clamp4(env + envStep, zero, one);
             tongue = clamp4(tongue + tongueStep, zero, one);
             const F4 open = one - tongue;
-            F4 pm = env * base * (one + vibAm), bm = one;
-            if (breathMod) {  // Curlew's growl, into the breath (the flute's: its jet; Timber never sets it)
-                for (uint32_t l = 0; l < 4; ++l) bm[l] = breathMod[l < count ? l : 0][i];
-                pm = pm * bm;
-            }
+            // Curlew's growl, into the breath (the flute's: its jet; 1 when none: Timber never sets it).
+            const F4 bm = bms[i];
+            const F4 pm = env * base * (one + vibAm) * bm;
             g = g + gStep;
             for (uint32_t l = 0; l < count; ++l) nz[l] = nzs[l].next(), clk[l] = click[l].next(), b[l] = bore[l].frac(d[l]);
             F4 w, y;
@@ -660,7 +664,7 @@ struct Wind {
                 const F4 t = dd;
                 djCur = djCur + djStep;
                 for (uint32_t l = 0; l < count; ++l) eta[l] = jet[l].frac(djCur[l]);
-                const F4 U = breathMod ? jetU * open * bm : jetU * open;
+                const F4 U = jetU * open * bm;
                 jetU = jetU + jetUStep;
                 const F4 half = f4(0.5f) * t;
                 for (uint32_t l = 0; l < count; ++l) jet[l].push(half[l]);

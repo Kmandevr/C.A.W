@@ -44,8 +44,12 @@ struct Winds : timber::Wind {
     bool testBypassBody = false;
     // The growl (its own, in place of Timber's): the amount, and each voice's tongue and hum phases (by its index).
     double growlAmount = 0;
+    // Two rotating phasors a voice (the tongue's roll and the hum: a complex multiply a sample, their steps set and
+    // their length renormalised on the control grid, so any block size gives the same bits).
     struct Growl {
-        double tongue = 0, hum = 0, rate = 26;
+        float tr = 1, ti = 0, hr = 1, hi = 0;    // the tongue's and the hum's phasors
+        float tc = 1, ts = 0, hc = 1, hs = 0;    // their steps (cos, sin)
+        double rate = 26;
         timber::Noise wander;
     };
     Growl growls[Base::kPool];
@@ -92,9 +96,9 @@ struct Winds : timber::Wind {
     void start(Voice& v, const Shared& s) noexcept {
         Base::start(v, s);
         Growl& g = growls[&v - voices];
-        g.tongue = 0, g.hum = 0, g.rate = 26;
-        releaseGain[&v - voices] = 1.0f, releaseStep[&v - voices] = 0.0f;
+        g = Growl{};
         g.wander.s = 0x6A09u + 131u * v.key;
+        releaseGain[&v - voices] = 1.0f, releaseStep[&v - voices] = 0.0f;
     }
     void voiceControl(Voice& v, const Shared& s) noexcept {
         Base::voiceControl(v, s);
@@ -107,7 +111,17 @@ struct Winds : timber::Wind {
         // The tongue's roll wanders (24..30 Hz), and the pitch flutters with it (up to 20 cents at Growl 1).
         Growl& g = growls[&v - voices];
         g.rate = timber::clampd(g.rate + 0.6 * g.wander.next(), 22.0, 31.0);
-        const double flutter = 20.0 * growlAmount * lib::fastSinCycles(g.tongue);
+        // The tongue's step by its series (w is under 0.005 rad: exact to float); the hum's is set at the note's start.
+        const double wt = timber::kTwoPi * g.rate / sr, w2 = wt * wt;
+        g.tc = static_cast<float>(1.0 - w2 * (0.5 - w2 / 24.0)), g.ts = static_cast<float>(wt * (1.0 - w2 / 6.0));
+        if (g.hs == 0.0f) {
+            const double wh = timber::kTwoPi * (0.5 * v.baseHz + 2.0) / sr;
+            g.hc = static_cast<float>(std::cos(wh)), g.hs = static_cast<float>(std::sin(wh));
+        }
+        // Their lengths back to 1 (one Newton step of 1 / sqrt: they drift by rounding only).
+        const float nt = 1.5f - 0.5f * (g.tr * g.tr + g.ti * g.ti), nh = 1.5f - 0.5f * (g.hr * g.hr + g.hi * g.hi);
+        g.tr *= nt, g.ti *= nt, g.hr *= nh, g.hi *= nh;
+        const double flutter = 20.0 * growlAmount * g.ti;
         tune(v, vibCents * vibrato * lib::fastSinCycles(v.vib) + flutter);
     }
     // The growl into each voice's breath (the mouth pressure, before the reed, jet or lips: the hum and the rolled
@@ -118,17 +132,19 @@ struct Winds : timber::Wind {
         Growl& g = growls[&v - voices];
         // A reed speaks only in a narrow window of pressure: less depth there (the clarinet half, the sax 0.6) keeps it
         // speaking through the growl.
-        const double a = growlAmount * (kKind[which] == 0 ? 0.5 : (kKind[which] == 2 ? 0.6 : 1.0)), dt = 1.0 / sr;
-        const double humHz = 0.5 * v.baseHz + 2.0;
+        const double a = growlAmount * (kKind[which] == 0 ? 0.5 : (kKind[which] == 2 ? 0.6 : 1.0));
         const float dT = static_cast<float>(0.85 * a), dH = static_cast<float>(0.6 * a);
         const float norm = 1.0f / (1.0f - dT * 0.3125f);
+        float tr = g.tr, ti = g.ti, hr = g.hr, hi = g.hi;
+        const float tc = g.tc, ts = g.ts, hc = g.hc, hs = g.hs;
         for (uint32_t i = 0; i < n; ++i) {
-            const float c = 0.5f + 0.5f * static_cast<float>(lib::fastSinCycles(g.tongue + 0.25));
-            const float h = static_cast<float>(lib::fastSinCycles(g.hum));
-            gm[i] = (1.0f - dT * c * c * c) * norm * (1.0f + dH * h);
-            g.tongue += g.rate * dt, g.hum += humHz * dt;
-            g.tongue -= std::floor(g.tongue), g.hum -= std::floor(g.hum);
+            const float c = 0.5f + 0.5f * tr;
+            gm[i] = (1.0f - dT * c * c * c) * norm * (1.0f + dH * hi);
+            const float t2 = tr * tc - ti * ts, h2 = hr * hc - hi * hs;
+            ti = tr * ts + ti * tc, hi = hr * hs + hi * hc;
+            tr = t2, hr = h2;
         }
+        g.tr = tr, g.ti = ti, g.hr = hr, g.hi = hi;
     }
     float growlBuf[4][timber::kControlFrames] = {};
     void render(Voice& v, float* out, uint32_t n) noexcept {
