@@ -20,6 +20,8 @@ The realistic instruments get their own pages.
   - **Bittern:** tap the stop pills to draw stops (drag one up and down for its level), watch the drawn ranks glow as you play, and try Cathedral, Loft and Dry.
   - **Woodpecker:** switch between marimba, vibes, chimes and timpani, and drag up and down for a harder mallet; the woodpecker pecks the bar you play.
   - **Starling:** play and watch the hammers rise and the dampers lift with the pedal; drag up and down for a harder hammer.
+### New
+- **Rook, drums that sound different by kind:** three cards over the pads (Synth, Produced, Acoustic) switch the whole kit to that kind's best kit, and a new Rook opens on a realistic, dry studio rock and pop kit: synthesized drum heads with real recorded sticks, shells, snare wires, hi-hat and cymbals (Karoryfer's CC0 kits). A Randomness knob sets how far the dice move a pad, and a randomized pad stays its type. Presets come in categories, the best kits first.
 
 ## 1.1.3-alpha.2 (2026-11-25)
 

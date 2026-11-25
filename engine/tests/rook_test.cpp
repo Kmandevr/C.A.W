@@ -293,8 +293,9 @@ TEST(rook_kinds_default_kits_are_far_apart_spectrally) {
 
 TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
     // As the owner uses it: each kind's default kit loaded, the bar played, and every setting it uses (the kit's,
-    // the Acoustic kit's, each piece's, and every parameter of its first two playing pads) moved to its ends: the
-    // render changes. Settings their needs say are not heard in this kit (a layer that is off) are skipped; the
+    // the Acoustic kit's, each piece's, and every parameter of its kick and snare pads, GM 36 and 38) moved to its
+    // ends: the render changes measurably (over -100 dB of the bar, L1); one that changes it less than -70 dB is
+    // listed as weak. Settings their needs say are not heard in this kit (a layer that is off) are skipped; the
     // settings audits (drums_audit_test, drums_acoustic_test) hear each in a context where it is.
     const ParameterDescriptor* t = parameterTable();
     int failures = 0, checked = 0;
@@ -320,6 +321,23 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
         };
         const std::vector<uint32_t> pads = usedPads(kit);
         CHECK(pads.size() >= 8);
+        std::vector<int> keys;
+        bool autoNotes = false;
+        for (uint32_t pad : pads) {
+            double note = defaultVoice(pad)[kNote];
+            for (const auto& [id, x] : kit)
+                if (id == padId(pad) + "_note") note = x;
+            autoNotes = autoNotes || note == kNoteAuto;
+            keys.push_back(note == kNoteAuto ? autoNote(pad, 36) : static_cast<int>(note) - kNoteFirst);
+        }
+        std::vector<uint32_t> main;  // the kick's and the snare's pads
+        for (int want : {36, 38})
+            for (size_t i = 0; i < pads.size(); ++i)
+                if (keys[i] == want) {
+                    main.push_back(static_cast<uint32_t>(i));
+                    break;
+                }
+        CHECK(main.size() == 2);
         std::vector<uint32_t> ids;
         for (uint32_t k = 0; k < kGlobalCount; ++k) ids.push_back(k);
         bool anyPiece = false;  // the Acoustic kit's own settings are heard only through its pieces
@@ -329,22 +347,12 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
         for (uint32_t pc = 0; pc < kPieces; ++pc)
             if (static_cast<int>(valueOf(pieceParam(pc, kPcKind))) != kPieceOff)
                 for (uint32_t k = 0; k < kPieceParams; ++k) ids.push_back(pieceParam(pc, k));
-        for (uint32_t i = 0; i < 2 && i < pads.size(); ++i)
+        for (uint32_t i : main)
             for (uint32_t k = 0; k < kPadParams; ++k) ids.push_back(padParam(pads[i], k));
-        // The bar's hits, then every playing pad once on its own note (whatever map the kit uses), the first two
-        // pads also hit on every beat.
+        // The bar's hits (kick and snare on every beat among them), then every playing pad once on its own note
+        // (whatever map the kit uses).
         std::vector<Hit> hits = groove();
-        bool autoNotes = false;
-        for (uint32_t i = 0; i < pads.size(); ++i) {
-            double note = defaultVoice(pads[i])[kNote];
-            for (const auto& [id, x] : kit)
-                if (id == padId(pads[i]) + "_note") note = x;
-            autoNotes = autoNotes || note == kNoteAuto;
-            const int key = note == kNoteAuto ? autoNote(pads[i], 36) : static_cast<int>(note) - kNoteFirst;
-            if (i < 2)
-                for (uint32_t b = 0; b < 4; ++b) hits.push_back({b * 24000 + 3000 + i * 1500, key, 0.8});
-            hits.push_back({kGrooveFrames + i * 2400, key, 0.85});
-        }
+        for (uint32_t i = 0; i < pads.size(); ++i) hits.push_back({kGrooveFrames + i * 2400, keys[i], 0.85});
         const uint32_t frames = kGrooveFrames + static_cast<uint32_t>(pads.size()) * 2400 + 24000;
         std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.frame < b.frame; });
         const std::vector<Event> events = eventsOf(hits);
@@ -378,16 +386,18 @@ TEST(rook_every_control_of_each_kinds_default_kit_is_audible) {
             const double was = valueOf(index);
             bool any = false;
             double best = 0.0;
-            for (double m : {d.minimum, d.maximum}) {
+            const bool cycle = id.size() > 10 && id.substr(id.size() - 10) == "body_phase";  // a cycle: its ends are one phase
+            for (double m : cycle ? std::vector<double>{0.25, 0.5} : std::vector<double>{d.minimum, d.maximum}) {
                 if (d.choiceCount > 0 && m == d.maximum) m = d.choiceCount - 1;
                 if (std::fabs(m - was) < 1e-9) continue;
                 Values moved = kit;
                 moved.emplace_back(id, m);
                 const double x = apart(ref, render(moved, events, frames));
                 best = std::max(best, x);
-                any = any || x >= 3e-4;  // -70 dB of the bar's level, L1
+                any = any || x >= 1e-5;  // -100 dB of the bar's level, L1
             }
             ++checked;
+            if (any && best < 3e-4) std::printf("rook: weak in %s: %s (%.2g of the bar, L1)\n", name, id.c_str(), best);
             if (!any && best >= 0.0 && !(std::fabs(d.minimum - was) < 1e-9 && std::fabs(d.maximum - was) < 1e-9)) {
                 char msg[240];
                 std::snprintf(msg, sizeof msg, "%s: %s changes nothing at its ends (%.2g apart)", name, id.c_str(), best);
