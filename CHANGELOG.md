@@ -8,6 +8,15 @@ Versions keep the `-alpha.N` suffix until the official release.
 - **The new instruments, every knob heard:** Starling's Hammer runs from soft felt to hard (about 12 dB brighter), and Soft pedal, Touch, Resonance, Sympathy, Phantom partials and Noise all do what they say in normal playing; the Upright and Felt are their own pianos (the Felt darker and softer, the Upright boxy and shorter-lived), both with the grand's recorded attack processed to match; a key let go under the pedal sounds its damper when the pedal lifts. Curlew's Growl is a real growl and flutter-tongue, its Vibrato is heard at the default, and the sax has a body. Nightingale no longer spikes or buzzes as a note is released, and its vibrato comes in sooner. Woodpecker's Release damps the bars by hand, Attack level adds or removes the mallet's stroke, and the vibraphone's motor is one control.
 ### Changed
 - **Timber has been split into the new instruments:** a project that used Timber now opens with each track on Starling (piano, and for now the plucked strings), Nightingale (bowed strings), Curlew (winds), Woodpecker (mallets), Bittern (a church-like organ) or Kestrel's new Electric piano and Tonewheel organ presets, with its settings carried over as closely as they go, and a one-time note says so. It sounds similar, not identical. Searching "Timber" finds the new instruments.
+The realistic instruments get their own pages.
+
+### New
+- **Starling, Nightingale, Curlew, Bittern and Woodpecker each have a page of their own**, in the same one-screen layout as the other instruments: the instrument drawn live on top, its own knobs under it, then tone and space; on a phone, swipe the three panels under the picture. Try these:
+  - **Nightingale:** drag the picture sideways to move the bow toward the bridge or over the fingerboard, and up to press harder; watch the string move under it as you play.
+  - **Curlew:** drag the picture up and down for the breath and watch the breath column and the bore's standing wave.
+  - **Bittern:** tap the stop pills to draw stops (drag one up and down for its level), watch the drawn ranks glow as you play, and try Cathedral, Loft and Dry.
+  - **Woodpecker:** switch between marimba, vibes, chimes and timpani, and drag up and down for a harder mallet; the woodpecker pecks the bar you play.
+  - **Starling:** play and watch the hammers rise and the dampers lift with the pedal; drag up and down for a harder hammer.
 
 ## 1.1.3-alpha.2 (2026-11-25)
 
