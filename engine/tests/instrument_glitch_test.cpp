@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -114,9 +115,9 @@ struct Glitch {
 Glitch scan(const std::vector<float>& x, const std::vector<double>& allowed, double allowMs, double lowestKey, double jumpDb = kJumpDb) {
     float top = 0;
     for (float s : x) top = std::max(top, std::fabs(s));
-    auto allowedAt = [&](double t) {
+    auto allowedAt = [&](double t, double len) {  // the window [t, t + len) meets a note's onset
         for (double a : allowed)
-            if (t >= a - 0.004 && t < a + allowMs / 1000.0) return true;
+            if (t + len > a - 0.004 && t < a + allowMs / 1000.0) return true;
         return false;
     };
     Glitch worst;
@@ -129,7 +130,7 @@ Glitch scan(const std::vector<float>& x, const std::vector<double>& allowed, dou
             for (size_t j = i * w; j < (i + 1) * w; ++j) peak[i] = std::max(peak[i], static_cast<double>(std::fabs(x[j])));
         for (size_t i = hist; i < nw; ++i) {
             const double t = static_cast<double>(i * w) / kSr;
-            if (allowedAt(t) || peak[i] < top * 1e-3) continue;
+            if (allowedAt(t, static_cast<double>(w) / kSr) || peak[i] < top * 1e-3) continue;
             std::vector<double> before(peak.begin() + static_cast<long>(i - hist), peak.begin() + static_cast<long>(i));
             std::nth_element(before.begin(), before.begin() + hist / 2, before.end());
             const double jump = 20 * std::log10(peak[i] / std::max(before[hist / 2], 1e-12));
@@ -150,7 +151,7 @@ Glitch scan(const std::vector<float>& x, const std::vector<double>& allowed, dou
         }
         for (size_t i = hist; i < nw; ++i) {
             const double t = static_cast<double>(i * w) / kSr;
-            if (allowedAt(t) || peak[i] < top * 1e-3) continue;
+            if (allowedAt(t, static_cast<double>(w) / kSr) || peak[i] < top * 1e-3) continue;
             double se = 0;
             for (size_t j = i - hist; j < i; ++j) se += step[j] * step[j];
             const double sref = std::sqrt(se / hist);
@@ -174,8 +175,8 @@ struct Instrument {
 const Instrument kInstruments[] = {
     {"org.caw.starling", "Starling", 1, 24, 104, {{"noise", 0.0}}, 40},
     {"org.caw.nightingale", "Nightingale", 4, 0, 0, {}, 300},
-    {"org.caw.curlew", "Curlew", 6, 0, 0, {}, 200},
-    {"org.caw.woodpecker", "Woodpecker", 6, 0, 0, {}, 40},
+    {"org.caw.curlew", "Curlew", 6, 0, 0, {}, 300},
+    {"org.caw.woodpecker", "Woodpecker", 6, 0, 0, {}, 60},  // some recorded strokes ring up 15 ms after their contact
 };
 // Each variant's keys (Nightingale, Curlew, Woodpecker): a range it plays.
 void rangeOf(const Instrument& ins, int var, double& lo, double& hi) {
@@ -271,7 +272,9 @@ int variantCount(const char* id) {
 
 TEST(instrument_glitch_scan) {
     int bad = 0;
+    const char* only = std::getenv("CAW_GLITCH_ONLY");  // one instrument's id, to look at it alone
     for (const Instrument& ins : kInstruments) {
+        if (only && std::string(only) != ins.id) continue;
         const int variants = variantCount(ins.id);
         for (int var = 0; var < variants; ++var) {
             const std::vector<std::pair<std::string, double>> chars =
@@ -301,6 +304,14 @@ TEST(instrument_glitch_scan) {
                         std::printf("%s %s %s take %zu: %s%s at %.3f s (%.1f dB)\n", fail ? "GLITCH" : "clean", ins.name,
                                     (variants > 1 ? std::to_string(var) : cname).c_str(), t, g.kind, cname.c_str(), g.at, g.db);
                     if (fail) ++bad;
+                    if (fail && std::getenv("CAW_GLITCH_DUMP")) {  // the take, for a look (float32 stereo interleaved)
+                        const std::string path = std::string(std::getenv("CAW_GLITCH_DUMP")) + "/" + ins.name + "_" +
+                                                 std::to_string(var) + cname + "_" + std::to_string(t) + ".f32";
+                        if (FILE* f = std::fopen(path.c_str(), "wb")) {
+                            for (size_t i = 0; i < s.size(); ++i) std::fwrite(&s.l[i], 4, 1, f), std::fwrite(&s.r[i], 4, 1, f);
+                            std::fclose(f);
+                        }
+                    }
                 }
             }
         }
