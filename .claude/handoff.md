@@ -24,6 +24,8 @@ Fixed on this branch: version.dart appBuild 18; rules done.md; decisions 2026-11
   Rook kind cards' place and Studio as default; panel names; EP/tonewheel presets need listening.
 - Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
 - No steel-string guitar (no CC0/CC-BY source).
+- S22+ Benchmark (docs/performance.md 2026-11-25): Every effect and extreme songs drop out; low-latency live p99 over
+  budget; callback on little cores, low clocks; live parts unprofiled; sustained run never ran. Perf agent after merges.
 
 ## Next
 1. Merge the P0 branch, full flutter test, PR, release 1.1.3-alpha.2 (app.yml dispatch on Main, release=true).
