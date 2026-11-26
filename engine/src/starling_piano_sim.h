@@ -158,16 +158,22 @@ struct Contact {
 // (the coupled strings' in-phase decay). [Fact, measured 2026-11-20] The targets are the Salamander Grand's
 // broadband decay, per octave (C..A at velocity 8, the median of four notes): 0.1-1 s after the peak (the prompt
 // sound) and 2-6 s (the aftersound, octaves 1-4; higher up the recordings end in their noise floor first).
+// [Fact, measured 2026-11-26] the top octave and a half (no dampers there) from Salamander's full samples (C7, F#7, A7,
+// C8 at velocities 8 and 12, CC-BY 3.0): the fundamental's T60 over 0.3-1.95 s, band-passed at it, 2.7-2.9 s at C7,
+// 3.0-3.1 at F#7, 2.1-2.3 at A7, 2.3-2.7 at C8; the model read 3.5, 2.0, 1.6 and 1.3 s there on the old 1.4 s at C8 (an
+// A7 note was 64 dB down by 1 s, the recording 39): the points at 96-108 now set so the model reads them
+// (`starling_treble_rings_as_recorded`: 2.7, 3.1, 2.2 and 2.5 s).
 inline double simT60(double key) noexcept {
-    static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 108};
-    static constexpr double kT[] = {34, 31, 26, 17, 26, 14, 6.0, 1.4};
+    static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 96, 102, 105, 108};
+    static constexpr double kT[] = {34, 31, 26, 17, 26, 14, 6.0, 3.0, 3.0, 2.4, 2.6};
+    constexpr int kN = static_cast<int>(sizeof(kKey) / sizeof(kKey[0]));
     if (key <= kKey[0]) return kT[0];
-    for (int i = 1; i < 8; ++i)
+    for (int i = 1; i < kN; ++i)
         if (key <= kKey[i]) {
             const double f = (key - kKey[i - 1]) / (kKey[i] - kKey[i - 1]);
             return kT[i - 1] * detPow(kT[i] / kT[i - 1], f);
         }
-    return kT[7];
+    return kT[kN - 1];
 }
 inline double simPrompt(double key) noexcept {  // the prompt T60 over the aftersound's
     static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 108};
