@@ -146,6 +146,20 @@ TEST(curlew_tuning_table) {
 
 // Every note of each range speaks and holds a steady pitch at the defaults, soft and loud (at most a tenth may not:
 // the sax still jumps to its octave at C#4).
+// The third knob is named for what the instrument blows through: the flutes' jet, the brass's lips, else a reed
+// (the piccolo and oboe had read "Lips" when they were added, 2026-11-26).
+TEST(curlew_names_the_third_knob_by_its_instrument) {
+    const char* want[curlew::kInstruments] = {"Jet", "Reed", "Reed", "Lips", "Lips", "Lips", "Jet", "Reed", "Lips"};
+    for (int i = 0; i < curlew::kInstruments; ++i) {
+        auto p = makeC({{"variant", static_cast<double>(i)}});
+        const ModuleDescriptor& d = p->descriptor();
+        std::string name;
+        for (uint32_t k = 0; k < d.parameterCount; ++k)
+            if (std::string(d.parameters[k].id) == "reed") name = d.parameters[k].name;
+        CHECK_EQ(name, std::string(want[i]));
+    }
+}
+
 TEST(curlew_every_note_speaks) {
     for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         int bad = 0, all = 0;

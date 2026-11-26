@@ -57,7 +57,9 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     // In Winds::P's order.
     t.num("breath", "Breath", 0.6, 0.0, 1.0).group = "winds";
     t.num("noise", "Breath noise", 0.15, 0.0, 1.0).group = "winds";
-    t.num("reed", index == 0 ? "Jet" : (index >= 3 ? "Lips" : "Reed"), 0.5, 0.0, 1.0).group = "winds";
+    // By the instrument's kind (curlew_winds.h): a jet on the flutes, lips on brass, else a reed.
+    const int kind = curlew::kKind[index];
+    t.num("reed", kind == 1 ? "Jet" : (kind == 3 ? "Lips" : "Reed"), 0.5, 0.0, 1.0).group = "winds";
     t.num("vibrato", "Vibrato", index == 1 ? 0.0 : 0.2, 0.0, 1.0).group = "winds";  // a clarinet plays straight
     t.expo("vib_rate", "Vibrato rate", 5.0, 2.0, 9.0, "Hz").group = "winds";
     t.num("growl", "Growl", 0.0, 0.0, 1.0).group = "winds";

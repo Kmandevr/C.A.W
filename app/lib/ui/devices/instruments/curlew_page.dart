@@ -97,6 +97,14 @@ class CurlewPainter extends CustomPainter {
         canvas.drawCircle(at, width * 0.35, Paint()..color = Neon.bg);
         canvas.drawCircle(at, width * 0.35, instrumentLine(Neon.dim, 1));
       }
+    } else if (k == CurlewInstrument.tuba) {
+      // On the upright body under the bell, pointing out to the side.
+      final body = s.height * 0.79;
+      for (var i = 0; i < 3; i++) {
+        final at = metric.getTangentForOffset(metric.length - body * (0.28 + i * 0.13))!.position;
+        canvas.drawRect(Rect.fromCenter(center: at - Offset(width * 1.2, 0), width: width * 1.6, height: width * 0.8),
+            Paint()..color = p.secondary.withValues(alpha: 0.6));
+      }
     } else if (k != CurlewInstrument.trombone) {
       for (var i = 0; i < 3; i++) {
         final at = metric.getTangentForOffset(metric.length * (0.42 + i * 0.05))!.position;
