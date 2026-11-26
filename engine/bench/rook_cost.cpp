@@ -209,7 +209,8 @@ int rookCost(double seconds) {
     // CI's Arm64 runner, which reads 5-10 % higher even on 1.1.0's own Kit: 909 (PR #261).
     const KitCase kits[] = {
         {"Acoustic kit: typical groove (Normal)", &dryRock, &groove, kQualityNormal, 13000, 9600},  // 2.4 % of a phone core
-        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 7500, 0},
+        // (Eco's typical groove: 6.5-7.4k locally on 2026-11-26, where 7500 was set; CI's x64 runner read 7661)
+        {"Acoustic kit: typical groove (Eco)", &dryRock, &groove, kQualityEco, 10400, 0},
         {"Acoustic kit: full kit ringing (Normal)", &dryRock, &full, kQualityNormal, 28500, 24000},
         {"Acoustic kit: full kit ringing (Eco)", &dryRock, &full, kQualityEco, 16600, 8000},
         {"Acoustic kit: full kit ringing (High, exports)", &dryRock, &full, kQualityHigh, 44500, 0},
