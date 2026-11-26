@@ -277,9 +277,10 @@ void main() {
 
     await open(tester, 'org.caw.bittern');
     r = await picture('bittern');
-    // The Viole Céleste's rank (the tenth of 26 across the façade) pulled up from nothing.
+    // The Viole Céleste's rank (its place among the stops across the façade) pulled up from nothing.
     expect(target().value('gamba8'), 0);
-    final x = r.left + r.width * (0.03 + 0.77 * 9.5 / 26);
+    final at = bitternStops.indexWhere((s) => s.id == 'gamba8');
+    final x = r.left + r.width * (0.03 + 0.77 * (at + 0.5) / bitternStops.length);
     await slowDrag(tester, Offset(x, r.center.dy), const Offset(0, -40));
     expect(target().value('gamba8'), greaterThan(0));
     expect(target().value('principal8'), 1, reason: 'its neighbours stay');

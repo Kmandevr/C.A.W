@@ -99,7 +99,7 @@ struct Bars {
     // A voice is silent while its recording holds (up to 80 ms): it may not end for silence before 0.3 s.
     static constexpr double kMinLife = 0.3, kSpread = 0.5;
     // Every instrument's knobs; each variant's descriptor has its own subset (builtin_woodpecker.cpp maps them).
-    enum P : uint32_t { kHardness, kDecay, kAttack, kTier, kResonator, kSustain, kMotor, kMotorDepth, kAll };
+    enum P : uint32_t { kHardness, kDecay, kAttack, kTier, kResonator, kSustain, kMotor, kMotorDepth, kRoll, kTubeTune, kAll };
     static constexpr int kPlayers = 32;
 
     struct Voice : VoiceBase {
@@ -120,10 +120,18 @@ struct Bars {
         uint32_t clickLeft = 0;
         float clickAmp = 0;
         timber::Noise noise;
+        // A roll: the modes as one stroke starts them (re-struck at the Roll rate while the key is held), the time to
+        // the next stroke (samples), the strike's level (for each stroke's contact) and the tube's tuning it has.
+        F4 z0r[kBlocks], z0i[kBlocks];
+        double rollLeft = 0;
+        float strikeLevel = 0;
+        uint32_t strokeLeft = 0;  // a roll stroke under way: its share added each sample over the mallet's contact
+        float strokeStep = 0;
+        double tubeFor = 0;
     };
 
     int which = 0;
-    double hardness = 0.5, decay = 1, attack = 1, resonator = 1, sustain = 0, motor = 0, depth = 0.6;
+    double hardness = 0.5, decay = 1, attack = 1, resonator = 1, sustain = 0, motor = 0, depth = 0.6, roll = 0, tubeCents = 0;
     int tier = kQualityNormal, modeCap = 8;
     bool pedal = false;
     double sr = 48000, tremPhase = 0;
@@ -163,6 +171,8 @@ struct Bars {
         sustain = clampd(p[kSustain], 0, 1);
         motor = clampd(p[kMotor], 0, 8);
         depth = clampd(p[kMotorDepth], 0, 1);
+        roll = clampd(p[kRoll], 0, 24);
+        tubeCents = clampd(p[kTubeTune], 0, 100);
         const bool down = std::max(sustain, s.pedal) >= 0.5;
         if (pedal && !down && kDampers[which])  // the pedal up: every released key still ringing is damped now
             for (uint32_t k = 0; k < count; ++k)
@@ -194,14 +204,21 @@ struct Bars {
             v.c[k / 4][k % 4] = static_cast<float>(c), v.s[k / 4][k % 4] = static_cast<float>(s);
         }
     }
+    // The band-pass's coefficients at `f` Hz (b, a1, a2).
+    void resonatorAt(double f, float& b, float& a1, float& a2) const noexcept {
+        const double w = timber::kTwoPi * std::min(f, 0.45 * sr) / sr, r = detExp(-timber::kPi * f / (kTubeQ * sr));
+        a1 = static_cast<float>(2.0 * r * detCos(w)), a2 = static_cast<float>(-r * r);
+        b = static_cast<float>(0.5 * (1.0 - r * r));
+    }
+    // The tube at the fundamental, or Tube detune's cents above it (a tube cut a little short: it reinforces the
+    // fundamental less and rings at its own pitch; one way only, as flat and sharp by the same cents sound alike).
     void tuneResonator(Voice& v) const noexcept {
         const double f = v.hz[0] / std::max(1e-6, static_cast<double>(v.zone->ratio[0]));  // the fundamental
-        const double w = timber::kTwoPi * std::min(f, 0.45 * sr) / sr, r = detExp(-timber::kPi * f / (kTubeQ * sr));
-        v.ra1 = static_cast<float>(2.0 * r * detCos(w)), v.ra2 = static_cast<float>(-r * r);
-        v.rb = static_cast<float>(0.5 * (1.0 - r * r));
+        resonatorAt(f * detPow(2.0, tubeCents / 1200.0), v.rb, v.ra1, v.ra2);
+        v.tubeFor = tubeCents;
     }
     void tune(Voice& v) noexcept {
-        const double pitch = clampd(v.pitch, kLow[which] - 12.0, kHigh[which] + 12.0);
+        const double pitch = clampd(v.pitch, 12.0, 120.0);  // every key its own note: past the recorded range the nearest zone's modes carry on
         v.hzRef = timber::noteHz(pitch);
         for (int k = 0; k < kModes; ++k) v.hz[k] = k < v.modes ? static_cast<float>(v.hzRef * v.zone->ratio[k]) : 0.0f;
         setModes(v);
@@ -220,7 +237,7 @@ struct Bars {
 
     void start(Voice& v, const Shared& s) noexcept {
         const Layout& lay = kLayouts[which];
-        const double pitch = clampd(v.pitch, kLow[which] - 12.0, kHigh[which] + 12.0);
+        const double pitch = clampd(v.pitch, 12.0, 120.0);  // every key its own note: past the recorded range the nearest zone's modes carry on
         int zi = 0;
         for (int z = 1; z < lay.zones; ++z)
             if (std::fabs(pitch - kZones[lay.firstZone + z].key) < std::fabs(pitch - kZones[lay.firstZone + zi].key)) zi = z;
@@ -260,7 +277,10 @@ struct Bars {
                                   static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
         const bool recorded = hasRecording && attack > 1e-3 && std::fabs(pitch - zone.key) <= 4.5 &&
                               static_cast<uint64_t>(clip.first) + clip.frames <= bank->frames;
-        const double nRef = (lay.hold + 0.5 * lay.fade) * sr / ratio;  // the output frame where the recording is at ref
+        // The output frame where the recording is at ref (played at the note's ratio); with no recording (a key past
+        // the recorded range), the recording's own time: carried back over a slowed recording's longer time, a key
+        // two octaves under the range started its modes 30 dB too loud.
+        const double nRef = (lay.hold + 0.5 * lay.fade) * sr / (std::fabs(pitch - zone.key) <= 4.5 ? ratio : 1.0);
         double c1r = 0, c1i = 0;
         for (int k = 0; k < kModes; ++k) {
             double zr = 0, zim = 0;
@@ -285,6 +305,9 @@ struct Bars {
         }
         v.rx1 = v.rx2 = v.ry1 = v.ry2 = 0;
         if (v.tube > 0) startResonator(v, c1r, c1i);
+        for (int b = 0; b < kBlocks; ++b) v.z0r[b] = v.zr[b], v.z0i[b] = v.zi[b];
+        v.strikeLevel = static_cast<float>(R);
+        v.rollLeft = roll > 0 ? sr / roll : 0.0;
         v.gated = false;
         v.clickLeft = 0;
         if (recorded) {
@@ -319,13 +342,22 @@ struct Bars {
         if (pn <= 0) return;
         const double ir = cr / pn, ii = -ci / pn;          // p^-1
         const double i2r = ir * ir - ii * ii, i2i = 2 * ir * ii;  // p^-2
-        // H(p) = b (1 - p^-2) / (1 - a1 p^-1 - a2 p^-2)
-        const double nr = v.rb * (1.0 - i2r), ni = v.rb * (-i2i);
-        const double dr = 1.0 - v.ra1 * ir - v.ra2 * i2r, di = -v.ra1 * ii - v.ra2 * i2i;
-        const double dd = dr * dr + di * di;
-        const double hr = (nr * dr + ni * di) / dd, hi = (ni * dr - nr * di) / dd;
-        // The bar's mode z' with z' (1 + tube H) = z.
-        const double er = 1.0 + v.tube * hr, ei = v.tube * hi, ee = er * er + ei * ei;
+        // H(p) = b (1 - p^-2) / (1 - a1 p^-1 - a2 p^-2), of the tube as it sounds (hr, hi) and of a tube at the
+        // fundamental (gr, gi): the bar's share is set against the tuned one, as recorded, so a detuned tube changes
+        // the sound (Tube tuning) instead of being made up for.
+        auto H = [&](float b, float a1, float a2, double& outR, double& outI) {
+            const double nr = b * (1.0 - i2r), ni = b * (-i2i);
+            const double dr = 1.0 - a1 * ir - a2 * i2r, di = -a1 * ii - a2 * i2i;
+            const double dd = dr * dr + di * di;
+            outR = (nr * dr + ni * di) / dd, outI = (ni * dr - nr * di) / dd;
+        };
+        double hr, hi, gr, gi;
+        H(v.rb, v.ra1, v.ra2, hr, hi);
+        float tb, ta1, ta2;
+        resonatorAt(v.hz[0] / std::max(1e-6, static_cast<double>(v.zone->ratio[0])), tb, ta1, ta2);
+        H(tb, ta1, ta2, gr, gi);
+        // The bar's mode z' with z' (1 + tube G) = z.
+        const double er = 1.0 + v.tube * gr, ei = v.tube * gi, ee = er * er + ei * ei;
         const double zr2 = (zr * er + zi * ei) / ee, zi2 = (zi * er - zr * ei) / ee;
         v.zr[0][0] = static_cast<float>(zr2), v.zi[0][0] = static_cast<float>(zi2);
         // Its past: x[-1] = Im(z'), x[-2] = Im(z' p^-1); the band-pass's y = Im(H x).
@@ -346,6 +378,23 @@ struct Bars {
     }
     void voiceControl(Voice& v, const Shared&) noexcept {
         if (v.pitch != v.tunedPitch) tune(v);
+        else if (v.tube > 0 && v.tubeFor != tubeCents) tuneResonator(v);
+        // A roll: while the key is held, a stroke every 1 / Roll seconds (each from the next hand: 0.7 of the first
+        // stroke's level, within 15 %, and its interval within 10 %; [Assumption] a player's even roll), the modes
+        // struck again in the first stroke's phase with the mallet's contact.
+        if (roll > 0 && v.held && !v.fading && !v.damped) {
+            v.rollLeft -= kControlFrames;
+            if (v.rollLeft <= 0) {
+                const float a = 0.7f * (1.0f + 0.15f * v.noise.next());
+                const double tc = contactTime(hardness);
+                // The stroke's modes come in over the mallet's contact (a force pulse tc long), not in one sample.
+                v.strokeLeft = static_cast<uint32_t>(std::max(2.0, tc * sr));
+                v.strokeStep = a / static_cast<float>(v.strokeLeft);
+                v.clickLeft = static_cast<uint32_t>(std::max(2.0, tc * sr));
+                v.clickAmp = 0.3f * a * v.strikeLevel * static_cast<float>(0.3 + 0.7 * hardness);
+                v.rollLeft += sr / roll * (1.0 + 0.1 * v.noise.next());
+            }
+        }
         for (int b = 0; b < kBlocks; ++b)
             for (int k = 0; k < 4; ++k) v.zr[b][k] = timber::flushf(v.zr[b][k]), v.zi[b][k] = timber::flushf(v.zi[b][k]);
         v.rx1 = timber::flushf(v.rx1), v.rx2 = timber::flushf(v.rx2), v.ry1 = timber::flushf(v.ry1), v.ry2 = timber::flushf(v.ry2);
@@ -355,6 +404,10 @@ struct Bars {
         const float tube = v.tube * static_cast<float>(resonator);
         for (uint32_t i = 0; i < n; ++i) {
             float y = 0;
+            if (v.strokeLeft) {
+                --v.strokeLeft;
+                for (int b = 0; b < v.blocks; ++b) v.zr[b] += v.z0r[b] * f4(v.strokeStep), v.zi[b] += v.z0i[b] * f4(v.strokeStep);
+            }
             for (int b = 0; b < v.blocks; ++b) {
                 const F4 r = v.c[b] * v.zr[b] - v.s[b] * v.zi[b], im = v.s[b] * v.zr[b] + v.c[b] * v.zi[b];
                 v.zr[b] = r, v.zi[b] = im;

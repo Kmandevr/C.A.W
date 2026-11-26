@@ -1,10 +1,14 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-25
+updated: 2026-11-26
 ---
 
 # Decisions
+
+## 2026-11-26: Claude merges and releases on its own (owner)
+
+- **Owner (2026-11-26):** "You don't need my permission to merge and release. Just continue on your way and merge and release when required." Claude merges its pull request to Main once CI is green and the release check passes, and cuts a release (app.yml `release`) when a set of finished fixes is ready for the owner to try. The earlier "don't merge PR #269 without the owner's ask" is superseded. What is checked before a release is unchanged (2026-11-25 below), and UI looks are still asked first.
 
 ## 2026-11-25: Bittern is the Salt Lake Tabernacle organ's divisions, on one keyboard (Claude, owner's request)
 

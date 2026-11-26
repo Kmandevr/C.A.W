@@ -1,4 +1,4 @@
-// Bittern's page (org.caw.bittern, pipe organ): the pipe façade drawn live, its drawn ranks glowing (drag a rank up and down for its stop's level) beside the swell box's shutters, its 26 stops as drawknob pills by division under the registration, and the Stops, Wind and Room panels with the room's Hall, Loft and Dry.
+// Bittern's page (org.caw.bittern, pipe organ): the pipe façade drawn live, its drawn ranks glowing (drag a rank up and down for its stop's level) beside the swell box's shutters, its 33 stops and the Chimes as drawknob pills by division under the registration, and the Stops, Wind and Room panels with the room's Hall, Loft and Dry.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -50,10 +50,18 @@ const bitternStops = <({String id, String name, String foot, double feet, int di
   (id: 'ped_principal8', name: 'Principal', foot: "8'", feet: 8, division: 4),
   (id: 'trombone16', name: 'Trombone', foot: "16'", feet: 16, division: 4),
   (id: 'bombarde32', name: 'Bombarde', foot: "32'", feet: 32, division: 4),
+  (id: 'gemshorn4', name: 'Gemshorn', foot: "4'", feet: 4, division: 0),
+  (id: 'voix_humaine8', name: 'Voix Humaine', foot: "8'", feet: 8, division: 1),
+  (id: 'violin8', name: 'Violin', foot: "8'", feet: 8, division: 2),
+  (id: 'cello8', name: 'Violoncello', foot: "8'", feet: 8, division: 2),
+  (id: 'chimes', name: 'Chimes', foot: 'G3-G5', feet: 4, division: 2),
+  (id: 'contrabass16', name: 'Contrabass', foot: "16'", feet: 16, division: 4),
+  (id: 'quint10', name: 'Quint', foot: "10 2/3'", feet: 10.67, division: 4),
+  (id: 'choral_bass4', name: 'Choral Bass', foot: "4'", feet: 4, division: 4),
 ];
 
 /// The reed stops (their pipes drawn flared).
-const _reeds = {'trumpet8', 'trompette8', 'hautbois8', 'krummhorn8', 'tuba8', 'trombone16', 'bombarde32'};
+const _reeds = {'trumpet8', 'trompette8', 'hautbois8', 'krummhorn8', 'tuba8', 'trombone16', 'bombarde32', 'voix_humaine8'};
 
 /// The Room choices and the Room (`space`) each sets: the engine's own presets' (the Tabernacle's hall the default 0.45, the
 /// Loft preset's 0.15, the Dry one's 0).
@@ -81,12 +89,12 @@ final bitternSpec = InstrumentSpec(
   inlineKnobs: const ['principal8', 'octave4', 'chiff', 'wind'],
   panels: [
     InstrumentPanel('Stops', (context, knob) => const BitternStops()),
-    InstrumentPanel('Wind', (context, knob) => instrumentKnobPanel(const ['tremulant', 'trem_rate', 'wind', 'chiff'], knob,
-        labels: const {'tremulant': 'Tremulant', 'trem_rate': 'Trem rate', 'wind': 'Wind', 'chiff': 'Chiff'})),
+    InstrumentPanel('Wind', (context, knob) => instrumentKnobPanel(const ['swell', 'tremulant', 'trem_rate', 'wind', 'chiff'], knob,
+        labels: const {'swell': 'Swell', 'tremulant': 'Tremulant', 'trem_rate': 'Trem rate', 'wind': 'Wind', 'chiff': 'Chiff'})),
     InstrumentPanel('Room', (context, knob) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 4),
       const BitternRoom(),
-      instrumentKnobPanel([...instrumentSpaceKnobs, ...instrumentToneKnobs], knob),
+      instrumentKnobPanel(['weight', 'spread', ...instrumentSpaceKnobs, ...instrumentToneKnobs], knob, labels: const {'weight': 'Weight', 'spread': 'Spread'}),
     ])),
   ],
 );

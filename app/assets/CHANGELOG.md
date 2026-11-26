@@ -3,6 +3,19 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.4 (2026-11-26)
+
+Your notes on alpha.3: the piano's stray sounds, the organ's size and pipes, the tuned percussion's notes and the brass.
+
+### Fixed
+- **Starling's piano has no stray sounds:** with the pedal up, only the strings of the keys you hold answer a note (every string used to ring at its own pitch, a semitone or two off the note); a released key now gives only its damper's soft thud, not a ghost tone a quarter of a second later; and the faint ringing partials a loud note carries stop with the dampers instead of sounding on after the key. Noise starts lower (the recordings' own level) and its top end is now heard.
+- **Woodpecker plays the note you press on every key**, across marimba, xylophone, glockenspiel, vibraphone, chimes and timpani; before, some keys sounded another note and some ranges only one.
+- **Curlew's trumpet, trombone and horn sound like brass:** far less breath noise, and each now has a brass tone of its own, measured against real recordings (trumpet bright, trombone in between, horn dark and round), instead of one dull, clarinet-like sound for all three.
+### New
+- **Bittern, a wall of sound:** seven more stops, among them orchestral Violin 8', Violoncello 8' and Contrabass 16' as extra ranks of pipes, a Voix Humaine, a Gemshorn and a 10 2/3' Quint; **Chimes** to play with the organ; a **Swell** knob you can automate; **Weight**, the floor-shaking low end that recordings usually lose; and **Spread**, which places the pipes across the room as an organ's are. Every key is now its own pipe, its colour changing from key to key as a real rank's does, and the reeds are smoother.
+- **Woodpecker:** **Roll** (a mallet roll on a held note, up to 24 strokes a second) and **Tube detune** (a resonator tuned off its bar, for a wilder vibraphone or marimba).
+- **Nightingale's strings keep their low end:** the cello and bass bodies now carry the warmth and weight their recordings have.
+
 ## 1.1.3-alpha.3 (2026-11-25)
 
 - **The new instruments, every knob heard:** Starling's Hammer runs from soft felt to hard (about 12 dB brighter), and Soft pedal, Touch, Resonance, Sympathy, Phantom partials and Noise all do what they say in normal playing; the Upright and Felt are their own pianos (the Felt darker and softer, the Upright boxy and shorter-lived), both with the grand's recorded attack processed to match; a key let go under the pedal sounds its damper when the pedal lifts. Curlew's Growl is a real growl and flutter-tongue, its Vibrato is heard at the default, and the sax has a body. Nightingale no longer spikes or buzzes as a note is released, and its vibrato comes in sooner. Woodpecker's Release damps the bars by hand, Attack level adds or removes the mallet's stroke, and the vibraphone's motor is one control.

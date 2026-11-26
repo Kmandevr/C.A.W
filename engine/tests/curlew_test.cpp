@@ -72,13 +72,21 @@ double powerDb(const std::vector<float>& x, size_t from, size_t n) {
 }  // namespace
 
 // The renders tools/instrument_bodies.py curlew compares with the recordings: every semitone of each range at
-// velocity 0.7, body off, no vibrato, to $CAW_CURLEW_RENDERS as <instrument>_<key>.f32 (nothing without it).
+// velocity 0.7, body off, no vibrato, to $CAW_CURLEW_RENDERS as <instrument>_<key>.f32 (nothing without it). With
+// CAW_CURLEW_BODY set, the body on (the sound as heard, for the noise and spectrum against the recordings).
 TEST(curlew_body_renders) {
     const char* dir = std::getenv("CAW_CURLEW_RENDERS");
     if (!dir) return;
+    const bool bodyOff = std::getenv("CAW_CURLEW_BODY") == nullptr;
     for (int inst = 0; inst < 6; ++inst)
         for (int key = kLow[inst]; key <= kHigh[inst]; ++key) {
-            const std::vector<float> s = note(inst, key, 0.7, 2.0, {{"vibrato", 0.0}});
+            Values extra = {{"vibrato", 0.0}};
+            if (const char* set = std::getenv("CAW_CURLEW_SET")) {  // "knob=value" (one knob)
+                const std::string kv(set);
+                const size_t eq = kv.find('=');
+                if (eq != std::string::npos) extra.emplace_back(kv.substr(0, eq), std::atof(kv.c_str() + eq + 1));
+            }
+            const std::vector<float> s = note(inst, key, 0.7, 2.0, extra, bodyOff);
             const std::string path = std::string(dir) + "/" + std::to_string(inst) + "_" + std::to_string(key) + ".f32";
             std::ofstream f(path, std::ios::binary);
             f.write(reinterpret_cast<const char*>(s.data()), static_cast<std::streamsize>(s.size() * sizeof(float)));

@@ -196,6 +196,19 @@ struct Biquad {
         const double al = detSin(w) / (2.0 * q), c = detCos(w);
         norm(1 + al * A, -2 * c, 1 - al * A, 1 + al / A, -2 * c, 1 - al / A);
     }
+    // RBJ shelves of `db` with corner `hz` and quality `q` (0.707: no overshoot): below it, or above it.
+    void lowShelf(double hz, double q, double db, double sr) noexcept {
+        const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr, A = detPow(10.0, db / 40.0);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w), r = 2.0 * std::sqrt(A) * al;
+        norm(A * ((A + 1) - (A - 1) * c + r), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - r),
+             (A + 1) + (A - 1) * c + r, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - r);
+    }
+    void highShelf(double hz, double q, double db, double sr) noexcept {
+        const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr, A = detPow(10.0, db / 40.0);
+        const double al = detSin(w) / (2.0 * q), c = detCos(w), r = 2.0 * std::sqrt(A) * al;
+        norm(A * ((A + 1) + (A - 1) * c + r), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - r),
+             (A + 1) - (A - 1) * c + r, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - r);
+    }
     // A band-pass of unit peak gain at `hz` (a resonance).
     void band(double hz, double q, double sr) noexcept {
         const double w = kTwoPi * clampd(hz, 10.0, 0.45 * sr) / sr;

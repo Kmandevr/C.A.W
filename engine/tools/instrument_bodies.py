@@ -48,6 +48,7 @@ FAMILIES = {  # family: (instrument index, folder, the model's range, the array'
     ],
 }
 BANDS = 8
+TOP_HZ = 12000.0  # no band above this (as the high shelf): it holds its shape at 44.1 kHz and up
 GAIN, QLO, QHI, SPACING = 9.0, 0.4, 3.0, 2 ** (1 / 3)
 RANGES = {'kViolin': (55, 100), 'kViola': (48, 88), 'kCello': (36, 76), 'kBass': (28, 60), 'kFlute': (60, 96),
           'kClarinet': (50, 89), 'kTrumpet': (54, 82), 'kTrombone': (40, 72), 'kHorn': (41, 77)}
@@ -64,6 +65,76 @@ def peak_db(f, hz, q, db, sr=SR):
     z = np.exp(-1j * 2 * np.pi * f / sr)
     H = (b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)
     return 20 * np.log10(np.abs(H))
+
+
+def shelf_db(f, hz, q, db, high, sr=SR):
+    # The RBJ low or high shelf's magnitude in dB at frequencies f (as the engine's Biquad::lowShelf / highShelf).
+    w0 = 2 * np.pi * hz / sr
+    A = 10 ** (db / 40)
+    al = np.sin(w0) / (2 * q)
+    c = np.cos(w0)
+    r = 2 * np.sqrt(A) * al
+    s = -1 if high else 1
+    b = np.array([A * ((A + 1) - s * (A - 1) * c + r), s * 2 * A * ((A - 1) - s * (A + 1) * c), A * ((A + 1) - s * (A - 1) * c - r)])
+    a = np.array([(A + 1) + s * (A - 1) * c + r, -s * 2 * ((A - 1) + s * (A + 1) * c), (A + 1) + s * (A - 1) * c - r])
+    z = np.exp(-1j * 2 * np.pi * f / sr)
+    H = (b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)
+    return 20 * np.log10(np.abs(H))
+
+
+SHELF_GAIN, PEAKS = 18.0, 9
+
+
+def highpass_db(f, hz, q=0.707, sr=SR):
+    # The RBJ high-pass's magnitude in dB (as the engine's Biquad::highpass).
+    w0 = 2 * np.pi * hz / sr
+    al = np.sin(w0) / (2 * q)
+    c = np.cos(w0)
+    b = np.array([(1 + c) / 2, -(1 + c), (1 + c) / 2])
+    a = np.array([1 + al, -2 * c, 1 - al])
+    z = np.exp(-1j * 2 * np.pi * f / sr)
+    H = (b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)
+    return 20 * np.log10(np.abs(H))
+
+
+def fit_shaped(edges, target, lo, hi, hp):
+    # A low and a high shelf (within +-SHELF_GAIN dB: the broad tilt a body puts on the string, its low end and its
+    # top) and PEAKS peaking filters within +-GAIN dB, Q QLO..QHI, each SPACING or more above the last (its
+    # resonances), over a fixed high-pass at `hp` Hz (0.7 times the instrument's lowest note: nothing radiates under
+    # its lowest string, and without it a low shelf lifted the bowed model's sub-bass push at the note's start into a
+    # thump 15 dB over the tone). Bounded, so no two bands cancel each other into a ringing pair (fit_bounded's reason).
+    m = (edges >= lo) & (edges <= hi)
+    f, t = edges[m], target[m]
+    n = PEAKS
+    span = np.log(hi / lo)
+    step = max(np.exp(span / n) / SPACING - 1.0, 1e-3)
+
+    def unpack(x):
+        # Every band under TOP_HZ (2026-11-26, the audio review: three violin peaks sat at the old 20 kHz cap, beyond
+        # the fitted data, where an RBJ peak's shape moves with the sample rate: 96 kHz was 8 dB darker at 14 kHz).
+        hz = np.minimum(lo / SPACING * np.cumprod(SPACING * (1.0 + np.exp(x[:n]))), TOP_HZ)
+        return hz, x[n:2 * n], np.exp(x[2 * n:3 * n]), x[3 * n:]
+
+    def resid(x):
+        hz, db, q, sh = unpack(x)
+        y = highpass_db(f, hp) + shelf_db(f, np.exp(sh[0]), 0.707, sh[1], False) + shelf_db(f, np.exp(sh[2]), 0.707, sh[3], True)
+        # (and a light cost on the gain of a peak above the fitted data, 0.1 dB a dB, easing in over a sixth of an
+        # octave past `hi`: a band the data does not need goes to 0 dB instead of sitting at the cap in a cancelling
+        # pair; the peaks inside the data are as free as before)
+        past = 1.0 / (1.0 + np.exp(-12.0 * (np.log2(hz) - np.log2(hi) - 1.0 / 12.0)))
+        return np.concatenate([y + sum(peak_db(f, hz[k], q[k], db[k]) for k in range(n)) - t, 0.1 * db * past])
+    x0 = np.concatenate([np.full(n, np.log(step)), np.zeros(n), np.zeros(n), [np.log(200.0), 0.0, np.log(4000.0), 0.0]])
+    lob = np.concatenate([np.full(n, -6.0), np.full(n, -GAIN), np.full(n, np.log(QLO)),
+                          [np.log(60.0), -SHELF_GAIN, np.log(1500.0), -SHELF_GAIN]])
+    hib = np.concatenate([np.full(n, 2.0), np.full(n, GAIN), np.full(n, np.log(QHI)),
+                          [np.log(600.0), SHELF_GAIN, np.log(12000.0), SHELF_GAIN]])
+    r = least_squares(resid, np.clip(x0, lob + 1e-6, hib - 1e-6), bounds=(lob, hib))
+    e = resid(r.x)[:len(f)]
+    hz, db, q, sh = unpack(r.x)
+    bands = [(float(hp), 0.707, 0.0, 'kHighPass'), (float(np.exp(sh[0])), 0.707, float(sh[1]), 'kLowShelf'),
+             (float(np.exp(sh[2])), 0.707, float(sh[3]), 'kHighShelf')]
+    bands += [(float(h), float(qq), float(d), None) for h, qq, d in zip(hz, q, db)]
+    return bands, (float(np.sqrt(np.mean(e * e))), float(np.abs(e).max()))
 
 
 def fit_bands(edges, curve, lo=60.0, hi=14000.0):
@@ -241,18 +312,27 @@ def main():
         for _ in range(3):
             curve -= shift(curve)
         # Fitted only where the instrument has partials (the curve's ends beyond them are extrapolated).
-        bands, err = fit_bands(edges, curve, max(60.0, np.percentile(pts[:, 0], 1)), min(14000.0, np.percentile(pts[:, 0], 99)))
+        flo, fhi = max(60.0, np.percentile(pts[:, 0], 1)), min(14000.0, np.percentile(pts[:, 0], 99))
+        if family == 'nightingale':  # 2026-11-25: shelves and peaks, so the low end the recordings have is kept
+            bands, err = fit_shaped(edges, curve, flo, fhi, 0.7 * 440.0 * 2 ** ((lo - 69) / 12.0))
+        else:
+            bands, err = fit_bands(edges, curve, flo, fhi)
+            bands = [(hz, q, db, None) for hz, q, db in bands]
         arrays[name] = bands
         print('%s: fit within %.2f dB rms, %.2f dB worst' % (name, err[0], err[1]))
         print('%s: %d points from %s; curve %.1f..%.1f dB' % (name, len(pts), folder, curve.min(), curve.max()))
     with open(os.path.join(eng, 'src', '%s_bodies.inc' % family), 'w') as f:
         f.write('// Generated by tools/instrument_bodies.py %s from VSCO' % family + ' 2 Community Edition (CC0 1.0): each instrument\'s recorded\n')
-        f.write('// spectrum over the model\'s at the same notes, as %d peaking bands {Hz, Q, dB} (RBJ, designed at the rate).\n' % BANDS)
+        f.write('// spectrum over the model\'s at the same notes, as bands {Hz, Q, dB} (RBJ peaks; for the strings first a high-pass\n')
+        f.write('// at 0.7 times the lowest note, a low and a high shelf: fit_shaped), designed at the rate.\n')
         f.write('// clang-format off\n')
         for name in names:
             f.write('const BodyBand %s[] = {\n' % name)
-            for hz, q, db in arrays[name]:
-                f.write('    {%.2ff, %.4ff, %.3ff},\n' % (hz, q, db))
+            for hz, q, db, kind in arrays[name]:
+                if kind:
+                    f.write('    {%.2ff, %.4ff, %.3ff, BodyBand::%s},\n' % (hz, q, db, kind))
+                else:
+                    f.write('    {%.2ff, %.4ff, %.3ff},\n' % (hz, q, db))
             f.write('};\n')
         f.write('// clang-format on\n')
 

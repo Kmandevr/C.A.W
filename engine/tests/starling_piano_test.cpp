@@ -347,3 +347,27 @@ TEST(starling_piano_matches_its_reference_render) {
                           {{0.4, 64, 1.0}, {0.8, 64, 0.0}});
     CHECK_REFERENCE(refs, "starling_piano", (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
 }
+
+// Development: every third key of the grand at three velocities, 2 s held and 1 s released, written as float32 mono
+// (<key>_<velocity>.f32) to CAW_STARLING_RENDERS for analysis (the owner's "weird transients or harmonics", 2026-11-25).
+TEST(starling_piano_renders) {
+    const char* dir = std::getenv("CAW_STARLING_RENDERS");
+    if (!dir) return;
+    for (int key = 21; key <= 108; key += 3)
+        for (int vel : {40, 80, 120}) {
+            Values v = {{"variant", 0.0}};
+            if (const char* noise = std::getenv("CAW_STARLING_NOISE")) v.emplace_back("noise", std::atof(noise));
+            if (const char* set = std::getenv("CAW_STARLING_SET")) {  // "knob=value" (one knob)
+                const std::string kv(set);
+                const size_t eq = kv.find('=');
+                if (eq != std::string::npos) v.emplace_back(kv.substr(0, eq), std::atof(kv.c_str() + eq + 1));
+            }
+            auto p = makeStarling(v);
+            if (!p) continue;
+            const std::vector<float> m = play(*p, v, {{0.0, 2.0, static_cast<double>(key), vel / 127.0}}, 3.0).mono();
+            const std::string path = std::string(dir) + "/" + std::to_string(key) + "_" + std::to_string(vel) + ".f32";
+            std::ofstream f(path, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(m.data()), static_cast<std::streamsize>(m.size() * sizeof(float)));
+            CHECK(f.good());
+        }
+}

@@ -19,25 +19,25 @@ constexpr double kSr = 48000;
 
 // The perceptual features of a render (mono), the owner's columns (2026-11-25) and a few more:
 // lvl 0..0.8 s, bright (first-difference RMS minus RMS over 0..0.8 s), early 0..0.1 s, late 0.6..0.8 s and tail
-// 0.9..1.5 s (all dB); tune: the lowest note's fundamental in cents against equal temperament (0.1..0.7 s);
+// 0.9..1.5 s, release 0.8..0.95 s (the sounds of a key or a breath let go: a damper's thud, a valve's puff; all dB); tune: the lowest note's fundamental in cents against equal temperament (0.1..0.7 s);
 // onset: ms to the first sample 40 dB under the peak; mod: the envelope's fluctuation (10 ms frames' dB against
 // their 80 ms running mean, RMS over 0.15..0.8 s: vibrato through a body, tremolo, beating, flutter).
 // One held note (phrase 4) adds the pitch's wobble: its deviation (cents RMS) and rate (Hz, from its zero
 // crossings), from the fundamental's peak in 40 ms windows every 20 ms over 0.4..1.4 s.
 struct Features {
-    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0, flutter = 0, strike = 0, sbright = 0, sub = 0;
+    double lvl = 0, bright = 0, early = 0, late = 0, tail = 0, tune = 0, onset = 0, mod = 0, wobble = 0, rate = 0, flutter = 0, strike = 0, sbright = 0, sub = 0, release = 0;
     double band[8] = {};  // octave bands 125 Hz..16 kHz over 0.05..0.8 s (dB): the colour, compared in pairs
 };
-constexpr int kFeatures = 14;
-constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate", "flutter", "strike", "sbright", "sub"};
+constexpr int kFeatures = 15;
+constexpr const char* kFeatureNames[kFeatures] = {"lvl", "bright", "early", "late", "tail", "tune", "onset", "mod", "wobble", "rate", "flutter", "strike", "sbright", "sub", "release"};
 // What counts as heard: about 1 dB of a level, 5 cents, 2 ms of onset, 0.5 dB of envelope fluctuation, 3 cents of
 // wobble, 1 Hz of its rate, 5 % of flutter (the envelope's strongest modulation at 18..40 Hz, a growl's or a flutter-
 // tongue's, as a share of its mean). strike: the level over 0..15 ms and sbright the brightness over 0..30 ms (a
 // mallet's or hammer's stroke, over in a few ms), 1 dB each. sub (held note): the strongest component under the
 // fundamental (0.4..0.6 of it, a growl's hummed pitch and its sidebands) against the fundamental, 3 dB.
-constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5, 3.0, 1.0, 5.0, 1.0, 1.0, 3.0};
+constexpr double kThreshold[kFeatures] = {1.0, 1.0, 1.0, 1.0, 1.0, 5.0, 2.0, 0.5, 3.0, 1.0, 5.0, 1.0, 1.0, 3.0, 1.0};
 double featureAt(const Features& f, int k) {
-    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod, f.wobble, f.rate, f.flutter, f.strike, f.sbright, f.sub};
+    const double v[kFeatures] = {f.lvl, f.bright, f.early, f.late, f.tail, f.tune, f.onset, f.mod, f.wobble, f.rate, f.flutter, f.strike, f.sbright, f.sub, f.release};
     return v[k];
 }
 
@@ -70,6 +70,7 @@ Features measure(const std::vector<float>& m, double lowest, bool held = false) 
     f.sbright = rmsOf(d, 0, static_cast<size_t>(0.03 * kSr)) - rmsOf(m, 0, static_cast<size_t>(0.03 * kSr));
     f.late = rmsOf(m, static_cast<size_t>(0.6 * kSr), s08);
     f.tail = std::max(-120.0, rmsOf(m, static_cast<size_t>(0.9 * kSr), static_cast<size_t>(1.5 * kSr)));
+    f.release = std::max(-120.0, rmsOf(m, s08, static_cast<size_t>(0.95 * kSr)));
     const double ref = 440.0 * std::pow(2.0, (lowest - 69) / 12.0);
     const size_t a = static_cast<size_t>(0.1 * kSr), n = static_cast<size_t>(0.6 * kSr);
     f.tune = cents(peakHz(m, ref, 60, a, n, kSr), ref);
@@ -167,6 +168,9 @@ const Context kContexts[] = {
     {"org.caw.starling", "release", {{"sustain", 0.0}}, 0, "the pedal up (the harp lets its strings ring by default)"},
     {"org.caw.starling", "sympathy", {}, 0, "the chord's keys held (their undamped strings answer)"},
     {"org.caw.starling", "glide", {{"velocity", 1.0}}, 2, "a loud bass note"},
+    // The piano's Noise is its keys' and dampers' sounds (the damper's thud a short 40-90 ms after a key comes up,
+    // since 2026-11-25): heard against soft notes, as a listener hears them.
+    {"org.caw.starling", "noise", {}, 1, "soft notes (the keys' and dampers' sounds against a quiet tone)"},
     {"org.caw.starling", "velocity", {}, 1, "soft notes"},
     {"org.caw.nightingale", "velocity", {}, 1, "soft notes"},
     {"org.caw.curlew", "velocity", {}, 1, "soft notes"},

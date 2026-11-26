@@ -1,33 +1,38 @@
 # Handoff
 
-Commit: 94afd84 pushed (Rook merged). Uncommitted on top (commits were refused by the permission check, 2026-11-25):
-staged = Rook app fixes (hero on Simulated pads, owner-use test, Arrange FX golden); unstaged = Bittern as the
-Tabernacle organ (engine, tests, refs, bench, page, fixture, docs). Commit both, push, then continue below.
+Commit: 41c6694 on ccr-bd7ac4df-86w0bh (PR #269 open). 1.1.3-alpha.4 is ready on it (c168e76: version, changelog,
+goldens). The owner (2026-11-26): Claude merges and releases when ready (docs/decisions.md). Issue #268: Starling strings' Windows-only -91 dB difference.
+Audio review's findings fixed (d5b8bbb); Curlew built strict (Arm64 green); Rook Eco ceiling at 1.4x local.
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
-Make 1.1.3 usable: 1.1.3-alpha.3 with the instrument fixes, pages, Timber removal, guitar/harp, Bittern, Rook; then 1.1.4+.
+Make 1.1.3 usable: the owner's alpha.3 feedback, then 1.1.4+.
 
-## Done and verified (this session)
-- Rook app fixes: flutter suite all green except the re-recorded Arrange FX golden (now passes).
-- Bittern: 26 Tabernacle stops by division, enclosed Swell/Choir (box + tremulant), pedal on lowest key, 9
-  registrations, hall 3.8 s, silent speech clips skipped. `caw_tests bittern` 22/22; full engine suite passes but the
-  env-only native-loader test (needs CAW_TEST_COMPONENT_PATH); refs bittern + stress re-recorded. Cost x86 19.4k /
-  32.9k / 35.1k µs/s (ceilings 27k/46k/50k). App: instrument_pages + use_like_owner (bittern) pass; full app suite
-  was running with CAW_LIB=engine/build-organ/libcaw.so.
-- Owner asked (UI look): is the 26-stop page (pills grouped by division) right, or real drawknob jambs?
+## Done and verified
+The owner's feedback on alpha.3 (2026-11-25/26):
+- Piano "weird transients/harmonics", "intended sound too present": done (bank stray harmonics, late release noise,
+  phantom partials now stop with the dampers and sit 4 dB lower: 2a72b60).
+- Woodpecker wrong notes: done. Organ stops, chimes, Swell knob, Weight (low end), Spread, strings: done.
+- Organ "the note shouldn't just get lower, change like an organ would": done (509e331: tables every 2 semitones,
+  per-pipe voicing, `bittern_each_key_has_its_own_colour`).
+- Brass "too noisy, not genuine": Curlew done (17a760e, measured against VSCO; scratch tools brass_cmp.py,
+  brass_sim.py in the scratchpad). Organ reeds: breath/puff cut earlier; their spectra are still modelled
+  (no recording) - waiting on the owner's ear.
 
 ## Open
-- Owner decisions: tonewheel organ to Kestrel or Bittern (kTonewheelToKestrel); Rook cards/Studio; panels; EP/tonewheel by ear.
-- Undo my CI loosening: put Curlew back in the stress mix match; reconsider the Friction 1 dB class after the body refit.
-- S22+ Benchmark (docs/performance.md): drops in Every effect and extreme songs; low-latency p99 over budget.
+- Two modes per instrument (realistic / free keyboard, "wonky" parameters) - ask the owner how the switch
+  should look; UI refinement of the main panel while playing - ask the owner first (screenshots).
+
+Verified (2026-11-26, build-organ, x86 Release):
+- `caw_tests` full: all pass but the env-only native-loader test (needs CAW_TEST_COMPONENT_PATH).
+- `caw_rt_tests bittern|starling|curlew` pass. `caw_bench 3 321`: Bittern 19.7k/33.8k/36.3k us/s, Curlew trombone 3.35k.
+- An audio-reviewer was run on 2a72b60..17a760e (see its findings in the session).
+
+- The owner's Bittern vision (cinematic wall of sound, rock organ stage, hyper-organ; not urgent): staged plan in
+  Hub #33, with two questions (where the rock organ lives: the tonewheel question; the controls' look).
 
 ## Next
-1. Nightingale full measured body (low end, warmth); Woodpecker settings (strike position, mallet type, material,
-   resonator tuning, rolls, dead strokes, timpani pedal, stereo), each audible in the knob test.
-2. Curlew: most of the wind family (piccolo, alto flute, oboe, bassoon, saxes, tuba...).
-3. Starling: treble decay, top zones (keys 105/108), the guitar's level jump above its range, the note-end "high note".
-4. Merge the live-path gate test branch (worktree-agent-adafbe12bcaece343, f393ef7).
-5. Reviewer agents (audio-reviewer, code-reviewer), release 1.1.3-alpha.3 with screenshots to the owner.
-6. Performance (owner): close p99 vs mean, mean low; find what 1.1.3 changed vs 1.1.2 (banks decoding, silent bodies,
-   little cores). 7. Last (owner): optimise Rook (~40 % CPU) without changing its sound; better kick tools.
+1. Watch PR #269's CI (Windows mix_pool timing test is flaky).
+2. Two-modes design question to the owner; then build.
+3. Older: Curlew more winds; Starling treble/top zones; live-path gate test branch; undo CI loosening (Curlew in the
+   stress mix match); performance p99; Rook optimisation and kick tools (last).

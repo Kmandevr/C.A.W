@@ -99,6 +99,27 @@ TEST(woodpecker_is_in_tune_over_every_range) {
     }
 }
 
+// Every key plays its own note (owner, 2026-11-25: "it just sounds all of the wrong notes ... some of it only sounds one
+// note"): past an instrument's recorded range the modes carry on at the key's pitch (the nearest zone's ratios), so
+// C2 to C8 on any of them is twelve notes an octave and each one in tune, where its reference mode is under 0.4 of
+// the rate (the timpani over C2 to C5 only, past which a kettle's head is not a drum).
+TEST(woodpecker_every_key_plays_its_own_note) {
+    for (int inst = 0; inst < 6; ++inst) {
+        double worst = 0;
+        int worstKey = 0;
+        const int lo = 36, hi = inst == woodpecker::kTimpani ? 72 : 108;
+        for (int key = lo; key <= hi; key += 5) {
+            const double hz = refRatio(inst) * 440.0 * std::pow(2.0, (key - 69.0) / 12.0);
+            if (hz > 0.4 * 48000) continue;
+            const std::vector<float> m = note(inst, key, 0.7, 0.5, {}, true);
+            const double c = cents(peakHz(m, hz, 20, 7200, 16800, 48000), hz);  // a wrong note reads 20 (the window's edge)
+            if (std::fabs(c) > worst) worst = std::fabs(c), worstKey = key;
+        }
+        if (verbose()) std::printf("%s: every key's own note, worst %.1f ct (key %d)\n", kNames[inst], worst, worstKey);
+        CHECK(worst < 5.0);
+    }
+}
+
 // The recorded attack hands over to the model with no hole or bump: across the crossfade, no 10 ms window (two periods
 // in the bass) steps from its neighbours' mean by more than 1.5 dB beyond what the recording played on unfaded (the
 // real instrument, its own beating and decay) does there, at every zone's key and between zones, soft and loud, at

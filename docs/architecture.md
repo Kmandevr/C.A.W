@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture and verified engine/app boundaries; future design proposals are kept privately.
-updated: 2026-11-25
+updated: 2026-11-26
 covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, engine/CMakeLists.txt]
 ---
 

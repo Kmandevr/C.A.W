@@ -77,11 +77,28 @@ struct Winds : timber::Wind {
         // and 4 % (Timber's 8 cents and 5 % at 1 gave 1.6 cents at the default: Vibrato rate could not be heard).
         vibBreath = 0.2, vibCents = 50.0;
         pullTable = kPull[which], pullFirst = kPullFirst[which], pullCount = kPullKeys;
-        // Brass: the lips' resonance a little above the note (outward-striking lips, as Fletcher and Rossing describe
-        // them); at Timber's 0.9 below it, a trombone or horn held only half its notes (measured 2026-11-24: 1.15
-        // held 10 of 11 trombone and 9 of 10 trumpet notes; the pull table aims off the sharpening that comes with it).
-        if (kKind[which] == 3) lipRatio = 1.15f, lipSpan = 0.08, lipsCloseWithBreath = true;  // Lips 0..1: the lips' resonance 1.12..1.20 x the note
+        // Brass (2026-11-26, the owner: the brass "don't really sound like genuine brass instruments"): the bore a
+        // period's round trip (every one of its resonances a harmonic of the note) and the lips' resonance just under
+        // the note at a fixed Q of 3, as lips are (Adachi and Sato, JASA 99(2), 1996: a Q of a few). Before, the
+        // bore two periods long (resonances at the half harmonics too) and the lips at 1.15 times the note with
+        // Timber's fixed bandwidth (r 0.997: a Q of 6 at C4, under 2 in the bass): the lips led, each note sounded
+        // 2.2 semitones over its bore's tuning (the pull table aimed it off), the bore's resonances missed its
+        // harmonics, and every brass had one clarinet-like spectrum (its 2nd harmonic 12 dB under the 1st and the
+        // 3rd). [Measured] (a copy of the loop, 2026-11-26): every key E2..A#5 speaks, 1.4-2 semitones over the bore
+        // (aimed off by the pull table), its harmonics falling smoothly (0, -8, -12, -14, -16 dB at velocity 0.7) and
+        // 41-76 dB over what lies between them; under a mouth pressure of 1.05 the lips' oscillation turned
+        // quasi-periodic (a rough tone 23-36 dB over the noise), so the velocity moves the pressure 1.05..1.2 and
+        // the gain carries the rest of the loudness. Lips 0..1: 0.87..0.93 times the note.
+        if (kKind[which] == 3) {
+            lipRatio = 0.89f, lipSpan = 0.06, lipQ = 3.0, lipsCloseWithBreath = true;
+            brassBore = 1.0, brassPush = 1.05, brassPushSpan = 0.15;
+        }
+        // Brass: the breath's turbulence through the lips 20 dB under Timber's (2026-11-26, the owner: "a bit too
+        // noisy"). [Measured] VSCO 2 CE's sustains hold their noise between the harmonics 24-45 dB under the tone; at
+        // Breath noise 0.15 the model's sat at 13-18 dB under it, at 0 at 31-38 dB: the turbulence was nearly all of it.
+        if (kKind[which] == 3) lipTurb = 0.05f;
         if (!Base::prepare(rate, v, n)) return false;
+        bell.design(kBellHz[which], rate);
         body.load(bodyResponse(which), bodyAmount, sr);
         return true;
     }
@@ -166,12 +183,49 @@ struct Winds : timber::Wind {
         for (uint32_t l = 0; l < count; ++l) fadeReleased(*vs[l], out[l], n);
         breathMod = nullptr;
     }
+    // The bell's radiation (brass): the model's sound is the mouthpiece's pressure, whose low harmonics are strong;
+    // a bell radiates its high ones far better (Benade's spectrum transformation, Fundamentals of Musical Acoustics
+    // ch. 20: rising about 6 dB an octave up to the bell's cutoff, then level). A first-order shelf, 18 dB over the
+    // three octaves under the cutoff, 0 dB an octave and a half under it, so the level stays near where it was.
+    // [Assumption] the cutoffs (not measured: each bell's size): trumpet 1.5 kHz, trombone 0.8; the horn none (its
+    // hand in the bell takes the highs back: [Measured] with a 0.6 kHz lift its centroid sat 1.1-1.6 times VSCO's). Without it the three were one dull, clarinet-like spectrum (the 2nd harmonic 12 dB
+    // under the 1st; VSCO's trumpet holds its 2nd to 6th within 5 dB of the strongest).
+    static constexpr double kBellHz[6] = {0, 0, 0, 1500.0, 800.0, 0};
+    struct Bell {
+        float b0 = 1, b1 = 0, a1 = 0, xl = 0, yl = 0, xr = 0, yr = 0;
+        bool on = false;
+        void design(double fc, double sr) noexcept {
+            on = fc > 0;
+            if (!on) return;
+            // H(s) = g (s + wz) / (s + wp), wz = wp / 8 (18 dB), g so |H| = 1 at fc / 2.83; bilinear, prewarped.
+            const double k = 1.0 / std::tan(timber::kPi * std::min(fc, 0.45 * sr) / sr), wp = 1.0;
+            const double wz = wp / 8.0;
+            const double wn = std::tan(timber::kPi * std::min(fc / 2.83, 0.45 * sr) / sr) * k;  // fc/2.83 against wp
+            const double g = std::sqrt((wn * wn + wp * wp) / (wn * wn + wz * wz));
+            const double a0 = k + wp;
+            b0 = static_cast<float>(g * (k + wz) / a0), b1 = static_cast<float>(g * (wz - k) / a0);
+            a1 = static_cast<float>((wp - k) / a0);
+        }
+        void process(float* l, float* r, uint32_t n) noexcept {
+            if (!on) return;
+            for (uint32_t i = 0; i < n; ++i) {
+                const float ol = b0 * l[i] + b1 * xl - a1 * yl, orr = b0 * r[i] + b1 * xr - a1 * yr;
+                xl = l[i], yl = ol, xr = r[i], yr = orr;
+                l[i] = ol, r[i] = orr;
+            }
+            yl = timber::flushf(yl), yr = timber::flushf(yr);
+        }
+        void clear() noexcept { xl = yl = xr = yr = 0; }
+    };
+    Bell bell;
     void post(float* l, float* r, uint32_t n, const Shared& s) noexcept {
         Base::post(l, r, n, s);
+        bell.process(l, r, n);
         if (!testBypassBody) body.process(l, r, n);
     }
     void clearPost() noexcept {
         Base::clearPost();
+        bell.clear();
         body.clear();
     }
 };

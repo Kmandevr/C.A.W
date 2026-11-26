@@ -29,6 +29,11 @@ enum Stop : int {
     kConcertFlute8, kErzahler8, kKrummhorn8,                                                          // Choir
     kTuba8,                                                                                           // Antiphonal
     kContreBourdon32, kPedPrincipal16, kBourdon16, kPedOctave8, kTrombone16, kBombarde32,             // Pedal
+    // 2026-11-25 (the owner: "a few more stops", strings "as additional sets of pipes", more low end): the Great's
+    // Gemshorn, the Swell's Voix Humaine, the Choir's orchestral strings (Violin and Violoncello, as the Skinner
+    // organs' orchestral string stops), and the Pedal's Contrabass, Quint 10 2/3' (with the 16' it sounds a 32'
+    // resultant, the organ's own way to a low end smaller speakers can carry) and Choral Bass 4'.
+    kGemshorn4, kVoixHumaine8, kViolin8, kCello8, kContrabass16, kQuint10, kChoralBass4,
     kStops,
     // The second ranks of the two-rank celestes (each follows its stop's knob): the Viole Céleste II's céleste and
     // the Kleine Erzähler II's.
@@ -41,6 +46,7 @@ inline constexpr int kDivisionOf[kRanks] = {
     kChoir, kChoir, kChoir,
     kAntiphonal,
     kPedal, kPedal, kPedal, kPedal, kPedal, kPedal,
+    kGreat, kSwell, kChoir, kChoir, kPedal, kPedal, kPedal,
     kSwell, kChoir};
 // The enclosed divisions: the swell box (the mod wheel) and the tremulant act on these only.
 inline constexpr bool enclosed(int division) noexcept { return division == kSwell || division == kChoir; }
@@ -48,7 +54,7 @@ inline constexpr bool enclosed(int division) noexcept { return division == kSwel
 // the rest **[Assumption]** modelled spectra (nothing of theirs was recorded).
 enum Family : int {
     kStopped, kOpen, kPrincipal, kString, kReed, kMixtureFamily, kOboe, kKrummhorn, kTuba, kErzahler, kTrompette,
-    kGeigen, kHarmonicFlute, kFamilies
+    kGeigen, kHarmonicFlute, kViolin, kCello, kVoixHumaine, kFamilies
 };
 inline constexpr int kFamilyOf[kRanks] = {
     kPrincipal, kPrincipal, kHarmonicFlute, kPrincipal, kPrincipal, kMixtureFamily, kReed,
@@ -56,10 +62,15 @@ inline constexpr int kFamilyOf[kRanks] = {
     kOpen, kErzahler, kKrummhorn,
     kTuba,
     kStopped, kPrincipal, kStopped, kPrincipal, kReed, kReed,
+    kErzahler, kVoixHumaine, kViolin, kCello, kCello, kStopped, kPrincipal,
     kString, kErzahler};
 inline constexpr bool isReed(int family) noexcept {
-    return family == kReed || family == kOboe || family == kKrummhorn || family == kTuba || family == kTrompette;
+    return family == kReed || family == kOboe || family == kKrummhorn || family == kTuba || family == kTrompette ||
+           family == kVoixHumaine;
 }
+// The string families (the Viole, the orchestral Violin and Violoncello): slower to speak, and the orchestral ones
+// with a player's vibrato.
+inline constexpr bool isString(int family) noexcept { return family == kString || family == kViolin || family == kCello; }
 // The rank's pitch as a multiple of the 8' note (16' = 0.5; the mixtures' tables are built at the 8' pitch).
 inline constexpr double kFoot[kRanks] = {
     0.5, 1, 1, 2, 4, 1, 1,
@@ -67,6 +78,7 @@ inline constexpr double kFoot[kRanks] = {
     1, 1, 1,
     1,
     0.25, 0.5, 0.5, 1, 0.5, 0.25,
+    2, 1, 1, 1, 0.5, 0.75, 2,
     1, 1};
 // Each stop's voicing at its knob's full: its loudness against a principal 8' ([Assumption] by kind, after Harrison's
 // "there are no very loud stops, the effect being obtained by the 188 ranks" and the Tuba Mirabilis on high pressure
@@ -78,11 +90,12 @@ inline constexpr float kVoicing[kRanks] = {
     0.65f, 0.35f, 0.55f,
     1.7f,
     0.9f, 0.9f, 0.8f, 0.7f, 0.9f, 1.0f,
+    0.6f, 0.5f, 0.55f, 0.6f, 0.8f, 0.6f, 0.6f,
     0.5f, 0.35f};
 // Each rank's tuning above its stop's (cents): the celestes' second ranks beat against the first ([Assumption] a
 // string céleste about 6 cents sharp, a gentle one 3-4).
 inline constexpr float kCelesteCents[kRanks] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6.0f, 3.5f};
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6.0f, 3.5f};
 // The knob that sets a rank: its own, or for a céleste's second rank its stop's.
 inline constexpr int stopOf(int rank) noexcept {
     return rank == kVioleCeleste ? kViole8 : rank == kErzahlerCeleste ? kErzahler8 : rank;
@@ -90,11 +103,13 @@ inline constexpr int stopOf(int rank) noexcept {
 // The pedal's compass: C to g' (32 notes, MIDI 36-67 at the 8' pitch); a pedal stop sounds only within it.
 inline constexpr double kPedalLow = 36, kPedalHigh = 67;
 
-// The tables' zones: 6 semitones of the pipe's sounding pitch each, from MIDI 12 (the mixture's by its key's 8'
-// pitch), every table kTableSize pairs of floats (each value and the step to the next), peak 1.
-inline constexpr int kZones = 18;
+// The tables' zones: 2 semitones of the pipe's sounding pitch each, from MIDI 12 (the mixture's by its key's 8'
+// pitch), every table 2^tableBits(zone) pairs of floats (each value and the step to the next; at most kTableSize),
+// peak 1.
+inline constexpr int kZones = 54;
 inline constexpr uint32_t kTableSize = 2048;
-inline int zoneOf(double sounding) noexcept { return std::clamp(static_cast<int>((sounding - 12.0) / 6.0), 0, kZones - 1); }
+inline int zoneOf(double sounding) noexcept { return std::clamp(static_cast<int>((sounding - 12.0) / 2.0), 0, kZones - 1); }
+int tableBits(int zone) noexcept;
 
 // The shared tables (built once per process, read-only; bittern_tables.cpp): a family's steady tone and its speaking
 // tone (the spectrum while the pipe speaks) in zone z, and each table's RMS.
@@ -200,8 +215,14 @@ struct Organ {
     static constexpr double kMinLife = 0.05, kSpread = 0.5;
     // Stop levels (kStops), then Tremulant, Wind, Chiff, Tremulant rate, Registration, Pedal.
     static constexpr uint32_t kTrem = kStops, kWind = kStops + 1, kChiff = kStops + 2, kTremRate = kStops + 3,
-                              kReg = kStops + 4, kPedalMode = kStops + 5;
-    static constexpr uint32_t kModelParams = kStops + 6;
+                              kReg = kStops + 4, kPedalMode = kStops + 5, kSwellKnob = kStops + 6,
+                              kWeight = kStops + 7, kChimes = kStops + 8, kSpreadKnob = kStops + 9;
+    static constexpr uint32_t kModelParams = kStops + 10;
+    // The Chimes (tubular bells, as an organ's Chimes stop): the modes over the struck note, measured on VCSL's
+    // chimes (Woodpecker's: 0.63, 1.22, 2.00, 2.92, 3.98, 5.1, 6.5), each one's level and ring ([Assumption] chosen:
+    // the 2.00 the strongest, the lowest and highest softer), sounding from G3 to G5 (MIDI 55-79, a Deagan set's 25).
+    static constexpr int kChimeModes = 7;
+    static constexpr double kChimeLow = 55, kChimeHigh = 79;
     static constexpr int kPlayers = 4;  // recorded speech clips per note: one per recorded registration
     static constexpr int kBreathBands = 4;
     static constexpr float kBreathDamp = 0.25f;  // the breath's band-passes: Q 4
@@ -221,6 +242,7 @@ struct Organ {
         double inc[kRanks] = {};      // its step at its tuned pitch
         const float* steady[kRanks] = {};
         const float* speaking[kRanks] = {};
+        uint32_t shift[kRanks] = {};  // 32 less its tables' bits: the phase's top bits index them
         float rms[kRanks] = {};
         // Each pipe is worked out every other control block (half of them each block, by the parity of their
         // index) and runs on lines from then (lineAt, on the voice's clock of samples) until the next time: so no
@@ -239,6 +261,8 @@ struct Organ {
         float gainAt(int k) const noexcept { return gain[k] + gStep[k] * static_cast<float>(clock - lineAt[k]); }
         float spokeAt(int k) const noexcept { return spoke[k] + spokeStep[k] * static_cast<float>(clock - lineAt[k]); }
         float tuning[kRanks] = {};   // its fixed tuning error (cents)
+        float voiced[kRanks] = {};   // its fixed level as voiced (a factor near 1) and speed of speech (likewise)
+        float voicedRise[kRanks] = {};
         float strikeRise[kRanks] = {};  // this strike's own speed of speech (a factor near 1)
         float settle[kRanks] = {}, settleK[kRanks] = {};  // its speech's pitch error (cents) and its decay a block
         float wPitch[kRanks] = {}, wPitchTo[kRanks] = {}, wLevel[kRanks] = {}, wLevelTo[kRanks] = {};
@@ -259,6 +283,9 @@ struct Organ {
         // (narrower, brighter).
         float bodyLp = 0, bodyK = 0.1f;
         float boxLp = 0;  // the enclosed divisions' swell box, a one-pole low-pass (Organ::swellK)
+        float chC[kChimeModes] = {}, chS[kChimeModes] = {}, chZr[kChimeModes] = {}, chZi[kChimeModes] = {};
+        bool chimeOn = false;
+        float vibOffset = 0;  // the orchestral strings' vibrato: this note's own phase (cycles)
         uint32_t tick = 0;  // control blocks since the note started (each pipe's pitch is worked out every other one)
         float strikeLevel[kRanks] = {};  // this strike's own level error (a fraction)
         Rng rng, noise;
@@ -269,6 +296,11 @@ struct Organ {
     float level[kRanks] = {};
     float knob[kRanks] = {};
     bool pedalEvery = false;  // the Pedal choice: Every key (else the lowest key held)
+    double swellKnob = 1, weightFor = -1, vibPhase = 0;
+    float chimes = 0;
+    double spread = 0.6;  // Spread: how far the pipes stand apart across the case
+    timber::Biquad floorL, floorR;  // Weight's low shelf
+    uint32_t floorFill = 0;
     int pedalKey = -1;        // the lowest key held this block (-1 none)
     int registration = 0;
     double trem = 0, wind = 0.3, chiffAmt = 0.5, tremRate = 6.0, modWheel = 0;
@@ -308,6 +340,7 @@ struct Organ {
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         sr = rate;
         voices = v, count = n;
+        weightFor = -1;  // the floor designed again for this rate
         gainK = static_cast<float>(1.0 - detExp(-1.0 / (0.005 * sr)));
         noiseGain = static_cast<float>(kOut * detPow(10.0, noiseDb() / 20.0));
         blockK = static_cast<float>(1.0 - detExp(-2.0 * kControlFrames / (0.005 * sr)));  // over two blocks
@@ -334,6 +367,7 @@ struct Organ {
         swellK = swellKTo, swellG = swellGTo;
         windRng.s = 0x0B177E2Du;
         notes = 0;
+        floorL.clear(), floorR.clear(), floorFill = 0;  // a stop or seek: no old low tail, the flush back on its grid
     }
     // 2^(c / 1200) for a few tens of cents: its Taylor series to x^3 (within 1e-6 of the exponential to 50 cents),
     // so each pipe's pitch each control block costs a few multiplies.
@@ -352,6 +386,14 @@ struct Organ {
         // The pedal (one keyboard plays the manuals and the pedal): its stops sound on the lowest key held, as a
         // pedal line under the hands, or on every key; either way within the pedal's compass.
         pedalEvery = p[kPedalMode] >= 0.5;
+        swellKnob = clampd(p[kSwellKnob], 0, 1);
+        chimes = static_cast<float>(clampd(p[kChimes], 0, 1));
+        spread = clampd(p[kSpreadKnob], 0, 1);
+        const double wt = clampd(p[kWeight], 0, 1);
+        if (wt != weightFor) {  // the floor: a low shelf at 110 Hz, +12 dB at 1 (only when the knob moves)
+            weightFor = wt;
+            floorL.lowShelf(110.0, 0.707, 12.0 * wt, sr), floorR.lowShelf(110.0, 0.707, 12.0 * wt, sr);
+        }
         pedalKey = -1;
         for (uint32_t i = 0; i < count; ++i) {
             const Voice& o = voices[i];
@@ -372,6 +414,8 @@ struct Organ {
         sway += (swayTarget - sway) * std::min(1.0, dt * 2.0);
         tremPhase += tremRate * dt;
         tremPhase -= std::floor(tremPhase);
+        vibPhase += 5.5 * dt;  // the orchestral strings' vibrato, 5.5 Hz
+        vibPhase -= std::floor(vibPhase);
         const double t = lib::fastSinCycles(tremPhase);
         // The reservoir: what the sounding pipes draw (each pipe's level, a big pipe more: the square root of its
         // length), the sag toward draw / (draw + 24) through a spring of 3 Hz damped at 0.35 (a big chord sags and
@@ -395,7 +439,8 @@ struct Organ {
             levelMod[e] = static_cast<float>((1.0 + sway * 0.12 * wind + tr * 0.2) * (1.0 - 0.1 * give * sag));
         }
         // The swell box: the mod wheel closes it (darker, quieter), open at 0.
-        const double box = clampd(modWheel, 0, 1);
+        // The Swell knob (open at 1, automatable) and the mod wheel (closing from it) together.
+        const double box = clampd(modWheel + (1.0 - swellKnob), 0, 1);
         swellKTo = box < 1e-3 ? 1.0f : static_cast<float>(1.0 - detExp(-timber::kTwoPi * (12000.0 * detPow(0.08, box)) / sr));
         swellGTo = static_cast<float>(1.0 - 0.6 * box);
         // The box's shutters move, they do not jump: eased over about 10 ms (each pipe's level eases on to it).
@@ -423,6 +468,7 @@ struct Organ {
             const int z = fam == kMixtureFamily ? zMix : zoneOf(pitch + 12.0 * std::log2(kFoot[k]));
             v.inc[k] = hz * kFoot[k] / sr * 4294967296.0;
             v.steady[k] = steadyTable(fam, z), v.speaking[k] = speakingTable(fam, z);
+            v.shift[k] = static_cast<uint32_t>(32 - tableBits(z));
             v.rms[k] = tableRms(fam, z);
         }
         v.tunedPitch = v.pitch;
@@ -433,11 +479,11 @@ struct Organ {
     void setRise(Voice& v, int k) const noexcept {
         const double hz = timber::noteHz(clampd(v.pitch, 12.0, 120.0)) * kFoot[k];
         double t50 = isReed(kFamilyOf[k]) ? 0.012 : riseSeconds(std::max(hz, 20.0));
-        if (kFamilyOf[k] == kString) t50 *= 1.5;
+        if (isString(kFamilyOf[k])) t50 *= 1.5;
         // [Assumption] a tracker action: a key struck faster opens its pallet faster, so the pipe speaks a little
         // sooner (and with more of its speech: startSpeech); as measured at the frame's velocity 0.75.
         const double vel = 1.6 - 0.8 * clampd(v.velocity, 0, 1);
-        const double tau = std::max(0.004, t50 * vel * v.strikeRise[k] / 1.23);
+        const double tau = std::max(0.004, t50 * vel * v.strikeRise[k] * v.voicedRise[k] / 1.23);
         v.rise[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
         v.settleK[k] = static_cast<float>(detExp(-static_cast<double>(kControlFrames) / (tau * sr)));
     }
@@ -456,9 +502,9 @@ struct Organ {
         v.settle[k] = 6.0f * v.rng.next() * (1.0f - v.env[k]);
         if (isReed(kFamilyOf[k])) {
             v.settle[k] = -(12.5f + 2.5f * v.rng.next()) * (1.0f - v.env[k]);
-            v.puff += static_cast<float>(pipeLevel(k) * v.rms[k] * kOut * 0.06 * chiffAmt / 0.5) * (1.0f - v.env[k]);
+            v.puff += static_cast<float>(pipeLevel(k) * v.rms[k] * kOut * 0.02 * chiffAmt / 0.5) * (1.0f - v.env[k]);
         }
-        v.gain[k] = pipeLevel(k), v.gStep[k] = 0;
+        v.gain[k] = pipeLevel(k) * v.voiced[k], v.gStep[k] = 0;
     }
     void start(Voice& v, const Shared& s) noexcept {
         v.rng.s = 0xB177E2Du + 977u * v.key + 7919u * notes;
@@ -473,6 +519,8 @@ struct Organ {
         }
         Rng pipe;  // each pipe's own fixed tuning (the same pipe plays every time its key is struck)
         pipe.s = 0x9E3779B9u + 131u * v.key;
+        Rng voicer;  // and its own voicing (a generator of its own: the tuning's draws stay as they were)
+        voicer.s = 0x7F4A7C15u + 131u * v.key;
         for (int k = 0; k < kRanks; ++k) {
             // [Measured] the chorus' ranks beat at a median 4.4 cents (VCSL's Loud: 0.4-4 Hz on partials of 0.2-2 kHz):
             // each pipe's tuning a triangular error of +-11 cents (standard deviation 4.6), so two pipes of a key
@@ -482,6 +530,11 @@ struct Organ {
             const double pipeHz = timber::noteHz(clampd(v.pitch, 12.0, 120.0)) * kFoot[k] * (kFamilyOf[k] == kMixtureFamily ? 4.0 : 1.0);
             const float narrow = static_cast<float>(std::min(1.0, std::sqrt(500.0 / pipeHz)));
             v.tuning[k] = kCelesteCents[k] + 5.6f * narrow * (pipe.next() + pipe.next());
+            // [Assumption] no two pipes of a rank voiced alike (a voicer evens a rank by ear, pipe by pipe, to within
+            // about a decibel; each mouth speaks a little sooner or later): each its own level within 1.2 dB
+            // (triangular) and speed of speech within 15 %, fixed for the key.
+            v.voiced[k] = 1.0f + 0.075f * (voicer.next() + voicer.next());
+            v.voicedRise[k] = 1.0f + 0.15f * voicer.next();
             v.strikeRise[k] = 1.0f, v.strikeLevel[k] = 0;
             if (was) {
                 v.phase[k] = was->phase[k], v.env[k] = was->envAt(k), v.spoke[k] = was->spokeAt(k);
@@ -489,7 +542,7 @@ struct Organ {
             } else {
                 v.phase[k] = static_cast<uint32_t>((0.5 + 0.5 * v.rng.next()) * 4294967295.0);
                 v.env[k] = v.spoke[k] = 0;
-                v.gain[k] = pipeLevel(k);
+                v.gain[k] = pipeLevel(k) * v.voiced[k];
                 v.wPitch[k] = v.rng.next(), v.wLevel[k] = v.rng.next();
             }
             v.wPitchTo[k] = v.wPitch[k], v.wLevelTo[k] = v.wLevel[k];
@@ -534,6 +587,9 @@ struct Organ {
         v.inFade = was ? 0.0f : 1.0f;
         v.inStep = static_cast<float>(1.0 / std::max(1.0, 0.005 * sr));
         startSpeech(v, was ? was->env : nullptr);
+        place(v);
+        v.vibOffset = 0.5f + 0.5f * v.rng.next();
+        strikeChimes(v);
         voiceControl(v, s);
     }
     // The recorded speech: for each flue stop drawn, its family's recording nearest the key (within 2 semitones; the
@@ -562,7 +618,7 @@ struct Organ {
             // The clip in the rank's own units: its peak over its tone's RMS, times this rank's RMS at its level. The
             // chorus' recording sounds three ranks (and the mixture's), so each principal takes a third of it in
             // power; the strings a quarter of it ([Assumption]: a string's speech is like a principal's).
-            const double share = fam == kPrincipal || fam == kGeigen || fam == kMixtureFamily ? 0.577 : fam == kString ? 0.5 : 1.0;
+            const double share = fam == kPrincipal || fam == kGeigen || fam == kMixtureFamily ? 0.577 : isString(fam) ? 0.5 : 1.0;
             const float since = still ? 1.0f - still[k] : 1.0f;  // a pipe still sounding speaks less again
             const float g = static_cast<float>(pipeLevel(k) * v.rms[k] * kOut * ci.scale * share) * amount * since;
             if (g <= 1e-7f) continue;
@@ -592,7 +648,42 @@ struct Organ {
     // default Release (0.12 s) is its T60. The pipe sounds env^2: env's time constant is T60 / 3.45 (voiceControl).
     // The valve closing puffs: [Assumption] a breath burst at the speech's measured level (28 dB under the tone, at
     // Chiff 0.5), 25 ms long.
+    // Spread (2026-11-25, the owner: "places the different pipes around the room"): a note's pipes stand where an
+    // organ's case puts them, the chromatic layout: the C side (C, D, E, F#, G#, A#) to the left, the C# side to the
+    // right, each side's big bass pipes in its outer tower and the treble toward the middle (a key's place: 0.3 of the
+    // way out at C6 and up, all the way at C2 and down). Spread 0 all in the middle; the pan keeps its power.
+    void place(Voice& v) const noexcept {
+        const int pc = static_cast<int>(v.key) % 12;
+        const double side = pc % 2 == 0 ? -1.0 : 1.0;
+        const double out = 0.3 + 0.7 * clampd((84.0 - v.pitch) / 48.0, 0, 1);
+        const double pan = clampd(spread * side * out, -1, 1);
+        v.panL = static_cast<float>(std::cos((pan + 1.0) * 0.25 * timber::kPi));
+        v.panR = static_cast<float>(std::sin((pan + 1.0) * 0.25 * timber::kPi));
+    }
+    // The Chimes' modes at their rings (seconds to -60 dB, the struck mode's `t60`, the others in proportion).
+    void setChimes(Voice& v, double t60) const noexcept {
+        static constexpr double kRatio[kChimeModes] = {0.63, 1.22, 2.00, 2.92, 3.98, 5.1, 6.5};
+        static constexpr double kRing[kChimeModes] = {0.5, 0.7, 1.0, 0.85, 0.7, 0.55, 0.45};
+        const double f = timber::noteHz(clampd(v.pitch, kChimeLow - 12, kChimeHigh + 12));
+        for (int m = 0; m < kChimeModes; ++m) {
+            const double hz = f * kRatio[m];
+            const double r = hz < 0.45 * sr ? detExp(-6.907755278982137 / (t60 * kRing[m] * sr)) : 0.0, w = timber::kTwoPi * hz / sr;
+            v.chC[m] = static_cast<float>(r * detCos(w)), v.chS[m] = static_cast<float>(r * detSin(w));
+        }
+    }
+    // A key of the Chimes' compass struck: its modes from rest (a struck tube), louder for a harder key.
+    void strikeChimes(Voice& v) noexcept {
+        v.chimeOn = false;
+        for (int m = 0; m < kChimeModes; ++m) v.chZr[m] = v.chZi[m] = 0;
+        if (chimes <= 0.0f || v.pitch < kChimeLow - 0.5 || v.pitch > kChimeHigh + 0.5) return;
+        static constexpr float kLevel[kChimeModes] = {0.15f, 0.35f, 1.0f, 0.7f, 0.5f, 0.3f, 0.18f};
+        setChimes(v, 6.0);
+        const float a = 0.6f * chimes * static_cast<float>(0.4 + 0.6 * clampd(v.velocity, 0, 1));
+        for (int m = 0; m < kChimeModes; ++m) v.chZr[m] = a * kLevel[m];
+        v.chimeOn = true;
+    }
     void release(Voice& v, const Shared&) noexcept {
+        if (v.chimeOn) setChimes(v, 0.8);  // the chimes' damper as the key comes up: out in about 0.8 s
         float tone = 0;
         for (int k = 0; k < kRanks; ++k) {
             v.on[k] = false;
@@ -664,7 +755,10 @@ struct Organ {
                 v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
                 v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
                 v.settle[k] *= v.settleK[k] * v.settleK[k] * v.settleK[k] * v.settleK[k];
-                const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k];
+                // The orchestral strings' vibrato: a player's 10 cents at 5.5 Hz, each note from its own phase.
+                const int fam = kFamilyOf[k];
+                const double vib = fam == kViolin || fam == kCello ? 10.0 * lib::fastSinCycles(vibPhase + v.vibOffset) : 0.0;
+                const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k] + vib;
                 v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod[enclosed(kDivisionOf[k])]);
             }
             // A stop retired holds its gain (its pipe releases); a stop drawn or moving eases to its new level.
@@ -672,12 +766,14 @@ struct Organ {
             if (level[k] > 0.0f) {
                 const bool box = enclosed(kDivisionOf[k]);
                 const float to = level[k] * kVoicing[k] * levelMod[box] * (box ? swellG : 1.0f) *
-                                 (1.0f + 0.345f * wd * v.wLevel[k]) * (1.0f + v.strikeLevel[k]);
+                                 (1.0f + 0.345f * wd * v.wLevel[k]) * (1.0f + v.strikeLevel[k]) * v.voiced[k];
                 v.gStep[k] = (to - gain) * bk * kLine;
             }
             const float e2 = env * env * gain;
             const float a = e2 * v.rms[k];
-            v.drawOf[k] = e2 * pipeDraw[k], v.toneOf[k] = a * a;
+            // A reed's tongue makes no wind noise of its own (only the flues' mouths do): its tone stays out of the
+            // breath (2026-11-25, the owner: the reeds too noisy).
+            v.drawOf[k] = e2 * pipeDraw[k], v.toneOf[k] = isReed(kFamilyOf[k]) ? 0.0f : a * a;
             drawNext += v.drawOf[k];
             tone += v.toneOf[k];
         }
@@ -687,17 +783,39 @@ struct Organ {
         for (int b = 0; b < kBreathBands; ++b) v.nLp[b] = timber::flushf(v.nLp[b]), v.nBp[b] = timber::flushf(v.nBp[b]);
         v.bodyLp = timber::flushf(v.bodyLp);
         v.boxLp = timber::flushf(v.boxLp);
+        if (v.chimeOn) {  // rung out (about -100 dB): off
+            float e = 0;
+            for (int m = 0; m < kChimeModes; ++m) {
+                v.chZr[m] = timber::flushf(v.chZr[m]), v.chZi[m] = timber::flushf(v.chZi[m]);
+                e += v.chZr[m] * v.chZr[m] + v.chZi[m] * v.chZi[m];
+            }
+            if (e < 1e-10f) v.chimeOn = false;
+        }
         v.puff = timber::flushf(v.puff);
     }
     // Per sample, in bittern_render.cpp: compiled with strict floating point, so any block size gives the same bits
     // (the fast flags vectorise a loop's main body and its remainder with different groupings).
     void render(Voice& v, float* out, uint32_t n) noexcept;
     // The swell boxes are in each voice (render): only the Swell and the Choir are enclosed.
-    void post(float*, float*, uint32_t, const Shared&) noexcept {}
+    // The floor (Weight): a low shelf at 110 Hz on the organ's sum, +6 dB at the default 0.5 (2026-11-25, the owner:
+    // "a quite literal wall of sound ... a lot of it is normally lost in recording"; the 16's and 32's the organ is
+    // felt by), flushed on the control grid so any block size gives the same bits.
+    // At Weight 0 the shelf still runs (at 0 dB it is exactly the identity), so moving the knob to or from 0 never
+    // drops or releases its low-frequency state in one sample (the audio review, 2026-11-26: a step either way).
+    void post(float* l, float* r, uint32_t n, const Shared&) noexcept {
+        if (weightFor < 0.0) return;  // not designed yet (the first control block designs it)
+        runFloor(l, r, n);
+        floorFill += n;
+        if (floorFill >= kControlFrames) floorFill = 0, floorL.flush(), floorR.flush();
+    }
+    // The shelf itself, in the strict bittern_render.cpp: at 0 dB it is then exactly the identity on every build
+    // (Arm64's fused multiply-adds left a tail of 1e-10 of the speech there with the fast flags).
+    void runFloor(float* l, float* r, uint32_t n) noexcept;
     bool postQuiet() const noexcept { return true; }
     // Asleep (nothing sounding for 0.5 s): the box's and the reservoir's state to rest, so the next note does not
     // start on a sagging wind.
     void clearPost() noexcept {
+        floorL.clear(), floorR.clear(), floorFill = 0;
         sag = sagVel = draw = drawNext = 0;
     }
     void display(float* out) const noexcept {

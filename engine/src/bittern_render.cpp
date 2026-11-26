@@ -5,9 +5,6 @@ namespace caw::bittern {
 
 void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
     float acc[kControlFrames] = {}, box[kControlFrames] = {};  // the open divisions' pipes, the enclosed ones'
-    constexpr int kShift = 32 - 11;  // kTableSize = 2^11
-    constexpr float kFrac = 1.0f / static_cast<float>(1u << kShift);
-    constexpr uint32_t kMask = (1u << kShift) - 1u;
     const float gk = gainK;
     // Each pipe's lines this render: from their start (lineAt) on the voice's clock.
     float steps[kControlFrames];
@@ -22,6 +19,8 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         const float* s = v.steady[k];
         const float* e = v.speaking[k];
         const uint32_t inc = v.step[k], ph = v.phase[k];
+        const uint32_t shift = v.shift[k], mask = (1u << shift) - 1u;  // the table's 2^(32 - shift) values
+        const float frac = 1.0f / static_cast<float>(1u << shift);
         float* to = enclosed(kDivisionOf[k]) ? box : acc;
         // The pipe's level each sample (its speech or release, squared, and its level: both lines; o + i + 1 is a
         // whole number, exact) times its table, in one pass.
@@ -29,16 +28,16 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
             for (uint32_t i = 0; i < n; ++i) {  // spoken and up: the common case
                 const float t = o + steps[i];
                 const uint32_t p = ph + i * inc;  // wraps at 2^32: a whole cycle
-                const uint32_t at = (p >> kShift) * 2;
-                const float f = static_cast<float>(p & kMask) * kFrac;
+                const uint32_t at = (p >> shift) * 2;
+                const float f = static_cast<float>(p & mask) * frac;
                 to[i] += (s[at] + s[at + 1] * f) * (g0 + gs * t);
             }
         } else if (w0 >= 1.0f && ws == 0.0f) {
             for (uint32_t i = 0; i < n; ++i) {
                 const float t = o + steps[i], x = e0 + es * t;
                 const uint32_t p = ph + i * inc;
-                const uint32_t at = (p >> kShift) * 2;
-                const float f = static_cast<float>(p & kMask) * kFrac;
+                const uint32_t at = (p >> shift) * 2;
+                const float f = static_cast<float>(p & mask) * frac;
                 to[i] += (s[at] + s[at + 1] * f) * (x * x * (g0 + gs * t));
             }
         } else {
@@ -46,8 +45,8 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
             for (uint32_t i = 0; i < n; ++i) {
                 const float t = o + steps[i], x = e0 + es * t;
                 const uint32_t p = ph + i * inc;
-                const uint32_t at = (p >> kShift) * 2;
-                const float f = static_cast<float>(p & kMask) * kFrac;
+                const uint32_t at = (p >> shift) * 2;
+                const float f = static_cast<float>(p & mask) * frac;
                 const float a = s[at] + s[at + 1] * f, b = e[at] + e[at + 1] * f;
                 to[i] += (b + (a - b) * (w0 + ws * t)) * (x * x * (g0 + gs * t));
             }
@@ -65,6 +64,19 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
     } else {
         for (uint32_t i = 0; i < n; ++i) acc[i] += box[i];
         if (n > 0) v.boxLp = box[n - 1];
+    }
+    // The Chimes (unenclosed): each mode a complex one-pole, read as its imaginary part so it starts from rest.
+    if (v.chimeOn) {
+        for (int m = 0; m < kChimeModes; ++m) {
+            float zr = v.chZr[m], zi = v.chZi[m];
+            const float c = v.chC[m], sn = v.chS[m];
+            for (uint32_t i = 0; i < n; ++i) {
+                const float r = c * zr - sn * zi, im = sn * zr + c * zi;
+                zr = r, zi = im;
+                acc[i] += im;
+            }
+            v.chZr[m] = zr, v.chZi[m] = zi;
+        }
     }
     // Body: the pipes' scale (see Voice::bodyLp); at Body 0.5 the pipes as measured, bit for bit.
     // At Body 0.5 the filter rests on the pipes' last sample, so turning Body starts it without a step.
@@ -134,6 +146,23 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         for (int j = 0; j < v.playersOn; ++j)
             if (v.players[j].data) v.players[live++] = v.players[j];
         v.playersOn = live;
+    }
+}
+
+// Weight's shelf (Biquad::run's arithmetic, local to this strict file so no fast-flag copy of it is linked here).
+void Organ::runFloor(float* l, float* r, uint32_t n) noexcept {
+    for (int c = 0; c < 2; ++c) {
+        timber::Biquad& f = c == 0 ? floorL : floorR;
+        float* x = c == 0 ? l : r;
+        float z1 = f.z1, z2 = f.z2;
+        const float b0 = f.b0, b1 = f.b1, b2 = f.b2, a1 = f.a1, a2 = f.a2;
+        for (uint32_t i = 0; i < n; ++i) {
+            const float in = x[i], y = b0 * in + z1;
+            z1 = b1 * in - a1 * y + z2;
+            z2 = b2 * in - a2 * y;
+            x[i] = y;
+        }
+        f.z1 = z1, f.z2 = z2;
     }
 }
 

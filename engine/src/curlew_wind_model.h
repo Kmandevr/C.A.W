@@ -115,7 +115,8 @@ struct Wind {
         // its bore's lowest mode, so the bore is 1.5 periods. Brass: the lips pick the bore's 2nd mode (2 periods).
         static constexpr double kBore[4] = {0.5, 1.5, 0.5, 2.0};
         const float cap = static_cast<float>(v.bore.mask - 4);
-        v.d = std::min(cap, static_cast<float>(std::max(2.0, kBore[instrument] * period - 1.0)));
+        const double bore = instrument == 3 && brassBore > 0 ? brassBore : kBore[instrument];
+        v.d = std::min(cap, static_cast<float>(std::max(2.0, bore * period - 1.0)));
         v.dj = std::min(cap, static_cast<float>(std::max(2.0, v.d * (0.28 + 0.1 * reed))));
         if (instrument == 1) {  // an open-open pipe: a period round trip, both ends inverting (+1 in all)
             v.d = std::min(cap, static_cast<float>(std::max(2.0, period - 1.0)));
@@ -131,9 +132,12 @@ struct Wind {
         if (instrument == 3) {  // the lips: a two-pole resonance at the note
             // Curlew widens the lips' tension (lipSpan) around the same middle, so Lips is heard on every brass.
             const double lr = lipSpan > 0 ? lipRatio + 0.01 + lipSpan * (reed - 0.5) : lipRatio + 0.02 * reed;
-            const double w = kTwoPi * f0 * lr / sr, r = 0.997;
+            const double w = kTwoPi * f0 * lr / sr;
+            // Curlew: the lips' Q fixed (lipQ), not their bandwidth (Timber's r 0.997: Q 6 at C4, under 2 in the
+            // bass, where the notes fell into other regimes), at Timber's peak gain.
+            const double r = lipQ > 0 ? std::exp(-kPi * f0 * lr / (lipQ * sr)) : 0.997;
             v.lipA1 = static_cast<float>(2.0 * r * std::cos(w)), v.lipA2 = static_cast<float>(-r * r);
-            v.lipG = static_cast<float>(0.002 * std::sin(w) / 0.043);  // the same peak gain at every pitch
+            v.lipG = static_cast<float>(0.002 * std::sin(w) / 0.043 * (lipQ > 0 ? (1.0 - r) / 0.003 : 1.0));  // the same peak gain at every pitch
         }
         v.tunedPitch = v.pitch;
     }
@@ -166,6 +170,10 @@ struct Wind {
     const float (*breathMod)[kControlFrames] = nullptr;  // Curlew (1.1.3): its growl, per lane and frame, times the breath
     // The vibrato's depth at Vibrato 1: the breath's share (Simulated) and the pitch (cents). Timber 0.05 and 8.
     double vibBreath = 0.05, vibCents = 8.0;
+    float lipTurb = 0.5f;  // the breath's turbulence through the lips (Curlew sets its own)
+    double lipQ = 0;       // Curlew (1.1.3): the lips' resonance Q at every pitch (0: Timber's fixed bandwidth)
+    double brassBore = 0;  // Curlew (1.1.3): the brass bore's round trip in periods (0: Timber's 2)
+    double brassPush = 0.75, brassPushSpan = 0.5;  // the brass's mouth pressure over the velocity (Timber's)
     bool lipsCloseWithBreath = false;  // Curlew (1.1.3): the lips' rest gap closes as the breath ends
     double lipSpan = 0;  // Curlew (1.1.3): the lips' tension range over Lips 0..1 (Timber: 0.02 from 0)
     void release(Voice& v, const Shared& s) noexcept {
@@ -266,7 +274,7 @@ struct Wind {
             const float expr = static_cast<float>(std::max(v.pressure, modWheel));
             // The player blows harder for a louder note: the velocity and expression move the mouth pressure (so a
             // brass note brightens with level), the rest of the loudness is the gain.
-            const float push = static_cast<float>(K == 3 ? 0.75 + 0.5 * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
+            const float push = static_cast<float>(K == 3 ? brassPush + brassPushSpan * v.velocity : 0.9 + 0.2 * v.velocity) * (1.0f + 0.15f * expr);
             base[l] = (kLow[K] + kSpan[K] * static_cast<float>(breath)) * push;
             loud[l] = static_cast<float>(0.45 + 0.55 * v.velocity) * (1.0f + 0.4f * expr);
             vibAm[l] = static_cast<float>(vibBreath * vibrato * lib::fastSinCycles(v.vib));
@@ -361,7 +369,7 @@ struct Wind {
                 if (lipsCloseWithBreath) hgt = hgt * min4(one, env * f4(20.0f));
                 const F4 root = sqrt4(abs4(dp));
                 const F4 flow = hgt * sel4(gt4(dp, zero), root, zero - root);
-                turb = f4(turbAmt) * f4(0.5f) * abs4(flow) * nz;
+                turb = f4(turbAmt) * f4(lipTurb) * abs4(flow) * nz;
                 const F4 x = f4(0.85f) * b + f4(lipFlow) * flow + turb;
                 const F4 dd = x - dcx + f4(0.995f) * dcy;
                 dcx = x, dcy = dd;

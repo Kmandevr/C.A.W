@@ -38,11 +38,16 @@ inline float sum4(F4 v) noexcept { return (v[0] + v[1]) + (v[2] + v[3]); }
 // A bank of up to N decaying complex exponentials sharing one input, each read out as Re(c z) on one or two sides:
 // z <- p z + x, p = e^{(-sigma + j w) / sr} (impulse invariance of h(t) = Re(c e^{s t}), so the same bank at any
 // sample rate). Four sections at a time (SIMD); a block's sections run over the block in turn.
-template <int N, bool Stereo>
+template <int N, bool Stereo, bool Weighted = false>
 struct ModeBank {
     static_assert(N % 4 == 0);
     alignas(16) float pr[N] = {}, pi[N] = {}, lr[N] = {}, li[N] = {}, rr[N] = {}, ri[N] = {}, zr[N] = {}, zi[N] = {};
+    // Weighted: each section's share of the input (1 every one by default: x times 1 is x, the same bits).
+    alignas(16) float in[N];
     int groups = 0;
+    ModeBank() noexcept {
+        for (float& w : in) w = 1.0f;
+    }
 
     // Section k: frequency hz, decay rate sigma (1/s), weights (left and right complex c; the right ignored if mono).
     void set(int k, double hz, double sigma, double cl_r, double cl_i, double cr_r, double cr_i, double sr) noexcept {
@@ -75,8 +80,10 @@ struct ModeBank {
             const F4 Pr = load4(pr + o), Pi = load4(pi + o), Lr = load4(lr + o), Li = load4(li + o);
             const F4 Rr = load4(rr + o), Ri = load4(ri + o);
             F4 Zr = load4(zr + o), Zi = load4(zi + o);
+            const F4 In = load4(in + o);
             for (uint32_t i = 0; i < n; ++i) {
-                const F4 X = f4(x[i]);
+                F4 X = f4(x[i]);
+                if constexpr (Weighted) X = X * In;
                 const F4 nr = Pr * Zr - Pi * Zi + X;
                 const F4 ni = Pi * Zr + Pr * Zi;
                 Zr = nr, Zi = ni;
