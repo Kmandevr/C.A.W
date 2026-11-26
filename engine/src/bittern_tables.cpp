@@ -18,6 +18,9 @@ namespace {
 constexpr double kTwoPiD = 6.283185307179586;
 constexpr int kKinds = 2;  // steady, speaking
 std::unique_ptr<float[]> gTables;
+size_t gTotal = 0;                          // floats in gTables
+size_t gAt[kFamilies][kZones][kKinds] = {};  // each table's start in gTables
+int gBits[kZones] = {};                      // each zone's tables hold 2^bits values (bitsFor)
 float gRms[kFamilies][kZones][kKinds] = {};
 std::once_flag gOnce;
 
@@ -72,9 +75,9 @@ double modelled(int family, int h, double f0) {
     }
 }
 
-// A measured family's harmonic h in zone z (bittern_bank.inc's 32; past them, the slope of harmonics 16..32 in
-// log-log carried on, at least 6 dB an octave down).
-double measured(int family, int z, int h) {
+// A measured family's harmonic h in measured zone z (bittern_bank.inc's 32; past them, the slope of harmonics 16..32
+// in log-log carried on, at least 6 dB an octave down).
+double measuredAt(int family, int z, int h) {
     const float* a = kMeasured[family][z];
     if (h <= kMeasuredHarmonics) return a[h - 1];
     double sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -85,6 +88,18 @@ double measured(int family, int z, int h) {
     }
     const double slope = std::min(-1.0, (n * sxy - sx * sy) / (n * sxx - sx * sx));
     return a[kMeasuredHarmonics - 1] * std::pow(static_cast<double>(h) / kMeasuredHarmonics, slope);
+}
+
+// The measured zones are 6 semitones (centred 3 over MIDI 12 + 6 m); a table's zone is 2 (centred 1 over 12 + 2 z):
+// its harmonic h is the two measured zones around its centre, interpolated in decibels, so a rank's colour moves
+// with the key, pipe by pipe, as a real rank's scaling does, not in steps of half an octave (the owner,
+// 2026-11-26: "the note shouldn't just get lower").
+double measured(int family, int z, int h) {
+    const double m = std::clamp((2.0 * z + 1.0 - 3.0) / 6.0, 0.0, kMeasuredZones - 1.0);
+    const int m0 = std::min(static_cast<int>(m), kMeasuredZones - 2);
+    const double f = m - m0;
+    const double a = std::max(1e-7, measuredAt(family, m0, h)), b = std::max(1e-7, measuredAt(family, m0 + 1, h));
+    return std::exp(std::log(a) + (std::log(b) - std::log(a)) * f);
 }
 
 // Two stops built on the measured families ([Assumption] by organ-building description, Audsley and Skinner's own):
@@ -113,7 +128,7 @@ double speakingGain(int family, double hz) {
 // octave each time the top rank would pass about 8 kHz at the zone's lowest key (a real mixture's repeats).
 int mixtureRanks(int z, int* out) {
     double mult[4] = {4, 6, 8, 12};
-    const double low = hzOf(12.0 + 6.0 * z);
+    const double low = hzOf(12.0 + 2.0 * z);
     while (low * mult[3] > 8000.0 && mult[0] > 1) {
         for (double& m : mult) m *= 0.5;
     }
@@ -123,20 +138,38 @@ int mixtureRanks(int z, int* out) {
     return k;
 }
 
+constexpr double kNyq = 0.45 * 44100.0;  // band-limited for 44.1 kHz and up (a little duller at higher rates)
+
+// Eight samples a cycle of the zone's top harmonic at least (the linear read's error 22 dB under that harmonic,
+// itself 40 dB and more under the tone near the band's top), 2^6 to 2^11: the treble's tables are short, so the 54
+// zones take 13 MB against the 18 six-semitone zones' 9.4 (the bass's long tables are most of it).
+int bitsFor(int zone) {
+    const double harmonics = std::floor(kNyq / hzOf(12.0 + 2.0 * (zone + 1)));
+    int bits = 6;
+    while (bits < 11 && static_cast<double>(1u << bits) < 8.0 * harmonics) ++bits;
+    return bits;
+}
+
 void build() {
-    const size_t per = 2 * kTableSize;
-    gTables.reset(new (std::nothrow) float[static_cast<size_t>(kFamilies) * kZones * kKinds * per]());
-    if (!gTables) return;
-    const double nyq = 0.45 * 44100.0;  // band-limited for 44.1 kHz and up (a little duller at higher rates)
-    lib::Fft fft;
-    fft.prepare(kTableSize);
-    std::vector<double> re(kTableSize), im(kTableSize);
+    size_t total = 0;
+    for (int z = 0; z < kZones; ++z) gBits[z] = bitsFor(z);
     for (int fam = 0; fam < kFamilies; ++fam)
         for (int z = 0; z < kZones; ++z)
+            for (int kind = 0; kind < kKinds; ++kind) gAt[fam][z][kind] = total, total += 2 * (size_t{1} << tableBits(z));
+    gTables.reset(new (std::nothrow) float[total]());
+    if (!gTables) return;
+    gTotal = total;
+    lib::Fft fft;
+    std::vector<double> re, im;
+    for (int z = 0; z < kZones; ++z) {
+        const uint32_t size = 1u << tableBits(z);
+        fft.prepare(size);
+        re.assign(size, 0.0), im.assign(size, 0.0);
+        for (int fam = 0; fam < kFamilies; ++fam)
             for (int kind = 0; kind < kKinds; ++kind) {
-                float* t = gTables.get() + ((static_cast<size_t>(fam) * kZones + z) * kKinds + kind) * per;
-                const double top = hzOf(12.0 + 6.0 * (z + 1));  // the zone's highest pitch sets the band limit
-                const double mid = hzOf(12.0 + 6.0 * z + 3.0);
+                float* t = gTables.get() + gAt[fam][z][kind];
+                const double top = hzOf(12.0 + 2.0 * (z + 1));  // the zone's highest pitch sets the band limit
+                const double mid = hzOf(12.0 + 2.0 * z + 1.0);
                 // The spectrum, then one inverse FFT: x[i] = Im(sum X[m] e^(j 2 pi m i / N)). The phases are seeded
                 // per family and zone (the same for both kinds, so the speaking table fades into the steady one).
                 std::fill(re.begin(), re.end(), 0.0);
@@ -147,10 +180,10 @@ void build() {
                     return (seed >> 8) * (1.0 / 16777216.0);
                 };
                 auto addRank = [&](int family, int zone, double mult, double gain) {
-                    for (int h = 1; h < static_cast<int>(kTableSize / 2); ++h) {
+                    for (int h = 1; h < static_cast<int>(size / 2); ++h) {
                         const double harm = mult * h;
                         const double ph = kTwoPiD * rnd();
-                        if (top * harm > nyq || harm >= kTableSize / 2) break;
+                        if (top * harm > kNyq || harm >= size / 2) break;
                         double a = gain * amplitude(family, zone, h, mid * mult);
                         if (kind == 1) a *= speakingGain(family, mid * harm);
                         if (a < 1e-5) continue;
@@ -162,7 +195,7 @@ void build() {
                     int ranks[4];
                     const int n = mixtureRanks(z, ranks);
                     for (int k = 0; k < n; ++k) {
-                        const int zr = std::clamp(z + static_cast<int>(std::lround(2.0 * std::log2(ranks[k]))), 0, kZones - 1);
+                        const int zr = std::clamp(z + static_cast<int>(std::lround(6.0 * std::log2(ranks[k]))), 0, kZones - 1);
                         addRank(kPrincipal, zr, ranks[k], 0.6);
                     }
                 } else {
@@ -170,23 +203,24 @@ void build() {
                 }
                 fft.inverse(re.data(), im.data());
                 double peak = 1e-9;
-                for (uint32_t i = 0; i < kTableSize; ++i) peak = std::max(peak, std::fabs(im[i]));
+                for (uint32_t i = 0; i < size; ++i) peak = std::max(peak, std::fabs(im[i]));
                 double ss = 0;
-                for (uint32_t i = 0; i < kTableSize; ++i) {
+                for (uint32_t i = 0; i < size; ++i) {
                     t[2 * i] = static_cast<float>(im[i] / peak);
                     ss += static_cast<double>(t[2 * i]) * t[2 * i];
                 }
                 // Each value with the step to the next beside it (the interpolation's two reads at one place).
-                for (uint32_t i = 0; i < kTableSize; ++i) t[2 * i + 1] = t[2 * ((i + 1) % kTableSize)] - t[2 * i];
-                gRms[fam][z][kind] = static_cast<float>(std::sqrt(ss / kTableSize));
+                for (uint32_t i = 0; i < size; ++i) t[2 * i + 1] = t[2 * ((i + 1) % size)] - t[2 * i];
+                gRms[fam][z][kind] = static_cast<float>(std::sqrt(ss / size));
             }
+    }
 }
 
 const float* table(int family, int zone, int kind) noexcept {
     static const float silent[2 * kTableSize] = {};
     if (!gTables || family < 0 || family >= kFamilies) return silent;
     zone = std::clamp(zone, 0, kZones - 1);
-    return gTables.get() + ((static_cast<size_t>(family) * kZones + zone) * kKinds + kind) * (2 * kTableSize);
+    return gTables.get() + gAt[family][zone][kind];
 }
 
 }  // namespace
@@ -204,7 +238,11 @@ float tableRms(int family, int zone) noexcept {
     return gRms[family][std::clamp(zone, 0, kZones - 1)][0];
 }
 size_t tableBytes() noexcept {
-    return gTables ? static_cast<size_t>(kFamilies) * kZones * kKinds * (2 * kTableSize) * sizeof(float) : 0;
+    return gTables ? gTotal * sizeof(float) : 0;
+}
+int tableBits(int zone) noexcept {
+    const int b = gBits[std::clamp(zone, 0, kZones - 1)];
+    return b > 0 ? b : 11;  // no tables built: the silent one (kTableSize)
 }
 
 double riseSeconds(double hz) noexcept { return std::clamp(kRise0 * detPow(hz / 440.0, kRiseExp), 0.015, 0.35); }

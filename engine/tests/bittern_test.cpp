@@ -175,6 +175,31 @@ TEST(bittern_small_pipes_speak_first) {
     CHECK(t2 > 0.03 && t2 < t8 * 0.8);
 }
 
+// Each key its own pipe (the owner, 2026-11-26: "the note shouldn't just get lower, they should change like an organ
+// would"): within what was one half-octave table, C3, D3 and E3 of a rank differ in colour (their first 8 harmonics
+// against the fundamental, averaged), the reed's formant staying put in Hz as its key moves, the principal's measured
+// scaling moving with it.
+TEST(bittern_each_key_has_its_own_colour) {
+    auto profile = [&](const char* stop, int key, double* db) {
+        const Values v = only(stop);
+        auto p = makeB(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, static_cast<double>(key), 0.7}}, 1.0).mono();
+        const double f = 440.0 * std::pow(2.0, (key - 69) / 12.0);
+        const double f1 = 10 * std::log10(powerAt(m, f, 24000, 19200) + 1e-30);
+        for (int h = 2; h <= 8; ++h) db[h] = 10 * std::log10(powerAt(m, f * h, 24000, 19200) + 1e-30) - f1;
+    };
+    for (const char* stop : {"principal8", "trumpet8"}) {
+        double a[9], b[9], c[9];
+        profile(stop, 48, a), profile(stop, 50, b), profile(stop, 52, c);
+        double ab = 0, bc = 0;
+        for (int h = 2; h <= 8; ++h) ab += std::fabs(a[h] - b[h]) / 7, bc += std::fabs(b[h] - c[h]) / 7;
+        if (verbose()) std::printf("%s: C3-D3 %.2f dB, D3-E3 %.2f dB a harmonic\n", stop, ab, bc);
+        // (before, 6-semitone tables: principal 0.95 and 0.60, the trumpet 2.55 and 0.24, its D3 and E3 one table)
+        CHECK(ab > 0.4);
+        CHECK(bc > 0.4);
+    }
+}
+
 // Body is the pipes' scale: wider (1) rounder, its upper partials down against the fundamental; narrower (0) brighter.
 TEST(bittern_body_is_the_pipes_scale) {
     const double f = 440.0 * std::pow(2.0, (48 - 69) / 12.0);
@@ -429,7 +454,11 @@ TEST(bittern_has_no_glitches) {
     std::vector<float> jump = chord, gate = chord, click = chord;
     const double held = rmsOf(chord, 19200, 4800);
     for (size_t i = 19200; i < jump.size(); ++i) jump[i] = chord[std::min(chord.size() - 1, i + 46)];  // C3's quarter cycle
-    std::fill(gate.begin() + 19200, gate.end(), 0.0f);
+    // (the gate where the chord is at its largest within C3's cycle: cut at a zero crossing, a gate makes no step)
+    size_t cut = 19200;
+    for (size_t i = 19200; i < 19200 + 184; ++i)
+        if (std::fabs(chord[i]) > std::fabs(chord[cut])) cut = i;
+    std::fill(gate.begin() + static_cast<std::ptrdiff_t>(cut), gate.end(), 0.0f);
     click[19200] += static_cast<float>(held * 0.0316 * 40.0);
     for (const auto* g : {&jump, &gate, &click}) {
         const Scan s = scan(*g);
