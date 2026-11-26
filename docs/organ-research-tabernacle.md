@@ -140,7 +140,7 @@ The Pedal 32' reed is named "Bombarde", not "Contra Bombarde", in [S1]. A photo 
 | Pedal (6) | Contre Bourdon 32', Principal 16', Bourdon 16', Principal 8', Trombone 16', Bombarde 32' |
 | Couplers | Swell to Great, Choir to Great, Great to Pedal, Swell to Pedal |
 
-Not built: the couplers (one keyboard plays everything; [decisions](decisions.md), 2026-11-25) and the Antiphonal's place behind the listener. The Montre 32' is skipped. In the real organ it is an extension of the Great Subprincipal [S1], so a model could add it as an extension at almost no cost (**proposal**).
+Not built: the couplers (one keyboard plays everything; [decisions](decisions.md), 2026-11-25). **The Antiphonal's place (2026-11-26):** the one Antiphonal stop Bittern has, the Tuba Mirabilis, stands in the front case on 15" wind [S1], so it stays at the front; only the division's rear stops (its Diapason, Gedeckt, Salicional, Voix Céleste, Principal, Mixtur, Trompette and Vox Humana, east end [S7]) would sound from behind, delayed and placed so (**proposal**, not built: they are not among Bittern's stops). The Montre 32' is skipped. In the real organ it is an extension of the Great Subprincipal [S1], so a model could add it as an extension at almost no cost (**proposal**).
 
 **Presets (proposal; registrations are assumptions, see section 3):**
 1. **Soft accompaniment**: Sw Gedeckt 8' and Viole Céleste II, box mostly closed; Ch Kleine Erzähler II; Ped Bourdon 16' with Sw to Ped.

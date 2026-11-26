@@ -24,8 +24,9 @@ Make 1.1.3 usable from the owner's feedback, then 1.1.4+ toward 1.2.0.
 - Organ reed stops: spectra still modelled (no recording); waiting on the owner's ear.
 
 ## Next
-1. Bittern stage 1 merged (#270: division reservoirs, pallets, hall low cut, presets; not released yet). Left from
-   stage 1: the Antiphonal's own bus with a 35-50 ms rear pre-delay and placement; then release 1.1.3-alpha.5.
+1. Bittern stage 1 merged (#270: division reservoirs, pallets, hall low cut, presets; not released yet). The
+   Antiphonal's rear placement is not built: Bittern's one Antiphonal stop, the Tuba, stands in the front case [S1]
+   (docs/organ-research-tabernacle.md); it needs the division's rear stops first (asked the owner, Hub #33).
    Issue #271: the Windows mix-pool timing test (hypothesis there).
 2. Curlew: more winds (piccolo, alto flute, oboe, bassoon, saxes, tuba); Starling treble/top zones.
 3. Older: live-path gate test branch; undo CI loosening (Curlew in the stress mix match); performance p99; Rook

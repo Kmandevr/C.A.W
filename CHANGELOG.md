@@ -3,6 +3,17 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.5 (2026-11-26)
+
+Bittern breathes and fills the hall like a real organ.
+
+### Changed
+- **Each division has its own wind:** a big pedal chord sags the Pedal's wind and pulls the manuals a little, as a real organ's shared blower does; the Swell keeps steady under it, and the Antiphonal's Tuba, on high pressure, barely moves.
+- **The pipes open on their pallets:** each key's pipes start 1 to 4 ms after it (the big pipes a little later), so a chord's notes never start on exactly the same sample, and a reed still speaks with its brassy flat start.
+- **The hall keeps the bass clean:** the reverb no longer booms under the 16' and 32' pedal stops; the organ itself keeps all of its low end.
+### New
+- **Bittern presets:** *Interstellar whisper* (soft Swell flutes and strings behind nearly closed shutters, deep in the hall) and *Rock organ (pipes)* (bright flutes and the Krummhorn with spitting speech: try it into Drive and the Mod effect's Rotary); *Wall of sound* now has the Antiphonal's Tuba on top.
+
 ## 1.1.3-alpha.4 (2026-11-26)
 
 Your notes on alpha.3: the piano's stray sounds, the organ's size and pipes, the tuned percussion's notes and the brass.
