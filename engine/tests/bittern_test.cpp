@@ -217,6 +217,20 @@ TEST(bittern_a_bent_note_does_not_click) {
     CHECK(s.window < kWindowLimit);
 }
 
+// Weight moved to 0 and back while a chord sounds leaves no step (the audio review, 2026-11-26: the shelf was
+// skipped at 0, so its bass dropped in one sample, and its frozen state came back when it moved up again).
+TEST(bittern_weight_to_zero_and_back_does_not_click) {
+    constexpr double kStepLimit = 8.0, kWindowLimit = 4.0;  // bittern_has_no_glitches' limits
+    const Values base = with(only("principal8"), {{"bourdon16", 1.0}, {"weight", 1.0}});
+    const std::vector<Note> held = {{0.0, -1, 36, 0.7}, {0.0, -1, 43, 0.7}};
+    const std::vector<float> m = playSegments({{base, held, 0.6}, {with(base, {{"weight", 0.0}}), {}, 0.6},
+                                              {with(base, {{"weight", 0.8}}), {}, 0.6}});
+    const Scan s = scan(m);
+    if (verbose()) std::printf("weight 1 -> 0 -> 0.8: step %.2f (at %.3f s), window %.2f (at %.3f s)\n", s.step, s.stepAt, s.window, s.windowAt);
+    CHECK(s.step < kStepLimit);
+    CHECK(s.window < kWindowLimit);
+}
+
 // Body is the pipes' scale: wider (1) rounder, its upper partials down against the fundamental; narrower (0) brighter.
 TEST(bittern_body_is_the_pipes_scale) {
     const double f = 440.0 * std::pow(2.0, (48 - 69) / 12.0);

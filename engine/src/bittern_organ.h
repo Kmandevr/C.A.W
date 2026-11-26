@@ -340,6 +340,7 @@ struct Organ {
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         sr = rate;
         voices = v, count = n;
+        weightFor = -1;  // the floor designed again for this rate
         gainK = static_cast<float>(1.0 - detExp(-1.0 / (0.005 * sr)));
         noiseGain = static_cast<float>(kOut * detPow(10.0, noiseDb() / 20.0));
         blockK = static_cast<float>(1.0 - detExp(-2.0 * kControlFrames / (0.005 * sr)));  // over two blocks
@@ -366,6 +367,7 @@ struct Organ {
         swellK = swellKTo, swellG = swellGTo;
         windRng.s = 0x0B177E2Du;
         notes = 0;
+        floorL.clear(), floorR.clear(), floorFill = 0;  // a stop or seek: no old low tail, the flush back on its grid
     }
     // 2^(c / 1200) for a few tens of cents: its Taylor series to x^3 (within 1e-6 of the exponential to 50 cents),
     // so each pipe's pitch each control block costs a few multiplies.
@@ -798,8 +800,10 @@ struct Organ {
     // The floor (Weight): a low shelf at 110 Hz on the organ's sum, +6 dB at the default 0.5 (2026-11-25, the owner:
     // "a quite literal wall of sound ... a lot of it is normally lost in recording"; the 16's and 32's the organ is
     // felt by), flushed on the control grid so any block size gives the same bits.
+    // At Weight 0 the shelf still runs (at 0 dB it is exactly the identity), so moving the knob to or from 0 never
+    // drops or releases its low-frequency state in one sample (the audio review, 2026-11-26: a step either way).
     void post(float* l, float* r, uint32_t n, const Shared&) noexcept {
-        if (weightFor <= 0.0) return;
+        if (weightFor < 0.0) return;  // not designed yet (the first control block designs it)
         for (uint32_t i = 0; i < n; ++i) l[i] = floorL.run(l[i]), r[i] = floorR.run(r[i]);
         floorFill += n;
         if (floorFill >= kControlFrames) floorFill = 0, floorL.flush(), floorR.flush();

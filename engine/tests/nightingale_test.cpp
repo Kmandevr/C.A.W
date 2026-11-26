@@ -377,3 +377,32 @@ TEST(nightingale_matches_its_reference_render) {
         CHECK_REFERENCE(refs, "nightingale_" + std::to_string(inst), a, cawtest::Class::Friction);
     }
 }
+
+// A string's body sounds the same at every rate the app runs at: its response at 44.1 and 96 kHz within 2.5 dB of 48
+// kHz up to 14 kHz (the audio review, 2026-11-26: violin bands pinned at 20 kHz made 96 kHz 8 dB darker at 14 kHz).
+// What is left is the RBJ designs' bilinear warping near 48 kHz's top: up to 1.96 dB, the bass at 10 kHz.
+TEST(nightingale_bodies_hold_their_shape_at_every_rate) {
+    auto responseDb = [](int inst, double sr, double hz) {
+        BodyFilter b;
+        b.load(nightingale::bodyResponse(inst), 1.0f, sr);
+        const uint32_t n = 1u << 15;
+        std::vector<float> l(n, 0.0f), r(n, 0.0f);
+        l[0] = r[0] = 1.0f;
+        for (uint32_t at = 0; at < n; at += 64) b.process(l.data() + at, r.data() + at, 64);
+        double re = 0, im = 0;
+        for (uint32_t i = 0; i < n; ++i) re += l[i] * std::cos(2 * timber_test::kPi * hz * i / sr), im -= l[i] * std::sin(2 * timber_test::kPi * hz * i / sr);
+        return 10 * std::log10(re * re + im * im + 1e-30);
+    };
+    double worst = 0;
+    for (int inst = 0; inst < 4; ++inst)
+        for (double hz : {200.0, 500.0, 1000.0, 2000.0, 4000.0, 7000.0, 10000.0, 12000.0, 14000.0}) {
+            const double ref = responseDb(inst, 48000, hz);
+            for (double sr : {44100.0, 96000.0}) {
+                const double d = std::fabs(responseDb(inst, sr, hz) - ref);
+                worst = std::max(worst, d);
+                if (d > 2.5) std::printf("instrument %d at %.0f Hz, %.0f Hz: %.2f dB off 48 kHz\n", inst, hz, sr, d);
+                CHECK(d < 2.5);
+            }
+        }
+    if (verbose()) std::printf("bodies against 48 kHz: worst %.2f dB\n", worst);
+}

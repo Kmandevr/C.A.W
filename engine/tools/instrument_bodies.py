@@ -48,6 +48,7 @@ FAMILIES = {  # family: (instrument index, folder, the model's range, the array'
     ],
 }
 BANDS = 8
+TOP_HZ = 16000.0  # no band above this: it holds its shape at 44.1 kHz and up
 GAIN, QLO, QHI, SPACING = 9.0, 0.4, 3.0, 2 ** (1 / 3)
 RANGES = {'kViolin': (55, 100), 'kViola': (48, 88), 'kCello': (36, 76), 'kBass': (28, 60), 'kFlute': (60, 96),
           'kClarinet': (50, 89), 'kTrumpet': (54, 82), 'kTrombone': (40, 72), 'kHorn': (41, 77)}
@@ -109,24 +110,28 @@ def fit_shaped(edges, target, lo, hi, hp):
     step = max(np.exp(span / n) / SPACING - 1.0, 1e-3)
 
     def unpack(x):
-        hz = lo / SPACING * np.cumprod(SPACING * (1.0 + np.exp(x[:n])))
+        # Every band under TOP_HZ (2026-11-26, the audio review: three violin peaks sat at the old 20 kHz cap, beyond
+        # the fitted data, where an RBJ peak's shape moves with the sample rate: 96 kHz was 8 dB darker at 14 kHz).
+        hz = np.minimum(lo / SPACING * np.cumprod(SPACING * (1.0 + np.exp(x[:n]))), TOP_HZ)
         return hz, x[n:2 * n], np.exp(x[2 * n:3 * n]), x[3 * n:]
 
     def resid(x):
         hz, db, q, sh = unpack(x)
         y = highpass_db(f, hp) + shelf_db(f, np.exp(sh[0]), 0.707, sh[1], False) + shelf_db(f, np.exp(sh[2]), 0.707, sh[3], True)
-        return y + sum(peak_db(f, min(hz[k], 20000.0), q[k], db[k]) for k in range(n)) - t
+        # (and a light cost on each peak's gain, 0.1 dB a dB: a band the data does not need goes to 0 dB instead of
+        # sitting at the cap in a cancelling pair)
+        return np.concatenate([y + sum(peak_db(f, hz[k], q[k], db[k]) for k in range(n)) - t, 0.1 * db])
     x0 = np.concatenate([np.full(n, np.log(step)), np.zeros(n), np.zeros(n), [np.log(200.0), 0.0, np.log(4000.0), 0.0]])
     lob = np.concatenate([np.full(n, -6.0), np.full(n, -GAIN), np.full(n, np.log(QLO)),
                           [np.log(60.0), -SHELF_GAIN, np.log(1500.0), -SHELF_GAIN]])
     hib = np.concatenate([np.full(n, 2.0), np.full(n, GAIN), np.full(n, np.log(QHI)),
                           [np.log(600.0), SHELF_GAIN, np.log(12000.0), SHELF_GAIN]])
     r = least_squares(resid, np.clip(x0, lob + 1e-6, hib - 1e-6), bounds=(lob, hib))
-    e = resid(r.x)
+    e = resid(r.x)[:len(f)]
     hz, db, q, sh = unpack(r.x)
     bands = [(float(hp), 0.707, 0.0, 'kHighPass'), (float(np.exp(sh[0])), 0.707, float(sh[1]), 'kLowShelf'),
              (float(np.exp(sh[2])), 0.707, float(sh[3]), 'kHighShelf')]
-    bands += [(min(float(h), 20000.0), float(qq), float(d), None) for h, qq, d in zip(hz, q, db)]
+    bands += [(float(h), float(qq), float(d), None) for h, qq, d in zip(hz, q, db)]
     return bands, (float(np.sqrt(np.mean(e * e))), float(np.abs(e).max()))
 
 
