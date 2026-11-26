@@ -40,7 +40,8 @@ class VariantCards extends StatelessWidget {
   /// One row's height (each of [rows]).
   final double height;
 
-  /// The cards in rows, by variant index (Curlew: woodwinds over brass); null: one row in the engine's order.
+  /// The cards in rows, by variant index (Curlew: woodwinds over brass), any it leaves out in a last row; null: one
+  /// row in the engine's order.
   final List<List<int>>? rows;
 
   /// Each card's own colour (the Drive's variants), else the device's accent.
@@ -61,6 +62,9 @@ class VariantCards extends StatelessWidget {
     Widget card(int k) => _card(context, k, sel, col, name, base.label);
     final groups = rows?.map((r) => r.where((k) => k < n).toList()).where((r) => r.isNotEmpty).toList() ??
         [List.generate(n, (k) => k)];
+    // A variant no row lists (a newer library's) still gets a card, in a last row.
+    final rest = [for (var k = 0; k < n; k++) if (!groups.any((r) => r.contains(k))) k];
+    if (rest.isNotEmpty) groups.add(rest);
     // Every row as many slots as the longest, so the cards keep one width (a shorter row ends early).
     final slots = groups.fold(0, (m, r) => r.length > m ? r.length : m);
     Widget row(List<int> ks) => SizedBox(height: height, child: Row(children: [
