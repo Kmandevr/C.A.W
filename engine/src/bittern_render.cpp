@@ -66,6 +66,19 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
         for (uint32_t i = 0; i < n; ++i) acc[i] += box[i];
         if (n > 0) v.boxLp = box[n - 1];
     }
+    // The Chimes (unenclosed): each mode a complex one-pole, read as its imaginary part so it starts from rest.
+    if (v.chimeOn) {
+        for (int m = 0; m < kChimeModes; ++m) {
+            float zr = v.chZr[m], zi = v.chZi[m];
+            const float c = v.chC[m], sn = v.chS[m];
+            for (uint32_t i = 0; i < n; ++i) {
+                const float r = c * zr - sn * zi, im = sn * zr + c * zi;
+                zr = r, zi = im;
+                acc[i] += im;
+            }
+            v.chZr[m] = zr, v.chZi[m] = zi;
+        }
+    }
     // Body: the pipes' scale (see Voice::bodyLp); at Body 0.5 the pipes as measured, bit for bit.
     // At Body 0.5 the filter rests on the pipes' last sample, so turning Body starts it without a step.
     const float bk = v.bodyK, bg = body > 0.0f ? 0.75f * body : body;

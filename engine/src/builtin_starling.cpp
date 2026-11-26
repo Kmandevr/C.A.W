@@ -87,7 +87,7 @@ void pianoParams(fx::ParamTable& t) {
     t.num("resonance", "Resonance", 0.3, 0.0, 1.0).group = "piano";
     ParameterDescriptor& tier = t.pick("tier", "Quality", 0.0, kTiers);
     tier.group = "piano", tier.automatable = false, tier.modulatable = false;
-    t.num("noise", "Noise", 0.35, 0.0, 1.0).group = "piano";  // key-release, pedal and damper noises: 0.35 as recorded
+    t.num("noise", "Noise", 0.25, 0.0, 1.0).group = "piano";  // key-release, pedal and damper noises: 0.35 as recorded, 0.25 (the default since 2026-11-25, the owner: "too present") 9 dB under
     t.num("touch", "Touch", 0.0, 0.0, 1.0).group = "piano";
     t.pick("action", "Action delay", 0.0, kOffOn).group = "piano";
     t.num("glide", "Pitch glide", 0.5, 0.0, 1.0).group = "piano";
@@ -144,11 +144,11 @@ const std::vector<BuiltinPreset>* starlingPresets(std::string_view id) {
         {"Grand, a little room", "Piano: the grand with a small room around it, ready to play", with(0, {{"space", 0.12}})},
         {"Bright pop grand", "Piano: a brighter hammer and tone that cut through a band mix", with(0, {{"hammer", 0.75}, {"tone", 0.2}})},
         {"Warm jazz grand", "Piano: a softer hammer and a light touch, for trio and lounge", with(0, {{"hammer", 0.35}, {"tone", -0.1}, {"touch", 0.4}})},
-        {"Close-miked grand", "Piano: the hammers, keys and pedal up front, as heard from inside the lid", with(0, {{"noise", 0.9}, {"body", 0.6}})},
+        {"Close-miked grand", "Piano: the hammers, keys and pedal up front, as heard from inside the lid", with(0, {{"noise", 0.6}, {"body", 0.6}})},
         {"Pedalled ballad", "Piano: rich ringing under the sustain pedal (play the pedal by CC 64)", with(0, {{"resonance", 0.6}, {"sympathy", 0.8}, {"hammer", 0.45}})},
         {"Soft-pedal nocturne", "Piano: una corda and a soft hammer, for quiet, intimate pieces", with(0, {{"soft", 1.0}, {"hammer", 0.3}})},
         {"Upright", "Piano: a home upright, modelled from the strike, for songwriting", with(0, {{"character", 1}})},
-        {"Felt piano", "Piano: the felt rail down, soft and dark, for film and lo-fi", with(0, {{"character", 2}, {"hammer", 0.2}, {"noise", 0.6}, {"release", 0.5}})},
+        {"Felt piano", "Piano: the felt rail down, soft and dark, for film and lo-fi", with(0, {{"character", 2}, {"hammer", 0.2}, {"noise", 0.45}, {"release", 0.5}})},
         {"Honky-tonk upright", "Piano: an old upright out of tune with itself, for saloon and ragtime", with(0, {{"character", 1}, {"unison", 5.0}, {"hammer", 0.7}})},
         {"Light grand (Eco)", "Piano at Eco: the grand for less CPU, for big projects on a phone", with(0, {{"tier", 1}})},
         {"Grand for export (High)", "Piano at High: more strings' detail and phantom partials, for final renders", with(0, {{"tier", 3}, {"phantom", 0.7}})},

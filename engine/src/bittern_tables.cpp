@@ -40,7 +40,7 @@ double modelled(int family, int h, double f0) {
     switch (family) {
         case kString: return (h == 1 ? 0.55 : 1.0) * std::pow(n, -0.6) * (n > 24 ? std::pow(24.0 / n, 2.0) : 1.0);
         case kTrompette:
-            return std::pow(n, -0.25) * (1.0 + 2.5 * bump(2200.0, 1200.0)) * (f > 8000 ? std::pow(8000.0 / f, 1.2) : 1.0);
+            return std::pow(n, -0.25) * (1.0 + 2.0 * bump(2200.0, 1200.0)) * (f > 5000 ? std::pow(5000.0 / f, 2.0) : 1.0);
         case kOboe:
             return (h == 1 ? 0.35 : 1.0) * std::pow(n, -0.5) * (1.0 + 3.0 * bump(1200.0, 450.0) + 1.2 * bump(3000.0, 700.0)) *
                    (f > 5000 ? std::pow(5000.0 / f, 2.0) : 1.0);
@@ -49,9 +49,25 @@ double modelled(int family, int h, double f0) {
         case kTuba:
             return std::pow(n, -1.0) * (1.0 + 0.8 * bump(800.0, 600.0)) * (f > 4000 ? std::pow(4000.0 / f, 2.0) : 1.0);
         case kErzahler: return h == 1 ? 1.0 : h == 2 ? 0.45 : h == 3 ? 0.12 : 0.05 * std::pow(n, -2.0);
-        default: {  // kReed
-            const double formant = 1.0 + 2.0 * bump(1500.0, 900.0);
-            return std::pow(n, -0.35) * formant * (f > 6000 ? std::pow(6000.0 / f, 1.5) : 1.0);
+        // The orchestral strings: a bowed string's sawtooth (1/n, Helmholtz motion) through a body: the violin's air
+        // and wood modes near 280 and 500 Hz and its bridge hill near 2.8 kHz, weak below its air mode; the cello's an
+        // octave and more lower (air near 110 Hz, wood near 220, the bridge hill near 1.5 kHz).
+        case kViolin:
+            return (f < 250 ? 0.4 : 1.0) / n * (1.0 + 1.5 * bump(280.0, 80.0) + 1.2 * bump(500.0, 150.0) + 2.0 * bump(2800.0, 1000.0)) *
+                   (f > 6000 ? std::pow(6000.0 / f, 2.0) : 1.0);
+        case kCello:
+            return 1.0 / n * (1.0 + 1.5 * bump(110.0, 40.0) + 1.5 * bump(220.0, 80.0) + 1.5 * bump(1500.0, 700.0)) *
+                   (f > 4000 ? std::pow(4000.0 / f, 2.0) : 1.0);
+        // The Voix Humaine: a short-resonator reed, its odd harmonics the stronger and two vowel formants (an "ah", near
+        // 550 Hz and 1.5 kHz).
+        case kVoixHumaine:
+            return std::pow(n, -0.6) * (h % 2 ? 1.0 : 0.4) * (1.0 + 2.5 * bump(550.0, 200.0) + 1.5 * bump(1500.0, 400.0)) *
+                   (f > 4000 ? std::pow(4000.0 / f, 2.0) : 1.0);
+        default: {  // kReed: a trumpet's reed pipe, its harmonics steady up to the formant near 1.5 kHz and falling
+                    // steeply above 3 kHz (2026-11-25, the owner: the reeds too noisy and not like real brass: they had
+                    // kept a buzz up to 6 kHz)
+            const double formant = 1.0 + 1.5 * bump(1500.0, 900.0);
+            return std::pow(n, -0.35) * formant * (f > 3000 ? std::pow(3000.0 / f, 2.5) : 1.0);
         }
     }
 }
@@ -88,7 +104,7 @@ double amplitude(int family, int z, int h, double f0) {
 // blares as it starts, 4 dB an octave brighter ([Assumption] all three: none was recorded).
 double speakingGain(int family, double hz) {
     const int m = family == kStopped ? 0 : family == kOpen || family == kErzahler || family == kHarmonicFlute ? 1 : isReed(family) ? -1 : 2;
-    const double tilt = m < 0 ? 4.0 : kTilt[m][0];
+    const double tilt = m < 0 ? 2.0 : kTilt[m][0];  // a reed's onset 2 dB an octave brighter (it was 4: a blare)
     const double db = std::clamp(tilt * std::log2(hz / 1000.0), -18.0, 18.0);
     return std::pow(10.0, db / 20.0);
 }

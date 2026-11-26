@@ -25,7 +25,8 @@ constexpr const char* kId = "org.caw.bittern";
 const char* const kIds[] = {"subprincipal16", "principal8", "flute_harm8", "octave4", "fifteenth2", "mixture", "trumpet8",
                             "geigen8", "rohrflute8", "gamba8", "flute4", "nazard", "tierce", "plein_jeu", "trompette8",
                             "hautbois8", "concert_flute8", "erzahler8", "krummhorn8", "tuba8", "subbass32",
-                            "ped_principal16", "bourdon16", "ped_principal8", "trombone16", "bombarde32"};
+                            "ped_principal16", "bourdon16", "ped_principal8", "trombone16", "bombarde32",
+                            "gemshorn4", "voix_humaine8", "violin8", "cello8", "contrabass16", "quint10", "choral_bass4"};
 static_assert(sizeof(kIds) / sizeof(kIds[0]) == bittern::kStops);
 std::unique_ptr<ModuleProcessor> makeB(const Values& v, double sr = 48000) {
     std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kId, v);
@@ -126,7 +127,9 @@ TEST(bittern_each_stop_sounds_at_its_footage) {
                  {"trumpet8", 1}, {"geigen8", 1}, {"rohrflute8", 1}, {"gamba8", 1}, {"flute4", 2}, {"nazard", 3},
                  {"tierce", 5}, {"trompette8", 1}, {"hautbois8", 1}, {"concert_flute8", 1}, {"erzahler8", 1},
                  {"krummhorn8", 1}, {"tuba8", 1}, {"subbass32", 0.25}, {"ped_principal16", 0.5}, {"bourdon16", 0.5},
-                 {"ped_principal8", 1}, {"trombone16", 0.5}, {"bombarde32", 0.25}};
+                 {"ped_principal8", 1}, {"trombone16", 0.5}, {"bombarde32", 0.25}, {"gemshorn4", 2},
+                 {"voix_humaine8", 1}, {"violin8", 1}, {"cello8", 1}, {"contrabass16", 0.5}, {"quint10", 0.75},
+                 {"choral_bass4", 2}};
     const double f8 = 440.0 * std::pow(2.0, (48 - 69) / 12.0);
     for (const S& s : stops) {
         const Values v = only(s.id);
@@ -134,7 +137,7 @@ TEST(bittern_each_stop_sounds_at_its_footage) {
         const std::vector<float> m = play(*p, v, {{0.0, -1, 48, 0.7}}, 0.8).mono();
         const double own = powerAt(m, f8 * s.mult, 19200, 9600);
         double other = 0;
-        for (double k : {0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0})
+        for (double k : {0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0})
             if (k != s.mult && k < s.mult) other = std::max(other, powerAt(m, f8 * k, 19200, 9600));
         if (verbose()) std::printf("%s: own %.1f dB, any lower %.1f dB\n", s.id, 10 * std::log10(own + 1e-30), 10 * std::log10(other + 1e-30));
         CHECK(own > 10.0 * other);  // nothing below the rank's own pitch
@@ -212,7 +215,26 @@ TEST(bittern_every_knob_is_heard) {
                  {"trem_rate", 2, 9, {{"tremulant", 1.0}, {"gamba8", 0.8}}, 9600, 48000},
                  {"wind", 0, 1, {}, 9600, 48000},          {"chiff", 0, 1, {}, 0, 7200},
                  {"body", 0, 1, {}, 9600, 48000},          {"registration", 0, 8, {}, 9600, 48000},
-                 {"pedal", 0, 1, {}, 9600, 48000}};
+                 {"pedal", 0, 1, {}, 9600, 48000},
+                 // The Swell knob closes the enclosed divisions' boxes: heard with the Swell's Viole Céleste drawn.
+                 {"swell", 0, 1, {{"gamba8", 0.8}}, 9600, 48000},
+                 {"weight", 0, 1, {}, 9600, 48000},
+                 {"chimes", 0, 1, {}, 9600, 48000}};
+    // Spread moves the pipes apart across the stereo field: heard as the left and right channels differing.
+    {
+        const std::vector<Note> c = {{0.0, 1.4, 48, 0.8}, {0.0, 1.4, 55, 0.8}, {0.0, 1.4, 64, 0.8}};
+        auto side = [&](double spread) {
+            const Values v = {{"space", 0.0}, {"spread", spread}};
+            auto p = makeB(v);
+            const Stereo s = play(*p, v, c, 1.5);
+            double d = 0, m = 0;
+            for (size_t i = 9600; i < s.l.size(); ++i) d += (s.l[i] - s.r[i]) * (s.l[i] - s.r[i]), m += (s.l[i] + s.r[i]) * (s.l[i] + s.r[i]);
+            return 10 * std::log10(d / m + 1e-20);
+        };
+        const double narrow = side(0.0), wide = side(1.0);
+        if (verbose()) std::printf("spread       side against middle: %.1f dB at 0, %.1f dB at 1\n", narrow, wide);
+        CHECK(wide > narrow + 10.0);
+    }
     for (const K& k : knobs) {
         Values a = k.extra, b = k.extra;
         a.emplace_back(k.id, k.lo), b.emplace_back(k.id, k.hi);
@@ -241,7 +263,8 @@ TEST(bittern_a_key_struck_faster_speaks_sooner) {
 // The recorded speech: with Chiff the attack carries the recording's own speech (more in the first 100 ms than
 // without), and from 0.5 s on nothing of it is left (the two renders identical: no noise off the note's start).
 TEST(bittern_speech_is_recorded_and_only_at_the_start) {
-    const Values a = only("rohrflute8", {{"chiff", 1.0}, {"wind", 0.3}});
+    // Weight 0: the floor's low shelf is a recursive filter, whose tail of the speech is tiny but never exactly zero.
+    const Values a = only("rohrflute8", {{"chiff", 1.0}, {"wind", 0.3}, {"weight", 0.0}});
     auto p = makeB(a), q = makeB(a);
     organOf(*q).testMuteSpeech = true;
     const std::vector<float> x = play(*p, a, {{0.0, -1, 60, 0.8}}, 1.0).mono(), y = play(*q, a, {{0.0, -1, 60, 0.8}}, 1.0).mono();
@@ -487,7 +510,8 @@ TEST(bittern_pedal_plays_the_lowest_key) {
 // average over their first 12 harmonics (the dead-alike red flag), and the reeds' and the flues' attacks differ.
 TEST(bittern_every_stop_has_its_own_colour) {
     const char* eights[] = {"principal8", "flute_harm8", "trumpet8", "geigen8", "rohrflute8", "gamba8", "trompette8",
-                            "hautbois8", "concert_flute8", "erzahler8", "krummhorn8", "tuba8", "ped_principal8"};
+                            "hautbois8", "concert_flute8", "erzahler8", "krummhorn8", "tuba8", "ped_principal8",
+                            "voix_humaine8", "violin8", "cello8"};
     const double f = 440.0 * std::pow(2.0, (60 - 69) / 12.0);
     std::vector<std::vector<double>> sp;
     for (const char* id : eights) {

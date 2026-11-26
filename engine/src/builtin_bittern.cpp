@@ -44,6 +44,10 @@ constexpr StopInfo kStopInfo[kStops] = {
     {"subbass32", "Contre Bourdon 32'", 0.0},    {"ped_principal16", "Principal 16'", 0.0},
     {"bourdon16", "Bourdon 16'", 0.6},           {"ped_principal8", "Principal 8' (Pedal)", 0.0},
     {"trombone16", "Trombone 16'", 0.0},         {"bombarde32", "Bombarde 32'", 0.0},
+    {"gemshorn4", "Gemshorn 4'", 0.0},           {"voix_humaine8", "Voix Humaine 8'", 0.0},
+    {"violin8", "Violin 8'", 0.0},               {"cello8", "Violoncello 8'", 0.0},
+    {"contrabass16", "Contrabass 16'", 0.0},     {"quint10", "Quint 10 2/3'", 0.0},
+    {"choral_bass4", "Choral Bass 4'", 0.0},
 };
 constexpr const char* kDivisionGroup[kDivisions] = {"great", "swell", "choir", "antiphonal", "pedal"};
 // The registration choice (kRegistration's rows): the organ's usual combinations, one tap; "Stops" plays the knobs.
@@ -79,6 +83,14 @@ const ModuleDescriptor& descriptor() {
         // the hands) or on every key, within the pedal's compass.
         ParameterDescriptor& ped = t.pick("pedal", "Pedal", 0.0, kPedalNames);
         ped.group = "pedal", ped.modulatable = false;
+        // The Swell's and the Choir's boxes as a knob (1 open; the mod wheel closes them from here), automatable.
+        t.num("swell", "Swell", 1.0, 0.0, 1.0).group = "wind";
+        // The floor: the organ's low end as felt in the hall, which a recording loses (+6 dB under 110 Hz at 0.5).
+        t.num("weight", "Weight", 0.5, 0.0, 1.0).group = "room";
+        // The Chimes (tubular bells, G3 to G5), struck by the keys.
+        t.num("chimes", "Chimes", 0.0, 0.0, 1.0).group = "choir";
+        // The pipes across the case: the C side left, the C# side right, the bass in the outer towers.
+        t.num("spread", "Spread", 0.6, 0.0, 1.0).group = "room";
         params.assign(t.data(), t.data() + t.size());
         m.id = kBitternId;
         m.name = "Bittern";
@@ -95,7 +107,7 @@ const ModuleDescriptor& descriptor() {
     (void)built;
     return m;
 }
-static_assert(Organ::kModelParams == kStops + 6);
+static_assert(Organ::kModelParams == kStops + 10);
 
 ModuleProcessor* make() noexcept { return new (std::nothrow) timber::Instrument<Organ>(descriptor(), 0); }
 
@@ -144,6 +156,10 @@ const std::vector<BuiltinPreset>* bitternPresets(std::string_view id) {
         {"Deep pedal", "The Contre Bourdon 32', Principal 16' and Bourdon 16' on every key: the floor shaking", reg({{"subbass32", 1}, {"ped_principal16", 0.8}, {"bourdon16", 0.9}, {"pedal", 1.0}})},
         {"Loft (close)", "The default chorus heard from the organ loft: much less of the hall", reg({{"principal8", 1}, {"octave4", 0.7}, {"rohrflute8", 0.5}, {"bourdon16", 0.6}, {"space", 0.15}})},
         {"Dry organ", "The default chorus with no hall, for your own reverb", reg({{"principal8", 1}, {"octave4", 0.7}, {"rohrflute8", 0.5}, {"bourdon16", 0.6}, {"space", 0.0}})},
+        {"Chimes over strings", "The Chimes over the Choir's Violin and Violoncello and the Swell's Viole Céleste", reg({{"chimes", 1}, {"violin8", 0.7}, {"cello8", 0.7}, {"gamba8", 0.5}, {"contrabass16", 0.6}})},
+        {"String orchestra", "The orchestral strings as pipes: Violin, Violoncello and the Pedal's Contrabass, with the celestes", reg({{"violin8", 0.9}, {"cello8", 0.8}, {"gamba8", 0.6}, {"erzahler8", 0.5}, {"contrabass16", 0.8}, {"pedal", 1.0}})},
+        {"Wall of sound", "The full organ with every 32' and the Quint's resultant, the floor at full Weight", reg({{"subprincipal16", 0.8}, {"principal8", 1}, {"flute_harm8", 0.7}, {"octave4", 1}, {"fifteenth2", 0.9}, {"mixture", 0.9}, {"trumpet8", 0.9}, {"geigen8", 0.9}, {"rohrflute8", 0.6}, {"flute4", 0.6}, {"plein_jeu", 0.8}, {"trompette8", 0.9}, {"concert_flute8", 0.6}, {"subbass32", 1}, {"ped_principal16", 1}, {"bourdon16", 0.9}, {"ped_principal8", 0.8}, {"trombone16", 0.9}, {"bombarde32", 0.9}, {"contrabass16", 0.8}, {"quint10", 0.7}, {"choral_bass4", 0.7}, {"weight", 1.0}})},
+        {"Voix Humaine", "The Swell's Voix Humaine with the tremulant over its Gedeckt: the organ's singing voice", reg({{"voix_humaine8", 1}, {"rohrflute8", 0.6}, {"tremulant", 0.5}, {"bourdon16", 0.5}})},
         {"Drunken organ", "A living, unsteady wind and a slow tremulant: a haunted, wavering organ", reg({{"geigen8", 0.8}, {"gamba8", 0.6}, {"bourdon16", 0.5}, {"wind", 1}, {"tremulant", 0.6}, {"trem_rate", 3.5}})},
     };
     return id == kBitternId ? &p : nullptr;
