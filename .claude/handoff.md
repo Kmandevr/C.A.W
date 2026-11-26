@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 090c80a on ccr-bd7ac4df-86w0bh (Main merged in; no open PR).
+Commit: (Main aad8d6f merged in; no open PR).
 1.1.3-alpha.4 released 2026-11-26 (Main 93ad17a, PR #269 squash-merged; app.yml release run 45756483102, pre-release
 v1.1.3-alpha.4 with APK, Windows zip, patches). Branch ccr-bd7ac4df-86w0bh has Main merged in (no diff); next work
 goes here as a new PR, one release's worth at a time (don't keep adding to a PR that is ready: the advisor's note).
@@ -24,8 +24,9 @@ Make 1.1.3 usable from the owner's feedback, then 1.1.4+ toward 1.2.0.
 - Organ reed stops: spectra still modelled (no recording); waiting on the owner's ear.
 
 ## Next
-1. Bittern stage 1 from Hub #33 (no new controls): division reservoirs, pallet stagger, the Antiphonal's rear
-   pre-delay, the hall's return high-passed near 200 Hz, signature registrations. Spec with measured targets first.
+1. Bittern stage 1 merged (#270: division reservoirs, pallets, hall low cut, presets; not released yet). Left from
+   stage 1: the Antiphonal's own bus with a 35-50 ms rear pre-delay and placement; then release 1.1.3-alpha.5.
+   Issue #271: the Windows mix-pool timing test (hypothesis there).
 2. Curlew: more winds (piccolo, alto flute, oboe, bassoon, saxes, tuba); Starling treble/top zones.
 3. Older: live-path gate test branch; undo CI loosening (Curlew in the stress mix match); performance p99; Rook
    optimisation and kick tools (last).
