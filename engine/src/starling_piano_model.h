@@ -139,6 +139,9 @@ struct Piano {
     double resGain = 1.0;    // the register bank's drive (pedal down) and its sympathetic share without the pedal
     double resHeld = 0.0;    // the bank's drive with the pedal up, from the undamped strings of the held keys
     double heldGain = 1.0;   // a silently held key's share of the bridge sum
+    // Starling: 0.025 (Timber's 0.04 put a loud note's phantoms 4 dB too far forward against the strings).
+    float phantomScale = 0.04f;
+    float phantomDamped = 1.0f;  // per control block under a landed damper (1: Timber's, unchanged)
     bool phantomNormal = false;  // phantom partials at Normal too (Timber: High only)
     int heldKeys = 0;        // keys held (struck) at the last control point
     // Starling's Upright and Felt (an upright with a felt rail): their own strings and dampers. [Assumption] typical
@@ -562,7 +565,7 @@ struct Piano {
             const double fl2 = psim::longitudinalHz(key);
             v.phantom[0].set(fl2, 0.6, sr), v.phantom[0].clear();
             v.phantom[1].set(std::min(2.0 * fl2, 0.45 * sr), 0.4, sr), v.phantom[1].clear();
-            v.phantomGain = static_cast<float>(phantomLevel * 0.04);
+            v.phantomGain = static_cast<float>(phantomLevel * phantomScale);
             // Starling: a mode over 0.45 x the rate is left out (it aliased: the treble's 40-47 kHz modes folded down to
             // near DC, where the string's squared motion drove them, 20-26 dB over the note).
             if (voicing) {
@@ -617,6 +620,12 @@ struct Piano {
             for (int m = 0; m < v.disp; ++m) v.dx[m][k] = flushf(v.dx[m][k]), v.dy[m][k] = flushf(v.dy[m][k]);
         }
         v.feltY = flushf(v.feltY);
+        // Starling: the longitudinal modes stop with the dampers (a 0.08 s T60 once the felt is down), not after
+        // their own 0.6 s; ringing on past the note-off they sounded 6-11 dB over the damped note.
+        if (v.damp > 0 && v.phantomGain > 0) {
+            const float k = 1.0f - v.damp * (1.0f - phantomDamped);
+            v.phantom[0].zr *= k, v.phantom[0].zi *= k, v.phantom[1].zr *= k, v.phantom[1].zi *= k;
+        }
         v.phantom[0].flush(), v.phantom[1].flush();
     }
 

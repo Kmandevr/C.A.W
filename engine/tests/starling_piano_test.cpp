@@ -357,6 +357,11 @@ TEST(starling_piano_renders) {
         for (int vel : {40, 80, 120}) {
             Values v = {{"variant", 0.0}};
             if (const char* noise = std::getenv("CAW_STARLING_NOISE")) v.emplace_back("noise", std::atof(noise));
+            if (const char* set = std::getenv("CAW_STARLING_SET")) {  // "knob=value" (one knob)
+                const std::string kv(set);
+                const size_t eq = kv.find('=');
+                if (eq != std::string::npos) v.emplace_back(kv.substr(0, eq), std::atof(kv.c_str() + eq + 1));
+            }
             auto p = makeStarling(v);
             if (!p) continue;
             const std::vector<float> m = play(*p, v, {{0.0, 2.0, static_cast<double>(key), vel / 127.0}}, 3.0).mono();

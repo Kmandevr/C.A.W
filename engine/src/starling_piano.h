@@ -193,7 +193,8 @@ struct PianoModel : timber::Piano {
     bool prepare(double rate, Voice* v, uint32_t n) noexcept {
         f1Cents = keyCents();
         recordedPedal = true;
-                voicing = true, resGain = kResGain, resHeld = 1.0, heldGain = kHeldGain, phantomNormal = true;
+        voicing = true, resGain = kResGain, resHeld = 1.0, heldGain = kHeldGain, phantomNormal = true;
+        phantomScale = 0.025f, phantomDamped = static_cast<float>(detExp(-6.907755278982137 * timber::kControlFrames / (0.08 * rate)));
         uprightStrings = true, uprightDamper = 1.6;
         buzzSound = 0.0f;  // the key-release recordings hold the dampers' sound
         if (!bank) bank = recorded::acquire(recorded::BankId::StarlingPiano);
