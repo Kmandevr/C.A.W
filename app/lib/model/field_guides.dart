@@ -295,7 +295,7 @@ const fieldGuides = <String, FieldGuide>{
     ('Bow position', 'Glassy at the bridge, soft over the fingerboard.'),
     ('Vibrato', 'How much the finger rocks the pitch.'),
   ], 'Solo violin'),
-  'org.caw.curlew': FieldGuide('Curlew is a wind player: flute, clarinet, sax, trumpet, trombone or horn, '
+  'org.caw.curlew': FieldGuide('Curlew is a wind player: flute, piccolo, clarinet, oboe, sax, trumpet, trombone, horn or tuba, '
       'blown by a modelled breath.', [
     ('Breath', 'How hard it is blown: soft and round, or bright and forward.'),
     ('Breath noise', 'The air you hear around the tone.'),
