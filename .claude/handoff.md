@@ -1,7 +1,8 @@
 # Handoff
 
-Commit: 17a760e on ccr-bd7ac4df-86w0bh (PR #269 open; 1.1.3-alpha.3 released from Main 7d26f27). Next release's
-changelog entry still to write when its version is set. Issue #268: Starling strings' Windows-only -91 dB difference.
+Commit: 41c6694 on ccr-bd7ac4df-86w0bh (PR #269 open). 1.1.3-alpha.4 is ready on it (c168e76: version, changelog,
+goldens); merging #269 and the release wait on the owner's ask. Issue #268: Starling strings' Windows-only -91 dB difference.
+Audio review's findings fixed (d5b8bbb); Curlew built strict (Arm64 green); Rook Eco ceiling at 1.4x local.
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
