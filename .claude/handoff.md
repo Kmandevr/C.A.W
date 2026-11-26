@@ -1,5 +1,6 @@
 # Handoff
 
+Commit: 090c80a on ccr-bd7ac4df-86w0bh (Main merged in; no open PR).
 1.1.3-alpha.4 released 2026-11-26 (Main 93ad17a, PR #269 squash-merged; app.yml release run 45756483102, pre-release
 v1.1.3-alpha.4 with APK, Windows zip, patches). Branch ccr-bd7ac4df-86w0bh has Main merged in (no diff); next work
 goes here as a new PR, one release's worth at a time (don't keep adding to a PR that is ready: the advisor's note).
