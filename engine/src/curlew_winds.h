@@ -46,7 +46,7 @@ struct Winds : timber::Wind {
     // mono legato), or Poly for chords.
     bool mono = true;
     bool legato(const Shared&) const noexcept { return mono; }
-    int which = 0;  // the instrument (Flute .. French horn)
+    int which = 0;  // the instrument (Flute .. Tuba)
     BodyFilter body;
     float bodyAmount = 1;
     bool testBypassBody = false;
@@ -112,6 +112,8 @@ struct Winds : timber::Wind {
         // time its speech burst 6 ms in, 26 dB under the tone, then dipped 8 dB before the note built (the jet's kick);
         // at twice it its first 5 ms read 32 dB under the tone.
         if (which == 6) tongueScale = 2.0;
+        // The piccolo's top and the tuba's bottom lie past the first six's pitch clamp (34..100, kept for theirs).
+        if (which >= 6) pitchLo = 28.0, pitchHi = 108.0;
         // The tuba: its lips close with the breath all the way down (lipCloseK 1, the other brass's 20: the last 5 %),
         // and its long bore loses its highs on each round trip (brassLp 0.5). [Measured] (2026-11-26, a released D2 and
         // instrument_glitch_scan): its lips stand at their widest (6) while the breath falls 1 to 0.28 in 57 ms with the

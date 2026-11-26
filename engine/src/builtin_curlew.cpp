@@ -23,6 +23,8 @@ constexpr std::string_view kPlay[] = {"Legato", "Poly"};
 constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn",
                                              "Piccolo", "Oboe", "Tuba"};
 constexpr uint32_t kCount = sizeof(kInstruments) / sizeof(kInstruments[0]);
+// The model's per-instrument tables (kKind, kPullFirst, kBellHz, kPull) are sized by curlew::kInstruments.
+static_assert(kCount == static_cast<uint32_t>(curlew::kInstruments), "a variant needs its row in every table");
 
 constexpr PortDescriptor kPorts[] = {
     {"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
@@ -154,6 +156,7 @@ Winds* curlewModelOf(ModuleProcessor& p) noexcept {
     if (auto* q = dynamic_cast<Instrument<At<6>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<7>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<8>>*>(&p)) return &q->model();
+    static_assert(kCount == 9, "curlewModelOf lists every variant: add its cast");
     return nullptr;
 }
 

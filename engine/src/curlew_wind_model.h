@@ -107,7 +107,7 @@ struct Wind {
         if (v.pitch != v.tunedPitch) {  // the note's own pitch, aimed off by its kind's pull (worked out once)
             double aim = -simPull(instrument, v.pitch);
             if (pullTable) aim = -pullAt(v.pitch);  // Curlew: its own pull, measured over each instrument's range
-            v.baseHz = noteHz(clampd(v.pitch, 28.0, 108.0) + aim / 100.0);  // (Curlew 2026-11-26: the tuba, the piccolo)
+            v.baseHz = noteHz(clampd(v.pitch, pitchLo, pitchHi) + aim / 100.0);
         }
         const double f0 = v.baseHz * lib::fastExp(cents * 5.776226504666211e-4);  // ln 2 / 1200
         const double period = sr / f0;
@@ -172,6 +172,7 @@ struct Wind {
     double vibBreath = 0.05, vibCents = 8.0;
     float lipTurb = 0.5f;  // the breath's turbulence through the lips (Curlew sets its own)
     double lipQ = 0;       // Curlew (1.1.3): the lips' resonance Q at every pitch (0: Timber's fixed bandwidth)
+    double pitchLo = 34.0, pitchHi = 100.0;  // the bore's pitch clamp (Curlew 1.1.3 widens it for the new winds)
     double tongueScale = 1;  // Curlew (1.1.3): the tongue's leave time over Timber's 4-12 ms
     double brassBore = 0;  // Curlew (1.1.3): the brass bore's round trip in periods (0: Timber's 2)
     double brassPush = 0.75, brassPushSpan = 0.5;  // the brass's mouth pressure over the velocity (Timber's)
