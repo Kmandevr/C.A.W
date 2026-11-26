@@ -78,7 +78,7 @@ List<DeviceCase> deviceCases(List<NativeComponentInfo> catalog) => [
 /// The catalog: the engine's own (CAW_LIB) or the test fixture's.
 List<NativeComponentInfo> _catalog = [
   ...builtinInfos(),
-  for (final f in ['timber_component', 'sampler_component'])
+  for (final f in ['sampler_component'])  // (Timber's fixture went with Timber in 1.1.3)
     ...NativeComponentInfo.listFromJson(
         jsonDecode(File('test/fixtures/$f.json').readAsStringSync()) as Map<String, dynamic>),
 ];
