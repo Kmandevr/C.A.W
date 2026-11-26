@@ -6,6 +6,7 @@ updated: 2026-11-26
 
 # Log
 
+- 2026-11-26: the Windows mix-pool timing test's root cause fixed (Issue #271): under a test hold the callback now waits up to 50 ms (was 2 ms) for a worker to claim first; a Windows worker woken from sleep could take longer, the callback then ran every node itself and the hold tested nothing.
 - 2026-11-26: Starling's treble rings as long as the Salamander recordings ([engine](engine.md#starling-the-hybrid-piano-113)): the decay table's top points, never measured before, now come from the full samples (C7–C8, 2.2–3.0 s at the fundamental, was 1.3–2.0), with a test.
 - 2026-11-26: Bittern, stage 1 of the owner's vision (Hub #33; [engine](engine.md)): a wind reservoir per division (the Pedal's pulling the Great's, the Antiphonal on high pressure), pallets opening 1–4 ms after each key, the hall's send high-passed at 200 Hz so the 16's and 32's don't boom, and the Interstellar whisper and Rock organ presets (Wall of sound gains the Tuba). Cost unchanged.
 - 2026-11-26: the audio review's findings on the alpha.4 work fixed ([engine](engine.md)): Bittern's Weight no longer clicks when it reaches or leaves 0 and is cleared on a stop or seek; Nightingale's string bodies refit with no band over 16 kHz, so they sound the same at 44.1, 48 and 96 kHz; the shelves designed with the deterministic sine and cosine.

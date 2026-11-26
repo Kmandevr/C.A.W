@@ -239,8 +239,10 @@ void MixPool::finish() noexcept {
     }
     published_ = false;
     if (holdMicros_.load(std::memory_order_relaxed) != 0 || preemptArmed_.load(std::memory_order_relaxed)) {
-        // tests: let a worker claim first (up to 2 ms)
-        const int64_t until = nowNs() + 2'000'000;
+        // tests: let a worker claim first (up to 50 ms: a Windows worker woken from its sleep can take longer than the
+        // 2 ms this was, and then the callback ran every node itself, never waited, and the hold tested nothing:
+        // Issue #271)
+        const int64_t until = nowNs() + 50'000'000;
         while ((claim_.load(std::memory_order_acquire) & kIndexMask) == 0 && nowNs() < until) CAW_POOL_PAUSE();
     }
     while (claimOne(0)) {
