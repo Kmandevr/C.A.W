@@ -1,8 +1,8 @@
 // The app's version as users see it (pubspec.yaml's version; a test keeps them equal). C.A.W is in open alpha.
-const String appVersion = '1.1.3-alpha.4';
+const String appVersion = '1.1.3-alpha.5';
 
 /// The build number (pubspec.yaml's `+N`; a test keeps them equal). Projects record it with [appVersion] as they save.
-const int appBuild = 20;
+const int appBuild = 21;
 
 /// The page where testers report problems (public; no token or account data is sent from the app).
 const String issuesUrl = 'https://github.com/Kmandevr/C.A.W/issues/new';
