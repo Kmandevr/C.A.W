@@ -3,6 +3,16 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.6 (2026-11-26)
+
+Curlew gets three new winds, and the piano's top notes ring as long as the real one.
+
+### New
+- **Piccolo, Oboe and Tuba in Curlew:** the piccolo sings up to A7, the oboe plays B3 to F6 with its reedy double-reed voice, and the tuba gives a deep, round brass bass from B1. Each is shaped by a free recording of the real instrument. The cards now sit in two rows, woodwinds over brass, with a drawing for each new instrument. (A bassoon was tried; its low notes spoke too slowly to feel playable, so it waits for a better model.)
+### Fixed
+- **Starling's top octave rings longer:** the piano's highest notes now sustain as long as the recorded piano's do (2-3 s at C7-C8, was 1.3-2).
+- **The tuba's notes end cleanly:** no click as a note stops.
+
 ## 1.1.3-alpha.5 (2026-11-26)
 
 Bittern breathes and fills the hall like a real organ.
