@@ -104,6 +104,7 @@ class InstrumentSpec {
     required this.hint,
     this.cardIcon,
     this.cardNames,
+    this.cardRows,
     this.caption,
     this.drag,
     this.twoAxes = false,
@@ -125,6 +126,9 @@ class InstrumentSpec {
   final String hint;
   final ChoiceIcon? cardIcon;
   final List<String>? cardNames;
+
+  /// The cards in rows by variant index (VariantCards.rows); null: one row.
+  final List<List<int>>? cardRows;
 
   /// The picture's caption for a variant; null: its name in capitals.
   final String Function(DeviceTarget t, InstrumentPicture p)? caption;
@@ -299,7 +303,7 @@ class _InstrumentPageState extends State<InstrumentPage> {
     trailing: [InstrumentVoices(prefix: k)],
     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (spec.cardIcon != null) ...[
-        VariantCards(key: ValueKey('$k-variants'), icon: spec.cardIcon!, names: spec.cardNames, height: 50),
+        VariantCards(key: ValueKey('$k-variants'), icon: spec.cardIcon!, names: spec.cardNames, rows: spec.cardRows, height: 50),
         const SizedBox(height: 6),
       ],
       InstrumentVisual(spec: spec, height: height),
@@ -474,7 +478,7 @@ class InstrumentInline extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(key: ValueKey('${spec.key}-inline'), crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      if (spec.cardIcon != null) VariantCards(icon: spec.cardIcon!, names: spec.cardNames, height: 42),
+      if (spec.cardIcon != null) VariantCards(icon: spec.cardIcon!, names: spec.cardNames, rows: spec.cardRows, height: 42),
       KnobRow([...spec.inlineKnobs, 'tone', 'space', 'release'], size: 40, labels: instrumentLabels),
     ]);
 }

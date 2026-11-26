@@ -1,4 +1,4 @@
-// Curlew's page (org.caw.curlew, winds): the Flute to Horn cards, the instrument's body drawn live with its breath column (drag up and down for the breath) and the standing wave in its bore, and the Breath, Tone and Space panels.
+// Curlew's page (org.caw.curlew, winds): the woodwind and brass cards in two rows, the instrument's body drawn live with its breath column (drag up and down for the breath) and the standing wave in its bore, and the Breath, Tone and Space panels.
 import 'dart:math' as math;
 import 'dart:ui' show PathMetric;
 
@@ -12,7 +12,14 @@ const curlewComponentId = 'org.caw.curlew';
 
 /// Variant indices (engine/src/builtin_curlew.cpp).
 abstract final class CurlewInstrument {
-  static const flute = 0, clarinet = 1, sax = 2, trumpet = 3, trombone = 4, horn = 5;
+  static const flute = 0, clarinet = 1, sax = 2, trumpet = 3, trombone = 4, horn = 5, piccolo = 6, oboe = 7, tuba = 8;
+  static const last = tuba;
+
+  /// The lips' instruments (thinner tubing, valves, a big bell).
+  static bool brass(int k) => k == trumpet || k == trombone || k == horn || k == tuba;
+
+  /// Open at both ends (no bell, a whole wave over the bore).
+  static bool flutes(int k) => k == flute || k == piccolo;
 }
 
 const curlewKnobs = ['breath', 'noise', 'reed', 'attack', 'vibrato', 'vib_rate', 'growl'];
@@ -24,7 +31,12 @@ final curlewSpec = InstrumentSpec(
   icon: Icons.air,
   hint: 'Pick an instrument, then play: the bore sings with what sounds. Drag the picture up and down for the breath.',
   cardIcon: curlewIcon,
-  cardNames: const ['Flute', 'Clarinet', 'Sax', 'Trumpet', 'Trombone', 'Horn'],
+  cardNames: const ['Flute', 'Clarinet', 'Sax', 'Trumpet', 'Trombone', 'Horn', 'Piccolo', 'Oboe', 'Tuba'],
+  // Woodwinds over brass (docs/decisions.md, 2026-11-26).
+  cardRows: const [
+    [CurlewInstrument.flute, CurlewInstrument.piccolo, CurlewInstrument.clarinet, CurlewInstrument.oboe, CurlewInstrument.sax],
+    [CurlewInstrument.trumpet, CurlewInstrument.trombone, CurlewInstrument.horn, CurlewInstrument.tuba],
+  ],
   drag: (t, variant, at, size) => const PictureDrag(y: 'breath', span: 0.8),
   painter: (p) => CurlewPainter(p),
   inlineKnobs: const ['breath', 'noise', 'reed', 'vibrato'],
@@ -39,8 +51,9 @@ final curlewSpec = InstrumentSpec(
   ],
 );
 
-/// The wind: its bore drawn as the instrument's shape (a straight flute, the clarinet's bell, the sax's curve, the
-/// trumpet's wrap, the trombone's slide, the horn's coil) with the standing wave inside while it sounds, and the
+/// The wind: its bore drawn as the instrument's shape (a straight flute and a short piccolo, the clarinet's bell, the
+/// oboe's slant and small bell, the sax's curve, the trumpet's wrap, the trombone's slide, the horn's coil, the tuba's
+/// big loop and upturned bell) with the standing wave inside while it sounds, and the
 /// breath column at the mouthpiece filled to the breath (the engine's while it sounds), noisy with Breath noise.
 class CurlewPainter extends CustomPainter {
   CurlewPainter(this.p);
@@ -49,15 +62,21 @@ class CurlewPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size s) {
     if (s.isEmpty) return;
-    final k = p.variant.clamp(0, 5);
+    final k = p.variant.clamp(0, CurlewInstrument.last);
     final col = Rect.fromLTWH(s.width * 0.03, s.height * 0.2, s.width * 0.06, s.height * 0.72);
     final bore = curlewBore(k, Rect.fromLTRB(s.width * 0.14, s.height * 0.16, s.width * 0.97, s.height * 0.95));
-    final width = s.height * (k >= CurlewInstrument.trumpet ? 0.045 : 0.07);
+    final width = s.height * (CurlewInstrument.brass(k) ? 0.045 : 0.07);
     canvas.drawPath(bore.path, instrumentLine(p.accent.withValues(alpha: 0.12 + 0.08 * p.value('body')), width * 2));
     canvas.drawPath(bore.path, instrumentLine(p.accent.withValues(alpha: 0.55), 1.3));
-    // The bell (none on the flute).
-    if (k != CurlewInstrument.flute) {
-      final flare = s.height * (k == CurlewInstrument.clarinet ? 0.1 : k == CurlewInstrument.horn ? 0.17 : 0.2);
+    // The bell (none on the flutes).
+    if (!CurlewInstrument.flutes(k)) {
+      final flare = s.height * switch (k) {
+        CurlewInstrument.clarinet => 0.1,
+        CurlewInstrument.oboe => 0.07,
+        CurlewInstrument.horn => 0.17,
+        CurlewInstrument.tuba => 0.24,
+        _ => 0.2,
+      };
       final b = bore.bell, d = bore.dir;
       final n = Offset(-d.dy, d.dx);
       final bell = Path()
@@ -70,9 +89,9 @@ class CurlewPainter extends CustomPainter {
       canvas.drawPath(bell, Paint()..color = p.accent.withValues(alpha: 0.1 + 0.25 * p.energy));
       canvas.drawPath(bell, instrumentLine(p.accent.withValues(alpha: 0.6), 1.3));
     }
-    // Keys on the woodwinds, valves on the trumpet and horn.
+    // Keys on the woodwinds, valves on the trumpet, horn and tuba.
     final metric = bore.path.computeMetrics().first;
-    if (k <= CurlewInstrument.sax) {
+    if (!CurlewInstrument.brass(k)) {
       for (var i = 0; i < 7; i++) {
         final at = metric.getTangentForOffset(metric.length * (0.3 + i * 0.075))!.position;
         canvas.drawCircle(at, width * 0.35, Paint()..color = Neon.bg);
@@ -94,7 +113,7 @@ class CurlewPainter extends CustomPainter {
     final path = Path();
     final ph = math.sin(p.seconds * 2 * math.pi * 3);
     // The flute is open at both ends (a whole wave over the bore), the reeds and lips closed at one (three quarters).
-    final waves = k == CurlewInstrument.flute ? 2.0 : 1.5;
+    final waves = CurlewInstrument.flutes(k) ? 2.0 : 1.5;
     const n = 60;
     for (var i = 0; i <= n; i++) {
       final u = i / n;
@@ -140,6 +159,28 @@ class CurlewPainter extends CustomPainter {
     case CurlewInstrument.flute:
       p..moveTo(r.left, cy)..lineTo(r.right, cy);
       return (path: p, mouth: Offset(r.left, cy), bell: Offset(r.right, cy), dir: const Offset(1, 0));
+    case CurlewInstrument.piccolo:
+      // Half the flute's length.
+      final a = r.left + r.width * 0.2, b = r.right - r.width * 0.2;
+      p..moveTo(a, cy)..lineTo(b, cy);
+      return (path: p, mouth: Offset(a, cy), bell: Offset(b, cy), dir: const Offset(1, 0));
+    case CurlewInstrument.oboe:
+      // A slanting cone from the reed, a small bell at its foot.
+      final y0 = cy - r.height * 0.12, y1 = cy + r.height * 0.12, x1 = r.right - r.width * 0.08;
+      final d = Offset(x1 - r.left, y1 - y0);
+      p..moveTo(r.left, y0)..lineTo(x1, y1);
+      return (path: p, mouth: Offset(r.left, y0), bell: Offset(x1, y1), dir: d / d.distance);
+    case CurlewInstrument.tuba:
+      // The leadpipe into one big loop, then up the body into a bell pointing at the sky.
+      final c = Offset(r.left + r.width * 0.42, cy + r.height * 0.1), rad = r.height * 0.32;
+      final x = r.right - r.width * 0.16, top = r.top + r.height * 0.06;
+      p
+        ..moveTo(r.left, c.dy)
+        ..lineTo(c.dx - rad, c.dy)
+        ..arcTo(Rect.fromCircle(center: c, radius: rad), math.pi, math.pi * 1.5, false)
+        ..lineTo(x, c.dy + rad)
+        ..lineTo(x, top);
+      return (path: p, mouth: Offset(r.left, c.dy), bell: Offset(x, top), dir: const Offset(0, -1));
     case CurlewInstrument.clarinet:
       p..moveTo(r.left, cy)..lineTo(r.right - r.width * 0.08, cy);
       return (path: p, mouth: Offset(r.left, cy), bell: Offset(r.right - r.width * 0.08, cy), dir: const Offset(1, 0));
@@ -188,6 +229,6 @@ class CurlewPainter extends CustomPainter {
 /// The cards' icons: each instrument's bore drawn small.
 void curlewIcon(Canvas canvas, Rect r, int k, Color c) {
   final b = curlewBore(k, Rect.fromCenter(center: r.center, width: r.height * 1.6, height: r.height));
-  canvas.drawPath(b.path, instrumentLine(c, k >= CurlewInstrument.trumpet ? 1.3 : 2.2));
-  if (k != CurlewInstrument.flute) canvas.drawCircle(b.bell, r.height * 0.14, Paint()..color = c);
+  canvas.drawPath(b.path, instrumentLine(c, CurlewInstrument.brass(k) ? 1.3 : 2.2));
+  if (!CurlewInstrument.flutes(k)) canvas.drawCircle(b.bell, r.height * (k == CurlewInstrument.oboe ? 0.09 : 0.14), Paint()..color = c);
 }

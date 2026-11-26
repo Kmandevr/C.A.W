@@ -107,7 +107,7 @@ struct Wind {
         if (v.pitch != v.tunedPitch) {  // the note's own pitch, aimed off by its kind's pull (worked out once)
             double aim = -simPull(instrument, v.pitch);
             if (pullTable) aim = -pullAt(v.pitch);  // Curlew: its own pull, measured over each instrument's range
-            v.baseHz = noteHz(clampd(v.pitch, 34.0, 100.0) + aim / 100.0);
+            v.baseHz = noteHz(clampd(v.pitch, 28.0, 108.0) + aim / 100.0);  // (Curlew 2026-11-26: the tuba, the piccolo)
         }
         const double f0 = v.baseHz * lib::fastExp(cents * 5.776226504666211e-4);  // ln 2 / 1200
         const double period = sr / f0;
@@ -154,7 +154,7 @@ struct Wind {
         v.tunedPitch = -1;
         tune(v, 0);
         // The tongue holds the reed (the lips, the flute's air) until the note's start, then leaves it in 4-12 ms.
-        v.tongue = 1, v.tongueStep = -static_cast<float>(1.0 / ((0.012 - 0.008 * v.velocity) * sr));
+        v.tongue = 1, v.tongueStep = -static_cast<float>(1.0 / (tongueScale * (0.012 - 0.008 * v.velocity) * sr));
         v.q1 = v.djStep = v.reed1 = v.reed2 = v.turb = v.apX = v.apY = v.jetU = v.jetUStep = 0;
         v.djCur = std::min(static_cast<float>(v.jet.mask - 4), v.dj * 2.5f);
     }
@@ -172,8 +172,11 @@ struct Wind {
     double vibBreath = 0.05, vibCents = 8.0;
     float lipTurb = 0.5f;  // the breath's turbulence through the lips (Curlew sets its own)
     double lipQ = 0;       // Curlew (1.1.3): the lips' resonance Q at every pitch (0: Timber's fixed bandwidth)
+    double tongueScale = 1;  // Curlew (1.1.3): the tongue's leave time over Timber's 4-12 ms
     double brassBore = 0;  // Curlew (1.1.3): the brass bore's round trip in periods (0: Timber's 2)
     double brassPush = 0.75, brassPushSpan = 0.5;  // the brass's mouth pressure over the velocity (Timber's)
+    float lipCloseK = 20.0f;  // Curlew (1.1.3): with lipsCloseWithBreath, the lips close below 1 / lipCloseK of the breath
+    float brassLp = 0;        // Curlew (1.1.3): the brass bore's wall loss, a one-pole on its reflection (0: none, Timber's)
     bool lipsCloseWithBreath = false;  // Curlew (1.1.3): the lips' rest gap closes as the breath ends
     double lipSpan = 0;  // Curlew (1.1.3): the lips' tension range over Lips 0..1 (Timber: 0.02 from 0)
     void release(Voice& v, const Shared& s) noexcept {
@@ -360,13 +363,14 @@ struct Wind {
                 w = drive + f4(0.5f) * t + turb;
                 y = b;
             } else {  // brass
+                if (brassLp > 0.0f) lp = lp + f4(brassLp) * (b - lp), b = lp;  // Curlew: the bore's wall loss
                 const F4 dp = pm - f4(0.85f) * b;
                 const F4 lip = lipG * dp + lipA1 * lip1 + lipA2 * lip2;
                 lip2 = lip1, lip1 = lip;
                 F4 hgt = clamp4(f4(0.02f) + f4(lipOpen) * lip, zero, f4(lipMax)) * open;  // the lips part only so far
                 // Curlew: with no breath the lips close (their rest gap let the bore's own wave through the valve,
                 // and a released low note kept sounding, -33 dB, 0.3 s after its release had ended).
-                if (lipsCloseWithBreath) hgt = hgt * min4(one, env * f4(20.0f));
+                if (lipsCloseWithBreath) hgt = hgt * min4(one, env * f4(lipCloseK));
                 const F4 root = sqrt4(abs4(dp));
                 const F4 flow = hgt * sel4(gt4(dp, zero), root, zero - root);
                 turb = f4(turbAmt) * f4(lipTurb) * abs4(flow) * nz;

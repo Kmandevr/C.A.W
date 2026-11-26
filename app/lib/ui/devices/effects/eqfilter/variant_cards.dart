@@ -33,10 +33,15 @@ void pickVariant(BuildContext context, int k, {Map<String, double> also = const 
 /// The device's variants as cards, each a drawn [icon] over its name ([names] shortens the engine's), the one it
 /// plays lit. Replaces the shell's "Variant:" pill on these pages ([DeviceEditorEntry.ownsVariant]).
 class VariantCards extends StatelessWidget {
-  const VariantCards({super.key, required this.icon, this.names, this.height = 54, this.colorOf});
+  const VariantCards({super.key, required this.icon, this.names, this.height = 54, this.colorOf, this.rows});
   final ChoiceIcon icon;
   final List<String>? names;
+
+  /// One row's height (each of [rows]).
   final double height;
+
+  /// The cards in rows, by variant index (Curlew: woodwinds over brass); null: one row in the engine's order.
+  final List<List<int>>? rows;
 
   /// Each card's own colour (the Drive's variants), else the device's accent.
   final Color Function(int k)? colorOf;
@@ -53,12 +58,26 @@ class VariantCards extends StatelessWidget {
     final sel = (t.info?.variantIndex ?? 0).clamp(0, n - 1);
     Color col(int k) => colorOf?.call(k) ?? scope.accent;
     String name(int k) => names != null && k < names!.length ? names![k] : (k < choices.length ? choices[k] : 'Variant ${k + 1}');
-    return SizedBox(height: height, child: Row(children: [
-      for (var k = 0; k < n; k++)
-        Expanded(child: Padding(padding: EdgeInsets.only(right: k < n - 1 ? 4 : 0), child: Semantics(
+    Widget card(int k) => _card(context, k, sel, col, name, base.label);
+    final groups = rows?.map((r) => r.where((k) => k < n).toList()).where((r) => r.isNotEmpty).toList() ??
+        [List.generate(n, (k) => k)];
+    // Every row as many slots as the longest, so the cards keep one width (a shorter row ends early).
+    final slots = groups.fold(0, (m, r) => r.length > m ? r.length : m);
+    Widget row(List<int> ks) => SizedBox(height: height, child: Row(children: [
+      for (var i = 0; i < slots; i++) Expanded(child: Padding(padding: EdgeInsets.only(right: i < slots - 1 ? 4 : 0),
+          child: i < ks.length ? card(ks[i]) : const SizedBox.shrink())),
+    ]));
+    if (groups.length == 1) return row(groups.first);
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      for (var i = 0; i < groups.length; i++) ...[if (i > 0) const SizedBox(height: 4), row(groups[i])],
+    ]);
+  }
+
+  Widget _card(BuildContext context, int k, int sel, Color Function(int) col, String Function(int) name, String label) =>
+        Semantics(
           button: true,
           selected: k == sel,
-          label: '${base.label}: ${name(k)}',
+          label: '$label: ${name(k)}',
           child: GestureDetector(
             key: ValueKey('variant-card-$k'),
             behavior: HitTestBehavior.opaque,
@@ -79,9 +98,7 @@ class VariantCards extends StatelessWidget {
               ]),
             )),
           ),
-        ))),
-    ]));
-  }
+        );
 }
 
 class _CardIcon extends CustomPainter {

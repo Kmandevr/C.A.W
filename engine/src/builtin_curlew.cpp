@@ -19,7 +19,9 @@ using timber::Instrument;
 
 constexpr std::string_view kName = "Curlew";
 constexpr std::string_view kPlay[] = {"Legato", "Poly"};
-constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn"};
+// 2026-11-26: Piccolo, Oboe and Tuba appended (variants 6-8), so a saved variant keeps its meaning.
+constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn",
+                                             "Piccolo", "Oboe", "Tuba"};
 constexpr uint32_t kCount = sizeof(kInstruments) / sizeof(kInstruments[0]);
 
 constexpr PortDescriptor kPorts[] = {
@@ -94,6 +96,8 @@ const fx::Variant kVariants[] = {
     {kInstruments[0], &descriptor<0>, &make<0>}, {kInstruments[1], &descriptor<1>, &make<1>},
     {kInstruments[2], &descriptor<2>, &make<2>}, {kInstruments[3], &descriptor<3>, &make<3>},
     {kInstruments[4], &descriptor<4>, &make<4>}, {kInstruments[5], &descriptor<5>, &make<5>},
+    {kInstruments[6], &descriptor<6>, &make<6>}, {kInstruments[7], &descriptor<7>, &make<7>},
+    {kInstruments[8], &descriptor<8>, &make<8>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kCount);
 const fx::MergedDevice kDevices[] = {{kCurlewId, kName, kVariants}};
@@ -124,6 +128,9 @@ const std::vector<BuiltinPreset>* curlewPresets(std::string_view id) {
         {"Trombone", "Trombone: a full, round trombone", with(4, {})},
         {"French horn", "French horn: warm and round, for film", with(5, {})},
         {"Horn swell", "French horn: a slow swell for pads and film", with(5, {{"attack", 0.4}, {"breath", 0.5}})},
+        {"Piccolo", "Piccolo: the flute an octave up, bright and piercing, for marches and film", with(6, {})},
+        {"Oboe", "Oboe: a reedy, singing double reed, for pastoral melodies", with(7, {})},
+        {"Tuba", "Tuba: a deep, round brass bass under the band", with(8, {})},
     };
     return id == kCurlewId ? &p : nullptr;
 }
@@ -142,6 +149,9 @@ Winds* curlewModelOf(ModuleProcessor& p) noexcept {
     if (auto* q = dynamic_cast<Instrument<At<3>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<4>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<5>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<6>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<7>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<8>>*>(&p)) return &q->model();
     return nullptr;
 }
 

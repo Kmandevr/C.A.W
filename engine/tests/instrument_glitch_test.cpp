@@ -175,13 +175,14 @@ struct Instrument {
 const Instrument kInstruments[] = {
     {"org.caw.starling", "Starling", 1, 24, 104, {{"noise", 0.0}}, 40},
     {"org.caw.nightingale", "Nightingale", 4, 0, 0, {}, 300},
-    {"org.caw.curlew", "Curlew", 6, 0, 0, {}, 300},
+    {"org.caw.curlew", "Curlew", 9, 0, 0, {}, 300},
     {"org.caw.woodpecker", "Woodpecker", 6, 0, 0, {}, 60},  // some recorded strokes ring up 15 ms after their contact
 };
 // Each variant's keys (Nightingale, Curlew, Woodpecker): a range it plays.
 void rangeOf(const Instrument& ins, int var, double& lo, double& hi) {
     static constexpr double kNight[4][2] = {{55, 96}, {48, 88}, {36, 76}, {28, 60}};
-    static constexpr double kCurlew[6][2] = {{60, 96}, {50, 89}, {49, 80}, {54, 82}, {40, 72}, {41, 77}};
+    static constexpr double kCurlew[9][2] = {{60, 96}, {50, 89}, {49, 80}, {54, 82}, {40, 72}, {41, 77},
+                                             {79, 105}, {59, 89}, {35, 62}};
     static constexpr double kWood[6][2] = {{45, 96}, {65, 108}, {79, 108}, {53, 89}, {60, 77}, {40, 57}};
     if (std::string(ins.id) == "org.caw.nightingale") lo = kNight[var][0], hi = kNight[var][1];
     else if (std::string(ins.id) == "org.caw.curlew") lo = kCurlew[var][0], hi = kCurlew[var][1];

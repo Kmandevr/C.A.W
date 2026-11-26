@@ -13,10 +13,14 @@ namespace caw::curlew {
 using timber::Shared;
 
 // Each instrument: the wind model's kind (0 clarinet, 1 flute, 2 sax, 3 brass) and its body (curlew_bodies.cpp).
-inline constexpr int kKind[6] = {1, 0, 2, 3, 3, 3};  // Flute, Clarinet, Saxophone, Trumpet, Trombone, French horn
+// Piccolo the flute's jet; the oboe a double reed on a cone, as the sax (its recorded body sets it apart); the tuba the
+// lips (2026-11-26). [Not built] the bassoon: on the cone its notes under C4 took 0.4-0.9 s to speak (the reed's growth
+// is slow on so long a bore, at every steady setting tried); it comes as variant 9 once they speak as a bassoon does.
+inline constexpr int kInstruments = 9;
+inline constexpr int kKind[kInstruments] = {1, 0, 2, 3, 3, 3, 1, 2, 3};  // Flute .. French horn, Piccolo, Oboe, Tuba
 BodyResponse bodyResponse(int instrument) noexcept;  // curlew_bodies.cpp
 // Each instrument's range for the pull table: its first key and 40 keys a semitone apart.
-inline constexpr int kPullFirst[6] = {58, 50, 46, 52, 38, 40};
+inline constexpr int kPullFirst[kInstruments] = {58, 50, 46, 52, 38, 40, 74, 56, 28};
 inline constexpr int kPullKeys = 40;
 #include "curlew_tuning.inc"
 
@@ -97,6 +101,23 @@ struct Winds : timber::Wind {
         // noisy"). [Measured] VSCO 2 CE's sustains hold their noise between the harmonics 24-45 dB under the tone; at
         // Breath noise 0.15 the model's sat at 13-18 dB under it, at 0 at 31-38 dB: the turbulence was nearly all of it.
         if (kKind[which] == 3) lipTurb = 0.05f;
+        // The piccolo: its bore's loss over the loop lighter (0.6, the flute's 0.3). [Measured] (curlew_param_scan,
+        // 2026-11-26): at 0.3 its notes from A#6 up did not hold; at 0.5 every one from G5 to G7 did, but A7 (in VSCO's
+        // range) spoke 30 dB under them and jumped 6 dB; at 0.6 every one from G5 to A7 holds, A7 7 dB under A6.
+        if (which == 6) boreLp = 0.6f;
+        // The oboe: its narrow cone's closed end higher (coneK 4, the sax's 3). [Measured] at 3 its D4 and F4 jumped; at 4
+        // every note from B3 to F6 holds.
+        if (which == 7) coneK = 4.0f;
+        // The piccolo: the tongue leaves over twice Timber's 4-12 ms (a real tonguing's 10-20 ms). [Measured] at Timber's
+        // time its speech burst 6 ms in, 26 dB under the tone, then dipped 8 dB before the note built (the jet's kick);
+        // at twice it its first 5 ms read 32 dB under the tone.
+        if (which == 6) tongueScale = 2.0;
+        // The tuba: its lips close with the breath all the way down (lipCloseK 1, the other brass's 20: the last 5 %),
+        // and its long bore loses its highs on each round trip (brassLp 0.5). [Measured] (2026-11-26, a released D2 and
+        // instrument_glitch_scan): its lips stand at their widest (6) while the breath falls 1 to 0.28 in 57 ms with the
+        // bore still ringing, so the flow reversed through them and the wave's edges, 37 times its median step in the
+        // sustain, grew to 54 at the release (a step 23-26 dB over the 40 ms before it); now 0.063 against 0.13.
+        if (which == 8) lipCloseK = 1.0f, brassLp = 0.5f;
         if (!Base::prepare(rate, v, n)) return false;
         bell.design(kBellHz[which], rate);
         body.load(bodyResponse(which), bodyAmount, sr);
@@ -190,7 +211,8 @@ struct Winds : timber::Wind {
     // [Assumption] the cutoffs (not measured: each bell's size): trumpet 1.5 kHz, trombone 0.8; the horn none (its
     // hand in the bell takes the highs back: [Measured] with a 0.6 kHz lift its centroid sat 1.1-1.6 times VSCO's). Without it the three were one dull, clarinet-like spectrum (the 2nd harmonic 12 dB
     // under the 1st; VSCO's trumpet holds its 2nd to 6th within 5 dB of the strongest).
-    static constexpr double kBellHz[6] = {0, 0, 0, 1500.0, 800.0, 0};
+    // [Assumption] the tuba's big bell: 0.4 kHz.
+    static constexpr double kBellHz[kInstruments] = {0, 0, 0, 1500.0, 800.0, 0, 0, 0, 400.0};
     struct Bell {
         float b0 = 1, b1 = 0, a1 = 0, xl = 0, yl = 0, xr = 0, yr = 0;
         bool on = false;

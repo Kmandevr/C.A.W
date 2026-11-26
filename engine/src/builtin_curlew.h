@@ -16,7 +16,8 @@ namespace curlew {
 
 inline constexpr std::string_view kCurlewId = "org.caw.curlew";
 
-// A merged device (fx_merged.h) whose `variant` ("Instrument") is Flute, Clarinet, Saxophone, Trumpet, Trombone or French horn.
+// A merged device (fx_merged.h) whose `variant` ("Instrument") is Flute, Clarinet, Saxophone, Trumpet, Trombone, French horn,
+// Piccolo, Oboe or Tuba.
 std::span<const fx::MergedDevice> mergedCurlewDevices();
 void registerCurlew(ModuleRegistry& registry);
 const std::vector<BuiltinPreset>* curlewPresets(std::string_view id);

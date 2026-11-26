@@ -6,6 +6,12 @@ updated: 2026-11-26
 
 # Decisions
 
+## 2026-11-26: Curlew's four new winds and their page (owner)
+
+- **Owner (2026-11-26):** "Use your recommendations for the questions you ask me." Curlew adds Piccolo, Oboe and Tuba (winds VSCO 2 CE has CC0 sustains of; the alto flute and other saxophones wait for recordings), appended as variants 6-8 so saved projects keep their meaning. Its page shows the cards in **two rows**, woodwinds (Flute, Piccolo, Clarinet, Oboe, Sax) over brass (Trumpet, Trombone, Horn, Tuba), and each new instrument is drawn in the **existing style**: a thin outline of its bore with the standing wave inside (the piccolo a short straight tube, the oboe a narrow cone with a small bell, the tuba a big coil with an upturned bell).
+- **Bassoon not built (2026-11-26):** on the sax's cone its notes under C4 took 0.4-0.9 s to reach half their level at every steady setting tried (reed slope, a stiffer reed, a tongue pulse into the bore), so they sounded late and failed `instrument_no_stray_peaks_on_any_key`. It comes as variant 9 once a bassoon model speaks in time (a real one takes about 50-100 ms; assumption, not measured here).
+- **Standing (owner, 2026-11-26):** when the owner is asked a question, Claude's recommended option is the answer unless the owner says otherwise.
+
 ## 2026-11-26: Claude merges and releases on its own (owner)
 
 - **Owner (2026-11-26):** "You don't need my permission to merge and release. Just continue on your way and merge and release when required." Claude merges its pull request to Main once CI is green and the release check passes, and cuts a release (app.yml `release`) when a set of finished fixes is ready for the owner to try. The earlier "don't merge PR #269 without the owner's ask" is superseded. What is checked before a release is unchanged (2026-11-25 below), and UI looks are still asked first.

@@ -23,7 +23,10 @@ namespace {
 constexpr const char* kId = "org.caw.curlew";
 // Each instrument's range tested (MIDI): flute, clarinet, alto sax, trumpet, trombone, French horn. Not yet: the
 // flute's top C7, the trombone's E2 and the horn's lowest notes, where the model does not hold (docs/engine.md, "Curlew").
-constexpr int kLow[6] = {60, 50, 49, 54, 43, 44}, kHigh[6] = {93, 89, 81, 82, 72, 77};
+// 2026-11-26: Piccolo, Oboe and Tuba (the recordings' ranges, VSCO 2 CE: piccolo 81-105, oboe 59-91, tuba 30-63; the
+// tuba from B1: lower it pulled flat).
+constexpr int kLow[curlew::kInstruments] = {60, 50, 49, 54, 43, 44, 79, 59, 35},
+              kHigh[curlew::kInstruments] = {93, 89, 81, 82, 72, 77, 105, 89, 62};
 
 std::unique_ptr<ModuleProcessor> makeC(const Values& v, double sr = 48000) {
     std::unique_ptr<ModuleProcessor> p = createComponent(registry(), kId, v);
@@ -78,7 +81,7 @@ TEST(curlew_body_renders) {
     const char* dir = std::getenv("CAW_CURLEW_RENDERS");
     if (!dir) return;
     const bool bodyOff = std::getenv("CAW_CURLEW_BODY") == nullptr;
-    for (int inst = 0; inst < 6; ++inst)
+    for (int inst = 0; inst < curlew::kInstruments; ++inst)
         for (int key = kLow[inst]; key <= kHigh[inst]; ++key) {
             Values extra = {{"vibrato", 0.0}};
             if (const char* set = std::getenv("CAW_CURLEW_SET")) {  // "knob=value" (one knob)
@@ -99,8 +102,8 @@ TEST(curlew_body_renders) {
 // median (a note the model does not hold, too unsteady to measure) takes that median.
 TEST(curlew_tuning_table) {
     if (!cawtest::updateGolden) return;
-    float t[6][curlew::kPullKeys];  // the semitones
-    for (int inst = 0; inst < 6; ++inst) {
+    float t[curlew::kInstruments][curlew::kPullKeys];  // the semitones
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         float row[curlew::kPullKeys];
         for (int z = 0; z < curlew::kPullKeys; ++z) {
             const double key = curlew::kPullFirst[inst] + z;
@@ -127,9 +130,9 @@ TEST(curlew_tuning_table) {
     f << "// Measured (caw_tests --update-references curlew_tuning_table, repeated with a rebuild between until it settles): each\n"
          "// instrument's pull in cents (the note flattens by it and is aimed off), every semitone from kPullFirst, at\n"
          "// velocity 0.6. A cell over 25 cents from its neighbours' median takes that median.\n// clang-format off\n"
-         "inline constexpr float kPull[6][40] = {\n";
+         "inline constexpr float kPull[9][40] = {\n";
     char buf[24];
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < curlew::kInstruments; ++i) {
         f << "    {";
         for (int z = 0; z < curlew::kPullKeys; ++z) {
             std::snprintf(buf, sizeof buf, "%s%.1ff", z ? ", " : "", t[i][z]);
@@ -144,7 +147,7 @@ TEST(curlew_tuning_table) {
 // Every note of each range speaks and holds a steady pitch at the defaults, soft and loud (at most a tenth may not:
 // the sax still jumps to its octave at C#4).
 TEST(curlew_every_note_speaks) {
-    for (int inst = 0; inst < 6; ++inst) {
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         int bad = 0, all = 0;
         std::string which;
         for (int key = kLow[inst]; key <= kHigh[inst]; key += 3)
@@ -164,7 +167,7 @@ TEST(curlew_every_note_speaks) {
 // In tune: every note within 20 cents at the defaults, velocity 0.6 (a player's own spread; the lips and the sax's reed
 // follow the aim, so a few keys keep 10-17 cents however often the table is measured again).
 TEST(curlew_plays_in_tune) {
-    for (int inst = 0; inst < 6; ++inst) {
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         double worst = 0;
         std::string row;
         for (int key = kLow[inst]; key <= kHigh[inst]; key += 3) {
@@ -181,7 +184,7 @@ TEST(curlew_plays_in_tune) {
 // No click into the bore: the first 5 ms hold no more than a breath (Timber's pad click peaked 18 dB under the tone,
 // pitched by the bore: the "piano on the flute"), and a slur adds no click either.
 TEST(curlew_has_no_click_at_the_onset) {
-    for (int inst = 0; inst < 6; ++inst) {
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         const double key = (kLow[inst] + kHigh[inst]) / 2;
         const std::vector<float> s = note(inst, key, 0.9, 0.6, {{"vibrato", 0.0}});
         const double onset = powerDb(s, 0, 240), tone = powerDb(s, 14400, 9600);
@@ -193,7 +196,7 @@ TEST(curlew_has_no_click_at_the_onset) {
 // The body: Body 1 the estimated one, 0 the bare model; the level moves by under 9 dB, at 48 and 44.1 kHz.
 TEST(curlew_body_changes_the_colour_not_the_level) {
     for (double sr : {48000.0, 44100.0})
-        for (int inst = 0; inst < 6; ++inst) {
+        for (int inst = 0; inst < curlew::kInstruments; ++inst) {
             const double key = (kLow[inst] + kHigh[inst]) / 2;
             Values v = {{"variant", static_cast<double>(inst)}, {"vibrato", 0.0}};
             auto p = makeC(v, sr), q = makeC(v, sr);
@@ -241,7 +244,7 @@ TEST(curlew_presets_load_and_play) {
 
 TEST(curlew_matches_its_reference_render) {
     cawtest::References refs("curlew");
-    for (int inst = 0; inst < 6; ++inst) {
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
         const Values v = {{"variant", static_cast<double>(inst)}};
         auto p = makeC(v);
         const double k = kLow[inst];
@@ -274,5 +277,59 @@ TEST(curlew_legato_slurs_one_note_at_a_time) {
         } else {
             CHECK(std::fabs(over - held) < 15);  // Poly: both sound
         }
+    }
+}
+
+// Development: for one instrument, how many notes of its range (every third key, soft and loud) are not steady as one
+// model field or knob takes each value: CAW_CURLEW_SCAN="<instrument>:<field>=<v1>,<v2>,..." (a field of the wind
+// model, e.g. jetRatio, or knob.<id>, e.g. knob.reed). Nothing without it.
+TEST(curlew_param_scan) {
+    const char* spec = std::getenv("CAW_CURLEW_SCAN");
+    if (!spec) return;
+    const std::string s(spec);
+    const size_t colon = s.find(':'), eq = s.find('=');
+    if (colon == std::string::npos || eq == std::string::npos) return;
+    const int inst = std::atoi(s.substr(0, colon).c_str());
+    const std::string field = s.substr(colon + 1, eq - colon - 1);
+    std::vector<double> values;
+    for (size_t at = eq + 1; at < s.size();) {
+        const size_t comma = s.find(',', at);
+        values.push_back(std::atof(s.substr(at, comma - at).c_str()));
+        if (comma == std::string::npos) break;
+        at = comma + 1;
+    }
+    for (double x : values) {
+        int bad = 0, all = 0;
+        std::string which;
+        for (int key = kLow[inst]; key <= kHigh[inst]; key += 3)
+            for (double vel : {0.3, 0.9}) {
+                Values v = {{"variant", static_cast<double>(inst)}, {"vibrato", 0.0}};
+                if (field.rfind("knob.", 0) == 0) v.emplace_back(field.substr(5), x);
+                auto p = makeC(v);
+                curlew::Winds& m = modelOf(*p);
+                m.testBypassBody = true;
+                if (field == "jetGain") m.jetGain = static_cast<float>(x);
+                if (field == "jetOffset") m.jetOffset = static_cast<float>(x);
+                if (field == "jetRatio") m.jetRatio = static_cast<float>(x);
+                if (field == "jetSharp") m.jetSharp = static_cast<float>(x);
+                if (field == "boreLp") m.boreLp = static_cast<float>(x);
+                if (field == "coneK") m.coneK = static_cast<float>(x);
+                if (field == "saxLp") m.saxLp = static_cast<float>(x);
+                if (const char* also = std::getenv("CAW_CURLEW_ALSO")) {  // a second field fixed: "coneK=2.5"
+                    const std::string a(also);
+                    const size_t e = a.find('=');
+                    const float y = static_cast<float>(std::atof(a.c_str() + e + 1));
+                    if (a.compare(0, e, "coneK") == 0) m.coneK = y;
+                    if (a.compare(0, e, "saxLp") == 0) m.saxLp = y;
+                    if (a.compare(0, e, "boreLp") == 0) m.boreLp = y;
+                    if (a.compare(0, e, "tongueScale") == 0) m.tongueScale = y;
+                }
+                const std::vector<float> o = play(*p, v, {{0.0, -1, static_cast<double>(key), vel}}, 0.8).mono();
+                const double T = periodOf(key);
+                const bool ok = ac(o, 19200, 14400, T) > 0.8 && ac(o, 19200, 14400, T / 2) < 0.6 && powerDb(o, 19200, 14400) > -60;
+                ++all;
+                if (!ok) ++bad, which += " " + std::to_string(key) + "@" + std::to_string(static_cast<int>(vel * 100));
+            }
+        std::printf("%s=%g: %d of %d not steady:%s\n", field.c_str(), x, bad, all, which.c_str());
     }
 }
