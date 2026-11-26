@@ -161,7 +161,8 @@ struct Contact {
 // [Fact, measured 2026-11-26] the top octave and a half (no dampers there) from Salamander's full samples (C7, F#7, A7,
 // C8 at velocities 8 and 12, CC-BY 3.0): the fundamental's T60 over 0.3-1.95 s, band-passed at it, 2.7-2.9 s at C7,
 // 3.0-3.1 at F#7, 2.1-2.3 at A7, 2.3-2.7 at C8; the model read 3.5, 2.0, 1.6 and 1.3 s there on the old 1.4 s at C8 (an
-// A7 note was 64 dB down by 1 s, the recording 39): the points at 96-108 now set so the model reads them
+// A7 note was 64 dB down by 1 s, the recording 39): the points at 96-108 now set so the model reads them, fitted
+// over 0.3-1.85 s as the test does
 // (`starling_treble_rings_as_recorded`: 2.7, 3.1, 2.2 and 2.5 s).
 inline double simT60(double key) noexcept {
     static constexpr double kKey[] = {21, 30, 42, 54, 66, 78, 90, 96, 102, 105, 108};

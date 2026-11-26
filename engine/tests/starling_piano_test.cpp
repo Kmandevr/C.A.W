@@ -373,7 +373,7 @@ TEST(starling_piano_renders) {
 }
 
 // The top octave and a half rings as Salamander's does (no dampers up there): the fundamental's T60 over 0.3-1.85 s
-// (a band at the key every 0.1 s, a line through them), within 30 % of the recordings' (C7 2.8 s, F#7 3.0, A7 2.2,
+// (a band at the key every 0.1 s, a line through them), within 20 % of the recordings. (C7 2.8 s, F#7 3.0, A7 2.2,
 // C8 2.5; measured 2026-11-26 from the full samples). The old table (1.4 s at C8) gave 2.0, 1.6 and 1.3 s from F#7 up.
 TEST(starling_treble_rings_as_recorded) {
     const std::pair<int, double> kKeys[] = {{96, 2.8}, {102, 3.0}, {105, 2.2}, {108, 2.5}};
@@ -394,6 +394,6 @@ TEST(starling_treble_rings_as_recorded) {
         const double slope = (count * sxy - sx * sy) / (count * sxx - sx * sx);
         const double t60 = -60.0 / std::min(-1e-9, slope);
         if (verbose()) std::printf("key %d: fundamental T60 %.2f s (recorded %.1f)\n", key, t60, rec);
-        CHECK(t60 > 0.7 * rec && t60 < 1.3 * rec);
+        CHECK(t60 > 0.8 * rec && t60 < 1.2 * rec);
     }
 }
