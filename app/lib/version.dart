@@ -2,7 +2,7 @@
 const String appVersion = '1.1.3-alpha.6';
 
 /// The build number (pubspec.yaml's `+N`; a test keeps them equal). Projects record it with [appVersion] as they save.
-const int appBuild = 21;
+const int appBuild = 22;
 
 /// The page where testers report problems (public; no token or account data is sent from the app).
 const String issuesUrl = 'https://github.com/Kmandevr/C.A.W/issues/new';
