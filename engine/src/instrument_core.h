@@ -86,6 +86,11 @@ public:
         }
         if (!model_.prepare(sr_, pool_.begin(), M::kPool)) return false;
         room_.set(model_.room());
+        // A model may keep its lows out of the room (roomLowCut(): Hz, 0 none): a one-pole high-pass on the send.
+        roomCut_ = 0.0f;
+        if constexpr (requires { M::roomLowCut(); }) {
+            if (M::roomLowCut() > 0.0) roomCut_ = static_cast<float>(detExp(-kTwoPi * M::roomLowCut() / sr_));
+        }
         displayClock_.prepare(sr_);
         reset();
         return true;
@@ -94,6 +99,7 @@ public:
         pool_.clear();
         model_.reset();
         room_.clear();
+        cutXl_ = cutXr_ = cutYl_ = cutYr_ = 0;
         toneL_ = toneR_ = 0;
         levelGain_ = levelStep_ = 0;
         levelFresh_ = true;
@@ -289,6 +295,7 @@ private:
         if (levelFresh_) levelGain_ = g, levelFresh_ = false;
         levelStep_ = (g - levelGain_) / kControlFrames;
         toneL_ = flushf(toneL_), toneR_ = flushf(toneR_);
+        cutYl_ = flushf(cutYl_), cutYr_ = flushf(cutYr_);
         room_.setLight(shared_.quality == kQualityEco);
     }
 
@@ -348,6 +355,11 @@ private:
             r = toneR_ * toneLo_ + (r - toneR_) * toneHi_;
             if (roomOn) {
                 float wl = l * static_cast<float>(shared_.space), wr = r * static_cast<float>(shared_.space);
+                if (roomCut_ > 0.0f) {
+                    const float hl = roomCut_ * (cutYl_ + wl - cutXl_), hr = roomCut_ * (cutYr_ + wr - cutXr_);
+                    cutXl_ = wl, cutXr_ = wr, cutYl_ = hl, cutYr_ = hr;
+                    wl = hl, wr = hr;
+                }
                 room_.process(wl, wr);
                 l += wl, r += wr;
             }
@@ -382,6 +394,7 @@ private:
             if (silentFrames_ > 0.5 * sr_) {
                 model_.clearPost();
                 room_.clear();
+                cutXl_ = cutXr_ = cutYl_ = cutYr_ = 0;
                 toneL_ = toneR_ = 0;
                 silentFrames_ = 0;
                 settled_ = true;
@@ -422,6 +435,7 @@ private:
     uint32_t legatoN_ = 0;
     double p_[static_cast<uint32_t>(M::kModelParams)] = {};
     lib::Reverb room_;
+    float roomCut_ = 0, cutXl_ = 0, cutXr_ = 0, cutYl_ = 0, cutYr_ = 0;  // the room send's high-pass (roomLowCut)
     float toneK_ = 0, toneLo_ = 1, toneHi_ = 1, toneL_ = 0, toneR_ = 0;
     double toneFor_ = std::nan(""), levelFor_ = std::nan(""), levelTarget_ = 1;  // what toneLo_/Hi_ and levelTarget_ are for
     double levelGain_ = 0, levelStep_ = 0;
