@@ -46,6 +46,11 @@ struct Stereo {
 struct Note {
     double on, off, pitch, velocity;
 };
+// Any other event (a per-note pitch, say) at `at` seconds; its frame is set when it plays.
+struct Raw {
+    double at;
+    Event e;
+};
 // A controller: CC `cc` to `value` 0..1 at `at` seconds.
 struct Cc {
     double at;
@@ -71,7 +76,8 @@ inline std::unique_ptr<ModuleProcessor> makeInstrument(const char* id, const Val
 // Plays `notes` (and `ccs`) for `seconds` in blocks of `block` frames; `quietAt` gets the first block end at which
 // the instrument said quiet() after every note was off (-1: never).
 inline Stereo play(ModuleProcessor& p, const Values& v, const std::vector<Note>& notes, double seconds, double sr = 48000,
-                   uint32_t block = 64, const std::vector<Cc>& ccs = {}, double* quietAt = nullptr) {
+                   uint32_t block = 64, const std::vector<Cc>& ccs = {}, double* quietAt = nullptr,
+                   const std::vector<Raw>& raw = {}) {
     const ModuleDescriptor& d = p.descriptor();
     std::vector<ParameterValue> params(d.parameterCount);
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
@@ -97,6 +103,7 @@ inline Stereo play(ModuleProcessor& p, const Values& v, const std::vector<Note>&
                     static_cast<uint32_t>(std::lround(std::clamp(c.value, 0.0, 1.0) * 127));
         events.push_back({static_cast<uint64_t>(c.at * sr), e});
     }
+    for (const Raw& x : raw) events.push_back({static_cast<uint64_t>(x.at * sr), x.e});
     std::stable_sort(events.begin(), events.end(), [](const Timed& a, const Timed& b) { return a.frame < b.frame; });
     const size_t total = static_cast<size_t>(seconds * sr);
     Stereo out;

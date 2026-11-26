@@ -200,6 +200,23 @@ TEST(bittern_each_key_has_its_own_colour) {
     }
 }
 
+// A pipe bent or glided across its tables' zones (every 2 semitones) keeps its waveform: a held chorus chord bent up
+// a fifth over 1.5 s in small steps (a per-note pitch, as a MIDI file's bend or a glide plays it) scans clean (the
+// audio review, 2026-11-26: each zone's own harmonic phases clicked at every swap).
+TEST(bittern_a_bent_note_does_not_click) {
+    const Values v = with(only("principal8"), {{"octave4", 0.8}, {"mixture", 0.6}, {"trumpet8", 0.7}});
+    auto p = makeB(v);
+    std::vector<Raw> bend;
+    for (int i = 0; i <= 150; ++i)
+        bend.push_back({0.3 + 0.01 * i, notes::notePitch(0, 1, 48, 48.0 + 7.0 * i / 150.0)});
+    const std::vector<float> m = play(*p, v, {{0.0, -1, 48, 0.7}}, 2.2, 48000, 64, {}, nullptr, bend).mono();
+    constexpr double kStepLimit = 8.0, kWindowLimit = 4.0;  // bittern_has_no_glitches' limits
+    const Scan s = scan(m);
+    if (verbose()) std::printf("bent note: step %.2f (at %.3f s), window %.2f (at %.3f s)\n", s.step, s.stepAt, s.window, s.windowAt);
+    CHECK(s.step < kStepLimit);
+    CHECK(s.window < kWindowLimit);
+}
+
 // Body is the pipes' scale: wider (1) rounder, its upper partials down against the fundamental; narrower (0) brighter.
 TEST(bittern_body_is_the_pipes_scale) {
     const double f = 440.0 * std::pow(2.0, (48 - 69) / 12.0);

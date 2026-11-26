@@ -170,19 +170,23 @@ void build() {
                 float* t = gTables.get() + gAt[fam][z][kind];
                 const double top = hzOf(12.0 + 2.0 * (z + 1));  // the zone's highest pitch sets the band limit
                 const double mid = hzOf(12.0 + 2.0 * z + 1.0);
-                // The spectrum, then one inverse FFT: x[i] = Im(sum X[m] e^(j 2 pi m i / N)). The phases are seeded
-                // per family and zone (the same for both kinds, so the speaking table fades into the steady one).
+                // The spectrum, then one inverse FFT: x[i] = Im(sum X[m] e^(j 2 pi m i / N)). Each harmonic's phase
+                // is seeded by the family, the rank and the harmonic only: the same in every zone and both kinds, so
+                // a pipe bent or glided into the next zone's table (tune()) changes its harmonics' levels, never its
+                // waveform's shape (the audio review, 2026-11-26: a zone's own phases clicked at the swap), and the
+                // speaking table fades into the steady one.
                 std::fill(re.begin(), re.end(), 0.0);
                 std::fill(im.begin(), im.end(), 0.0);
-                uint32_t seed = 0x51EDu + 131u * fam + 17u * z;
-                auto rnd = [&seed] {
-                    seed = seed * 1664525u + 1013904223u;
-                    return (seed >> 8) * (1.0 / 16777216.0);
+                auto phaseOf = [fam](double mult, int h) {
+                    uint32_t x = 0x51EDu + 131u * static_cast<uint32_t>(fam) + 7919u * static_cast<uint32_t>(mult) +
+                                 2654435761u * static_cast<uint32_t>(h);
+                    x ^= x >> 16, x *= 0x7FEB352Du, x ^= x >> 15, x *= 0x846CA68Bu, x ^= x >> 16;
+                    return (x >> 8) * (1.0 / 16777216.0);
                 };
                 auto addRank = [&](int family, int zone, double mult, double gain) {
                     for (int h = 1; h < static_cast<int>(size / 2); ++h) {
                         const double harm = mult * h;
-                        const double ph = kTwoPiD * rnd();
+                        const double ph = kTwoPiD * phaseOf(mult, h);
                         if (top * harm > kNyq || harm >= size / 2) break;
                         double a = gain * amplitude(family, zone, h, mid * mult);
                         if (kind == 1) a *= speakingGain(family, mid * harm);

@@ -517,6 +517,8 @@ struct Organ {
         }
         Rng pipe;  // each pipe's own fixed tuning (the same pipe plays every time its key is struck)
         pipe.s = 0x9E3779B9u + 131u * v.key;
+        Rng voicer;  // and its own voicing (a generator of its own: the tuning's draws stay as they were)
+        voicer.s = 0x7F4A7C15u + 131u * v.key;
         for (int k = 0; k < kRanks; ++k) {
             // [Measured] the chorus' ranks beat at a median 4.4 cents (VCSL's Loud: 0.4-4 Hz on partials of 0.2-2 kHz):
             // each pipe's tuning a triangular error of +-11 cents (standard deviation 4.6), so two pipes of a key
@@ -528,9 +530,9 @@ struct Organ {
             v.tuning[k] = kCelesteCents[k] + 5.6f * narrow * (pipe.next() + pipe.next());
             // [Assumption] no two pipes of a rank voiced alike (a voicer evens a rank by ear, pipe by pipe, to within
             // about a decibel; each mouth speaks a little sooner or later): each its own level within 1.2 dB
-            // (triangular) and speed of speech within 15 %, fixed for the key, after the tuning (whose draws stay).
-            v.voiced[k] = 1.0f + 0.075f * (pipe.next() + pipe.next());
-            v.voicedRise[k] = 1.0f + 0.15f * pipe.next();
+            // (triangular) and speed of speech within 15 %, fixed for the key.
+            v.voiced[k] = 1.0f + 0.075f * (voicer.next() + voicer.next());
+            v.voicedRise[k] = 1.0f + 0.15f * voicer.next();
             v.strikeRise[k] = 1.0f, v.strikeLevel[k] = 0;
             if (was) {
                 v.phase[k] = was->phase[k], v.env[k] = was->envAt(k), v.spoke[k] = was->spokeAt(k);
