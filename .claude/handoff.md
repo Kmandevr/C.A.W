@@ -1,38 +1,31 @@
 # Handoff
 
-Commit: 41c6694 on ccr-bd7ac4df-86w0bh (PR #269 open). 1.1.3-alpha.4 is ready on it (c168e76: version, changelog,
-goldens). The owner (2026-11-26): Claude merges and releases when ready (docs/decisions.md). Issue #268: Starling strings' Windows-only -91 dB difference.
-Audio review's findings fixed (d5b8bbb); Curlew built strict (Arm64 green); Rook Eco ceiling at 1.4x local.
-A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
+Commit: 090c80a on ccr-bd7ac4df-86w0bh (Main merged in; no open PR).
+1.1.3-alpha.4 released 2026-11-26 (Main 93ad17a, PR #269 squash-merged; app.yml release run 45756483102, pre-release
+v1.1.3-alpha.4 with APK, Windows zip, patches). Branch ccr-bd7ac4df-86w0bh has Main merged in (no diff); next work
+goes here as a new PR, one release's worth at a time (don't keep adding to a PR that is ready: the advisor's note).
+The owner (2026-11-26): Claude merges and releases when ready (docs/decisions.md). Issue #268: Starling strings'
+Windows-only -91 dB difference. A 5-hourly scheduled wake-up resumes this session. Standing rules:
+`.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
-Make 1.1.3 usable: the owner's alpha.3 feedback, then 1.1.4+.
+Make 1.1.3 usable from the owner's feedback, then 1.1.4+ toward 1.2.0.
 
 ## Done and verified
-The owner's feedback on alpha.3 (2026-11-25/26):
-- Piano "weird transients/harmonics", "intended sound too present": done (bank stray harmonics, late release noise,
-  phantom partials now stop with the dampers and sit 4 dB lower: 2a72b60).
-- Woodpecker wrong notes: done. Organ stops, chimes, Swell knob, Weight (low end), Spread, strings: done.
-- Organ "the note shouldn't just get lower, change like an organ would": done (509e331: tables every 2 semitones,
-  per-pipe voicing, `bittern_each_key_has_its_own_colour`).
-- Brass "too noisy, not genuine": Curlew done (17a760e, measured against VSCO; scratch tools brass_cmp.py,
-  brass_sim.py in the scratchpad). Organ reeds: breath/puff cut earlier; their spectra are still modelled
-  (no recording) - waiting on the owner's ear.
+- alpha.4 (the owner's alpha.3 notes): Starling's stray sounds, Woodpecker's notes, Bittern's stops/Chimes/Swell/
+  Weight/Spread and each key its own pipe, Curlew's brass measured against VSCO and built strict, Nightingale's bodies
+  refit (no band over 12 kHz). Two audio reviews' findings fixed. All 22 CI checks green on 7793461.
+- Measurement scratch tools (scratchpad tools_scripts): brass_cmp.py, brass_sim.py, piano_diff.py; VSCO checkout in
+  scratchpad vsco/repo (strings, brass sus).
 
 ## Open
-- Two modes per instrument (realistic / free keyboard, "wonky" parameters) - ask the owner how the switch
-  should look; UI refinement of the main panel while playing - ask the owner first (screenshots).
-
-Verified (2026-11-26, build-organ, x86 Release):
-- `caw_tests` full: all pass but the env-only native-loader test (needs CAW_TEST_COMPONENT_PATH).
-- `caw_rt_tests bittern|starling|curlew` pass. `caw_bench 3 321`: Bittern 19.7k/33.8k/36.3k us/s, Curlew trombone 3.35k.
-- An audio-reviewer was run on 2a72b60..17a760e (see its findings in the session).
-
-- The owner's Bittern vision (cinematic wall of sound, rock organ stage, hyper-organ; not urgent): staged plan in
-  Hub #33, with two questions (where the rock organ lives: the tonewheel question; the controls' look).
+- Owner questions: the two playing modes' look (realistic / keyboard, "wonky" parameters); what is off on the main
+  panel while playing; Hub #33 (Bittern vision: where the rock organ lives, the tonewheel question; the controls' look).
+- Organ reed stops: spectra still modelled (no recording); waiting on the owner's ear.
 
 ## Next
-1. Watch PR #269's CI (Windows mix_pool timing test is flaky).
-2. Two-modes design question to the owner; then build.
-3. Older: Curlew more winds; Starling treble/top zones; live-path gate test branch; undo CI loosening (Curlew in the
-   stress mix match); performance p99; Rook optimisation and kick tools (last).
+1. Bittern stage 1 from Hub #33 (no new controls): division reservoirs, pallet stagger, the Antiphonal's rear
+   pre-delay, the hall's return high-passed near 200 Hz, signature registrations. Spec with measured targets first.
+2. Curlew: more winds (piccolo, alto flute, oboe, bassoon, saxes, tuba); Starling treble/top zones.
+3. Older: live-path gate test branch; undo CI loosening (Curlew in the stress mix match); performance p99; Rook
+   optimisation and kick tools (last).

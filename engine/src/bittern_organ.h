@@ -1,4 +1,4 @@
-// Bittern's pipe organ (1.1.3): the Salt Lake Tabernacle organ's divisions (Great, Swell and Choir in their swell boxes, Antiphonal, Pedal) as 26 of its stops, ranks from measured and modelled pipe spectra, each pipe speaking on its own with recorded speech noise, one shared and sagging wind, the tremulant, and the hall on by default.
+// Bittern's pipe organ (1.1.3): the Salt Lake Tabernacle organ's divisions (Great, Swell and Choir in their swell boxes, Antiphonal, Pedal) as 26 of its stops, ranks from measured and modelled pipe spectra, each pipe speaking on its own with recorded speech noise, a sagging wind per division, the tremulant, and the hall on by default.
 #pragma once
 
 #include <algorithm>
@@ -206,9 +206,10 @@ struct Rng {
 //   over its harmonics' envelopes in its first 400 ms: the chiff and the wind's rush);
 // - every pipe is its own: a fixed tuning error (the chorus' measured beating), its own slow wander of pitch and
 //   level (measured), and the steady wind noise (measured level) while it sounds;
-// - one wind: a reservoir that sags under the pipes drawing on it (a big chord flattens and softens everything a
-//   little, with a small bounce), the living wind's sway and the tremulant, shared by every pipe, so the ranks move
-//   as one instrument; the swell box and the room (on by default) after them.
+// - the wind: a reservoir per division that sags under its pipes (a big chord flattens and softens them a little,
+//   with a small bounce; the Pedal's pulls the Great's), the living wind's sway on every pipe and the tremulant on
+//   the enclosed divisions, so the ranks move as one instrument; each key's pallets; the swell box and the room (on
+//   by default) after them.
 struct Organ {
     static constexpr uint32_t kEcoCap = 12, kNormalCap = 16, kHighCap = 24, kPool = kHighCap + 8;
     static constexpr bool kRestrike = true, kHeldSilenceEnds = false;
@@ -263,6 +264,8 @@ struct Organ {
         float tuning[kRanks] = {};   // its fixed tuning error (cents)
         float voiced[kRanks] = {};   // its fixed level as voiced (a factor near 1) and speed of speech (likewise)
         float voicedRise[kRanks] = {};
+        int pallet[kRanks] = {};     // control blocks until its pallet has opened and the wind reaches it
+        float puffDue[kRanks] = {};  // a reed valve's puff, waiting for its pallet
         float strikeRise[kRanks] = {};  // this strike's own speed of speech (a factor near 1)
         float settle[kRanks] = {}, settleK[kRanks] = {};  // its speech's pitch error (cents) and its decay a block
         float wPitch[kRanks] = {}, wPitchTo[kRanks] = {}, wLevel[kRanks] = {}, wLevelTo[kRanks] = {};
@@ -304,11 +307,12 @@ struct Organ {
     int pedalKey = -1;        // the lowest key held this block (-1 none)
     int registration = 0;
     double trem = 0, wind = 0.3, chiffAmt = 0.5, tremRate = 6.0, modWheel = 0;
-    // The wind (shared by every pipe): its sway (a smoothed random walk), the tremulant's phase and the reservoir's
-    // sag under the pipes' draw (a damped spring), per control block.
-    double sway = 0, swayTarget = 0, tremPhase = 0, sag = 0, sagVel = 0, draw = 0, drawNext = 0;
-    // The wind's pitch and level for the open divisions [0] and the enclosed ones [1] (their tremulant).
-    float pitchMod[2] = {1, 1}, levelMod[2] = {1, 1};
+    // The wind: its sway (a smoothed random walk, the blower's, shared), the tremulant's phase, and each division's
+    // own reservoir sagging under its pipes' draw (a damped spring), per control block.
+    double sway = 0, swayTarget = 0, tremPhase = 0;
+    double sag[kDivisions] = {}, sagVel[kDivisions] = {}, drawNext[kDivisions] = {};
+    // The wind's pitch and level for each division (the Swell's and the Choir's with their tremulant).
+    float pitchMod[kDivisions] = {1, 1, 1, 1, 1}, levelMod[kDivisions] = {1, 1, 1, 1, 1};
     Rng windRng;
     uint32_t notes = 0;  // notes started since the last reset (each note's phases)
     // The swell boxes (the Swell's and the Choir's, moved together by the mod wheel): each voice's one-pole
@@ -330,6 +334,9 @@ struct Organ {
     bool testMuteSpeech = false;  // the tests' A/B (never used for sound)
 
     size_t allocBytes() const noexcept { return 0; }
+    // The hall's send high-passed at 200 Hz (the owner's vision, Hub #33: the 16's and 32's stay clear, not a boom
+    // in the reverb; a real hall's long low tail is what masks a pedal line on record): the dry organ keeps them all.
+    static constexpr double roomLowCut() noexcept { return 200.0; }
     static lib::ReverbSettings room() noexcept {
         lib::ReverbSettings r;
         // The Tabernacle: [Fact] T30 3.83 s empty (Rollins 2005), about 3 s occupied, shorter up high (its ceiling
@@ -344,8 +351,10 @@ struct Organ {
         gainK = static_cast<float>(1.0 - detExp(-1.0 / (0.005 * sr)));
         noiseGain = static_cast<float>(kOut * detPow(10.0, noiseDb() / 20.0));
         blockK = static_cast<float>(1.0 - detExp(-2.0 * kControlFrames / (0.005 * sr)));  // over two blocks
-        for (int k = 0; k < kRanks; ++k)
+        for (int k = 0; k < kRanks; ++k) {
             pipeDraw[k] = kFamilyOf[k] == kMixtureFamily ? 1.2f : static_cast<float>(std::sqrt(1.0 / kFoot[k]));
+            palletFootMs[k] = 0.3 * std::max(0.0, std::log2(1.0 / kFoot[k]));  // off the audio thread
+        }
         buildTables();
         if (!bank) bank = recorded::acquire(recorded::BankId::Bittern);
         // [Measured] some of the recorded speech clips are silent (bittern_assets.py found no speech over the
@@ -362,8 +371,8 @@ struct Organ {
         return true;
     }
     void reset() noexcept {
-        sway = swayTarget = tremPhase = sag = sagVel = draw = drawNext = 0;
-        pitchMod[0] = pitchMod[1] = levelMod[0] = levelMod[1] = 1;
+        sway = swayTarget = tremPhase = 0;
+        for (int d = 0; d < kDivisions; ++d) sag[d] = sagVel[d] = drawNext[d] = 0, pitchMod[d] = levelMod[d] = 1;
         swellK = swellKTo, swellG = swellGTo;
         windRng.s = 0x0B177E2Du;
         notes = 0;
@@ -417,26 +426,32 @@ struct Organ {
         vibPhase += 5.5 * dt;  // the orchestral strings' vibrato, 5.5 Hz
         vibPhase -= std::floor(vibPhase);
         const double t = lib::fastSinCycles(tremPhase);
-        // The reservoir: what the sounding pipes draw (each pipe's level, a big pipe more: the square root of its
-        // length), the sag toward draw / (draw + 24) through a spring of 3 Hz damped at 0.35 (a big chord sags and
-        // bounces a little). [Assumption] chosen, not measured (the recordings hold single notes): full sag is 5
-        // cents flat and 0.9 dB softer; ten keys of the full organ sag about two thirds of that.
-        // (The draw is summed by each voice's voiceControl over the last block: drawNext.)
-        const double d = drawNext;
-        drawNext = 0;
-        draw = d;
-        const double target = d / (d + 24.0), w = timber::kTwoPi * 3.0;
-        sagVel += ((target - sag) * w * w - 2.0 * 0.35 * w * sagVel) * dt;
-        sag += sagVel * dt;
-        // The living wind: its sway up to 8 cents and 12 % at Living wind 1, and the reservoir's give (its sag's
+        // The reservoirs: what each division's sounding pipes draw (each pipe's level, a big pipe more: the square
+        // root of its length), each one's sag toward draw / (draw + size) through a damped spring (a big chord sags
+        // and bounces a little). [Assumption] chosen, not measured (the recordings hold single notes): the Great's
+        // full sag 5 cents flat and 0.9 dB softer, ten keys of its full organ about two thirds of that (a 3 Hz spring
+        // damped at 0.35, as the one shared reservoir was); the Swell and the Choir alike; the Pedal's reservoir
+        // bigger and slower (size 40, 2 Hz), and its draw also pulling on the Great's at 0.3 (one blower and trunk
+        // feed both: a big pedal note flattens the manuals a little, as on a real organ); the Antiphonal on high
+        // pressure (its tubas), a third of the give. (Each division's draw is summed by the voices over the last
+        // block: drawNext.)
+        static constexpr double kSize[kDivisions] = {24, 24, 24, 24, 40}, kHz[kDivisions] = {3, 3, 3, 3, 2};
+        static constexpr double kGive[kDivisions] = {1, 1, 1, 0.3, 1};
+        double d[kDivisions];
+        for (int k = 0; k < kDivisions; ++k) d[k] = drawNext[k], drawNext[k] = 0;
+        d[kGreat] += 0.3 * d[kPedal];
+        // The living wind: its sway up to 8 cents and 12 % at Living wind 1, and the reservoirs' give (their sag's
         // depth) from 0.4 at 0 (a steady blower) through 1 at 0.3 to 2.4 at 1. The tremulant (a real one's 5-7 Hz,
-        // 6 by default): up to 5 cents and 20 % (3.5 dB from trough to crest) at Tremulant 1.
+        // 6 by default): up to 5 cents and 20 % (3.5 dB from trough to crest) at Tremulant 1, on the enclosed
+        // divisions' wind only (the Swell's and the Choir's, as on the real organ).
         const double give = 0.4 + 2.0 * wind;
-        // The tremulant shakes the enclosed divisions' wind only (the Swell's and the Choir's, as on the real organ).
-        for (int e = 0; e < 2; ++e) {
-            const double tr = e ? t * trem : 0.0;
-            pitchMod[e] = static_cast<float>(cents(sway * 8.0 * wind + tr * 5.0 - 5.0 * give * sag));
-            levelMod[e] = static_cast<float>((1.0 + sway * 0.12 * wind + tr * 0.2) * (1.0 - 0.1 * give * sag));
+        for (int k = 0; k < kDivisions; ++k) {
+            const double target = d[k] / (d[k] + kSize[k]), w = timber::kTwoPi * kHz[k];
+            sagVel[k] += ((target - sag[k]) * w * w - 2.0 * 0.35 * w * sagVel[k]) * dt;
+            sag[k] += sagVel[k] * dt;
+            const double tr = enclosed(k) ? t * trem : 0.0, g = give * kGive[k];
+            pitchMod[k] = static_cast<float>(cents(sway * 8.0 * wind + tr * 5.0 - 5.0 * g * sag[k]));
+            levelMod[k] = static_cast<float>((1.0 + sway * 0.12 * wind + tr * 0.2) * (1.0 - 0.1 * g * sag[k]));
         }
         // The swell box: the mod wheel closes it (darker, quieter), open at 0.
         // The Swell knob (open at 1, automatable) and the mod wheel (closing from it) together.
@@ -451,6 +466,7 @@ struct Organ {
     // A big pipe draws more wind: the square root of its length against the 8'.
     // A big pipe draws more wind: the square root of its length against the 8' (a mixture's four small ranks 1.2).
     float pipeDraw[kRanks] = {};
+    double palletFootMs[kRanks] = {};  // a pipe's longer wind channel (palletBlocks)
     // A rank's level at its knob, voiced, and through its box (the wind's sway and the tremulant ride on it).
     float pipeLevel(int k) const noexcept { return level[k] * kVoicing[k] * (enclosed(kDivisionOf[k]) ? swellG : 1.0f); }
 
@@ -473,6 +489,16 @@ struct Organ {
         }
         v.tunedPitch = v.pitch;
     }
+    // The pallet: [Assumption] (organ-building, not measured) one pallet per key and division feeds all its drawn
+    // stops (a slider chest), opening 1-4 ms after the key, fixed for the key (its own travel and spring), and the
+    // wind takes a little longer down a big pipe's channel: 0.3 ms an octave of footage over the 8'. So the pipes of
+    // a chord never start on one sample, and the ranks of one key start together, as on a real chest.
+    int palletBlocks(int key, int k) const noexcept {
+        uint32_t x = 0x2545F491u + 131u * static_cast<uint32_t>(key) + 977u * static_cast<uint32_t>(kDivisionOf[k]);
+        x ^= x >> 16, x *= 0x7FEB352Du, x ^= x >> 15, x *= 0x846CA68Bu, x ^= x >> 16;
+        const double ms = 1.0 + 3.0 * ((x >> 8) * (1.0 / 16777216.0)) + palletFootMs[k];
+        return static_cast<int>(ms * 1e-3 * sr / kControlFrames + 0.5);
+    }
     // Each pipe's rise: the measured time to half level for its pitch (bittern_bank.inc), the reed's 12 ms and the
     // strings' 1.5 times a principal's ([Assumption]: neither was recorded). The pipe sounds env^2, a one-pole's
     // square, at half level when env is 0.707, 1.23 time constants in.
@@ -493,8 +519,11 @@ struct Organ {
     // too short to measure a direction); each strike's speech 20 % faster or slower and its level within 0.3 dB.
     // A reed's tongue starts flat (10-15 cents, settling in its 12 ms) and its valve's puff is heard ([Assumption]:
     // no reed was recorded).
-    void open(Voice& v, int k) noexcept {
+    // `struck`: the key newly struck (its pallet opens); else a stop drawn under a held key, whose pallet is already
+    // open: the slider admits the wind at once.
+    void open(Voice& v, int k, bool struck) noexcept {
         v.on[k] = true;
+        v.pallet[k] = struck ? palletBlocks(v.key, k) : 0;
         if (v.envAt(k) < 0.05f) v.spoke[k] = v.spokeStep[k] = 0;
         v.strikeRise[k] = 1.0f + 0.2f * v.rng.next();
         v.strikeLevel[k] = 0.035f * v.rng.next();
@@ -502,7 +531,9 @@ struct Organ {
         v.settle[k] = 6.0f * v.rng.next() * (1.0f - v.env[k]);
         if (isReed(kFamilyOf[k])) {
             v.settle[k] = -(12.5f + 2.5f * v.rng.next()) * (1.0f - v.env[k]);
-            v.puff += static_cast<float>(pipeLevel(k) * v.rms[k] * kOut * 0.02 * chiffAmt / 0.5) * (1.0f - v.env[k]);
+            // (the valve's puff when its pallet opens: held with the pipe while it waits)
+            v.puffDue[k] = static_cast<float>(pipeLevel(k) * v.rms[k] * kOut * 0.02 * chiffAmt / 0.5) * (1.0f - v.env[k]);
+            if (v.pallet[k] <= 0) v.puff += v.puffDue[k], v.puffDue[k] = 0;
         }
         v.gain[k] = pipeLevel(k) * v.voiced[k], v.gStep[k] = 0;
     }
@@ -549,7 +580,7 @@ struct Organ {
             v.envStep[k] = v.spokeStep[k] = v.gStep[k] = 0, v.lineAt[k] = 0;
             v.drawOf[k] = v.toneOf[k] = 0;
             v.on[k] = false;
-            v.settle[k] = 0;
+            v.settle[k] = 0, v.pallet[k] = 0, v.puffDue[k] = 0;
         }
         for (int b = 0; b < kBreathBands; ++b) {
             v.nLp[b] = was ? was->nLp[b] : 0.0f;
@@ -561,7 +592,7 @@ struct Organ {
         v.noise.s = 0x5EEDu + 131u * v.key + 31u * notes;
         tune(v);
         for (int k = 0; k < kRanks; ++k)
-            if (level[k] > 0.0f && speaks(v, k)) open(v, k);
+            if (level[k] > 0.0f && speaks(v, k)) open(v, k, true);
         v.relFor = -1;
         // The breath's bands, at the key's harmonics ([Measured] the residual's centroid sits about 4 times the 8'
         // pitch: 3.5-6x, 400 Hz in the bass to 7.4 kHz at C7): High the 2nd, 3rd, 4th and 6th, Normal and Eco the
@@ -723,7 +754,7 @@ struct Organ {
             const bool want = v.held && level[k] > 0.0f && speaks(v, k);
             const bool due = all || ((static_cast<uint32_t>(k) & 1u) == parity) || want != v.on[k];
             if (!due) {
-                drawNext += v.drawOf[k];
+                drawNext[kDivisionOf[k]] += v.drawOf[k];
                 tone += v.toneOf[k];
                 continue;
             }
@@ -731,7 +762,7 @@ struct Organ {
             float env = v.envAt(k), gain = v.gainAt(k), spoke = v.spokeAt(k);
             v.lineAt[k] = v.clock;
             const bool fresh = want && !v.on[k];
-            if (fresh) open(v, k), gain = v.gain[k], spoke = v.spoke[k];
+            if (fresh) open(v, k, false), gain = v.gain[k], spoke = v.spoke[k];
             if (!want) v.on[k] = false;
             if (!v.on[k] && env < 1e-5f) {
                 v.env[k] = v.envStep[k] = v.drawOf[k] = v.toneOf[k] = 0;
@@ -739,7 +770,13 @@ struct Organ {
                 continue;
             }
             if (v.on[k] && env > 0.9995f) env = 1.0f;  // up: the pipe at its full level (0.05 % from it)
-            const float target = v.on[k] ? 1.0f : 0.0f, d = v.on[k] ? v.rise[k] : v.relD;
+            const float target = v.on[k] ? 1.0f : 0.0f;
+            float d = v.on[k] ? v.rise[k] : v.relD;
+            const bool waiting = v.on[k] && v.pallet[k] > 0;
+            if (waiting) {  // still opening: held (its speech, settle and wander wait with it)
+                v.pallet[k] = std::max(0, v.pallet[k] - 2), d = 1.0f;
+                if (v.pallet[k] == 0) v.puff += v.puffDue[k], v.puffDue[k] = 0;
+            }
             const float envEnd = target + (env - target) * (d * d);
             v.env[k] = env, v.envStep[k] = (envEnd - env) * kLine;
             // Spoken (the tier's speakEnd of its level reached), the steady table alone.
@@ -752,20 +789,22 @@ struct Organ {
                 const float u = v.rng.next();  // one draw: a new pitch target at one end, a new level one at the other
                 if (u > jump) v.wPitchTo[k] = v.rng.next();
                 else if (u < -jump) v.wLevelTo[k] = v.rng.next();
-                v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
-                v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
-                v.settle[k] *= v.settleK[k] * v.settleK[k] * v.settleK[k] * v.settleK[k];
+                if (!waiting) {  // (a reed held by its pallet still starts its full 10-15 cents flat when it speaks)
+                    v.wPitch[k] += (v.wPitchTo[k] - v.wPitch[k]) * follow;
+                    v.wLevel[k] += (v.wLevelTo[k] - v.wLevel[k]) * follow;
+                    v.settle[k] *= v.settleK[k] * v.settleK[k] * v.settleK[k] * v.settleK[k];
+                }
                 // The orchestral strings' vibrato: a player's 10 cents at 5.5 Hz, each note from its own phase.
                 const int fam = kFamilyOf[k];
                 const double vib = fam == kViolin || fam == kCello ? 10.0 * lib::fastSinCycles(vibPhase + v.vibOffset) : 0.0;
                 const double c = v.tuning[k] + v.settle[k] + 2.6 * wc * v.wPitch[k] + vib;
-                v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod[enclosed(kDivisionOf[k])]);
+                v.step[k] = static_cast<uint32_t>(v.inc[k] * cents(c) * pitchMod[kDivisionOf[k]]);
             }
             // A stop retired holds its gain (its pipe releases); a stop drawn or moving eases to its new level.
             v.gain[k] = gain, v.gStep[k] = 0;
             if (level[k] > 0.0f) {
                 const bool box = enclosed(kDivisionOf[k]);
-                const float to = level[k] * kVoicing[k] * levelMod[box] * (box ? swellG : 1.0f) *
+                const float to = level[k] * kVoicing[k] * levelMod[kDivisionOf[k]] * (box ? swellG : 1.0f) *
                                  (1.0f + 0.345f * wd * v.wLevel[k]) * (1.0f + v.strikeLevel[k]) * v.voiced[k];
                 v.gStep[k] = (to - gain) * bk * kLine;
             }
@@ -774,7 +813,7 @@ struct Organ {
             // A reed's tongue makes no wind noise of its own (only the flues' mouths do): its tone stays out of the
             // breath (2026-11-25, the owner: the reeds too noisy).
             v.drawOf[k] = e2 * pipeDraw[k], v.toneOf[k] = isReed(kFamilyOf[k]) ? 0.0f : a * a;
-            drawNext += v.drawOf[k];
+            drawNext[kDivisionOf[k]] += v.drawOf[k];
             tone += v.toneOf[k];
         }
         // The steady wind noise: [Measured] the flue registrations' residual, kNoiseDb under their tone, at Living
@@ -816,7 +855,7 @@ struct Organ {
     // start on a sagging wind.
     void clearPost() noexcept {
         floorL.clear(), floorR.clear(), floorFill = 0;
-        sag = sagVel = draw = drawNext = 0;
+        for (int d = 0; d < kDivisions; ++d) sag[d] = sagVel[d] = drawNext[d] = 0;
     }
     void display(float* out) const noexcept {
         for (int k = 0; k < 7; ++k) out[k] = level[k];

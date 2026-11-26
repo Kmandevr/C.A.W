@@ -231,6 +231,83 @@ TEST(bittern_weight_to_zero_and_back_does_not_click) {
     CHECK(s.window < kWindowLimit);
 }
 
+// Each division its own reservoir (Hub #33, stage 1): the Pedal's big notes sag the Pedal and pull the Great a
+// little through the shared trunk, but leave the Swell's wind alone; the Antiphonal's tubas on high pressure give a
+// third as much as the Great's pipes for the same draw.
+TEST(bittern_each_division_has_its_own_wind) {
+    const Values pedal = with(only("bourdon16"), {{"ped_principal16", 1.0}, {"pedal", 1.0}});
+    auto p = makeB(pedal);
+    std::vector<Note> low;
+    for (int k = 0; k < 6; ++k) low.push_back({0.0, -1, 36.0 + 2 * k, 0.8});
+    play(*p, pedal, low, 0.6);
+    const bittern::Organ& o = organOf(*p);
+    if (verbose()) std::printf("pedal chord: pedal sag %.3f, great %.3f, swell %.3f\n", o.sag[bittern::kPedal], o.sag[bittern::kGreat], o.sag[bittern::kSwell]);
+    CHECK(o.sag[bittern::kPedal] > 0.05);
+    CHECK(o.sag[bittern::kGreat] > 0.002 && o.sag[bittern::kGreat] < o.sag[bittern::kPedal]);
+    CHECK(o.sag[bittern::kSwell] == 0.0);
+    // The same draw on the Great and on the Antiphonal: the Antiphonal's pitch drops a third as far.
+    auto g = makeB(only("trumpet8")), a = makeB(only("tuba8"));
+    std::vector<Note> chord;
+    for (int k = 0; k < 8; ++k) chord.push_back({0.0, -1, 48.0 + 3 * k, 0.8});
+    play(*g, only("trumpet8"), chord, 0.6), play(*a, only("tuba8"), chord, 0.6);
+    const double dg = 1.0 - organOf(*g).pitchMod[bittern::kGreat], da = 1.0 - organOf(*a).pitchMod[bittern::kAntiphonal];
+    if (verbose()) std::printf("pitch drop: great %.5f, antiphonal %.5f\n", dg, da);
+    CHECK(dg > 0);
+    CHECK(da < 0.5 * dg * organOf(*a).sag[bittern::kAntiphonal] / std::max(1e-9, organOf(*g).sag[bittern::kGreat]) + 1e-6);
+}
+
+// The pallets (Hub #33, stage 1): a key's pipes start 1-4 ms after it (counted on the control grid), keys apart.
+TEST(bittern_pipes_start_on_their_pallets) {
+    const Values v = only("principal8");
+    std::vector<double> onsets;
+    for (int key = 48; key < 60; ++key) {
+        auto p = makeB(v);
+        const std::vector<float> m = play(*p, v, {{0.0, -1, static_cast<double>(key), 0.8}}, 0.05).mono();
+        size_t i = 0;
+        while (i < m.size() && std::fabs(m[i]) < 1e-7f) ++i;
+        onsets.push_back(i / 48.0);
+    }
+    const auto [lo, hi] = std::minmax_element(onsets.begin(), onsets.end());
+    if (verbose()) std::printf("onsets %.2f..%.2f ms\n", *lo, *hi);
+    CHECK(*lo >= 0.8 && *hi <= 5.0);
+    CHECK(*hi - *lo >= 1.0);
+}
+
+// A reed held by its pallet still speaks from its full flat start (the audio review, 2026-11-26: its settle had
+// decayed by a third or more while the pallet held it): over the hold, the Trumpet keeps all of its 10-15 cents.
+TEST(bittern_a_reed_waiting_on_its_pallet_keeps_its_flat_start) {
+    const Values v = only("trumpet8");
+    for (int key = 36; key < 48; ++key) {
+        auto p = makeB(v);
+        bittern::Organ& o = organOf(*p);
+        play(*p, v, {{0.0, -1, static_cast<double>(key), 0.8}}, 64.0 / 48000.0);  // 1.3 ms: every pallet still shut
+        const bittern::Organ::Voice* sounding = nullptr;
+        for (uint32_t i = 0; i < o.count; ++i)
+            if (o.voices[i].active) sounding = &o.voices[i];
+        CHECK(sounding != nullptr);
+        if (!sounding || sounding->pallet[bittern::kTrumpet8] <= 0) continue;
+        CHECK(sounding->settle[bittern::kTrumpet8] <= -10.0f);  // it starts 10-15 cents flat
+    }
+}
+
+// The hall keeps out of the lows (Hub #33, stage 1): a 16' pedal note's reverb carries its fundamental at least
+// 8 dB under the dry note's (the send high-passed at 200 Hz; without it the hall's long low tail read +4.7 dB over
+// the dry, a boom under a pedal line), the dry organ none of it lost.
+TEST(bittern_hall_keeps_the_lows_clear) {
+    const Values dry = with(only("bourdon16"), {{"pedal", 1.0}}), wet = with(dry, {{"space", 1.0}});
+    auto p = makeB(dry), q = makeB(wet);
+    const std::vector<float> a = play(*p, dry, {{0.0, -1, 36, 0.8}}, 1.5).mono(), b = play(*q, wet, {{0.0, -1, 36, 0.8}}, 1.5).mono();
+    std::vector<float> room(a.size());
+    for (size_t i = 0; i < a.size(); ++i) room[i] = b[i] - a[i];
+    const double f = 440.0 * std::pow(2.0, (36 - 12 - 69) / 12.0);  // the 16' at C2: C1
+    const double lowDry = powerAt(a, f, 48000, 19200), lowRoom = powerAt(room, f, 48000, 19200);
+    const double hiDry = powerAt(a, 8 * f, 48000, 19200), hiRoom = powerAt(room, 8 * f, 48000, 19200);
+    const double rel = 10 * std::log10((lowRoom / lowDry) / (hiRoom / hiDry));
+    if (verbose()) std::printf("room/dry: fundamental %.1f dB, 8th harmonic %.1f dB; relative %.1f dB\n", 10 * std::log10(lowRoom / lowDry), 10 * std::log10(hiRoom / hiDry), rel);
+    CHECK(10 * std::log10(lowRoom / lowDry) < -8.0);
+    (void)rel;
+}
+
 // Body is the pipes' scale: wider (1) rounder, its upper partials down against the fundamental; narrower (0) brighter.
 TEST(bittern_body_is_the_pipes_scale) {
     const double f = 440.0 * std::pow(2.0, (48 - 69) / 12.0);
@@ -353,12 +430,17 @@ TEST(bittern_wind_sags_under_a_big_chord) {
     auto r = makeB(full);
     std::vector<Note> chord;
     for (int k = 0; k < 10; ++k) chord.push_back({0.0, 0.5, 36.0 + 4 * k, 0.8});
+    auto most = [](const bittern::Organ& o) {
+        double m = 0;
+        for (double x : o.sag) m = std::max(m, x);
+        return m;
+    };
     play(*p, full, chord, 0.45);
-    const double big = organOf(*p).sag;
+    const double big = organOf(*p).sag[bittern::kGreat];
     play(*q, soft, {{0.0, 0.8, 60, 0.8}}, 0.6);
-    const double small = organOf(*q).sag;
+    const double small = most(organOf(*q));
     play(*r, full, chord, 2.5);
-    const double after = organOf(*r).sag;
+    const double after = most(organOf(*r));
     if (verbose()) std::printf("sag: full chord %.2f, one soft note %.3f, after %.3f\n", big, small, after);
     CHECK(big > 0.4);
     CHECK(small < 0.05);
