@@ -45,13 +45,17 @@ FAMILIES = {  # family: (instrument index, folder, the model's range, the array'
         (3, 'Brass/Trumpet/sus', 54, 82, 'kTrumpet'),
         (4, 'Brass/Tenor Trombone/sus', 40, 72, 'kTrombone'),
         (5, 'Brass/F Horn/sus', 41, 77, 'kHorn'),
+        (6, 'Woodwinds/Piccolo/Sus', 79, 103, 'kPiccolo'),  # 2026-11-26
+        (7, 'Woodwinds/Oboe/Sus', 59, 89, 'kOboe'),
+        (8, 'Brass/Tuba/sus', 35, 62, 'kTuba'),
     ],
 }
 BANDS = 8
 TOP_HZ = 12000.0  # no band above this (as the high shelf): it holds its shape at 44.1 kHz and up
 GAIN, QLO, QHI, SPACING = 9.0, 0.4, 3.0, 2 ** (1 / 3)
 RANGES = {'kViolin': (55, 100), 'kViola': (48, 88), 'kCello': (36, 76), 'kBass': (28, 60), 'kFlute': (60, 96),
-          'kClarinet': (50, 89), 'kTrumpet': (54, 82), 'kTrombone': (40, 72), 'kHorn': (41, 77)}
+          'kClarinet': (50, 89), 'kTrumpet': (54, 82), 'kTrombone': (40, 72), 'kHorn': (41, 77),
+          'kPiccolo': (79, 103), 'kOboe': (59, 89), 'kTuba': (35, 62)}
 
 
 def peak_db(f, hz, q, db, sr=SR):

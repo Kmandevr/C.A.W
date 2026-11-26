@@ -1,4 +1,4 @@
-// Curlew's estimated bodies (flute, clarinet, trumpet, trombone, French horn; the saxophone its bell's radiation, chosen): the generated bands (tools/instrument_bodies.py curlew) behind bodyResponse().
+// Curlew's estimated bodies (flute, clarinet, trumpet, trombone, French horn, piccolo, oboe, tuba; the saxophone its bell's radiation, chosen): the generated bands (tools/instrument_bodies.py curlew) behind bodyResponse().
 #include "curlew_winds.h"
 
 namespace caw::curlew {
@@ -22,6 +22,9 @@ BodyResponse bodyResponse(int instrument) noexcept {
         case 3: return {kTrumpet, sizeof(kTrumpet) / sizeof(BodyBand)};
         case 4: return {kTrombone, sizeof(kTrombone) / sizeof(BodyBand)};
         case 5: return {kHorn, sizeof(kHorn) / sizeof(BodyBand)};
+        case 6: return {kPiccolo, sizeof(kPiccolo) / sizeof(BodyBand)};
+        case 7: return {kOboe, sizeof(kOboe) / sizeof(BodyBand)};
+        case 8: return {kTuba, sizeof(kTuba) / sizeof(BodyBand)};
         default: return {kSaxBell, sizeof(kSaxBell) / sizeof(BodyBand)};  // the saxophone: its bell's radiation (below)
     }
 }

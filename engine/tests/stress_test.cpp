@@ -195,8 +195,9 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         // Starling, Nightingale, Curlew and Bittern (was 5b2dd89ace6ad650); then Woodpecker's six instruments, an
         // intended change of the project and its sound (was 348171ca8d5d56dc). 2026-11-25: Timber removed (its 14 model
         // and Classic/Simulated rows gone; its successors were already in it), an intended change of the project and
-        // its sound (was 01e0b49b53128913); then Starling's guitar and harp, then Rook's recorded kit, the same.
-        {"every_instrument", "93736dc678ebf33c"},
+        // its sound (was 01e0b49b53128913); then Starling's guitar and harp, then Rook's recorded kit, the same;
+        // then Curlew's piccolo, oboe and tuba, the same (was 93736dc678ebf33c).
+        {"every_instrument", "c44b86fe8df0dab5"},
         {"every_effect", "bade933ee53725fc"},
         {"metering_heavy", "010ff6dc9b02b7d9"},
         {"worst_all", "ab9ee5309dd9a638"},

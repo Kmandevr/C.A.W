@@ -209,12 +209,12 @@ constexpr Device kDevices[] = {
 Phrase variantChord(const std::string& id, int var) {
     struct R {
         const char* id;
-        double lo[6], hi[6];
+        double lo[10], hi[10];
     };
     static const R kRanges[] = {
         {"org.caw.starling", {48, 40, 28}, {108, 83, 101}},  // piano, classical guitar (E2..B5), harp (E1..F7)
         {"org.caw.nightingale", {55, 48, 36, 28}, {96, 88, 76, 60}},
-        {"org.caw.curlew", {60, 50, 49, 54, 40, 41}, {96, 89, 80, 82, 72, 77}},
+        {"org.caw.curlew", {60, 50, 49, 54, 40, 41, 79, 59, 35}, {96, 89, 80, 82, 72, 77, 105, 89, 62}},
         {"org.caw.woodpecker", {48, 65, 79, 53, 60, 40}, {96, 108, 108, 89, 77, 57}},
         {"org.caw.bittern", {48}, {96}},
     };

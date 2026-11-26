@@ -19,8 +19,12 @@ using timber::Instrument;
 
 constexpr std::string_view kName = "Curlew";
 constexpr std::string_view kPlay[] = {"Legato", "Poly"};
-constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn"};
+// 2026-11-26: Piccolo, Oboe and Tuba appended (variants 6-8), so a saved variant keeps its meaning.
+constexpr std::string_view kInstruments[] = {"Flute", "Clarinet", "Saxophone", "Trumpet", "Trombone", "French horn",
+                                             "Piccolo", "Oboe", "Tuba"};
 constexpr uint32_t kCount = sizeof(kInstruments) / sizeof(kInstruments[0]);
+// The model's per-instrument tables (kKind, kPullFirst, kBellHz, kPull) are sized by curlew::kInstruments.
+static_assert(kCount == static_cast<uint32_t>(curlew::kInstruments), "a variant needs its row in every table");
 
 constexpr PortDescriptor kPorts[] = {
     {"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
@@ -55,7 +59,9 @@ const ModuleDescriptor& descriptorFor(uint32_t index) {
     // In Winds::P's order.
     t.num("breath", "Breath", 0.6, 0.0, 1.0).group = "winds";
     t.num("noise", "Breath noise", 0.15, 0.0, 1.0).group = "winds";
-    t.num("reed", index == 0 ? "Jet" : (index >= 3 ? "Lips" : "Reed"), 0.5, 0.0, 1.0).group = "winds";
+    // By the instrument's kind (curlew_winds.h): a jet on the flutes, lips on brass, else a reed.
+    const int kind = curlew::kKind[index];
+    t.num("reed", kind == 1 ? "Jet" : (kind == 3 ? "Lips" : "Reed"), 0.5, 0.0, 1.0).group = "winds";
     t.num("vibrato", "Vibrato", index == 1 ? 0.0 : 0.2, 0.0, 1.0).group = "winds";  // a clarinet plays straight
     t.expo("vib_rate", "Vibrato rate", 5.0, 2.0, 9.0, "Hz").group = "winds";
     t.num("growl", "Growl", 0.0, 0.0, 1.0).group = "winds";
@@ -94,6 +100,8 @@ const fx::Variant kVariants[] = {
     {kInstruments[0], &descriptor<0>, &make<0>}, {kInstruments[1], &descriptor<1>, &make<1>},
     {kInstruments[2], &descriptor<2>, &make<2>}, {kInstruments[3], &descriptor<3>, &make<3>},
     {kInstruments[4], &descriptor<4>, &make<4>}, {kInstruments[5], &descriptor<5>, &make<5>},
+    {kInstruments[6], &descriptor<6>, &make<6>}, {kInstruments[7], &descriptor<7>, &make<7>},
+    {kInstruments[8], &descriptor<8>, &make<8>},
 };
 static_assert(sizeof(kVariants) / sizeof(kVariants[0]) == kCount);
 const fx::MergedDevice kDevices[] = {{kCurlewId, kName, kVariants}};
@@ -124,6 +132,9 @@ const std::vector<BuiltinPreset>* curlewPresets(std::string_view id) {
         {"Trombone", "Trombone: a full, round trombone", with(4, {})},
         {"French horn", "French horn: warm and round, for film", with(5, {})},
         {"Horn swell", "French horn: a slow swell for pads and film", with(5, {{"attack", 0.4}, {"breath", 0.5}})},
+        {"Piccolo", "Piccolo: the flute an octave up, bright and piercing, for marches and film", with(6, {})},
+        {"Oboe", "Oboe: a reedy, singing double reed, for pastoral melodies", with(7, {})},
+        {"Tuba", "Tuba: a deep, round brass bass under the band", with(8, {})},
     };
     return id == kCurlewId ? &p : nullptr;
 }
@@ -142,6 +153,10 @@ Winds* curlewModelOf(ModuleProcessor& p) noexcept {
     if (auto* q = dynamic_cast<Instrument<At<3>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<4>>*>(&p)) return &q->model();
     if (auto* q = dynamic_cast<Instrument<At<5>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<6>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<7>>*>(&p)) return &q->model();
+    if (auto* q = dynamic_cast<Instrument<At<8>>*>(&p)) return &q->model();
+    static_assert(kCount == 9, "curlewModelOf lists every variant: add its cast");
     return nullptr;
 }
 
