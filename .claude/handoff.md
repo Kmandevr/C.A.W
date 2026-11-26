@@ -1,7 +1,7 @@
 # Handoff
 
 Commit: 41c6694 on ccr-bd7ac4df-86w0bh (PR #269 open). 1.1.3-alpha.4 is ready on it (c168e76: version, changelog,
-goldens); merging #269 and the release wait on the owner's ask. Issue #268: Starling strings' Windows-only -91 dB difference.
+goldens). The owner (2026-11-26): Claude merges and releases when ready (docs/decisions.md). Issue #268: Starling strings' Windows-only -91 dB difference.
 Audio review's findings fixed (d5b8bbb); Curlew built strict (Arm64 green); Rook Eco ceiling at 1.4x local.
 A 5-hourly scheduled wake-up resumes this session. Owner's standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
