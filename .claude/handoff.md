@@ -1,36 +1,27 @@
 # Handoff
 
-Commit: 499c188 on Main (#273 merged; not yet released), merged into ccr-bd7ac4df-86w0bh (no open PR).
-1.1.3-alpha.4 released 2026-11-26 (Main 93ad17a, PR #269 squash-merged; app.yml release run 45756483102, pre-release
-v1.1.3-alpha.4 with APK, Windows zip, patches). Branch ccr-bd7ac4df-86w0bh has Main merged in (no diff); next work
-goes here as a new PR, one release's worth at a time (don't keep adding to a PR that is ready: the advisor's note).
-The owner (2026-11-26): Claude merges and releases when ready (docs/decisions.md). Issue #268: Starling strings'
-Windows-only -91 dB difference. A 5-hourly scheduled wake-up resumes this session. Standing rules:
+Branch ccr-bd7ac4df-86w0bh at 6ffab93: Curlew's piccolo, oboe and tuba (cards in two rows), not yet a PR when
+written. Main has #273 (Starling treble) and #274 (docs) unreleased; alpha.6 ships them with Curlew. Released:
+1.1.3-alpha.5. The owner (2026-11-26): Claude merges and releases when ready, and takes its own recommended option
+for any question (docs/decisions.md). A 5-hourly scheduled wake-up resumes this session. Standing rules:
 `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
 
 ## Goal
-Make 1.1.3 usable from the owner's feedback, then 1.1.4+ toward 1.2.0.
+Finish 1.1.3, then 1.1.4 (automation choices and VCA groups #210, receives/parallel/multi-out #217, MIDI out and
+clock #211).
 
-## Done and verified
-- alpha.4 (the owner's alpha.3 notes): Starling's stray sounds, Woodpecker's notes, Bittern's stops/Chimes/Swell/
-  Weight/Spread and each key its own pipe, Curlew's brass measured against VSCO and built strict, Nightingale's bodies
-  refit (no band over 12 kHz). Two audio reviews' findings fixed. All 22 CI checks green on 7793461.
-- Measurement scratch tools (scratchpad tools_scripts): brass_cmp.py, brass_sim.py, piano_diff.py; VSCO checkout in
-  scratchpad vsco/repo (strings, brass sus).
-
-## Open
-- Owner questions: the two playing modes' look (realistic / keyboard, "wonky" parameters); what is off on the main
-  panel while playing; Hub #33 (Bittern vision: where the rock organ lives, the tonewheel question; the controls' look).
-- Organ reed stops: spectra still modelled (no recording); waiting on the owner's ear.
+## Done and verified (this branch)
+- Curlew variants 6-8 (piccolo G5-A7, oboe B3-F6, tuba B1-D4); bassoon not built (slow low notes, decisions.md).
+  Tuba release step fixed (lipCloseK 1, brassLp 0.5); the old six keep their pitch clamp 34..100.
+- Local: caw_tests all green but the native-loader test (needs CTest's CAW_TEST_COMPONENT_PATH); caw_rt_tests
+  139/139; flutter analyze clean, flutter test full pass; docs guard --strict pass. Audio review: no defects, its
+  hardening points applied.
 
 ## Next
-1. Bittern stage 1 released in 1.1.3-alpha.5 (#270, #272: division reservoirs, pallets, hall low cut, presets). The
-   Antiphonal's rear placement is not built: Bittern's one Antiphonal stop, the Tuba, stands in the front case [S1]
-   (docs/organ-research-tabernacle.md); it needs the division's rear stops first (asked the owner, Hub #33).
-   Issue #271: the Windows mix-pool timing test (hypothesis there).
-2. Starling's treble decay done (#273, unreleased); its late tail matches the recordings' own harmonics (the 15-25 dB
-   gap was their mains hum). Next: Curlew's four winds with CC0 recordings (piccolo, oboe, bassoon, tuba) -
-   waiting on the owner for the 10 cards' look and the new drawings (asked 2026-11-26).
-   Issue #271: mix-pool hook fixed in #273; close after a few green Windows runs.
-3. Older: live-path gate test branch; undo CI loosening (Curlew in the stress mix match); performance p99; Rook
-   optimisation and kick tools (last).
+1. Code review of the app part (running), PR, CI, merge, release 1.1.3-alpha.6 (version, changelog, four version
+   goldens, architecture.md version fact).
+2. The rest of 1.1.3 (recommended to the owner 2026-11-26): the maintenance list (split big files and CI jobs,
+   per-build compat tables job, per-build references, changelog per file, one list for bench and C API numbers,
+   worktree backup) and the hidden collaboration groundwork G1-G3 (Hub docs/caw/collaboration-design.md); two
+   playing modes (#11) and the main panel refinement (#10) move to 1.1.4.
+3. Open: Issue #271 (close after green Windows runs), #268; Hub #33 questions (rear Antiphonal, the rock organ).
