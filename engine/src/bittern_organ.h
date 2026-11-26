@@ -804,10 +804,13 @@ struct Organ {
     // drops or releases its low-frequency state in one sample (the audio review, 2026-11-26: a step either way).
     void post(float* l, float* r, uint32_t n, const Shared&) noexcept {
         if (weightFor < 0.0) return;  // not designed yet (the first control block designs it)
-        for (uint32_t i = 0; i < n; ++i) l[i] = floorL.run(l[i]), r[i] = floorR.run(r[i]);
+        runFloor(l, r, n);
         floorFill += n;
         if (floorFill >= kControlFrames) floorFill = 0, floorL.flush(), floorR.flush();
     }
+    // The shelf itself, in the strict bittern_render.cpp: at 0 dB it is then exactly the identity on every build
+    // (Arm64's fused multiply-adds left a tail of 1e-10 of the speech there with the fast flags).
+    void runFloor(float* l, float* r, uint32_t n) noexcept;
     bool postQuiet() const noexcept { return true; }
     // Asleep (nothing sounding for 0.5 s): the box's and the reservoir's state to rest, so the next note does not
     // start on a sagging wind.

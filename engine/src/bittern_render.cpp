@@ -149,4 +149,21 @@ void Organ::render(Voice& v, float* out, uint32_t n) noexcept {
     }
 }
 
+// Weight's shelf (Biquad::run's arithmetic, local to this strict file so no fast-flag copy of it is linked here).
+void Organ::runFloor(float* l, float* r, uint32_t n) noexcept {
+    for (int c = 0; c < 2; ++c) {
+        timber::Biquad& f = c == 0 ? floorL : floorR;
+        float* x = c == 0 ? l : r;
+        float z1 = f.z1, z2 = f.z2;
+        const float b0 = f.b0, b1 = f.b1, b2 = f.b2, a1 = f.a1, a2 = f.a2;
+        for (uint32_t i = 0; i < n; ++i) {
+            const float in = x[i], y = b0 * in + z1;
+            z1 = b1 * in - a1 * y + z2;
+            z2 = b2 * in - a2 * y;
+            x[i] = y;
+        }
+        f.z1 = z1, f.z2 = z2;
+    }
+}
+
 }  // namespace caw::bittern

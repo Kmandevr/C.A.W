@@ -48,7 +48,7 @@ FAMILIES = {  # family: (instrument index, folder, the model's range, the array'
     ],
 }
 BANDS = 8
-TOP_HZ = 16000.0  # no band above this: it holds its shape at 44.1 kHz and up
+TOP_HZ = 12000.0  # no band above this (as the high shelf): it holds its shape at 44.1 kHz and up
 GAIN, QLO, QHI, SPACING = 9.0, 0.4, 3.0, 2 ** (1 / 3)
 RANGES = {'kViolin': (55, 100), 'kViola': (48, 88), 'kCello': (36, 76), 'kBass': (28, 60), 'kFlute': (60, 96),
           'kClarinet': (50, 89), 'kTrumpet': (54, 82), 'kTrombone': (40, 72), 'kHorn': (41, 77)}
@@ -118,9 +118,11 @@ def fit_shaped(edges, target, lo, hi, hp):
     def resid(x):
         hz, db, q, sh = unpack(x)
         y = highpass_db(f, hp) + shelf_db(f, np.exp(sh[0]), 0.707, sh[1], False) + shelf_db(f, np.exp(sh[2]), 0.707, sh[3], True)
-        # (and a light cost on each peak's gain, 0.1 dB a dB: a band the data does not need goes to 0 dB instead of
-        # sitting at the cap in a cancelling pair)
-        return np.concatenate([y + sum(peak_db(f, hz[k], q[k], db[k]) for k in range(n)) - t, 0.1 * db])
+        # (and a light cost on the gain of a peak above the fitted data, 0.1 dB a dB, easing in over a sixth of an
+        # octave past `hi`: a band the data does not need goes to 0 dB instead of sitting at the cap in a cancelling
+        # pair; the peaks inside the data are as free as before)
+        past = 1.0 / (1.0 + np.exp(-12.0 * (np.log2(hz) - np.log2(hi) - 1.0 / 12.0)))
+        return np.concatenate([y + sum(peak_db(f, hz[k], q[k], db[k]) for k in range(n)) - t, 0.1 * db * past])
     x0 = np.concatenate([np.full(n, np.log(step)), np.zeros(n), np.zeros(n), [np.log(200.0), 0.0, np.log(4000.0), 0.0]])
     lob = np.concatenate([np.full(n, -6.0), np.full(n, -GAIN), np.full(n, np.log(QLO)),
                           [np.log(60.0), -SHELF_GAIN, np.log(1500.0), -SHELF_GAIN]])
