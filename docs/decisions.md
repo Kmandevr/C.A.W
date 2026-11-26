@@ -1138,7 +1138,7 @@ Carries out the first two bullets of the owner's decision below ([App](app.md)).
 **Decision (Claude, for the owner to confirm; [engine](engine.md#song-renders), [app](app.md)):**
 - **A stem is what a track or bus sends on** (after its effects, volume, pan and latency compensation), **with the master's volume, DC filter and start fade but not the master's effects or limiter** (`stems_through_master`, on by default). Why: the stems that reach the master then add up to the mix, and the levels match it, as REAPER's stems of the track outputs do; master effects can't be split per stem.
 - **Normalising takes one gain from the mix for every file** (`normalize_each` off), so normalised stems still add up; LUFS normalising stops at a −1 dBTP true-peak ceiling by default.
-- **One pass per range renders every file of it** through engine output taps (a small offline-only hook in `engine.cpp`), rather than one render per stem: the stems line up by construction, and a phone renders ten stems for the cost of one.
+- **One pass per range renders every file of it** through engine output taps (a small offline-only hook, set in `engine_control.cpp`), rather than one render per stem: the stems line up by construction, and a phone renders ten stems for the cost of one.
 - **Results stay in the app's support folder until saved** (Save, or Save all into a folder through the system's folder picker); they don't appear in Files yet.
 - **The sheet keeps the old Exporter** (Quick Export, one-shot, wavetable, MIDI) below its Export song button, rather than replacing it.
 
