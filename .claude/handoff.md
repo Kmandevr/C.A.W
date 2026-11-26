@@ -27,6 +27,9 @@ Verified (2026-11-26, build-organ, x86 Release):
 - `caw_rt_tests bittern|starling|curlew` pass. `caw_bench 3 321`: Bittern 19.7k/33.8k/36.3k us/s, Curlew trombone 3.35k.
 - An audio-reviewer was run on 2a72b60..17a760e (see its findings in the session).
 
+- The owner's Bittern vision (cinematic wall of sound, rock organ stage, hyper-organ; not urgent): staged plan in
+  Hub #33, with two questions (where the rock organ lives: the tonewheel question; the controls' look).
+
 ## Next
 1. Watch PR #269's CI (Windows mix_pool timing test is flaky).
 2. Two-modes design question to the owner; then build.
