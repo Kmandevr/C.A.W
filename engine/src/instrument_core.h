@@ -346,6 +346,7 @@ private:
         }
         model_.post(mixL, mixR, n, shared_);
         const bool roomOn = shared_.space > 0.0;
+        if (!roomOn) cutXl_ = cutXr_ = cutYl_ = cutYr_ = 0;  // the send off: its high-pass starts fresh when it returns
         float outPeak = 0;
         for (uint32_t i = 0; i < n; ++i) {
             float l = mixL[i], r = mixR[i];

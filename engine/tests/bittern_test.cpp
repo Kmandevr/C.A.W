@@ -273,6 +273,23 @@ TEST(bittern_pipes_start_on_their_pallets) {
     CHECK(*hi - *lo >= 1.0);
 }
 
+// A reed held by its pallet still speaks from its full flat start (the audio review, 2026-11-26: its settle had
+// decayed by a third or more while the pallet held it): over the hold, the Trumpet keeps all of its 10-15 cents.
+TEST(bittern_a_reed_waiting_on_its_pallet_keeps_its_flat_start) {
+    const Values v = only("trumpet8");
+    for (int key = 36; key < 48; ++key) {
+        auto p = makeB(v);
+        bittern::Organ& o = organOf(*p);
+        play(*p, v, {{0.0, -1, static_cast<double>(key), 0.8}}, 64.0 / 48000.0);  // 1.3 ms: every pallet still shut
+        const bittern::Organ::Voice* sounding = nullptr;
+        for (uint32_t i = 0; i < o.count; ++i)
+            if (o.voices[i].active) sounding = &o.voices[i];
+        CHECK(sounding != nullptr);
+        if (!sounding || sounding->pallet[bittern::kTrumpet8] <= 0) continue;
+        CHECK(sounding->settle[bittern::kTrumpet8] <= -10.0f);  // it starts 10-15 cents flat
+    }
+}
+
 // The hall keeps out of the lows (Hub #33, stage 1): a 16' pedal note's reverb carries its fundamental at least
 // 8 dB under the dry note's (the send high-passed at 200 Hz; without it the hall's long low tail read +4.7 dB over
 // the dry, a boom under a pedal line), the dry organ none of it lost.
