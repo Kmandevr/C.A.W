@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 02534da on Main (1.1.3-alpha.5 released 2026-11-26), merged into ccr-bd7ac4df-86w0bh (no open PR).
+Commit: 499c188 on Main (#273 merged; not yet released), merged into ccr-bd7ac4df-86w0bh (no open PR).
 1.1.3-alpha.4 released 2026-11-26 (Main 93ad17a, PR #269 squash-merged; app.yml release run 45756483102, pre-release
 v1.1.3-alpha.4 with APK, Windows zip, patches). Branch ccr-bd7ac4df-86w0bh has Main merged in (no diff); next work
 goes here as a new PR, one release's worth at a time (don't keep adding to a PR that is ready: the advisor's note).
@@ -28,6 +28,9 @@ Make 1.1.3 usable from the owner's feedback, then 1.1.4+ toward 1.2.0.
    Antiphonal's rear placement is not built: Bittern's one Antiphonal stop, the Tuba, stands in the front case [S1]
    (docs/organ-research-tabernacle.md); it needs the division's rear stops first (asked the owner, Hub #33).
    Issue #271: the Windows mix-pool timing test (hypothesis there).
-2. Curlew: more winds (piccolo, alto flute, oboe, bassoon, saxes, tuba); Starling treble/top zones.
+2. Starling's treble decay done (#273, unreleased); its late tail matches the recordings' own harmonics (the 15-25 dB
+   gap was their mains hum). Next: Curlew's four winds with CC0 recordings (piccolo, oboe, bassoon, tuba) -
+   waiting on the owner for the 10 cards' look and the new drawings (asked 2026-11-26).
+   Issue #271: mix-pool hook fixed in #273; close after a few green Windows runs.
 3. Older: live-path gate test branch; undo CI loosening (Curlew in the stress mix match); performance p99; Rook
    optimisation and kick tools (last).
