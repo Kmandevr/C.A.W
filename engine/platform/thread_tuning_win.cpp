@@ -211,6 +211,13 @@ void untuneWorker(WorkerState& state) noexcept {
     state.applied = 0;
 }
 
+UtilClamp raiseUtilMin(uint32_t) noexcept {
+    UtilClamp c;
+    c.state = ClampState::Unsupported;
+    return c;
+}
+UtilClamp probeUtilMin() noexcept { return {}; }
+
 // Windows has no performance hint API of this kind.
 struct Hint {};
 Hint* hintOpen() noexcept { return nullptr; }

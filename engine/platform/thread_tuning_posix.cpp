@@ -189,6 +189,75 @@ uint32_t tuneWorker(const CallbackThread& cb, WorkerState& state) noexcept {
 
 void untuneWorker(WorkerState& state) noexcept { state.applied = 0; }
 
+// ---- the utilization clamp ----
+
+namespace {
+
+// The kernel's struct sched_attr up to its utilization clamps (SCHED_ATTR_SIZE_VER1, 56 bytes; include/uapi/linux/
+// sched/types.h): glibc and older NDKs have no declaration of it, so it is spelled out here.
+struct SchedAttr {
+    uint32_t size;
+    uint32_t policy;
+    uint64_t flags;
+    int32_t nice;
+    uint32_t priority;
+    uint64_t runtime, deadline, period;
+    uint32_t utilMin, utilMax;
+};
+static_assert(sizeof(SchedAttr) == 56, "SCHED_ATTR_SIZE_VER1");
+// include/uapi/linux/sched.h
+constexpr uint64_t kFlagResetOnFork = 0x01, kFlagKeepPolicy = 0x08, kFlagKeepParams = 0x10, kFlagUtilClampMin = 0x20;
+
+}  // namespace
+
+UtilClamp raiseUtilMin(uint32_t utilMin) noexcept {
+    UtilClamp c;
+#if defined(SYS_sched_getattr) && defined(SYS_sched_setattr)
+    SchedAttr a{};
+    auto unsupported = [](int e) { return e == ENOSYS || e == EOPNOTSUPP || e == E2BIG; };
+    if (::syscall(SYS_sched_getattr, 0, &a, sizeof a, 0) != 0) {
+        c.error = errno;
+        c.state = unsupported(c.error) ? ClampState::Unsupported : ClampState::Refused;
+        return c;
+    }
+    if (a.size < sizeof a) {  // a kernel from before the clamps (it fills only the fields it has)
+        c.state = ClampState::Unsupported;
+        return c;
+    }
+    if (a.utilMin >= utilMin) {
+        c.state = ClampState::Kept;
+        c.utilMin = static_cast<int32_t>(a.utilMin);
+        return c;
+    }
+    // Only the floor: the policy, its priority and nice as they are (KEEP_*), reset-on-fork as it was.
+    SchedAttr want = a;
+    want.size = sizeof want;
+    want.flags = kFlagKeepPolicy | kFlagKeepParams | kFlagUtilClampMin | (a.flags & kFlagResetOnFork);
+    want.utilMin = utilMin;
+    if (::syscall(SYS_sched_setattr, 0, &want, 0) != 0) {
+        c.error = errno;
+        c.state = unsupported(c.error) ? ClampState::Unsupported : ClampState::Refused;
+        return c;
+    }
+    c.state = ClampState::Applied;
+    SchedAttr now{};
+    if (::syscall(SYS_sched_getattr, 0, &now, sizeof now, 0) == 0 && now.size >= sizeof now)
+        c.utilMin = static_cast<int32_t>(now.utilMin);
+#else
+    (void)utilMin;
+    c.state = ClampState::Unsupported;
+#endif
+    return c;
+}
+
+UtilClamp probeUtilMin() noexcept {
+#if defined(__ANDROID__)
+    return raiseUtilMin(kUtilMinRequest);
+#else
+    return {};  // desktop Linux: not asked (the phone's problem; a desktop's callback is not on a slow little core)
+#endif
+}
+
 // ---- the performance hint ----
 
 #if defined(__ANDROID__)

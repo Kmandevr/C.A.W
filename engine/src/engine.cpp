@@ -2992,11 +2992,13 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         mixActive_ = pool_ ? pool_->workers() : 0;
         mixOverSeconds_ = mixUnderSeconds_ = mixLosingSeconds_ = mixGrowSeconds_ = mixSettleSeconds_ = 0;
         waitAvg_ = workAvg_ = 0;
+        peakCount_ = peakOffCount_ = 0;
         tailPool_ = tailPoolWeight_ = tailSerial_ = tailSerialWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;
     }
     // The Benchmark's profile: serial (setProfile), by the profile this call read, so a profile set or cleared
     // meanwhile never has workers filling it.
     mixParallel_ = wantsMixPool() && !chunkProfile_;
+    mixOn_.store(mixParallel_, std::memory_order_relaxed);
     if (pool_) {
         const PartScope pool(parts(), Part::MixPool);
         const bool idle = !mixParallel_ || (!playing_ && !previewing_ && countInLeft_ == 0);
@@ -3103,6 +3105,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         }
         processNs_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - processStart).count();
     }
+    if (poolUsed_) pooledCallbacks_.fetch_add(1, std::memory_order_relaxed);  // one writer: the audio thread
     poolUsedLast_ = poolUsed_;
     poolUsed_ = false;
     if (PartProfile* p = parts()) p->end();
@@ -3165,11 +3168,13 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
             n.load = std::pow(0.9, dt / kTick);
             n.share = std::exp(-dt / kShareSeconds);
             n.tail = std::exp(-dt / kMixTailSeconds);
+            n.peak = std::exp(-dt / kMixPeakSeconds);
             w = &n;
         }
         loadKeep_ = w->load;
         shareKeep_ = w->share;
         tailKeep_ = w->tail;
+        peakKeep_ = w->peak;
     }
     loadClock_ += dt;
     loadAvg_ = loadKeep_ * loadAvg_ + (1.0 - loadKeep_) * load;
@@ -3191,10 +3196,18 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     // The off test leaves out the wait (time the callback spun for workers, not work of its own).
     mixRetrySeconds_ = std::max(0.0, mixRetrySeconds_ - dt);
     const double work = loadAvg_ - waitAvg_;
-    if (loadAvg_ > kMixParallelLoad) {
+    // The peaks (2026-11-27): a count of callbacks over kMixPeakLoad (and over kMixPeakOffLoad), each decaying
+    // with kMixPeakSeconds. Per frame rendered, as the mean.
+    peakCount_ = peakKeep_ * peakCount_ + (measured > kMixPeakLoad ? 1.0 : 0.0);
+    peakOffCount_ = peakKeep_ * peakOffCount_ + (measured > kMixPeakOffLoad ? 1.0 : 0.0);
+    // The count needs three peaks already (one or two stalled callbacks are not enough), so it turns the pool on at once: a
+    // song's bursts (a bar's first callbacks, a kick waking a drum chain) are too short and far apart to hold it
+    // over kMixPeakCount for kMixParallelSeconds.
+    const bool peaky = peakCount_ > kMixPeakCount;
+    if (loadAvg_ > kMixParallelLoad || peaky) {
         mixUnderSeconds_ = 0;
         mixOverSeconds_ += dt;
-        if (mixOverSeconds_ >= kMixParallelSeconds - kSlackSeconds && !mixAuto_ && mixRetrySeconds_ <= kSlackSeconds) {
+        if ((mixOverSeconds_ >= kMixParallelSeconds - kSlackSeconds || peaky) && !mixAuto_ && mixRetrySeconds_ <= kSlackSeconds) {
             mixAuto_ = true;
             // A pool starting on Auto: shedding holds off while it settles (below).
             if (pool_ && static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed)) == MixParallel::Auto)
@@ -3203,7 +3216,7 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
             mixLosingSeconds_ = mixGrowSeconds_ = 0;
             tailPool_ = tailPoolWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;  // the pool's tail from now
         }
-    } else if (work < kMixSerialLoad) {
+    } else if (work < kMixSerialLoad && peakOffCount_ < kMixPeakOffCount) {
         mixOverSeconds_ = 0;
         mixUnderSeconds_ += dt;
         if (mixUnderSeconds_ >= kMixSerialSeconds - kSlackSeconds) mixAuto_ = false;

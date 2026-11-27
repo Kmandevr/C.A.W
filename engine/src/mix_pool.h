@@ -96,6 +96,11 @@ public:
     // The callback's scheduling as it last described itself (SCHED_* on POSIX, 0 elsewhere or before a callback).
     int callbackPolicy() const noexcept { return cbPolicy_.load(std::memory_order_relaxed); }
     int callbackNice() const noexcept { return cbNice_.load(std::memory_order_relaxed); }
+    // The utilization clamp (tuning::probeUtilMin; Live, Android): the callback's, asked once per callback thread,
+    // and the workers' (each asks once; the last answer, and how many workers have it applied or kept).
+    tuning::UtilClamp callbackClamp() const noexcept { return loadClamp(cbClamp_); }
+    tuning::UtilClamp workerClamp() const noexcept { return loadClamp(wkClamp_); }
+    uint32_t workersClamped() const noexcept { return wkClamped_.load(std::memory_order_relaxed); }
 
     // Tests only: each worker waits a pseudo-random 0..maxMicros microseconds before each task it claims (and
     // before claiming), so the order and overlap of tasks vary from run to run.
@@ -161,6 +166,25 @@ private:
     std::atomic<uint32_t> tuned_{0};
     std::atomic<int> callbackCpu_{-1};
     tuning::Hint* hint_ = nullptr;
+    struct ClampSlot {
+        std::atomic<uint8_t> state{0};
+        std::atomic<int> error{0};
+        std::atomic<int32_t> utilMin{-1};
+    };
+    static void storeClamp(ClampSlot& to, const tuning::UtilClamp& c) noexcept {
+        to.error.store(c.error, std::memory_order_relaxed);
+        to.utilMin.store(c.utilMin, std::memory_order_relaxed);
+        to.state.store(static_cast<uint8_t>(c.state), std::memory_order_release);
+    }
+    static tuning::UtilClamp loadClamp(const ClampSlot& from) noexcept {
+        tuning::UtilClamp c;
+        c.state = static_cast<tuning::ClampState>(from.state.load(std::memory_order_acquire));
+        c.error = from.error.load(std::memory_order_relaxed);
+        c.utilMin = from.utilMin.load(std::memory_order_relaxed);
+        return c;
+    }
+    ClampSlot cbClamp_, wkClamp_;
+    std::atomic<uint32_t> wkClamped_{0};
 };
 
 }  // namespace caw

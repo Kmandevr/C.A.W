@@ -186,6 +186,9 @@ void MixPool::beginCallback(bool wake) noexcept {
         if (tNotedStart != startId_) {
             tNotedStart = startId_;
             noteCallbackThread();
+            // The utilization clamp, once per callback thread and start (Android; two or three system calls, no
+            // allocation): a floor under the clock and the core the scheduler gives it (thread_tuning.h).
+            storeClamp(cbClamp_, tuning::probeUtilMin());
         } else if (callbacks_ % kPolicyEvery == kPolicyEvery - 1) {
             // A2 (the 1.1.2 audit): AudioFlinger grants a fast track's callback its real-time priority
             // asynchronously, so the first callback's reading can be stale; looked at again now and then (a few
@@ -262,6 +265,7 @@ void MixPool::loop(uint32_t lane) noexcept {
     tidsReady_.fetch_add(1, std::memory_order_release);
     tuning::WorkerState tuning;
     uint32_t tunedGen = 0;
+    bool clampAsked = false;
     uint64_t rng = 0x9E3779B97F4A7C15ull * (lane + 1);
     uint32_t seen = wake_.load(std::memory_order_acquire);
     while (!stop_.load(std::memory_order_acquire)) {
@@ -289,6 +293,13 @@ void MixPool::loop(uint32_t lane) noexcept {
                 cb.nice = cbNice_.load(std::memory_order_relaxed);
                 cb.mmcss = mmcss_.load(std::memory_order_relaxed);
                 tuned_.fetch_or(tuning::tuneWorker(cb, tuning), std::memory_order_relaxed);
+                if (!clampAsked) {  // once per worker (Android), outside any task
+                    clampAsked = true;
+                    const tuning::UtilClamp c = tuning::probeUtilMin();
+                    storeClamp(wkClamp_, c);
+                    if (c.state == tuning::ClampState::Applied || c.state == tuning::ClampState::Kept)
+                        wkClamped_.fetch_add(1, std::memory_order_relaxed);
+                }
             }
         }
         // Idle: spin while a callback runs (and a little after), never longer than kMaxSpinMicros, unless parked
