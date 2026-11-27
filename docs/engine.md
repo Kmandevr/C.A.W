@@ -98,6 +98,8 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
 
 ## Playback
 
+Tests: `engine_test.cpp` (meters, audition, folder buses, routing, automation), `engine_transport_test.cpp`, `engine_overload_test.cpp`, `engine_arrangement_test.cpp` and `engine_capacity_test.cpp`, sharing `engine_test_harness.h`; the graph's channels, routing, typed ports and parameters in `graph_channels_test.cpp`, `graph_routing_test.cpp`, `graph_typed_ports_test.cpp` and `graph_parameters_test.cpp` (`caw_rt_tests`).
+
 - **Project:** BPM, beats per bar, loop length in bars, seed and master volume, and a tempo map and time signatures (below). The project loop is the song step it ends on as a sample on the tempo map (`round(steps × 60 × sr / (bpm × 4))` with one tempo), and every layer restarts when it wraps.
 - **Tempo map and time signatures (batch 1.0.3, #207, C API 31; `src/tempo_map.h`):**
   - **Units.** Positions are beats (quarter notes) from the song start (1 beat = 4 steps); tempo is BPM in quarter notes per minute. The project JSON's `tempo_map` (`[{"beat", "bpm", "ramp"}]`: 1–4096 points, BPM 1–999, the first at beat 0; its BPM becomes `bpm`) and `time_signatures` (`[{"bar", "beat", "num", "den"}]`: 1–1024, `num` 1–32, `den` 1/2/4/8/16/32, the first at bar 0; `beat` is recomputed from the bars and must agree within 1e-6) are checked and fail closed with an error that names the problem. Without them a project is one tempo (`bpm`) and one `beats_per_bar`/4 signature.

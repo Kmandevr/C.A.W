@@ -338,6 +338,8 @@ target_include_directories(caw_cli PRIVATE src)
   add_executable(caw_tests tests/test_main.cpp tests/engine_test.cpp tests/clip_playback_test.cpp tests/export_test.cpp tests/pattern_test.cpp
     tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_reference_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp tests/builtin_instruments_test.cpp
     src/capi.cpp src/capi_audio.cpp src/capi_modulation.cpp src/execution_capi.cpp src/worker_api.cpp src/capi_stress.cpp platform/audio_none.cpp)
+  target_sources(caw_tests PRIVATE tests/engine_transport_test.cpp tests/engine_overload_test.cpp
+    tests/engine_arrangement_test.cpp tests/engine_capacity_test.cpp)  # the mixer tests beside engine_test.cpp
   target_sources(caw_tests PRIVATE tests/tolerance.cpp tests/tolerance_test.cpp)  # reference renders, their comparators
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/test_signal_test.cpp)  # org.caw.test.osc, the internal test signal
@@ -510,6 +512,8 @@ target_include_directories(caw_cli PRIVATE src)
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
+  target_sources(caw_rt_tests PRIVATE tests/graph_routing_test.cpp tests/graph_typed_ports_test.cpp
+    tests/graph_parameters_test.cpp)  # the graph executor tests beside graph_channels_test.cpp
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
   target_sources(caw_rt_tests PRIVATE tests/drums_acoustic_rt_test.cpp)  # Rook 1.1.2: Acoustic kits, no allocation
   target_sources(caw_rt_tests PRIVATE tests/flagship_raven_rt_test.cpp)  # Flagship's 1.1.0 synthesis (Raven)
