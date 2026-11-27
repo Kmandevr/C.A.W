@@ -175,10 +175,12 @@ TEST(the_flagship_warps_stay_finite_bounded_and_free_of_subnormals) {
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e);
     if (!p) return;
-    // Every warp, light and full, on a wide 7-copy saw stack at a low and a very high note; Osc FM hears osc 3.
+    // Every warp, off, light and full, on a wide 7-copy saw stack at the lowest, a low and a very high note; Osc FM
+    // hears osc 3. (In the sanitizer build this is also the check that a warped read stays in its table: the stacks
+    // hold their indices to the table, osc_stack.inc, and these edges must not need it.)
     for (int warp = 1; warp <= 7; ++warp)
-        for (const double amount : {0.3, 1.0})
-            for (const int note : {28, 108}) {
+        for (const double amount : {0.0, 0.3, 1.0})
+            for (const int note : {0, 28, 108}) {
                 p->reset();
                 const std::vector<float> x = play(*p, note, 9600, {{"osc1_warp", warp}, {"osc1_warp_amt", amount}, {"osc1_unison", 7},
                     {"osc1_fm_ratio", 16}, {"osc3_on", 1}, {"osc3_unison", 5}, {"osc3_octave", 3}, {"fx_reverb_on", 0}});
