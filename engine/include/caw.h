@@ -962,10 +962,12 @@ CAW_API double caw_engine_midi_clock_in_bpm(CawEngine* e);
    System.nanoTime). Elsewhere there is no sender: caw_midi_out_start returns 0 and caw_midi_out_devices "[]".
    Any thread but the audio callback's. */
 /* Attaches the sender to [e] (caw_engine_set_midi_out_active(e, 1): its queue starts empty). 1 on success or when
-   already attached to [e]; 0 with no engine, no sender on this platform or another engine attached. */
+   already attached to [e]; 0 with no engine or no sender on this platform. Another engine attached is detached first,
+   as caw_midi_out_stop does (its owner may be gone). */
 CAW_API int32_t caw_midi_out_start(CawEngine* e);
-/* Detaches it: the engine queues nothing more, messages not yet sent are dropped, and CC 123 (All Notes Off) goes at
-   once on every channel each port carried. Windows waits for its thread to send them. caw_engine_destroy does this
+/* Detaches it: the engine queues nothing more, messages not yet sent are dropped, and CC 123 (All Notes Off) goes on every
+   channel each port carried, timed just after the last message handed out for that port (so a receiver that holds
+   messages until their timestamps plays it after them). Windows waits for its thread to send them. caw_engine_destroy does this
    for its own engine. */
 CAW_API void caw_midi_out_stop(void);
 /* The devices a port can send to, as JSON (caw_free): Windows, WinMM's output ports in its order, ["name", ...] (a

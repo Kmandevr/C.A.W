@@ -104,12 +104,21 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
 
     @Volatile private var follow = false
 
-    /** A port's clock bytes from one onSend, posted together. */
+    /** A port's clock bytes from one onSend, posted together; a full batch is posted at once, never cut. */
     private inner class ClockBatch(private val source: String) {
         private val bytes = ByteArray(48)
         private var n = 0
-        fun add(b: Int) {
-            if (n < bytes.size) bytes[n++] = b.toByte()
+        /** A one-byte message (F8, FA, FB, FC). */
+        fun add(b: Int, timestamp: Long) {
+            if (n + 1 > bytes.size) post(timestamp)
+            bytes[n++] = b.toByte()
+        }
+        /** A Song Position Pointer, whole. */
+        fun addSpp(lsb: Int, msb: Int, timestamp: Long) {
+            if (n + 3 > bytes.size) post(timestamp)
+            bytes[n++] = 0xF2.toByte()
+            bytes[n++] = lsb.toByte()
+            bytes[n++] = msb.toByte()
         }
         fun post(timestamp: Long) {
             if (n == 0) return
@@ -234,7 +243,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                 val b = msg[i].toInt() and 0xFF
                 when {
                     b >= 0xF8 -> { // clock and other real-time bytes may appear anywhere
-                        if (following && (b == 0xF8 || b == 0xFA || b == 0xFB || b == 0xFC)) clock.add(b)
+                        if (following && (b == 0xF8 || b == 0xFA || b == 0xFB || b == 0xFC)) clock.add(b, timestamp)
                         continue
                     }
                     b == 0xF0 -> { sysex = true; status = 0; spp = -1 }
@@ -245,7 +254,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                     }
                     spp >= 0 -> {
                         if (spp == 0) { sppLow = b; spp = 1 } else {
-                            clock.add(0xF2); clock.add(sppLow); clock.add(b)
+                            clock.addSpp(sppLow, b, timestamp)
                             spp = -1
                         }
                     }
@@ -294,8 +303,8 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                 // A System message (type 1, one word) carrying the clock: to the follow, not the instrument.
                 val st = ((w shr 16) and 0xFF).toInt()
                 if (following && type == 1 && (st == 0xF8 || st == 0xFA || st == 0xFB || st == 0xFC || st == 0xF2)) {
-                    clock.add(st)
-                    if (st == 0xF2) { clock.add(((w shr 8) and 0x7F).toInt()); clock.add((w and 0x7F).toInt()) }
+                    if (st == 0xF2) clock.addSpp(((w shr 8) and 0x7F).toInt(), (w and 0x7F).toInt(), timestamp)
+                    else clock.add(st, timestamp)
                     continue
                 }
                 words.add(w)

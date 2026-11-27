@@ -42,9 +42,9 @@ void send(void* ctx, const caw::MidiOutMessage& m) { packOne(*static_cast<Pack*>
 }  // namespace
 
 extern "C" int32_t caw_midi_out_start(CawEngine* e) {
-    return e && e->engine && caw::midiSender().attach(e->engine.get()) ? 1 : 0;
+    return e && e->engine && caw::midiSender().attach(e->engine.get(), caw_midi_clock_ns()) ? 1 : 0;
 }
-extern "C" void caw_midi_out_stop(void) { caw::midiSender().detach(); }
+extern "C" void caw_midi_out_stop(void) { caw::midiSender().detach(caw_midi_clock_ns()); }
 extern "C" char* caw_midi_out_devices(void) {
     char* s = static_cast<char*>(std::malloc(3));
     if (s) std::memcpy(s, "[]", 3);
@@ -60,6 +60,7 @@ extern "C" int64_t caw_midi_out_dropped(void) { return static_cast<int64_t>(caw:
 extern "C" JNIEXPORT jint JNICALL Java_com_kmandevr_caw_MidiOutNative_poll(JNIEnv* env, jclass, jbyteArray buf,
                                                                            jlong leadNs) {
     if (!buf) return -1;
+    leadNs = std::clamp<jlong>(leadNs, 0, 1'000'000'000);  // never negative: next - lead below must not overflow
     const int cap = std::min<int>(kMaxRecords, env->GetArrayLength(buf) / kRecord);
     if (cap <= 0) return -1;
     Pack p;
@@ -86,4 +87,10 @@ extern "C" JNIEXPORT jint JNICALL Java_com_kmandevr_caw_MidiOutNative_notesOff(J
     for (int k = 0; k < n; ++k) packOne(p, off[k]);
     if (p.n > 0) env->SetByteArrayRegion(buf, 0, p.n * kRecord, p.bytes);
     return p.n;
+}
+
+// MidiOutNative.detach(): caw_midi_out_stop, for MainActivity.onDestroy (an activity made again in the same process
+// must not find the old engine attached; the thread sends the CC 123s, then ends).
+extern "C" JNIEXPORT void JNICALL Java_com_kmandevr_caw_MidiOutNative_detach(JNIEnv*, jclass) {
+    caw_midi_out_stop();
 }

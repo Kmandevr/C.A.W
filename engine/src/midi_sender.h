@@ -83,31 +83,41 @@ public:
     using SendFn = void (*)(void* ctx, const MidiOutMessage& m);
 
     // Attaches [e]: its queue starts empty and fills from now (Engine::setMidiOutActive). True when attached (also
-    // when it already was); false with no engine or another engine attached.
-    bool attach(Engine* e) noexcept;
+    // when it already was); false with no engine. Another engine attached is detached first, as detach(nowNs) does
+    // (its owner may be gone: an Android activity made again in the same process).
+    bool attach(Engine* e, int64_t nowNs) noexcept;
     // Detaches: the engine queues nothing more, held messages are dropped, and CC 123 goes on every channel each port
-    // used, due now; the next pumps send those, then report kStopped.
-    void detach() noexcept;
-    // detach() if [e] is the attached engine (its destruction: no pump can reach it afterwards).
-    void detachIf(Engine* e) noexcept;
+    // used, at endTime (after anything already handed out for the port); the next pumps send those, then report
+    // kStopped.
+    void detach(int64_t nowNs) noexcept;
+    // detach(nowNs) if [e] is the attached engine (its destruction: no pump can reach it afterwards), in one hold of
+    // the lock, so a concurrent stop and start can't make it detach another engine.
+    void detachIf(Engine* e, int64_t nowNs) noexcept;
     bool attached() const noexcept;
     bool attachedTo(const Engine* e) const noexcept;
-    // Drains the attached engine into the schedule, then sends every held message due by [nowNs] + [leadNs], in time
-    // order, at most [maxSend] of them. Returns the next held message's time (INT64_MAX: none; at or before now:
-    // maxSend stopped it), or kStopped once detached with nothing left to send.
+    // Drains the attached engine into the schedule, then sends every held message due by [nowNs] + [leadNs] (lead
+    // clamped to 0..1 s), in time order, at most [maxSend] of them. Returns the next held message's time (INT64_MAX:
+    // none; at or before now: maxSend stopped it), or kStopped once detached with nothing left to send.
     int64_t pump(int64_t nowNs, int64_t leadNs, SendFn send, void* ctx, int maxSend = 1 << 30) noexcept;
-    // A port is closing or going to another device: CC 123 at [nowNs] for each channel it used, into [out] (room for
-    // 16), to send to the old device before it closes. Its held messages stay for the next device.
+    // A port is closing or going to another device: CC 123 for each channel it used, into [out] (room for 16), at
+    // endTime, to send to the old device before it closes. Its held messages stay for the next device.
     int takeNotesOff(int port, int64_t nowNs, MidiOutMessage* out) noexcept;
+    // When a port's CC 123 goes: just after now + the last lead and after the last message handed out for the port,
+    // so a receiver that schedules by timestamp never plays it before a note-on it already holds.
+    int64_t endTime(int port, int64_t nowNs) const noexcept;
     // Messages the schedule had no room for.
     uint64_t dropped() const noexcept;
 
 private:
+    void detachLocked(int64_t nowNs) noexcept;
+    int64_t endTimeLocked(int port, int64_t nowNs) const noexcept;
     mutable std::mutex lock_;
     Engine* engine_ = nullptr;
     MidiSendSchedule schedule_{kCapacity};
     MidiChannelsUsed used_;
     uint64_t dropped_ = 0;
+    int64_t lead_ = 0;                        // the last pump's lead
+    int64_t last_[kMidiOutPorts] = {};        // each port's latest time handed out (0: none)
 };
 
 MidiSender& midiSender();

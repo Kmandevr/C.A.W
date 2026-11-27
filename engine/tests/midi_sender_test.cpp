@@ -132,10 +132,9 @@ TEST(midi_sender_waits_precisely_only_for_a_message) {
 TEST(midi_sender_sends_each_message_at_its_time_and_ends_notes_on_detach) {
     Engine e{48000}, other{48000};
     MidiSender s;  // a sender of its own (the process's one is the C API's)
-    CHECK(!s.attach(nullptr));
-    CHECK(s.attach(&e));
-    CHECK(s.attach(&e));       // again: still attached
-    CHECK(!s.attach(&other));  // one engine at a time
+    CHECK(!s.attach(nullptr, kT0));
+    CHECK(s.attach(&e, kT0));
+    CHECK(s.attach(&e, kT0));  // again: still attached
     CHECK(s.attachedTo(&e));
     CHECK(e.midiOutActive());
     CHECK(e.setProjectJson(kProject).find("\"ok\":true") != std::string::npos);
@@ -171,7 +170,7 @@ TEST(midi_sender_sends_each_message_at_its_time_and_ends_notes_on_detach) {
     e.setMidiClockForTest(kT0 + 600'000'000);
     e.process(l.data(), r.data(), kCb);
     // Detach: nothing more from the engine, held messages dropped, CC 123 on channel 3 of port 2 (the one used).
-    s.detach();
+    s.detach(kT0 + 600'000'000);
     CHECK(!e.midiOutActive());
     CHECK(!s.attached());
     Sent offs;
@@ -182,15 +181,16 @@ TEST(midi_sender_sends_each_message_at_its_time_and_ends_notes_on_detach) {
         CHECK_EQ(offs.got[0].data[0], 0xB2);
         CHECK_EQ(offs.got[0].data[1], 123);
         CHECK_EQ(offs.got[0].data[2], 0);
+        CHECK(offs.got[0].timeNs > kT0 + 600'000'000);  // after the detach's now, so after all it handed out
     }
     CHECK_EQ(s.pump(kT0 + 602'000'000, 0, Sent::fn, &offs), MidiSender::kStopped);  // and nothing again
     CHECK_EQ(offs.got.size(), 1u);
     CHECK_EQ(s.dropped(), 0u);
     // Another engine may attach now; detachIf leaves a sender alone that has another engine.
-    CHECK(s.attach(&other));
-    s.detachIf(&e);
+    CHECK(s.attach(&other, kT0));
+    s.detachIf(&e, kT0);
     CHECK(s.attachedTo(&other));
-    s.detachIf(&other);
+    s.detachIf(&other, kT0);
     CHECK(!s.attached());
     CHECK(!other.midiOutActive());
 }
@@ -198,7 +198,7 @@ TEST(midi_sender_sends_each_message_at_its_time_and_ends_notes_on_detach) {
 TEST(midi_sender_lead_and_a_port_notes_off) {
     Engine e{48000};
     MidiSender s;
-    CHECK(s.attach(&e));
+    CHECK(s.attach(&e, kT0));
     CHECK(e.setProjectJson(kProject).find("\"ok\":true") != std::string::npos);
     CHECK(e.play());
     std::vector<float> l(kCb), r(kCb);
@@ -209,11 +209,13 @@ TEST(midi_sender_lead_and_a_port_notes_off) {
     CHECK(sent.got.empty());
     s.pump(kT0 - 1'000'000, 1'000'000, Sent::fn, &sent);  // 1 ms early: handed out
     CHECK_EQ(sent.got.size(), 1u);
-    // The port moves to another device: its CC 123s for the old one, once.
+    // The port moves to another device: its CC 123s for the old one, once, timed after the note-on it was handed
+    // (kT0, ahead of now by the lead): a receiver holding that note-on until kT0 plays the CC 123 after it.
     MidiOutMessage off[16];
     CHECK_EQ(s.takeNotesOff(2, 42, off), 1);
     CHECK_EQ(off[0].data[0], 0xB2);
-    CHECK_EQ(off[0].timeNs, 42);
+    CHECK_EQ(off[0].timeNs, kT0 + 1);
+    CHECK_EQ(s.endTime(2, kT0 + 5'000'000), kT0 + 6'000'001);  // later: now + the 1 ms lead
     CHECK_EQ(s.takeNotesOff(2, 42, off), 0);
     CHECK_EQ(s.takeNotesOff(3, 42, off), 0);
     CHECK_EQ(s.takeNotesOff(16, 42, off), 0);
@@ -224,7 +226,37 @@ TEST(midi_sender_lead_and_a_port_notes_off) {
     CHECK_EQ(used.mask(5), 0xFFFF);
     CHECK_EQ(used.takeNotesOff(5, 0, off), 16);
     CHECK_EQ(off[15].data[0], 0xBF);
-    s.detach();
+    s.detach(kT0);
+}
+
+TEST(midi_sender_attach_takes_over_and_ends_the_old_engines_notes) {
+    Engine e{48000}, other{48000};
+    MidiSender s;
+    CHECK(s.attach(&e, kT0));
+    CHECK(e.setProjectJson(kProject).find("\"ok\":true") != std::string::npos);
+    CHECK(e.play());
+    std::vector<float> l(kCb), r(kCb);
+    e.setMidiClockForTest(kT0);
+    e.process(l.data(), r.data(), kCb);
+    Sent sent;
+    s.pump(kT0 + 1'000'000, -5'000'000'000, Sent::fn, &sent);  // a negative lead counts as none
+    CHECK_EQ(sent.got.size(), 1u);
+    CHECK_EQ(s.endTime(2, kT0 + 1'000'000), kT0 + 1'000'001);
+    // An Android activity made again: the new engine takes over, the old one stops queueing and its notes end.
+    CHECK(s.attach(&other, kT0 + 2'000'000));
+    CHECK(!e.midiOutActive());
+    CHECK(other.midiOutActive());
+    CHECK(s.attachedTo(&other));
+    Sent offs;
+    CHECK(s.pump(kT0 + 3'000'000, 0, Sent::fn, &offs) != MidiSender::kStopped);
+    CHECK_EQ(offs.got.size(), 1u);
+    if (offs.got.size() == 1) {
+        CHECK_EQ(offs.got[0].data[0], 0xB2);
+        CHECK_EQ(offs.got[0].data[1], 123);
+        CHECK_EQ(offs.got[0].timeNs, kT0 + 2'000'001);
+    }
+    s.detachIf(&other, kT0);
+    CHECK(!s.attached());
 }
 
 TEST(midi_sender_c_api_per_platform) {

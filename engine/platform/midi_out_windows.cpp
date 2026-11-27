@@ -124,18 +124,23 @@ std::string jsonString(const std::string& s) {
     return o + "\"";
 }
 
-// Sends the port's CC 123s to its device, then closes it.
+// Takes the port's handle out (the sender thread sends nothing more to it: a send in progress holds g_ports, so it
+// finishes first), then sends its CC 123s, resets and closes it outside every lock, so a slow device stalls neither
+// the other ports nor the caller's other work.
 void closePort(int port) {
+    HMIDIOUT h = nullptr;
+    {
+        std::lock_guard<std::mutex> g(g_ports);
+        h = g_out[port];
+        g_out[port] = nullptr;
+    }
     caw::MidiOutMessage off[16];
-    const int n = caw::midiSender().takeNotesOff(port, 0, off);
-    std::lock_guard<std::mutex> g(g_ports);
-    HMIDIOUT h = g_out[port];
+    const int n = caw::midiSender().takeNotesOff(port, caw_midi_clock_ns(), off);
     if (!h) return;
     for (int k = 0; k < n; ++k)
         midiOutShortMsg(h, off[k].data[0] | static_cast<DWORD>(off[k].data[1]) << 8);
     midiOutReset(h);
     midiOutClose(h);
-    g_out[port] = nullptr;
 }
 
 }  // namespace
@@ -145,14 +150,14 @@ extern "C" int32_t caw_midi_out_start(CawEngine* e) {
     std::lock_guard<std::mutex> g(g_thread);
     if (g_sender.joinable()) {
         if (caw::midiSender().attachedTo(e->engine.get())) return 1;
-        if (caw::midiSender().attached()) return 0;  // another engine's
-        g_sender.join();  // detached (caw_engine_destroy): it ends once its CC 123s are sent
+        caw::midiSender().detach(caw_midi_clock_ns());  // another engine's: its notes end, the new one takes over
+        g_sender.join();  // it ends once the CC 123s are sent
     }
-    if (!caw::midiSender().attach(e->engine.get())) return 0;
+    if (!caw::midiSender().attach(e->engine.get(), caw_midi_clock_ns())) return 0;
     try {
         g_sender = std::thread(run);
     } catch (...) {
-        caw::midiSender().detach();
+        caw::midiSender().detach(caw_midi_clock_ns());
         return 0;
     }
     return 1;
@@ -160,7 +165,7 @@ extern "C" int32_t caw_midi_out_start(CawEngine* e) {
 
 extern "C" void caw_midi_out_stop(void) {
     std::lock_guard<std::mutex> g(g_thread);
-    caw::midiSender().detach();
+    caw::midiSender().detach(caw_midi_clock_ns());
     if (g_sender.joinable()) g_sender.join();  // it sends the CC 123s, then ends
 }
 

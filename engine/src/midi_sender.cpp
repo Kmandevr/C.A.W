@@ -76,36 +76,47 @@ MidiSendWait midiSendWait(int64_t nowNs, int64_t nextNs, int64_t pollNs) noexcep
     return {nowNs + pollNs, false};
 }
 
-bool MidiSender::attach(Engine* e) noexcept {
+int64_t MidiSender::endTimeLocked(int port, int64_t nowNs) const noexcept {
+    const int64_t last = port >= 0 && port < kMidiOutPorts ? last_[port] : 0;
+    return std::max(nowNs + lead_, last) + 1;
+}
+
+int64_t MidiSender::endTime(int port, int64_t nowNs) const noexcept {
+    std::lock_guard<std::mutex> g(lock_);
+    return endTimeLocked(port, nowNs);
+}
+
+bool MidiSender::attach(Engine* e, int64_t nowNs) noexcept {
     if (!e) return false;
     std::lock_guard<std::mutex> g(lock_);
     if (engine_ == e) return true;
-    if (engine_) return false;
+    if (engine_) detachLocked(nowNs);  // the old engine's notes end first
     engine_ = e;
     // Notes-offs a detach left unsent go with the new attach's first pump; nothing else is held.
     e->setMidiOutActive(true);
     return true;
 }
 
-void MidiSender::detach() noexcept {
-    std::lock_guard<std::mutex> g(lock_);
+void MidiSender::detachLocked(int64_t nowNs) noexcept {
     if (!engine_) return;
     engine_->setMidiOutActive(false);
     engine_ = nullptr;
     schedule_.clear();
     MidiOutMessage off[16];
     for (int p = 0; p < kMidiOutPorts; ++p) {
-        const int n = used_.takeNotesOff(p, 0, off);  // time 0: due at once
+        const int n = used_.takeNotesOff(p, endTimeLocked(p, nowNs), off);
         for (int k = 0; k < n; ++k) schedule_.push(off[k]);
     }
 }
 
-void MidiSender::detachIf(Engine* e) noexcept {
-    {
-        std::lock_guard<std::mutex> g(lock_);
-        if (!e || engine_ != e) return;
-    }
-    detach();
+void MidiSender::detach(int64_t nowNs) noexcept {
+    std::lock_guard<std::mutex> g(lock_);
+    detachLocked(nowNs);
+}
+
+void MidiSender::detachIf(Engine* e, int64_t nowNs) noexcept {
+    std::lock_guard<std::mutex> g(lock_);
+    if (e && engine_ == e) detachLocked(nowNs);
 }
 
 bool MidiSender::attached() const noexcept {
@@ -120,6 +131,7 @@ bool MidiSender::attachedTo(const Engine* e) const noexcept {
 
 int64_t MidiSender::pump(int64_t nowNs, int64_t leadNs, SendFn send, void* ctx, int maxSend) noexcept {
     std::lock_guard<std::mutex> g(lock_);
+    lead_ = std::clamp<int64_t>(leadNs, 0, 1'000'000'000);
     if (engine_) {
         MidiOutMessage buf[64];
         while (schedule_.size() < schedule_.capacity()) {
@@ -131,19 +143,18 @@ int64_t MidiSender::pump(int64_t nowNs, int64_t leadNs, SendFn send, void* ctx, 
         }
     }
     MidiOutMessage m;
-    for (int sent = 0; sent < maxSend && schedule_.popDue(nowNs + leadNs, m); ++sent) {
+    for (int sent = 0; sent < maxSend && schedule_.popDue(nowNs + lead_, m); ++sent) {
         if (engine_) used_.note(m);  // a detach's own CC 123s are not a channel used
+        if (m.port < kMidiOutPorts) last_[m.port] = std::max(last_[m.port], m.timeNs);
         if (send) send(ctx, m);
     }
-    if (!engine_ && schedule_.empty()) {
-        return kStopped;
-    }
+    if (!engine_ && schedule_.empty()) return kStopped;
     return schedule_.nextTime();
 }
 
 int MidiSender::takeNotesOff(int port, int64_t nowNs, MidiOutMessage* out) noexcept {
     std::lock_guard<std::mutex> g(lock_);
-    return used_.takeNotesOff(port, nowNs, out);
+    return used_.takeNotesOff(port, endTimeLocked(port, nowNs), out);
 }
 
 uint64_t MidiSender::dropped() const noexcept {

@@ -67,7 +67,7 @@ CawEngine* caw_engine_create(int32_t sample_rate) try {
 
 void caw_engine_destroy(CawEngine* e) {
     if (!e) return;
-    caw::midiSender().detachIf(e->engine.get());  // API 48: no sender pump reaches it after this
+    caw::midiSender().detachIf(e->engine.get(), caw::Engine::midiClockNs());  // API 48: no sender pump reaches it after this
     caw_audio_stop(e);
     e->waitAsync();
     delete e;

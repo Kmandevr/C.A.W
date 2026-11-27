@@ -89,12 +89,14 @@ void main() {
     late FakeOutput out;
     late Map<int, String> routes;
     MidiSenderHost? host;
+    late bool awake;
     late MidiOutRouting r;
     setUp(() {
       out = FakeOutput();
       routes = {};
       host = FakeHost();
-      r = MidiOutRouting(out, routes: () => routes, save: (m) async => routes = m, host: () => host);
+      awake = true;
+      r = MidiOutRouting(out, routes: () => routes, save: (m) async => routes = m, host: () => host, awake: () => awake);
       r.start();
     });
 
@@ -166,6 +168,31 @@ void main() {
       await r.sync();
       expect(out.attached, isNull);
       expect(r.sending, isFalse);
+    });
+
+    test('asleep (behind others, stopped) the sender detaches and attaches again on waking; shutdown closes for good',
+        () async {
+      routes = {0: 'A'};
+      out.list.add(const [MidiOutDevice(id: 'a', name: 'A')]);
+      await settle();
+      await r.sync();
+      expect(r.sending, isTrue);
+      awake = false;
+      await r.sync();
+      expect(r.sending, isFalse);
+      expect((host as FakeHost).stops, 1); // CC 123 on the channels used
+      expect(r.isOpen(0), isTrue); // the port stays open for the return
+      awake = true;
+      await r.sync();
+      expect(r.sending, isTrue);
+      expect((host as FakeHost).starts, 2);
+      await r.shutdown();
+      expect(out.log.last, 'close');
+      expect(r.sending, isFalse);
+      out.log.clear();
+      await r.sync();
+      await r.choose(1, 'A');
+      expect(out.log, isEmpty); // nothing opens again
     });
 
     test('an engine that has no sender is not asked again until it changes', () async {

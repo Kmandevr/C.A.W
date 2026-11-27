@@ -27,6 +27,9 @@ object MidiOutNative {
 
     /** CC 123 for each channel [port] used, into [buf] (room for 16): for the old device before the port moves. */
     @JvmStatic external fun notesOff(port: Int, buf: ByteArray): Int
+
+    /** caw_midi_out_stop: the engine detached, CC 123s queued for the thread to send. */
+    @JvmStatic external fun detach()
 }
 
 /**
@@ -53,6 +56,7 @@ class MidiOutput(context: Context) : EventChannel.StreamHandler, MethodChannel.M
     private val opened = arrayOfNulls<Opened>(16)
     private val generation = IntArray(16) // a route's newest request, so a slow open that lost doesn't win
     private val lock = Any()
+    private val sendLock = Any() // the sender thread's sends against a port's close
     private var thread: Thread? = null // under lock
     private var restart = false        // under lock: a start came while the thread was running (or ending)
 
@@ -144,27 +148,50 @@ class MidiOutput(context: Context) : EventChannel.StreamHandler, MethodChannel.M
                 runCatching { device.close() }
                 return@openDevice result.success(false)
             }
-            opened[port] = Opened(id, device, input)
-            ports = ports.copyOf().also { it[port] = input }
+            synchronized(sendLock) {
+                opened[port] = Opened(id, device, input)
+                ports = ports.copyOf().also { it[port] = input }
+            }
             result.success(true)
         }, main)
     }
 
-    /** The port's CC 123s to its old device, then closed. */
+    /**
+     * The port's CC 123s to its old device, then closed. Under [sendLock], so the sender thread sends nothing to it
+     * after them: what it took before is sent first, what it takes after finds no port. Each CC 123 carries the time
+     * the engine gave it (just after the last message handed out for the port), so a receiver that holds messages
+     * until their timestamps plays it after a note-on it already holds.
+     */
     private fun closePort(port: Int) {
-        val o = opened[port] ?: return
-        opened[port] = null
-        ports = ports.copyOf().also { it[port] = null }
-        if (MidiOutNative.loaded) {
-            val buf = ByteArray(MidiOutNative.RECORD * 16)
-            val n = MidiOutNative.notesOff(port, buf)
-            for (i in 0 until n) {
-                val at = i * MidiOutNative.RECORD
-                runCatching { o.port.send(buf, at + 2, buf[at + 1].toInt(), System.nanoTime()) }
+        val o = synchronized(sendLock) {
+            val was = opened[port] ?: return
+            opened[port] = null
+            ports = ports.copyOf().also { it[port] = null }
+            if (MidiOutNative.loaded) {
+                val buf = ByteArray(MidiOutNative.RECORD * 16)
+                val n = MidiOutNative.notesOff(port, buf)
+                for (i in 0 until n) {
+                    val at = i * MidiOutNative.RECORD
+                    runCatching { was.port.send(buf, at + 2, buf[at + 1].toInt(), timeOf(buf, at)) }
+                }
             }
+            was
         }
-        runCatching { o.port.close() }
-        runCatching { o.device.close() }
+        // Closed a little later: the CC 123s are timed up to the lead ahead, and a port closed first could drop them.
+        main.postDelayed({
+            runCatching { o.port.close() }
+            runCatching { o.device.close() }
+        }, CLOSE_DELAY_MS)
+    }
+
+    /** The app is going (MainActivity.onDestroy): every port's CC 123s and close, then the engine detached, so an
+     * activity made again in this process starts clean (the thread sends what is left and ends). */
+    fun close() {
+        for (p in 0 until 16) closePort(p)
+        if (MidiOutNative.loaded) runCatching { MidiOutNative.detach() }
+        manager?.unregisterDeviceCallback(callback)
+        known.clear()
+        sink = null
     }
 
     private fun startThread() {
@@ -194,16 +221,16 @@ class MidiOutput(context: Context) : EventChannel.StreamHandler, MethodChannel.M
                 }
                 continue
             }
-            val now = ports
-            for (i in 0 until n) {
-                val at = i * MidiOutNative.RECORD
-                val target = now[buf[at].toInt() and 0x0F] ?: continue // no device on that port
-                var t = 0L
-                for (k in 7 downTo 0) t = (t shl 8) or (buf[at + 8 + k].toLong() and 0xFF)
-                try {
-                    target.send(buf, at + 2, buf[at + 1].toInt(), t)
-                } catch (e: java.io.IOException) {
-                    // closed meanwhile (the device went): its messages are dropped
+            synchronized(sendLock) { // a port's close waits for this batch, and this one for a close
+                val now = ports
+                for (i in 0 until n) {
+                    val at = i * MidiOutNative.RECORD
+                    val target = now[buf[at].toInt() and 0x0F] ?: continue // no device on that port
+                    try {
+                        target.send(buf, at + 2, buf[at + 1].toInt(), timeOf(buf, at))
+                    } catch (e: java.io.IOException) {
+                        // closed meanwhile (the device went): its messages are dropped
+                    }
                 }
             }
         }
@@ -211,5 +238,13 @@ class MidiOutput(context: Context) : EventChannel.StreamHandler, MethodChannel.M
 
     companion object {
         const val LEAD_NS = 1_000_000L
+        const val CLOSE_DELAY_MS = 20L
+
+        /** A record's time (little-endian at bytes 8..15). */
+        fun timeOf(buf: ByteArray, at: Int): Long {
+            var t = 0L
+            for (k in 7 downTo 0) t = (t shl 8) or (buf[at + 8 + k].toLong() and 0xFF)
+            return t
+        }
     }
 }

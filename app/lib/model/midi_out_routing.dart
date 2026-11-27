@@ -1,37 +1,77 @@
 // MIDI out's routing on this machine (engine API 48): each MIDI-out port a project names (0..15) goes to the device
 // the settings chose for it, by name; the sender attaches to the engine while any port has its device. No screen.
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 
 import '../platform/midi_output.dart';
 import 'app_state.dart';
 
 class MidiOutRouting extends ChangeNotifier {
-  /// [routes] reads the settings' port-to-device-name map, [save] writes it; [host] is the engine now (null: none).
-  MidiOutRouting(this.output, {required this.routes, required this.save, required this.host});
+  /// [routes] reads the settings' port-to-device-name map, [save] writes it; [host] is the engine now (null: none);
+  /// [awake] whether the sender should run (false: detached, which sends CC 123 on the channels used).
+  MidiOutRouting(this.output, {required this.routes, required this.save, required this.host, bool Function()? awake})
+      : awake = awake ?? (() => true);
 
   /// The app's one instance (main.dart), for a later screen that picks the devices.
   static MidiOutRouting? current;
 
-  /// Wired to the app: the settings' `midiOutDevices`, re-synced when they or the engine change.
+  /// Wired to the app: the settings' `midiOutDevices`, re-synced when they or the engine change. The sender runs
+  /// while the app is in front or the transport plays (background playback keeps it; a stopped app behind others
+  /// detaches, ending the devices' notes, and attaches again on its return), and the app's exit or detach closes
+  /// every device after CC 123 (the engine would otherwise never be told: Windows' window closing, Android ending
+  /// the app).
   factory MidiOutRouting.forApp(AppState state, MidiOutput output) {
     final r = MidiOutRouting(
       output,
       routes: () => state.settings.midiOutDevices,
       save: (m) => state.settings.update((x) => x.midiOutDevices = m),
       host: () => state.engine,
+      awake: () => state.foreground.value || state.transportOn,
     );
     state.addListener(r._maybeSync);
+    state.foreground.addListener(r._maybeSync);
     state.settings.addListener(r._maybeSync);
+    r._life = AppLifecycleListener(
+      onDetach: () => unawaited(r.shutdown()),
+      onExitRequested: () async {
+        await r.shutdown();
+        return AppExitResponse.exit;
+      },
+    );
     r.start();
     return r;
+  }
+
+  AppLifecycleListener? _life;
+  bool _shut = false;
+
+  /// The app is going: the sender detached and every device closed, each after its CC 123s. Nothing opens again.
+  Future<void> shutdown() async {
+    if (_shut) return;
+    _shut = true;
+    await _sub?.cancel();
+    _sub = null;
+    await _running;
+    _attached = null;
+    _open.clear();
+    try {
+      await output.close();
+    } catch (_) {
+      // the platform side is already gone
+    }
   }
 
   final MidiOutput output;
   final Map<int, String> Function() routes;
   final Future<void> Function(Map<int, String>) save;
   final MidiSenderHost? Function() host;
+  final bool Function() awake;
+
+  /// The engine the sender should be on now: none while asleep or shut down.
+  MidiSenderHost? _wantedHost() => _shut || !awake() ? null : host();
 
   /// The devices the platform can send to now.
   List<MidiOutDevice> devices = const [];
@@ -78,7 +118,7 @@ class MidiOutRouting extends ChangeNotifier {
 
   void _maybeSync() {
     final r = routes();
-    if (!identical(host(), _hostSeen) || !mapEquals(r, _lastRoutes)) sync();
+    if (!identical(_wantedHost(), _hostSeen) || !mapEquals(r, _lastRoutes)) sync();
   }
 
   /// Opens and closes the ports to match the settings and the devices present, then attaches or detaches the
@@ -98,6 +138,7 @@ class MidiOutRouting extends ChangeNotifier {
   }
 
   Future<void> _syncOnce() async {
+    if (_shut) return;
     final r = routes();
     _lastRoutes = {...r};
     final want = <int, String>{};
@@ -123,7 +164,7 @@ class MidiOutRouting extends ChangeNotifier {
         _open.remove(port);
       }
     }
-    final h = host();
+    final h = _wantedHost();
     final newHost = !identical(h, _hostSeen);
     _hostSeen = h;
     if (_open.isNotEmpty && h != null) {
@@ -141,8 +182,9 @@ class MidiOutRouting extends ChangeNotifier {
 
   @override
   void dispose() {
+    _life?.dispose();
     _sub?.cancel();
-    output.close();
+    if (!_shut) output.close();
     super.dispose();
   }
 }
