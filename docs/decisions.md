@@ -6,6 +6,13 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: Per-build reference sets for chaotic devices (1.1.3 maintenance)
+
+- **[Fact] The problem:** chaotic devices (stick-slip bowed strings, self-oscillating winds) move by up to about 1 dB between compilers whatever the flags (2026-11-24, `.claude/rules/engine.md`), and every build compared with one set recorded on x86-64. So tolerances were widened for all builds: Nightingale's references use the Friction class (1 dB) and lone notes, Curlew's stop at its last release, and the Benchmark's `every_instrument` mix leaves out Nightingale and Curlew (`stress_test.cpp`, `withoutBowedStrings`).
+- **Chosen:** a build may have its own set of a suite, `<suite>.<build>.cawref` (`arm64`, `win64`, `x64_debug`, as the drums' compat tables split builds), which `References` reads instead of the common file where it exists; recording on such a build writes only its own file. A hand-started *Reference sets* workflow records them on CI's runners and uploads them as artifacts ([engine](engine.md)). x86-64 Release keeps the common files and its behaviour unchanged.
+- **Next, not done here:** record the sets for `nightingale`, `curlew` and `stress`, then tighten on the same branch (Nightingale back to Chaotic, Curlew's release tail, `every_instrument` whole), re-recording the common files locally and the sets with the workflow. **[Assumption]** the ThreadSanitizer job (Clang x86-64, which reads the common files) differs from GCC like the other compilers; a tightened `stress` set may need it its own build name too.
+- **Not chosen:** per-entry overlays on the common file (two files to read for one suite; a whole suite per build is simpler to record and check), and keeping the wide tolerances (they hide real changes on x86-64 too).
+
 ## 2026-11-27: Worktree backups and a scratch-build cleanup (1.1.3 maintenance)
 
 - **[Fact] The problem:** worker restarts and usage limits have ended sessions mid-task, and agent worktrees under `.claude/worktrees/` live only in the container; backing one up to `caw-backup-<name>` was a step to remember (`.claude/README.md`). Scratch builds are about 2 GB each and fill the disk.

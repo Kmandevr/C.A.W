@@ -283,3 +283,63 @@ TEST(reference_files_round_trip_and_refuse_damaged_ones) {
     CHECK(!cawtest::decodeAudio(huge, 100, back));
     std::filesystem::remove_all(where, ec);
 }
+
+// A build's own set (<suite>.<build>.cawref) is read where it exists, the common file otherwise; recording on a named
+// build writes its own file and leaves the common one alone; a damaged own set fails rather than falling back.
+TEST(reference_sets_prefer_the_builds_own_file_and_fall_back_to_the_common_one) {
+    const std::filesystem::path where = std::filesystem::temp_directory_path() /
+        ("caw_tolerance_build_sets_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::error_code ec;
+    std::filesystem::remove_all(where, ec);
+    std::filesystem::create_directories(where, ec);
+    const std::string dir = where.generic_string();
+    const Audio m = music(24000), quiet = gained(m, 0.5);
+    {
+        cawtest::References w("selftest", dir, true);
+        CHECK(!w.ownSet());
+        CHECK_ACCEPTED(w.compare("music", m, cawtest::Class::Stable));
+    }
+    const std::string common = dir + "/selftest.cawref", own = dir + "/selftest.testbuild.cawref";
+    const std::vector<uint8_t> commonBytes = fileBytes(common);
+    CHECK(commonBytes.size() > 1000);
+    {
+        // No own set yet: the common file.
+        cawtest::References r("selftest", dir, false, "testbuild");
+        CHECK(r.loaded() && !r.ownSet());
+        CHECK_EQ(r.path(), common);
+        CHECK_ACCEPTED(r.compare("music", m, cawtest::Class::Stable));
+    }
+    {
+        // Recorded on the build: its own file, with its own render.
+        cawtest::References w("selftest", dir, true, "testbuild");
+        CHECK(w.ownSet());
+        CHECK_EQ(w.path(), own);
+        CHECK_ACCEPTED(w.compare("music", quiet, cawtest::Class::Stable));
+    }
+    CHECK(fileBytes(own).size() > 1000);
+    CHECK(fileBytes(common) == commonBytes);
+    {
+        cawtest::References r("selftest", dir, false, "testbuild");
+        CHECK(r.loaded() && r.ownSet());
+        CHECK_EQ(r.path(), own);
+        CHECK_ACCEPTED(r.compare("music", quiet, cawtest::Class::Stable));
+        CHECK(!r.compare("music", m, cawtest::Class::Stable).empty());
+    }
+    for (const char* build : {"", "otherbuild"}) {
+        // The common build, and a build without its own set, keep the common file.
+        cawtest::References r("selftest", dir, false, build);
+        CHECK(r.loaded() && !r.ownSet());
+        CHECK_EQ(r.path(), common);
+        CHECK_ACCEPTED(r.compare("music", m, cawtest::Class::Stable));
+    }
+    {
+        // A damaged own set is refused, not replaced by the common file.
+        std::vector<uint8_t> cut = fileBytes(own);
+        cut.resize(cut.size() / 2);
+        writeBytes(own, cut);
+        cawtest::References r("selftest", dir, false, "testbuild");
+        CHECK(!r.loaded() && r.ownSet());
+        CHECK(!r.compare("music", quiet, cawtest::Class::Stable).empty());
+    }
+    std::filesystem::remove_all(where, ec);
+}

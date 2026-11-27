@@ -596,11 +596,35 @@ std::string featureDeltas(const Features& a, const Features& b) {
 
 }  // namespace
 
-References::References(std::string suite) : References(std::move(suite), std::string(), updateGolden) {}
+const char* referenceBuild() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return "arm64";
+#elif defined(_WIN32) && !defined(NDEBUG)
+    return "win64_debug";  // CI builds Windows Release only; a local Debug run keeps its own set
+#elif defined(_WIN32)
+    return "win64";
+#elif !defined(__OPTIMIZE__)
+    return "x64_debug";  // -O0 (Debug, the sanitizer jobs) rounds differently from Release
+#else
+    return "";
+#endif
+}
 
-References::References(std::string suite, std::string dir, bool updating)
-    : suite_(std::move(suite)), dir_(std::move(dir)), updating_(updating), failuresAtStart_(failureCount()) {
-    if (!updating_) loaded_ = load();
+References::References(std::string suite) : References(std::move(suite), std::string(), updateGolden, referenceBuild()) {}
+
+References::References(std::string suite, std::string dir, bool updating, std::string build)
+    : suite_(std::move(suite)), dir_(std::move(dir)), build_(std::move(build)), updating_(updating), failuresAtStart_(failureCount()) {
+    if (updating_) {
+        own_ = !build_.empty();  // a build other than x86-64 Release records its own set, never the common one
+        return;
+    }
+    // This build's own set where it has one (a damaged one fails, never falls back), else the common file.
+    if (!build_.empty())
+        if (std::FILE* f = std::fopen(fileFor(build_).c_str(), "rb")) {
+            std::fclose(f);
+            own_ = true;
+        }
+    loaded_ = load();
 }
 
 References::~References() {
@@ -615,14 +639,17 @@ References::~References() {
         if (!e.compared) fail(__FILE__, __LINE__, suite_ + "/" + e.name + ": stored but never compared (a case went missing?)");
 }
 
-std::string References::path() const {
-    if (!dir_.empty()) return dir_ + "/" + suite_ + ".cawref";
+std::string References::fileFor(const std::string& build) const {
+    const std::string name = suite_ + (build.empty() ? std::string() : "." + build) + ".cawref";
+    if (!dir_.empty()) return dir_ + "/" + name;
 #ifdef CAW_ROOT
-    return std::string(CAW_ROOT) + "/engine/tests/references/" + suite_ + ".cawref";
+    return std::string(CAW_ROOT) + "/engine/tests/references/" + name;
 #else
-    return "engine/tests/references/" + suite_ + ".cawref";
+    return "engine/tests/references/" + name;
 #endif
 }
+
+std::string References::path() const { return fileFor(own_ ? build_ : std::string()); }
 
 References::Entry* References::find(const std::string& name) {
     for (Entry& e : entries_)
@@ -632,7 +659,12 @@ References::Entry* References::find(const std::string& name) {
 
 void References::check(const std::string& name, const Audio& render, Class c, const char* file, int line) {
     const std::string why = compare(name, render, c);
-    if (!why.empty()) fail(file, line, suite_ + "/" + name + ": " + why);
+    if (why.empty()) return;
+    // Against this build's own set: after an intended sound change (the common file re-recorded) it is re-recorded too.
+    const std::string own = own_ && !updating_ ? " [this build's own set, " + suite_ + "." + build_ +
+                                                     ".cawref: after an intended sound change re-record it with the Reference sets workflow]"
+                                               : std::string();
+    fail(file, line, suite_ + "/" + name + ": " + why + own);
 }
 
 std::string References::compare(const std::string& name, const Audio& render, Class c) {
