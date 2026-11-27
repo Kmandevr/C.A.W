@@ -1,10 +1,20 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-26
+updated: 2026-11-27
 ---
 
 # Decisions
+
+## 2026-11-27: The long CI checks split into jobs that name their failing test (owner, 1.1.3 maintenance)
+
+- **Owner (2026-11-24):** "break down the big checks: split the long CI jobs (Dart tests, engine shards, the sanitizer build) into smaller ones whose failure names its test."
+- **[Fact] Before (step timestamps, Engine runs 45904645556 and 45933498369, App run 45933567534, 2026-11-26/27):** *Tests (Linux sanitizers)* took 77-109 minutes: its build 1-1.5 minutes with the compiler cache, its CTest step 74-107, waiting on `caw_tests_shard_1` (4,466-6,424 s; the other shards 960-2,170 s). *Dart tests*: 14 minutes, 12 of them `flutter test`. Windows engine tests: 15-17 minutes, 7.5-8.5 of them the build (no compiler cache).
+- **[Fact] Where the sanitizer time goes (measured here 2026-11-27, GCC 13 ASan/UBSan Debug, 4 cores, one process per case group):** `rook_every_control_of_each_kinds_default_kit_is_audible` takes 1,738 s alone, `drums_audit_every_pad_setting_changes_the_sound` about 1,030 s and every other case under 440 s; all cases about 8,000 s. At 4 or 8 shards the two slowest share a shard. **Decision:** the sanitizer build registers 14 shards (`CAW_TEST_SHARDS`, a CMake cache variable; 4 stays the default, and the count changes only the split, never which cases run), one CI job per shard runs it on one thread and on the mix pool and compares that shard's render digests (`CompareDigests.cmake` takes the shards to compare; every render belongs to one shard, so this is as strict as the one comparison over all), and a fifteenth job runs the other CTest tests. The slowest shard is then about 1,930 s, so the sanitizers take about 35 minutes (the slowest case and 3 minutes of setup and build), not 75-110. A *Tests (Linux sanitizers)* job fails unless all fifteen passed.
+- **Each sanitizer job builds for itself, not one build passed on as an artifact:** with the shared compiler cache the build takes 1-1.5 minutes, while the build directory a test job needs holds a 578 MB `caw_tests` and a 306 MB `libcaw.so` (measured here). One build then N downloads would put a whole job (setup, build, upload) before every test job, and the downloads cost about what the cached build does. Only the other-tests job, which builds everything, saves the cache.
+- **The Dart tests:** four jobs, *Dart tests (1/4)* to *(4/4)*, each running every fourth file of the sorted test list. Not `flutter test --total-shards`: package:test (test_core 0.6.18, `runner.dart`'s `_shardSuite`) splits each file's tests by index, so every job would still compile and load all 222 files. Each job writes a JSON report beside the default reporter, and `scripts/dart-test-summary.js` puts each failing test's file, line, name and first error line in the job's summary and as an annotation. A *Dart tests* job keeps the old check's name, runs the scripts' Node tests and fails unless all four passed; the GitHub Release still needs it.
+- **Windows engine tests stay one job:** most of the job is its uncached build, which each part would repeat. Every engine test job's summary now names its failing cases (`scripts/ctest-summary.js`: CTest's failed entries, each `FAIL` line, sanitizer reports).
+- **[Assumption]** The account's runners take the extra jobs (an Engine run now starts 20 jobs, an App pull request run 6) without long queues; the first runs on GitHub confirm the times.
 
 ## 2026-11-26: Curlew's four new winds and their page (owner)
 
@@ -1548,7 +1558,7 @@ Built (engine pass, 2026-11-10):
 - **The APK and the compiler cache:** GitHub scopes a cache to the branch (or pull request) that saved it, so Main's APK can only use an LLVM build cached on Main. When the Compiler workflow finishes on Main, the App workflow builds the APK again (only that job), so Main's APK always carries the compiler.
 - **Owner direction:** split a job into parallel parts where the parts are really independent, keeping it readable and reliable.
   - Where it helps: the Windows build compiles each target's files in parallel (`/MP`), because nearly all of the Windows engine job was compiling.
-  - Where it doesn't: the engine tests already run as 4 parallel shards. The Dart tests take under a minute themselves, so splitting them would add more runner setup than it saves.
+  - The engine tests run as 4 parallel shards within each job; the sanitizer suite and the Dart tests became separate jobs on 2026-11-27, once they took 75-110 and 10-14 minutes (see that entry).
 
 ## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
 
