@@ -1,0 +1,15 @@
+# C.A.W's shared-document model (Apache-2.0, as C.A.W): node ids, fractional keys, the edit operations and their
+# binary and JSON codec, a generic tree with tombstones and a coarse-node schema. Pure Dart, no Flutter, so a
+# standalone program can share it with the app. Not yet used by the app.
+name: caw_collab
+description: "C.A.W's shared-document model: ids, fractional keys, operations and their codec, a tree with tombstones, a schema."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  # SHA-256 for the schema hash.
+  caw_services:
+    path: ../caw_services

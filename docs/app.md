@@ -484,6 +484,7 @@ The in-app build and toolchain install exist (see the C++ platform note). Like `
 - **Flutter:** 3.47.7, pinned in `.github/workflows/app.yml`.
 - **Dependencies, all permissive:**
   - `caw_services` (`packages/caw_services/`, a path dependency, Apache-2.0 as C.A.W): the platform-free update check, small updates, the telemetry relay's client and schema, SHA-256 and the companion protocol, in pure Dart so the companion app can share it
+  - `caw_collab` (`packages/caw_collab/`, a path dependency, Apache-2.0 as C.A.W, depending only on `caw_services`): a shared-document model in pure Dart, not yet used by the app: node ids, base-62 fractional keys, the edit operations with a binary and a JSON codec whose decoders treat input as untrusted (size, depth and count limits; only `CollabDecodeError` escapes), a generic tree with tombstones that refuses cycles, and a coarse schema. Tests: `test/collab_codec_test.dart` (round trips and fuzzing), `test/collab_fractional_key_test.dart`, `test/collab_tree_test.dart` (tombstones, cycles, limits, inverses, convergence)
   - `ffi` 2.2.0 (BSD-3-Clause)
   - `path_provider` 2.1.6 (BSD-3-Clause)
   - `file_picker` 13.1.0 (MIT)

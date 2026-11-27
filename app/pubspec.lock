@@ -33,6 +33,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  caw_collab:
+    dependency: "direct main"
+    description:
+      path: "packages/caw_collab"
+      relative: true
+    source: path
+    version: "0.1.0"
   caw_services:
     dependency: "direct main"
     description:
