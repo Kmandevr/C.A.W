@@ -161,11 +161,12 @@ protected:
                     if (st->ic2 < 1e-20 && st->ic2 > -1e-20) st->ic2 = 0.0;
                 }
         }
-        for (auto* side : {soloL_, soloR_})  // the solo's listening filter runs runStereo too
-            for (int k = 0; k < lib::EqFilter::kMaxStages; ++k) {
-                if (side[k].ic1 < 1e-20 && side[k].ic1 > -1e-20) side[k].ic1 = 0.0;
-                if (side[k].ic2 < 1e-20 && side[k].ic2 > -1e-20) side[k].ic2 = 0.0;
-            }
+        if (solo_ > 0)  // the solo's listening filter runs runStereo too (its states are cleared when it changes)
+            for (auto* side : {soloL_, soloR_})
+                for (int k = 0; k < soloFilter_.stages(); ++k) {
+                    if (side[k].ic1 < 1e-20 && side[k].ic1 > -1e-20) side[k].ic1 = 0.0;
+                    if (side[k].ic2 < 1e-20 && side[k].ic2 > -1e-20) side[k].ic2 = 0.0;
+                }
         const bool same = knobsUnchanged(knobs_, kParamCount, at);
         if (same && !first_ && !pending_) {
             bool fading = false;
