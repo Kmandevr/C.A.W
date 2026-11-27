@@ -593,6 +593,81 @@ TEST(the_flagship_renders_the_same_bits_at_any_block_size) {
     }
 }
 
+// A ramping knob (automation) of an oscillator, a filter, the routing or an envelope reworks only its own voice
+// section (2026-11-27); a ramping knob outside them reworks everything, as every ramp did before. Glide ramping in
+// poly changes nothing heard but makes every control rework every section, so the two renders must match bit for
+// bit, and the ramped cutoff must be heard.
+TEST(the_flagship_s_ramping_knobs_rework_only_their_section_with_the_same_bits) {
+    Engine e(48000);
+    const Values patch = {{"mod1_amt", 0}, {"osc2_on", 1}, {"osc2_warp", 5}, {"osc2_warp_amt", 0.9}, {"osc2_unison", 3},
+                          {"osc1_warp", 2}, {"osc1_warp_amt", 0.2}, {"flt2_on", 1}, {"osc2_dest", 1}, {"fx_chorus_on", 1},
+                          {"env1_release", 2.0}};
+    const std::vector<Event> notes = {notes::noteOn(0, 1, 45, 0.9), notes::noteOn(300, 2, 52, 0.8), notes::noteOn(700, 3, 61, 0.7),
+                                      notes::noteOff(30000, 1, 45), notes::noteOff(30000, 2, 52), notes::noteOff(30000, 3, 61)};
+    struct Ramp {
+        const char* id;
+        double from, to;
+    };
+    auto render = [&](const std::vector<Ramp>& ramps) {
+        Stereo out;
+        std::unique_ptr<ModuleProcessor> p = make(e);
+        if (!p) return out;
+        const ModuleDescriptor& d = p->descriptor();
+        std::vector<ParameterValue> params(d.parameterCount);
+        for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
+        for (const auto& [id, v] : patch) params[static_cast<size_t>(paramIndex(d, id))].value = v;
+        const uint32_t frames = 48000, block = 37;
+        std::vector<std::vector<double>> lanes(ramps.size(), std::vector<double>(block));
+        std::vector<float> l(block), r(block);
+        float* channels[2] = {l.data(), r.data()};
+        size_t next = 0;
+        for (uint32_t start = 0; start < frames; start += block) {
+            const uint32_t n = std::min(block, frames - start);
+            for (size_t q = 0; q < ramps.size(); ++q) {
+                for (uint32_t i = 0; i < n; ++i)
+                    lanes[q][i] = ramps[q].from + (ramps[q].to - ramps[q].from) * std::min(1.0, (start + i) / 36000.0);
+                ParameterValue& pv = params[static_cast<size_t>(paramIndex(d, ramps[q].id))];
+                pv.samples = lanes[q].data();
+                pv.value = lanes[q][0];
+            }
+            std::vector<Event> in;
+            while (next < notes.size() && notes[next].frame < start + n) {
+                Event x = notes[next++];
+                x.frame -= start;
+                in.push_back(x);
+            }
+            const ChannelBufferView audio{channels, 2, n};
+            const EventInput ev{in.data(), static_cast<uint32_t>(in.size())};
+            ProcessBlock b;
+            b.frames = n;
+            b.audioOut = &audio;
+            b.audioOutCount = 1;
+            b.eventIn = &ev;
+            b.eventInCount = 1;
+            b.parameters = params.data();
+            b.parameterCount = d.parameterCount;
+            CHECK(p->processPorts(b));
+            out.left.insert(out.left.end(), l.begin(), l.begin() + n);
+            out.right.insert(out.right.end(), r.begin(), r.begin() + n);
+        }
+        return out;
+    };
+    const std::vector<Ramp> sections = {{"flt1_cutoff", 300.0, 6000.0}, {"osc1_frame", 0.0, 1.0}, {"osc2_warp_amt", 0.2, 0.9},
+                                        {"flt2_cutoff", 2000.0, 400.0}, {"env1_release", 0.5, 3.0}};
+    std::vector<Ramp> everything = sections;
+    everything.push_back({"glide", 0.01, 1.5});
+    const Stereo a = render(sections), b = render(everything), c = render({});
+    CHECK(!a.left.empty() && a.left.size() == b.left.size() && a.left.size() == c.left.size());
+    size_t differ = 0;
+    double moved = 0.0;
+    for (size_t i = 0; i < a.left.size() && i < b.left.size() && i < c.left.size(); ++i) {
+        differ += a.left[i] != b.left[i] || a.right[i] != b.right[i];
+        moved = std::max(moved, static_cast<double>(std::fabs(a.left[i] - c.left[i])));
+    }
+    if (differ) cawtest::fail(__FILE__, __LINE__, std::to_string(differ) + " samples differ from every section reworked");
+    CHECK(moved > 0.01);
+}
+
 TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {
     // Speed A2 (2026-11-12; its audio review): voices whose filters are set alike run side by side, the rest one at
     // a time. Twelve notes, each set apart by its own note expression: timbre picks filter 1's type (0 ladder

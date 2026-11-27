@@ -15,9 +15,9 @@
         const bool all = v.starting || knobsChanged_;
         const bool pitch = v.pitch != v.configuredPitch;
         v.configuredPitch = v.pitch;
-        uint32_t changed = 0, frameOnly = 0;
+        uint32_t changed = rampMoved_, frameOnly = 0;
         if (!all) {
-            uint32_t frame = 0, other = 0;
+            uint32_t frame = 0, other = rampMoved_;
             for (uint32_t t = 0; t < targetCount_; ++t) {
                 if (moving[t] == v.moving[t]) continue;
                 const uint32_t k = targetParam_[t], section = sectionOf(k);

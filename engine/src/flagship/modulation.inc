@@ -116,12 +116,30 @@
     // Once per control period: the knobs, the matrix, every sounding voice's settings and the effects.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
         restShared();
-        for (uint32_t r = 0; r < rampCount_; ++r) base_[ramp_[r]] = b.parameters[ramp_[r]].samples[at];
+        // A ramping knob (automation) of an oscillator, a filter, the routing or an envelope that no slot moves
+        // marks only its voice section (rampMoved_): the voices work that section out again, as a slot's would be
+        // (2026-11-27: Medusa's automated cutoff had every voice redo everything every period). The sections left
+        // alone would have been worked out to the same values, so the bits are the same. Any other ramping knob
+        // that moved this control moves everything, as before.
+        rampMoved_ = 0;
+        bool rampAll = false;
+        for (uint32_t r = 0; r < rampCount_; ++r) {
+            const uint32_t k = ramp_[r];
+            const double v = b.parameters[k].samples[at];
+            if (v != base_[k]) {
+                const uint32_t section = k < kModTargets ? sectionOf(k) : kMovedGlobal;
+                if (k < kModTargets && targetOf_[k] == 0 && (section & kRampSections)) rampMoved_ |= section;
+                else rampAll = true;
+            }
+            base_[k] = v;
+        }
         tempo_ = transport_ && transport_->tempo > 0.0 ? transport_->tempo : 120.0;
         // What a voice must work out again this control: everything when a knob, the tempo or the quality moved;
-        // otherwise only the sections a slot modulates, and what follows the pitch (2026-11-10 performance pass).
+        // otherwise only the sections a slot modulates or a ramp moved, and what follows the pitch (2026-11-10
+        // performance pass).
         const int quality = qualityNow(quality_);
-        if (rampCount_ > 0 || tempo_ != lastTempo_ || quality != lastQuality_) knobsChanged_ = true;
+        if (rampAll || tempo_ != lastTempo_ || quality != lastQuality_) knobsChanged_ = true;
+        if (knobsChanged_) rampMoved_ = 0;  // everything is worked out anyway
         lastTempo_ = tempo_;
         lastQuality_ = quality;
         const bool beatLocked = transport_ && transport_->playing;
@@ -129,6 +147,7 @@
 
         // The matrix: the slots that move something, and the parameters they move (each once, in slot order).
         // It is read from the knobs alone, so it stands while none moved.
+        if (rampMoved_ & (kMovedFilter1 | kMovedFilter2)) configureShared();  // it reads filter 1's and 2's knobs
         if (knobsChanged_) {
             buildMatrix();
             configureShared();
@@ -193,7 +212,8 @@
         });
         volume1_ = clampd(g(kVolume), 0.0, 1.0);
         // The effects read the knobs, the tempo, the quality and the slots moving the instrument's parameters.
-        if (knobsChanged_ || (moved_ & kMovedGlobal)) configureEffects(g);
+        // (Every control while a knob ramps, as before: the chorus's sweep moves on at each of its controls.)
+        if (knobsChanged_ || rampCount_ > 0 || (moved_ & kMovedGlobal)) configureEffects(g);
 
         knobsChanged_ = false;
         // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest (not while the
@@ -301,3 +321,6 @@
         return kMovedGlobal;
     }
     static constexpr uint32_t kMovedRouting = 1u << 5, kMovedEnvs = 1u << 6, kMovedLfos = 1u << 7, kMovedGlobal = 1u << 8;
+    static constexpr uint32_t kMovedFilter1 = 1u << 3, kMovedFilter2 = 1u << 4;
+    // The sections a ramping knob may move alone (rampMoved_): the oscillators, the filters, the routing, the envelopes.
+    static constexpr uint32_t kRampSections = 7u | kMovedFilter1 | kMovedFilter2 | kMovedRouting | kMovedEnvs;

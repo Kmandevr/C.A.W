@@ -311,7 +311,9 @@ bool foldTwiceFor(double hz, double drive) noexcept {
 // eight levels (amix 0) the oscillator reads two frames as an unwarped one does (addStackWarp<kWarpNone>).
 template <bool Morph>
 void addBank(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    using namespace simd4;
     const float mix = o.mix, amix = o.amix;
+    const F4 mx = splat(mix), am = splat(amix);
     for (int c = 0; c < o.count; ++c) {
         if (!o.a[c]) continue;
         const float* A = o.a[c];
@@ -323,14 +325,26 @@ void addBank(const OscVoice& o, const float* gL, const float* gR, float* L, floa
         const int sh = o.shift[c];
         const uint32_t mask = (1u << sh) - 1u;
         const float scale = 1.0f / static_cast<float>(1u << sh), gl = gL[c], gr = gR[c];
-        for (uint32_t i = 0; i < n; ++i, p += step) {
+        // Four frames at a time (2026-11-27): readFixed's indices and pairs, each lane the scalar loop's arithmetic.
+        const I4 m4 = splatU(mask), step4 = splatU(4u * step);
+        const F4 sc = splat(scale), l4 = splat(gl), r4 = splat(gr);
+        I4 P = lanesU(p, p + step, p + 2u * step, p + 3u * step);
+        uint32_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            alignas(16) uint32_t k[4];
+            storeU(k, shiftRight(P, sh));
+            const F4 fr = toFloat(P & m4) * sc;
+            const F4 x = read4<Morph>(A, B, k, fr, mx), y = read4<Morph>(C, D, k, fr, mx);
+            const F4 v = x + (y - x) * am;
+            store(L + i, load(L + i) + v * l4);
+            store(R + i, load(R + i) + v * r4);
+            P = P + step4;
+        }
+        p += i * step;
+        for (; i < n; ++i, p += step) {
             const uint32_t k = p >> sh;
             const float fr = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
-            float x = A[k] + (A[k + 1] - A[k]) * fr, y = C[k] + (C[k + 1] - C[k]) * fr;
-            if constexpr (Morph) {
-                x += (B[k] + (B[k + 1] - B[k]) * fr - x) * mix;
-                y += (D[k] + (D[k + 1] - D[k]) * fr - y) * mix;
-            }
+            const float x = read1<Morph>(A, B, k, fr, mix), y = read1<Morph>(C, D, k, fr, mix);
             const float v = x + (y - x) * amix;
             L[i] += v * gl;
             R[i] += v * gr;

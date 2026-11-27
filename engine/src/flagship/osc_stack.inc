@@ -84,22 +84,26 @@ struct Decimator2x {
 
 private:
 #if defined(__GNUC__)
+    // Both sides use the left's coefficients: every decimator is set from the one design (set()), so the right's are
+    // the same numbers, and x86-64's 16 vector registers hold one set without spilling (2026-11-27). The flush
+    // below 1e-25 tests |o| < 1e-25, which is (o < 1e-25) & (o > -1e-25) for every o, NaN included (both false).
     template <bool Two>
     static void downBlock(Decimator2x& l, const float* in, float* out, Decimator2x& r, const float* rIn, float* rOut,
                           uint32_t n) noexcept {
+        typedef long long Bits __attribute__((vector_size(16)));
         const Pair tiny = splat(1e-25), zero = splat(0.0);
-        Pair a[kStages], x[kStages], y[kStages], ra[kStages], rx[kStages], ry[kStages];
+        const Bits magnitude = {0x7FFFFFFFFFFFFFFFLL, 0x7FFFFFFFFFFFFFFFLL};
+        Pair a[kStages], x[kStages], y[kStages], rx[kStages], ry[kStages];
         for (int i = 0; i < kStages; ++i) {
             a[i] = pairOf(l.a[i][0], l.a[i][1]), x[i] = pairOf(l.x1[i][0], l.x1[i][1]), y[i] = pairOf(l.y1[i][0], l.y1[i][1]);
-            if constexpr (Two)
-                ra[i] = pairOf(r.a[i][0], r.a[i][1]), rx[i] = pairOf(r.x1[i][0], r.x1[i][1]), ry[i] = pairOf(r.y1[i][0], r.y1[i][1]);
+            if constexpr (Two) rx[i] = pairOf(r.x1[i][0], r.x1[i][1]), ry[i] = pairOf(r.y1[i][0], r.y1[i][1]);
         }
         double held = l.held, rHeld = r.held;
         // y = a (x - y1) + x1 per stage, flushed below 1e-25, into the next stage (AllpassChain::process).
         const auto stage = [&](Pair v, Pair& s, Pair& t, Pair c) noexcept {
             Pair o = c * (v - t) + s;
             s = v;
-            o = ((o < tiny) & (o > -tiny)) ? zero : o;
+            o = reinterpret_cast<Pair>(reinterpret_cast<Bits>(o) & magnitude) < tiny ? zero : o;
             t = o;
             return o;
         };
@@ -113,7 +117,7 @@ private:
             }
             for (int i = 0; i < kStages; ++i) {
                 v = stage(v, x[i], y[i], a[i]);
-                if constexpr (Two) w = stage(w, rx[i], ry[i], ra[i]);
+                if constexpr (Two) w = stage(w, rx[i], ry[i], a[i]);
             }
             out[f] += static_cast<float>(0.5 * (lane(v, 0) + lane(v, 1)));
             if constexpr (Two) rOut[f] += static_cast<float>(0.5 * (lane(w, 0) + lane(w, 1)));
@@ -204,51 +208,92 @@ struct OscVoice {
     OscKey key;
 };
 
-// One unwarped copy over N (or n) frames, added to L and R with its gains. The phase is 32-bit fixed point
-// (2^32 a cycle), so it wraps by itself and its top bits are the table index: no floor, no float-to-int per
-// sample. Three passes, so the compiler vectorizes two of them (NEON on Arm64, SSE on x86): the indices and
-// fractions, then the table reads (a gather, which NEON does not have: scalar loads), then the interpolation,
-// the morph between frames and the mix into L and R. Each sample's arithmetic is the one-pass loop's, in its
-// order, so the bits are the same (2026-11-10 second performance pass: about 40 % fewer instructions a copy).
+// Four samples' reads of a copy: the interpolated values at the table indices k[0..3] (each read is the pair
+// A[k], A[k + 1] in one 8-byte load, split apart in registers: simd4::pairs) with the fractions fr, morphed toward
+// B's by mix. Each lane's arithmetic is the scalar read's, a + (b - a) fr then v + (u - v) mix, so the same bits.
+template <bool Morph>
+CAW_FORCE_INLINE simd4::F4 read4(const float* A, const float* B, const uint32_t* k, simd4::F4 fr, simd4::F4 mix) noexcept {
+    using namespace simd4;
+    F4 a0, a1;
+    pairs(A, k, a0, a1);
+    F4 v = a0 + (a1 - a0) * fr;
+    if constexpr (Morph) {
+        F4 b0, b1;
+        pairs(B, k, b0, b1);
+        const F4 u = b0 + (b1 - b0) * fr;
+        v = v + (u - v) * mix;
+    }
+    return v;
+}
+// One sample's read, read4's arithmetic: the tails of a piece whose length is not a multiple of four.
+template <bool Morph>
+CAW_FORCE_INLINE float read1(const float* A, const float* B, uint32_t k, float fr, float mix) noexcept {
+    float v = A[k] + (A[k + 1] - A[k]) * fr;
+    if constexpr (Morph) {
+        const float u = B[k] + (B[k + 1] - B[k]) * fr;
+        v += (u - v) * mix;
+    }
+    return v;
+}
+
+// One unwarped copy's reads over N (or n) frames from the fixed-point phase p, each handed to out(i, v) four at a
+// time (a simd4::F4 for frames i..i + 3) and then one at a time (a float) for a tail. The phase is 32-bit fixed point
+// (2^32 a cycle), so it wraps by itself and its top bits are the table index: no floor, no float-to-int per sample.
+// Four frames at a time in vectors (SSE2 on x86-64, NEON on Arm64): the indices and fractions, the table pairs
+// (simd4::pairs: no store and reload of the pairs, the old three passes' cost), the interpolation and the morph.
+// Each sample's arithmetic is the one-pass loop's, in its order, so the bits are the same (2026-11-27).
+template <bool Morph, uint32_t N, class Out4, class Out1>
+CAW_FORCE_INLINE void readFixed(const float* A, const float* B, uint32_t p, uint32_t step, int sh, float mix, uint32_t n,
+                                const Out4& out4, const Out1& out1) noexcept {
+    using namespace simd4;
+    const uint32_t count = N ? N : n;
+    const uint32_t mask = (1u << sh) - 1u;  // sh <= 31, so p & mask fits an int32 (a signed conversion)
+    const float scale = 1.0f / static_cast<float>(1u << sh);
+    const I4 m4 = splatU(mask), step4 = splatU(4u * step);
+    const F4 sc = splat(scale), mx = splat(mix);
+    I4 P = lanesU(p, p + step, p + 2u * step, p + 3u * step);
+    uint32_t i = 0;
+    for (; i + 4 <= count; i += 4) {
+        alignas(16) uint32_t k[4];
+        storeU(k, shiftRight(P, sh));
+        const F4 fr = toFloat(P & m4) * sc;
+        out4(i, read4<Morph>(A, B, k, fr, mx));
+        P = P + step4;
+    }
+    p += i * step;
+    for (; i < count; ++i, p += step)
+        out1(i, read1<Morph>(A, B, p >> sh, static_cast<float>(static_cast<int32_t>(p & mask)) * scale, mix));
+}
+
+// One unwarped copy over N (or n) frames, added to L and R with its gains (L and R may be one buffer: R's sum is
+// then taken after L's, as the scalar loop did).
 template <bool Morph, uint32_t N>
 CAW_FORCE_INLINE void addCopy(const float* A, const float* B, uint32_t p, uint32_t step, int sh, float gl, float gr,
                               float mix, float* L, float* R, uint32_t n) noexcept {
-    const uint32_t count = N ? N : n;
-    const uint32_t mask = (1u << sh) - 1u;
-    const float scale = 1.0f / static_cast<float>(1u << sh);
-    int32_t index[kControlFrames];
-    float fr[kControlFrames], a[2 * kControlFrames], b[2 * kControlFrames];  // a: A[k], A[k + 1] for each sample
-    for (uint32_t i = 0; i < count; ++i) {  // sh <= 31, so both fit an int32 (a signed conversion vectorizes)
-        index[i] = static_cast<int32_t>(p >> sh);
-        fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
-        p += step;
-    }
-    // Each pair of neighbours in one 8-byte load and store. Written per compiler (the same loads and stores):
-    // Clang (the Android build) makes tighter code from pointers that step on, GCC from indices.
-#if defined(__clang__)
-    float* pa = a;
-    float* pb = b;
-    for (uint32_t i = 0; i < count; ++i, pa += 2, pb += 2) {
-        const size_t k = static_cast<uint32_t>(index[i]);
-        __builtin_memcpy(pa, A + k, 2 * sizeof(float));
-        if constexpr (Morph) __builtin_memcpy(pb, B + k, 2 * sizeof(float));
-    }
-#else
-    for (uint32_t i = 0; i < count; ++i) {
-        const int32_t k = index[i];
-        std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
-        if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
-    }
-#endif
-    for (uint32_t i = 0; i < count; ++i) {  // the pairs split apart again (NEON's ld2)
-        float v = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
-        if constexpr (Morph) {
-            const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
-            v += (u - v) * mix;
-        }
-        L[i] += v * gl;
-        R[i] += v * gr;
-    }
+    using namespace simd4;
+    const F4 l4 = splat(gl), r4 = splat(gr);
+    readFixed<Morph, N>(
+        A, B, p, step, sh, mix, n,
+        [&](uint32_t i, F4 v) noexcept {
+            store(L + i, load(L + i) + v * l4);
+            store(R + i, load(R + i) + v * r4);
+        },
+        [&](uint32_t i, float v) noexcept {
+            L[i] += v * gl;
+            R[i] += v * gr;
+        });
+}
+
+// Table reads at the precomputed indices k and fractions fr (a warped phase's), count of them, each handed to out
+// as readFixed hands them.
+template <bool Morph, class Out4, class Out1>
+CAW_FORCE_INLINE void readAt(const float* A, const float* B, const uint32_t* k, const float* fr, float mix, uint32_t count,
+                             const Out4& out4, const Out1& out1) noexcept {
+    using namespace simd4;
+    const F4 mx = splat(mix);
+    uint32_t i = 0;
+    for (; i + 4 <= count; i += 4) out4(i, read4<Morph>(A, B, k + i, load(fr + i), mx));
+    for (; i < count; ++i) out1(i, read1<Morph>(A, B, k[i], fr[i], mix));
 }
 
 // Osc FM's phase: t moved by w1 cycles per unit of the modulating oscillator's sample m (held to +-2, so a loud
@@ -262,7 +307,8 @@ inline float fmOscPhase(float t, float w1, float m) noexcept {
 
 // Adds `n` frames of the stack, `first` frames into the control period, to L and R with the copies' gains gL, gR
 // (L and R may be the same buffer: a mono sum). `fm` is Osc FM's modulator for the whole period (null otherwise).
-template <int W, bool Morph>
+// N = 16 (a whole period, the usual case: fixed-length loops) or 0 (n frames): the same arithmetic.
+template <int W, bool Morph, uint32_t N>
 void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
               const float* fm) noexcept {
     if constexpr (W == kWarpNone) {
@@ -270,17 +316,22 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             if (!o.a[c]) continue;
             const uint32_t step = o.step[c];
             const uint32_t p0 = o.phase[c] + first * step;
-            addCopy<Morph, 0>(o.a[c], o.b[c], p0, step, o.shift[c], gL[c], gR[c], o.mix, L, R, n);
+            addCopy<Morph, N>(o.a[c], o.b[c], p0, step, o.shift[c], gL[c], gR[c], o.mix, L, R, n);
         }
         return;
     }
+    // Each copy in two passes (2026-11-27): the warped phases' indices and fractions (a loop the compiler
+    // vectorizes), then the reads and sums four at a time (readAt). Each sample's arithmetic is the one-pass loop's,
+    // in its order, so the bits are the same.
+    using namespace simd4;
+    const uint32_t count = N ? N : n;
     for (int c = 0; c < o.count; ++c) {
         if (!o.a[c]) continue;
-        const float* A = o.a[c];
-        const float* B = o.b[c];
         const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
-        const float gl = gL[c], gr = gR[c], mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
-        for (uint32_t i = 0; i < n; ++i) {
+        const float gl = gL[c], gr = gR[c], w1 = o.w1, w2 = o.w2, w3 = o.w3;
+        alignas(16) uint32_t index[kControlFrames];
+        alignas(16) float fr[kControlFrames];
+        for (uint32_t i = 0; i < count; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
             float x;
@@ -288,15 +339,20 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
-            const float fr = x - static_cast<float>(k);
-            float v = A[k] + (A[k + 1] - A[k]) * fr;
-            if constexpr (Morph) {
-                const float u = B[k] + (B[k + 1] - B[k]) * fr;
-                v += (u - v) * mix;
-            }
-            L[i] += v * gl;
-            R[i] += v * gr;
+            index[i] = static_cast<uint32_t>(k);
+            fr[i] = x - static_cast<float>(k);
         }
+        const F4 l4 = splat(gl), r4 = splat(gr);
+        readAt<Morph>(
+            o.a[c], o.b[c], index, fr, o.mix, count,
+            [&](uint32_t i, F4 v) noexcept {
+                store(L + i, load(L + i) + v * l4);
+                store(R + i, load(R + i) + v * r4);
+            },
+            [&](uint32_t i, float v) noexcept {
+                L[i] += v * gl;
+                R[i] += v * gr;
+            });
     }
 }
 
@@ -305,10 +361,10 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
 // the sum comes down through a half-band decimator. What FM's far sidebands make above the high rate's Nyquist
 // (up to 1.5 times the sample rate) lands in the decimator's stop band instead of on the audible spectrum. R null:
 // mono into L (gL).
-// Each copy in three passes, as addCopy (speed phase 1, 2026-11-12): the warped phases' indices and fractions,
-// then the table reads (a gather: scalar loads), then the interpolation, the morph and the sums, so the
-// compiler vectorizes the first and the last. Each sample's arithmetic is the one-pass loop's, in its order, so
-// the bits are the same. Mono (R null) sums into the left only.
+// Each copy in two passes (speed phase 1, 2026-11-12; 2026-11-27): the warped phases' indices and fractions (a
+// loop the compiler vectorizes), then the table reads, the interpolation, the morph and the sums four at a time
+// (readAt). Each sample's arithmetic is the one-pass loop's, in its order, so the bits are the same. Mono (R null)
+// sums into the left only.
 template <int W, bool Morph, uint32_t N>
 void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
              Decimator2x& dl, Decimator2x* dr) noexcept {
@@ -321,38 +377,34 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
         const float* B = o.b[c];
         const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
         const float half = 0.5f * dt, gl = gL[c], gr = gR ? gR[c] : 0.0f, mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
-        int32_t index[2 * kControlFrames];
-        float fr[2 * kControlFrames], a[4 * kControlFrames], b[4 * kControlFrames];  // a: A[k], A[k + 1] per sample
+        alignas(16) uint32_t index[2 * kControlFrames];
+        alignas(16) float fr[2 * kControlFrames];
         for (uint32_t i = 0; i < count; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + (i >> 1))) * dt + ((i & 1u) ? half : 0.0f);
             t -= whole(t);
             t = t < 0.99999994f ? t : 0.99999994f;
             const float x = warp<W>(t, w1, w2, w3) * m;
             const int32_t k = static_cast<int32_t>(x);
-            index[i] = k;
+            index[i] = static_cast<uint32_t>(k);
             fr[i] = x - static_cast<float>(k);
         }
-        for (uint32_t i = 0; i < count; ++i) {
-            const size_t k = static_cast<uint32_t>(index[i]);
-            std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
-            if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
-        }
-        const auto read = [&](uint32_t i) noexcept {
-            float v = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
-            if constexpr (Morph) {
-                const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
-                v += (u - v) * mix;
-            }
-            return v;
-        };
+        using namespace simd4;
+        const F4 l4 = splat(gl), r4 = splat(gr);
         if (dr) {
-            for (uint32_t i = 0; i < count; ++i) {
-                const float v = read(i);
-                hl[i] += v * gl;
-                hr[i] += v * gr;
-            }
+            readAt<Morph>(
+                A, B, index, fr, mix, count,
+                [&](uint32_t i, F4 v) noexcept {
+                    store(hl + i, load(hl + i) + v * l4);
+                    store(hr + i, load(hr + i) + v * r4);
+                },
+                [&](uint32_t i, float v) noexcept {
+                    hl[i] += v * gl;
+                    hr[i] += v * gr;
+                });
         } else {
-            for (uint32_t i = 0; i < count; ++i) hl[i] += read(i) * gl;
+            readAt<Morph>(
+                A, B, index, fr, mix, count, [&](uint32_t i, F4 v) noexcept { store(hl + i, load(hl + i) + v * l4); },
+                [&](uint32_t i, float v) noexcept { hl[i] += v * gl; });
         }
     }
     Decimator2x::down(dl, hl, L, dr, hr, R, n);
@@ -361,8 +413,14 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
 template <int W>
 void addStackWarp(const OscVoice& o, const float* gL, const float* gR, float* L, float* R, uint32_t n, uint32_t first,
                   const float* fm) noexcept {
-    if (o.mix != 0.0f) addStack<W, true>(o, gL, gR, L, R, n, first, fm);
-    else addStack<W, false>(o, gL, gR, L, R, n, first, fm);
+    if (n == kControlFrames) {
+        if (o.mix != 0.0f) addStack<W, true, kControlFrames>(o, gL, gR, L, R, n, first, fm);
+        else addStack<W, false, kControlFrames>(o, gL, gR, L, R, n, first, fm);
+    } else if (o.mix != 0.0f) {
+        addStack<W, true, 0>(o, gL, gR, L, R, n, first, fm);
+    } else {
+        addStack<W, false, 0>(o, gL, gR, L, R, n, first, fm);
+    }
 }
 
 // addTwice for warp W: stereo through the left and right decimators, or mono (the halves summed once, as one
@@ -387,34 +445,12 @@ void addTwiceWarp(OscVoice& o, const float* gL, const float* gR, float* L, float
     }
 }
 
-// One unwarped copy's read values over N (or n) frames into v: addCopy's passes and arithmetic, the values kept
-// instead of mixed into L and R (the fold warp shapes them first).
+// One unwarped copy's read values over N (or n) frames into v: addCopy's reads, the values kept instead of mixed
+// into L and R (the fold warp shapes them first).
 template <bool Morph, uint32_t N>
 CAW_FORCE_INLINE void readCopy(const float* A, const float* B, uint32_t p, uint32_t step, int sh, float mix, float* v,
                                uint32_t n) noexcept {
-    const uint32_t count = N ? N : n;
-    const uint32_t mask = (1u << sh) - 1u;
-    const float scale = 1.0f / static_cast<float>(1u << sh);
-    int32_t index[kControlFrames];
-    float fr[kControlFrames], a[2 * kControlFrames], b[2 * kControlFrames];
-    CAW_NO_UNROLL
-    for (uint32_t i = 0; i < count; ++i) {
-        index[i] = static_cast<int32_t>(p >> sh);
-        fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
-        p += step;
-    }
-    for (uint32_t i = 0; i < count; ++i) {
-        const size_t k = static_cast<uint32_t>(index[i]);
-        std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
-        if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
-    }
-    CAW_NO_UNROLL
-    for (uint32_t i = 0; i < count; ++i) {
-        float x = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
-        if constexpr (Morph) {
-            const float u = b[2 * i] + (b[2 * i + 1] - b[2 * i]) * fr[i];
-            x += (u - x) * mix;
-        }
-        v[i] = x;
-    }
+    readFixed<Morph, N>(
+        A, B, p, step, sh, mix, n, [&](uint32_t i, simd4::F4 x) noexcept { simd4::store(v + i, x); },
+        [&](uint32_t i, float x) noexcept { v[i] = x; });
 }

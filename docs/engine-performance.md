@@ -1,6 +1,6 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A6).
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A8).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
 updated: 2026-11-27
 ---
@@ -561,3 +561,48 @@ The Benchmark's profile runs split `Engine::process` by engine part ([engine](en
 What it says: instruments and effects are where a real song's time goes (four fifths and more); the engine's own work shows only in projects built to stress it. A track's fader moved per sample (project modulation of volume) makes `mix` the largest part of `modulation_dense`, since the fader then runs its per-sample path; the meters (peaks, scopes, correlation) are the next largest engine part in small projects. These are this VM's shares, not a phone's.
 
 Per-device costs and ceilings are in [engine](engine.md) and [performance](performance.md) (Timber's Simulated piano added 2026-11-20).
+
+### A8. Kestrel's oscillator reads and ramping knobs (2026-11-27)
+
+**Why (owner, 2026-11-27):** Kestrel (`org.caw.synth.flagship`) was 34 % of a typical song on the S22+, and the owner's Medusa project ran badly unfrozen: Track 2's Kestrel (osc 1 seven copies with the Sync warp, osc 2 three copies with the FM warp at 2x, a driven ladder, a 10 s release, an automated cutoff) piled up voices. The rule: much faster, with no change to the sound; bit-identical first, then vectorization only where it nulls below −120 dBFS.
+
+**What changed (all bit-identical):**
+- **Table reads four at a time** (`flagship/osc_stack.inc`: `read4`, `readFixed`, `readAt`; `addCopy`, `addStack`, `addTwice`, `readCopy`, and `addBank` in `osc_modes.inc`). Each read loads a table pair `A[k], A[k + 1]` with one 8-byte load and splits four of them apart in registers (`simd4::pairs`), so the pairs are never stored and loaded back (the old three passes' gather); the interpolation, the morph and the sums run four samples to a vector. The warped stacks (Bend, Sync, Mirror, Quantize, FM at Eco, Osc FM) had one loop with the table reads inside, which no compiler vectorized; their phases and warps now get a loop of their own, which GCC and Clang vectorize, and a whole period (16 frames) runs with fixed-length loops. The wrapper is `engine/src/simd4.h` ([decisions](decisions.md)).
+- **The FM and fold decimators** (`Decimator2x::downBlock`): both sides use one coefficient set (every decimator is set from the one design), so x86-64's 16 vector registers stop spilling, and the flush tests `|o| < 1e-25` (the same as `o < 1e-25 && o > -1e-25` for every `o`, NaN included).
+- **A ramping knob reworks only its section** (`flagship/modulation.inc`, `rampMoved_`): before, any ramp (an automation lane) made every control rework every section of every voice. A ramp on an oscillator, filter, routing or envelope knob that no slot moves now marks only that section; other ramps work as before, and the effects are still configured at every control while a knob ramps. Tested by `the_flagship_s_ramping_knobs_rework_only_their_section_with_the_same_bits`.
+
+**[Fact, null against the previous build, 2026-11-27]** `builtin_flagship.cpp` is built strict (`_caw_fp_strict`), and every vector lane runs the scalar loop's IEEE operations in its order, so the renders are unchanged. 655 renders (every preset; every warp at two amounts; every filter type as filter 1, as filter 2 in parallel and as a centred mono voice; Whole stack, Eco and High; 16 copies; LFO and pitch slots; the shared SVF; mono legato; every effect; Medusa's two Kestrel patches; ten automation ramps, the chorus on during one) at 44.1, 48 and 96 kHz, in 64-frame blocks, in 1/37/64/512 and with 24 voices at 48 kHz, were compared sample by sample: **all 655 bit-identical** on x86-64 GCC 13 Release, on x86-64 Clang 18 (the file alone), with the wrapper's scalar fallback (`-DCAW_SIMD4_SCALAR`, 450 of the 655 before the disk filled), and on Arm64 (`aarch64-linux-gnu-g++` 13, static, `qemu-aarch64`: 655 of 655).
+
+**[Fact, x86-64 VM, GCC 13 Release, 2026-11-27; a shared 4-vCPU machine at a load average of 10-20, so best of several runs]** Before / after:
+
+| Case | Before | After | Change |
+|---|---:|---:|---:|
+| Medusa unfrozen, Track 2's Kestrel (µs per 256-frame callback, mean, 86 s, fastest of 3 per callback) | 293.5 | 189.2 | −36 % |
+| Medusa unfrozen, the whole project: mean / p99 (µs) | 490.9 / 826.3 | 383.7 / 654.4 | −22 % / −21 % |
+| Medusa's Track 2 patch, 8 voices held (µs per 256-frame block, the instrument alone) | 243 | 164 | −33 % |
+| Medusa's Track 2 patch, 32 voices releasing | 958 | 640 | −33 % |
+| Default patch (Init), 4 / 16 / 64 voices held | 34 / 135 / 533 | 34 / 135 / 536 | 0 % |
+| `flagship_heavy` / `flagship_heavy16` (callgrind, instructions in the instrument, 0.5 s) | 7.75 G / 1.98 G | 6.96 G / 1.79 G | −10 % / −10 % |
+| `caw_bench 0.5 320` (µs/s against the reference): default patch, Osc sync, Formant x7, `flagship_heavy16` | 11,550-11,770, 5,090-5,330, 9,470-9,730, 131,800-136,000 | 11,190-11,270, 4,970-5,210, 7,580-7,680, 130,100-130,900 | −3 %, −2 %, −21 %, −3 % |
+
+- **Where it pays:** the warped stacks (Medusa's Sync and Mirror warps: about 3x fewer instructions a copy), the FM warp at 2x and the spectral banks. The default patch's unwarped copies were already vectorized and its time goes to the ladder (35 % of its render, `filterStereo`), so it does not move.
+- **Arm64 [Fact, qemu, relative]:** qemu times every float operation in software per lane, so a change that packs the same operations into vectors reads the same there (Medusa's patch 9,400 against 9,600 µs, Init within ±3 %), as expected; the Arm64 build's hot loops are vectorized as x86-64's are (`addStack<2>`: NEON `fcvtzs`/`scvtf` on four lanes, checked in the object). **[Assumption]** the S22+ gains about what x86-64 does; the Bench workflow measures it.
+- **The cost ceilings** (`caw_raven_cost`) are now about 1.4 times these figures ([engine](engine.md)).
+
+**B (vectorization that changes bits), tried:**
+- **The ladder in float, four ladders to a vector** (two voices' stereo pairs; scratch, not kept): **worst null −113.4 dBFS peak** (`flt1_type` 2, band-pass, resonance 0.7, drive 2.5, 24 voices at 48 kHz), over the −120 dBFS rule; the float state rounds in the resonant feedback. It gained 4-5 % on the default patch and 1 % on Medusa. **Not kept.**
+- **A reciprocal instead of the ladder's division:** not built. SSE2 has no double-precision reciprocal estimate (a float `rcpps` and two Newton steps in double is a longer dependent chain than `divpd`'s latency on a latency-bound loop), and on NEON `frecpe` with three `frecps` steps is likewise longer than `fdiv`; **[Inference]** no gain.
+- **Copies across lanes** (four copies in one vector instead of four frames): not built. After the reads above, each copy's sum into the voice is one vector add per four frames; across copies the four lanes must still be summed into each frame (a transpose or horizontal adds), more operations, and the sum order changes the bits. **[Inference]** no gain over the bit-identical change.
+- So **no golden or reference render changed**, and no per-build reference set (Reference sets workflow) needs re-recording.
+
+**C (changes the sound; the owner's call), measured on Medusa unfrozen, not committed** (Track 2's Kestrel, mean µs per 256-frame callback, against 195.0 for this build in the same session):
+
+| Option | Kestrel | Change | What it changes |
+|---|---:|---:|---|
+| End a released voice at −96 dB (1.6e-5) instead of −120 dB | 175.5 | −10 % | Release tails cut 96 dB below the envelope's peak; against this build the renders differ by up to −84 dBFS peak (24 voices, FM patches) |
+| FM warp at 1x while its highest sideband, f × (1 + (index + 1) × ratio) at the top of the bend range, stays under 20 kHz (or 14 kHz) | 136.9 (135.4) | −30 % (−31 %) | Nearly every Medusa note qualifies; the 1x path is a different render (no decimator delay, more aliasing), up to +6 dBFS apart, so it needs an aliasing sweep like A6's before any crossover is chosen |
+| End a releasing voice when its output is 120 dB below the instrument's (its peak over a period under 1e-6 × the last period's output peak) | 186.5 | −4 % | Up to −108 dBFS peak apart (Tonewheel organ, 24 voices) |
+| All three | 126.2 | −35 % | |
+
+**Found on the way [Fact, code read 2026-11-27]:** Kestrel's chorus advances its sweep only in `lib::Chorus::control()`, which `configureEffects` calls only when a knob, the tempo or the quality moved, a slot moves an instrument-wide knob, or (now as before) a knob ramps. With every knob still, the sweep's last step runs on unchanged (`step()` adds `stepL_` each frame), so the chorus delay drifts in a straight line until `read()` holds it at the line's ends, instead of following its LFO. Left as it is (fixing it changes the sound); a bug for the owner to schedule.
+
