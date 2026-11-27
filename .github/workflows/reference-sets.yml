@@ -30,6 +30,8 @@ jobs:
           - { name: Windows x64 clang-cl, os: windows-2025, config: Release, flags: "-T ClangCL", jobs: 4, build: win64 }
           # The sanitizer jobs' build (ASan and UBSan, Debug, -O0); two compile jobs, as there (more run out of memory).
           - { name: Linux x64 Debug, os: ubuntu-24.04, config: Debug, flags: "-DCMAKE_BUILD_TYPE=Debug -DCAW_SANITIZE=ON", jobs: 2, build: x64_debug }
+          # The ThreadSanitizer job's build (Clang, RelWithDebInfo), which runs the stress references.
+          - { name: Linux x64 Clang ThreadSanitizer, os: ubuntu-24.04, config: RelWithDebInfo, flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCAW_TSAN=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", jobs: 4, build: x64_clang }
     env:
       TESTS: ${{ inputs.tests }}
       BUILD: ${{ matrix.build }}
@@ -51,6 +53,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Allow ThreadSanitizer's memory layout
+        if: matrix.build == 'x64_clang'
+        run: sudo sysctl vm.mmap_rnd_bits=28  # as engine.yml's ThreadSanitizer job
       - name: Configure
         run: |
           cmake --version | head -1

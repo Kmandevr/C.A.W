@@ -605,6 +605,8 @@ const char* referenceBuild() {
     return "win64";
 #elif !defined(__OPTIMIZE__)
     return "x64_debug";  // -O0 (Debug, the sanitizer jobs) rounds differently from Release
+#elif defined(__clang__)
+    return "x64_clang";  // Clang reassociates differently from GCC (the ThreadSanitizer job)
 #else
     return "";
 #endif
