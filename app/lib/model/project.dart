@@ -135,7 +135,9 @@ class ClipDoc {
     this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes,
     this.loopSteps, List<ClipAutomationLaneDoc>? automation, List<CompPartDoc>? comp})
       : takes = takes ?? [], automation = automation ?? [], comp = comp ?? [];
-  final String id;
+
+  /// Unique in the project: a repeated one (an untrusted file) is replaced on load ([ProjectInstanceIds.settleIds]).
+  String id;
   String patternId;
 
   /// Loop-recorded takes (pattern ids, oldest first; empty for an ordinary clip): the clip plays one of them,

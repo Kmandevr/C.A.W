@@ -6,6 +6,8 @@
 // gives back its inverse, so applying that returns the project to what it was.
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../app_state.dart';
 import '../arrange_fx.dart';
 import '../audio_clips.dart';
@@ -60,6 +62,21 @@ sealed class ProjectOp {
   /// The op [j] describes, or null when it isn't one. What an inverse keeps to put lanes, links and memberships
   /// back ([OpRestore]) is local and never in the JSON.
   static ProjectOp? fromJson(Object? j) {
+    // Untrusted input: a field of the wrong type deep in a track or device (their readers cast) is no op either.
+    try {
+      return _fromJson(j);
+    } on TypeError {
+      return null;
+    } on FormatException {
+      return null;
+    } on ArgumentError {
+      return null;
+    } on UnsupportedError {
+      return null;  // a NaN or infinite count read as an integer
+    }
+  }
+
+  static ProjectOp? _fromJson(Object? j) {
     if (j is! Map) return null;
     String? text(String key) => switch (j[key]) { final String s when s.isNotEmpty && s.length <= 256 => s, _ => null };
     final node = text('node');
@@ -95,21 +112,23 @@ sealed class ProjectOp {
     return null;
   }
 
-  @override
-  bool operator ==(Object other) =>
-      other is ProjectOp && other.runtimeType == runtimeType && jsonEncode(other.toJson()) == jsonEncode(toJson());
-
-  @override
-  int get hashCode => jsonEncode(toJson()).hashCode;
-
-  @override
-  String toString() {
+  /// The op as text: its JSON, or for a value JSON can't hold (NaN, which apply refuses) the map's own text.
+  String _text() {
     try {
       return jsonEncode(toJson());
     } on JsonUnsupportedObjectError {
-      return toJson().toString();  // a value JSON can't hold (NaN): an op apply refuses
+      return toJson().toString();
     }
   }
+
+  @override
+  bool operator ==(Object other) => other is ProjectOp && other.runtimeType == runtimeType && other._text() == _text();
+
+  @override
+  int get hashCode => _text().hashCode;
+
+  @override
+  String toString() => _text();
 }
 
 /// Writes [field] of [node] ([OpField]).
@@ -209,6 +228,11 @@ class OpRestore {
         [for (final k in p.modLinks) (k, k.target)],
         const [], const []);
 
+  /// [clip]'s own lanes as they are (a clip moved to another track: a save there re-aims or drops its effect lanes).
+  static OpRestore clip(ClipDoc clip) => OpRestore._(null, const [], [
+        (clip, List.of(clip.automation), [for (final l in clip.automation) (l, l.component, l.device)]),
+      ], null, const [], const [], const []);
+
   /// The tracks inside [track] and the VCA groups it is in.
   static OpRestore track(ProjectDoc p, LayerDoc track) => OpRestore._(null, const [], const [], null, const [],
       [for (final l in p.layers) if (l.parentId == track.id) (l, l.parentId)],
@@ -255,6 +279,10 @@ class OpRestore {
   }
 }
 
+/// How many device and send lookups ops have made (tests check a drag step makes one).
+@visibleForTesting
+int debugOpLookups = 0;
+
 /// Which list of its track a device sits in.
 enum DeviceChain { components, noteComponents, instrument }
 
@@ -277,6 +305,7 @@ extension ProjectDocOps on ProjectDoc {
 
   /// Device [uid] in the project, or null.
   DeviceSpot? findDevice(String uid) {
+    debugOpLookups++;
     for (var i = 0; i < masterComponents.length; i++) {
       if (masterComponents[i].uid == uid) return (layer: null, chain: DeviceChain.components, index: i, use: masterComponents[i]);
     }
@@ -298,6 +327,7 @@ extension ProjectDocOps on ProjectDoc {
 
   /// Send [uid]: its track and index, or null.
   ({LayerDoc layer, int index})? findSend(String uid) {
+    debugOpLookups++;
     for (final l in layers) {
       for (var i = 0; i < l.sends.length; i++) {
         if (l.sends[i].uid == uid) return (layer: l, index: i);
@@ -586,14 +616,17 @@ extension ProjectDocOps on ProjectDoc {
     final to = _layer(op.parent);
     if (at == null || to == null) return null;
     if ((at.clip != null) != (op.list == OpList.clips)) return null;
+    OpRestore? restore;
     if (at.clip case final c?) {
+      // Onto another track, its effect lanes are read by index there at the next save: the way back restores them.
+      if (!identical(at.layer, to) && c.automation.isNotEmpty) restore = OpRestore.clip(c);
       at.layer.clips.removeAt(at.index);
       to.clips.insert(op.index.clamp(0, to.clips.length), c);
     } else {
       at.layer.audioClips.removeAt(at.index);
       to.audioClips.insert(op.index.clamp(0, to.audioClips.length), at.audio!);
     }
-    return ProjectMove(op.node, at.layer.id, op.list, at.index);
+    return ProjectMove(op.node, at.layer.id, op.list, at.index, restore: restore);
   }
 
   ProjectOp? _moveDevice(ProjectMove op) {
@@ -658,8 +691,76 @@ enum _End { live, save, changed }
 
 extension ProjectOps on AppState {
   /// The one entry for the edits [ProjectOp] covers: applies [op] to the project, makes the live engine call or
-  /// the project sync and autosave it needs, and returns its inverse (empty when it named nothing).
-  List<ProjectOp> apply(ProjectOp op, {void Function()? andThen}) => applyAll([op], andThen: andThen);
+  /// the project sync and autosave it needs, and returns its inverse (null when it named nothing).
+  ProjectOp? apply(ProjectOp op, {void Function()? andThen}) {
+    if (andThen == null && op is ProjectSet) {
+      final (:applied, :inverse) = _applyDrag(op);
+      if (applied) return inverse;
+    }
+    final inverses = applyAll([op], andThen: andThen);
+    return inverses.isEmpty ? null : inverses.first;
+  }
+
+  /// A drag step (a knob, a send, a fader, the master) by the shortest way: the target found once, no lists, the
+  /// same engine call, save and ticks as [applyAll]. Not [applied] when [op] isn't one; then [applyAll] decides.
+  ({bool applied, ProjectOp? inverse}) _applyDrag(ProjectSet op) {
+    final field = op.field, v = op.value;
+    final number = v is num && v.isFinite ? v.toDouble() : null;
+    const notDrag = (applied: false, inverse: null);
+    if (OpField.paramOf(field) case final param?) {
+      if (v != null && number == null) return notDrag;
+      final spot = project.findDevice(op.node);
+      if (spot == null) return notDrag;
+      final params = spot.use.params, old = params[param];
+      if (number == null) {
+        params.remove(param);
+      } else {
+        params[param] = number;
+      }
+      _deviceLive(spot, field, param);
+      layerValueTick(spot.layer?.id ?? masterLayerId).value++;
+      return (applied: true, inverse: ProjectSet(op.node, field, old));
+    }
+    if (number == null) return notDrag;
+    if (field == OpField.level) {
+      final at = project.findSend(op.node);
+      if (at == null) return notDrag;
+      final s = at.layer.sends[at.index], old = s.level;
+      s.level = number;
+      _pushSend(at.layer, at.index);
+      layerValueTick(at.layer.id).value++;
+      return (applied: true, inverse: ProjectSet(op.node, field, old));
+    }
+    if (op.node == kMasterNode && field == OpField.volume) {
+      final old = project.master;
+      project.master = number;
+      engine?.setMaster(number);
+      finishEdit(sync: false, notify: false);
+      masterValueTick.value++;
+      values.value++;
+      return (applied: true, inverse: ProjectSet(op.node, field, old));
+    }
+    if (field != OpField.volume && field != OpField.pan) return notDrag;
+    LayerDoc? l;
+    for (final x in project.layers) {
+      if (x.id == op.node) {
+        l = x;
+        break;
+      }
+    }
+    if (l == null) return notDrag;
+    final old = field == OpField.volume ? l.volume : l.pan;
+    if (field == OpField.volume) {
+      l.volume = number;
+    } else {
+      l.pan = number;
+    }
+    engine?.setLayerMix(l.id, l.volume, l.pan, l.mute, l.solo);
+    finishEdit(sync: false, notify: false);
+    layerValueTick(l.id).value++;
+    values.value++;
+    return (applied: true, inverse: ProjectSet(op.node, field, old));
+  }
 
   /// Applies [ops] in order as one edit (one sync, one save) and returns their inverses, last first. [andThen] runs
   /// after the project changed and before it saves and redraws (a selection that follows the edit).

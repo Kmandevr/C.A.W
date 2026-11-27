@@ -280,7 +280,7 @@ extension AppStateArrange on AppState {
 
   /// Removes [l]; the tracks inside it move up to its folder.
   void removeLayer(LayerDoc l) {
-    if (apply(ProjectDelete(l.id), andThen: _pruneClipSelection).isNotEmpty) return;
+    if (apply(ProjectDelete(l.id), andThen: _pruneClipSelection) != null) return;
     _pruneClipSelection();  // not in the project (already gone): the screens still settle
     _changed();
   }
@@ -304,6 +304,10 @@ extension AppStateArrange on AppState {
     // Volume and pan drags only redraw their sliders and go straight to the audio thread. Mute and solo reach
     // through folders and buses (soloing a track keeps its buses and send buses open; muting a folder without a bus
     // mutes its tracks), which the engine works out from the whole project, so they go as a project update.
+    if (mute == null && solo == null && (volume == null) != (pan == null)) {
+      apply(volume != null ? ProjectSet(l.id, OpField.volume, volume) : ProjectSet(l.id, OpField.pan, pan));  // a drag step
+      return;
+    }
     applyAll([
       if (volume != null) ProjectSet(l.id, OpField.volume, volume),
       if (pan != null) ProjectSet(l.id, OpField.pan, pan),

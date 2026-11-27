@@ -215,7 +215,8 @@ class AudioClipDoc {
         takes = takes ?? [],
         comp = comp ?? [];
 
-  final String id;
+  /// Unique in the project: a repeated one (an untrusted file) is replaced on load ([ProjectInstanceIds.settleIds]).
+  String id;
   String assetId;
   double startSteps;
   double _lengthSteps;

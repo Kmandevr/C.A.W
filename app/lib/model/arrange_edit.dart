@@ -456,7 +456,7 @@ extension ArrangeEdit on AppState {
     // The length is a resize (one op); the rest of the sheet's fields change with it, in the same edit.
     final resized = lengthSteps != null &&
         apply(ProjectSet(clip.id, OpField.length, lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt()),
-            andThen: others).isNotEmpty;
+            andThen: others) != null;
     if (!resized) editLayer(layer, (_) => others());
     endUndoStep();
   }

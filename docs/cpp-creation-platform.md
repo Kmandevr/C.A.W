@@ -126,7 +126,7 @@ The Library is a broad, practical toolbox, not just a thin wrapper around the cu
 
 Make the Library the easiest and fastest route into the engine: built-in, Library and user-authored components use the same registration, descriptor, typed-port, parameter and lifecycle contracts. A user should be able to add or insert a component and use its declared inputs/outputs without manually recreating engine integration. Preinstall the common packages most CAW projects are likely to use; keep less common packages modular and locally cached. Predict requirements from project files and install missing dependencies in the background when connected, while keeping already-installed projects buildable offline.
 
-A component placed in a chain is one device in the project (`ComponentUseDoc` in `app/lib/model/project.dart`) with a stable instance id the project keeps, so its lanes, links and undo history follow it when the chain is reordered; the engine still addresses it by chain index.
+A component placed in a chain is one device in the project (`ComponentUseDoc` in `app/lib/model/project.dart`) with a stable instance id the project keeps, so its lanes, links and undo history follow it when the chain is reordered; the engine still addresses it by chain index. Its knobs, bypass, adding, removing and moving go through one edit entry by that id (`ProjectOps.apply`, [app](app.md)).
 
 ### Audio and DSP
 

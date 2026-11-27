@@ -1,6 +1,7 @@
 // The apply(op) seam (lib/model/collab/project_ops.dart): each op and its inverse round-trip to the same project,
 // ops read back from their JSON, refused ops change nothing, and AppState's edits go through it.
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
@@ -12,6 +13,7 @@ import 'package:caw/model/mixer_fx.dart';
 import 'package:caw/model/modulation.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/routing.dart';
+import 'package:caw/model/routing_edit.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/model/vca.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -260,7 +262,7 @@ void main() {
       expect(_layer(s.project, 'b').clips.single.id, 'c1');
       s.applyAll(undo);
       expect(_json(s.project), start);
-      expect(s.apply(const ProjectSet('zz', OpField.volume, 1)), isEmpty);
+      expect(s.apply(const ProjectSet('zz', OpField.volume, 1)), isNull);
     });
 
     test('a knob drag step changes only the value; a fader saves; a structural edit saves and redraws', () {
@@ -292,6 +294,132 @@ void main() {
       expect(_layer(s.project, 'b').components.last, same(eq));
       s.insertNativeEffect(masterLayerOf(s.project), copy);
       expect(s.project.masterComponents.last, same(copy));
+    });
+  });
+
+  group('review fixes', () {
+    test('a project with a repeated clip id gives the later clips new ids, so an op edits the one it names', () {
+      final j = jsonDecode(_json(_project())) as Map<String, dynamic>;
+      final layers = j['layers'] as List;
+      ((layers[1] as Map)['clips'] as List).add({...((layers[0] as Map)['clips'] as List).first as Map});
+      final audio = ((layers[0] as Map)['audio_clips'] as List).first as Map;
+      ((layers[1] as Map)['audio_clips'] = [ {...audio} ]);
+      final p = ProjectDoc.fromJson(jsonDecode(jsonEncode(j)) as Map<String, dynamic>);
+      final a = _layer(p, 'a'), b = _layer(p, 'b');
+      expect(a.clips.single.id, 'c1', reason: 'the first holder keeps it');
+      expect(b.clips.single.id, isNot('c1'));
+      expect(a.audioClips.single.id, 'ac1');
+      expect(b.audioClips.single.id, isNot('ac1'));
+      expect(p.applyOp(const ProjectSet('c1', OpField.start, 40)), isNotNull);
+      expect((a.clips.single.startSteps, b.clips.single.startSteps), (40, 0));
+      final again = jsonEncode(p.toJson());
+      expect(jsonEncode(ProjectDoc.fromJson(jsonDecode(again) as Map<String, dynamic>).toJson()), again,
+          reason: 'once settled, the ids stay');
+    });
+
+    test('a clip moved to another track and back gets its effect lanes back, with a save between', () {
+      final s = AppState(settings: Settings());
+      addTearDown(s.dispose);
+      s.project = _project();
+      _layer(s.project, 'b').components.add(ComponentUseDoc('org.caw.delay'));
+      s.starting = false;
+      s.history.reset(_json(s.project));
+      final start = _json(s.project);
+      final lane = _layer(s.project, 'a').clips.single.automation.single;
+      final aimed = (lane.device, lane.component);
+      final back = s.apply(const ProjectMove('c1', 'b', OpList.clips, kAtEnd))!;
+      s.endUndoStep();  // the undo snapshot: a save, which re-aims the clip's lane at track b's delay
+      expect(lane.device, isNot(aimed.$1));
+      s.apply(back);
+      expect((lane.device, lane.component), aimed, reason: 'back as it was, before any save settles it');
+      expect(_json(s.project), start);
+    });
+
+    test('malformed op JSON is no op, never a throw', () {
+      final p = _project();
+      final a = _layer(p, 'a');
+      final samples = <Map<String, Object?>>[
+        const ProjectSet('a', OpField.volume, 0.5).toJson(),
+        ProjectSet(a.automation.single.uid, OpField.points, [AutomationPointDoc(step: 2, value: 0.4)]).toJson(),
+        ProjectInsert('b', OpList.components, 0, ComponentUseDoc('org.caw.chorus', {'rate': 0.5})).toJson(),
+        ProjectInsert(kProjectNode, OpList.layers, 1, _layer(_project(), 'a')).toJson(),
+        const ProjectMove('f2', 'f', OpList.layers, 0, withInside: false).toJson(),
+        const ProjectDelete('b').toJson(),
+      ];
+      final junk = <Object?>[null, 1, -1, 1.5, double.nan, '', 'x', true, <Object?>[], <String, Object?>{}, [1, 'a'],
+          {'id': 3}, {'step': 'x'}];
+      final rnd = Random(7);
+      Object? mutate(Object? x, int depth) {
+        if (x is Map && x.isNotEmpty && depth < 6) {
+          final out = <String, Object?>{for (final e in x.entries) '${e.key}': e.value};
+          final key = out.keys.elementAt(rnd.nextInt(out.length));
+          out[key] = rnd.nextInt(3) == 0 ? junk[rnd.nextInt(junk.length)] : mutate(out[key], depth + 1);
+          return out;
+        }
+        if (x is List && x.isNotEmpty && depth < 6) {
+          final out = List<Object?>.of(x);
+          final i = rnd.nextInt(out.length);
+          out[i] = rnd.nextInt(3) == 0 ? junk[rnd.nextInt(junk.length)] : mutate(out[i], depth + 1);
+          return out;
+        }
+        return junk[rnd.nextInt(junk.length)];
+      }
+
+      var none = 0;
+      for (var i = 0; i < 3000; i++) {
+        final sample = jsonDecode(jsonEncode(samples[i % samples.length]));
+        final op = ProjectOp.fromJson(mutate(sample, 0));
+        if (op == null) {
+          none++;
+          continue;
+        }
+        final q = _project();
+        q.applyOp(op);  // applies or refuses; never throws
+      }
+      expect(none, greaterThan(0));
+      for (final j in junk) {
+        expect(ProjectOp.fromJson(j), isNull);
+        expect(ProjectOp.fromJson({'op': 'insert', 'parent': 'project', 'list': 'layers', 'index': 0, 'kind': 'track',
+            'node': {'id': 'n', 'name': j, 'clips': j, 'components': j}}), anyOf(isNull, isA<ProjectInsert>()));
+      }
+      expect(ProjectOp.fromJson({'op': 'insert', 'parent': 'project', 'list': 'layers', 'index': 0, 'kind': 'track',
+          'node': {'id': 'n', 'clips': 'nonsense'}}), isNull);
+    });
+
+    test('ops holding NaN compare and hash without throwing', () {
+      const x = ProjectSet('a', OpField.volume, double.nan);
+      final y = ProjectSet('a', OpField.volume, double.nan + 0);
+      expect(x == y, isTrue);
+      expect(x.hashCode, y.hashCode);
+      expect(x == const ProjectSet('a', OpField.volume, 0.5), isFalse);
+      expect({x, y}, hasLength(1));
+    });
+
+    test('a knob, send or fader drag step looks its target up once', () {
+      final s = AppState(settings: Settings());
+      addTearDown(s.dispose);
+      s.project = _project();
+      s.starting = false;
+      s.history.reset(_json(s.project));
+      final a = _layer(s.project, 'a');
+      for (final step in <void Function()>[
+        () => s.setNativeParamLive(a, 0, 'gain', 0.3),
+        () => s.setInstrumentParamLive(a, 'level', 0.2),
+        () => s.setSendLevelLive(a, 0, 0.7),
+      ]) {
+        final before = debugOpLookups;
+        step();
+        expect(debugOpLookups - before, 1);
+      }
+      expect(a.components[0].params['gain'], 0.3);
+      expect(a.sends.single.level, 0.7);
+      s.mixLayer(a, volume: 0.4);
+      s.setMaster(0.6);
+      expect((a.volume, s.project.master), (0.4, 0.6));
+      // The fast path's inverse is the same as the general one's.
+      expect(s.apply(ProjectSet(a.components[0].uid, OpField.param('gain'), 0.9)),
+          ProjectSet(a.components[0].uid, OpField.param('gain'), 0.3));
+      expect(s.apply(const ProjectSet('a', OpField.pan, 0.5)), const ProjectSet('a', OpField.pan, 0.0));
     });
   });
 }
