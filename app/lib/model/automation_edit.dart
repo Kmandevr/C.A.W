@@ -180,13 +180,15 @@ class AutomationClipboard {
     final picked = [for (var i = 0; i < points.length; i++) if (selected.contains(i)) points[i]];
     if (picked.isEmpty) return null;
     final first = picked.first.step;
-    return AutomationClipboard([for (final p in picked) p.copy(step: p.step - first, value: toHeight(p.value))]);
+    return AutomationClipboard(
+        [for (final p in picked) p.copy(step: p.step - first, value: toHeight(p.value), fresh: true)]);
   }
 
   /// [points] with this pasted at [at] (heights back to values through [toValue]), over what they had there; the
   /// pasted points are the selection.
   Transformed pasteInto(List<AutomationPointDoc> points, double at, {double Function(double) toValue = _same}) {
-    final span = [for (final p in this.points) p.copy(step: math.max(0, at) + p.step, value: toValue(p.value))];
+    // Each paste is new points (their own ids), however often the same copy goes in.
+    final span = [for (final p in this.points) p.copy(step: math.max(0, at) + p.step, value: toValue(p.value), fresh: true)];
     final all = replaceSpan(points, span);
     return (points: all, selected: {for (var i = 0; i < all.length; i++) if (span.any((s) => identical(s, all[i]))) i});
   }

@@ -18,6 +18,7 @@ import 'chain_templates.dart';
 import 'cpp_component.dart';
 import 'device_names.dart';
 import 'freeze.dart';
+import 'instance_ids.dart';
 import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
 import 'pattern_doc.dart';
@@ -72,28 +73,32 @@ class ComponentCatalog extends ValueNotifier<Map<String, NativeComponentInfo>> {
 final _catalogs = Expando<ComponentCatalog>('component catalog');
 
 /// Keeps native-component automation lanes on their effects after the chain of [layerId] (null: the master)
-/// changed from [before] to its current order: a lane follows its effect to the new index, and goes with it when the
-/// effect is removed. Lanes address an effect by index, so every chain edit calls this.
+/// changed from [before] to its current order: a lane follows its effect (by the device's id, lib/model/
+/// instance_ids.dart; a lane with none yet by its index in [before]) to its new index, and goes with it when the
+/// effect is removed. Every chain edit calls this, so the index the lane also keeps stays in step.
 void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> before) {
   final after = layerId == null ? p.masterComponents : p.layers.where((l) => l.id == layerId).firstOrNull?.components;
+  // Where the lane's device is now, or -1 when it is gone (the lane goes too).
+  int follow(String? device, int? index) {
+    final use = aimedDevice(before, device, index ?? -1);
+    return use == null || after == null ? -1 : deviceIndexIn(after, use.uid);
+  }
   p.automation.removeWhere((lane) {
     if (lane.targetType != 'component' || lane.layerId != layerId) return false;
-    final i = lane.component ?? -1;
-    if (i < 0 || i >= before.length) return true;
-    final now = after == null ? -1 : after.indexWhere((c) => identical(c, before[i]));
+    final now = follow(lane.device, lane.component);
     if (now < 0) return true;
     lane.component = now;
+    lane.device = after![now].uid;
     return false;
   });
   // Clip lanes on the track's effects follow them the same way.
   for (final clip in p.layers.where((l) => l.id == layerId).firstOrNull?.clips ?? const <ClipDoc>[]) {
     clip.automation.removeWhere((lane) {
       if (lane.targetType != 'component') return false;
-      final i = lane.component ?? -1;
-      if (i < 0 || i >= before.length) return true;
-      final now = after == null ? -1 : after.indexWhere((c) => identical(c, before[i]));
+      final now = follow(lane.device, lane.component);
       if (now < 0) return true;
       lane.component = now;
+      lane.device = after![now].uid;
       return false;
     });
   }
@@ -137,6 +142,12 @@ extension ArrangeFx on AppState {
   int? engineComponentIndex(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.components.length || !componentPlayable(layer.components[index].id)) return null;
     return layer.components.take(index).where((c) => componentPlayable(c.id)).length;
+  }
+
+  /// Where device [uid] (`ComponentUseDoc.uid`) of [layer]'s effects sits in the engine's chain now, or null.
+  int? engineDeviceIndex(LayerDoc layer, String uid) {
+    final i = deviceIndexIn(layer.components, uid);
+    return i < 0 ? null : engineComponentIndex(layer, i);
   }
 
   /// Adds native effect [componentId] to [layer]'s inserts (at [at], or the end). A folder has inserts only while
@@ -224,9 +235,10 @@ extension ArrangeFx on AppState {
     final e = engine;
     final engineIndex = engineComponentIndex(layer, index);
     if (e == null || engineIndex == null) return false;
-    final id = layer.components[index].id;
+    final uid = layer.components[index].uid;
     if (!await e.setComponentState(engineLayerId(layer), engineIndex, bytes, version)) return false;
-    if (index >= layer.components.length || layer.components[index].id != id) return false;
+    // The same device still at [index] (by its id: not another one put there meanwhile).
+    if (deviceIndexIn(layer.components, uid) != index) return false;
     endUndoStep();
     editLayer(layer, (l) {
       l.components[index].state = base64Encode(bytes);
@@ -441,7 +453,7 @@ extension ArrangeFx on AppState {
     final copied = ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
         lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
         sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, loopSteps: clip.loopSteps,
-        automation: [for (final a in clip.automation) a.copy()]);
+        automation: [for (final a in clip.automation) a.copy(fresh: true)]);
     editProject((p) {
       p.modules.add(source);
       target.clips.add(copied);

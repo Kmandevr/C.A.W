@@ -23,9 +23,11 @@ class DeviceHistoryStep {
 
 /// The undo steps that changed [t]'s values, newest first, at most [limit]. Each holds the device's values as they
 /// stood before that step. Only the descriptor's parameters count (a rack's saved layout is not one of its knobs).
-/// A step that removed or replaced the device (another component in its slot), or changed the order of its chain
-/// (an effect added, removed or moved), ends the list: the project keeps no id per device, so earlier values at
-/// that slot may belong to another one. Call [AppState.endUndoStep] first, so an edit still settling is a step.
+/// The device is found in each snapshot by its instance id (`ComponentUseDoc.uid`), so its steps from before a
+/// reorder, or a move to another chain, still count. The step that added it (no device with its id before) or
+/// replaced it ends the list. A snapshot without device ids falls back to its slot, ending the list at a step that
+/// changed the chain's order (an effect added, removed or moved). Call [AppState.endUndoStep] first, so an edit
+/// still settling is a step.
 List<DeviceHistoryStep> deviceHistory(DeviceTarget t, {int limit = 30}) {
   final use = t.use, info = t.info;
   if (use == null) return const [];
@@ -36,12 +38,21 @@ List<DeviceHistoryStep> deviceHistory(DeviceTarget t, {int limit = 30}) {
   _forget(snapshots);
   final out = <DeviceHistoryStep>[];
   final chain = _chainNow(t);
-  var after = (chain: chain, values: known(use.params));
+  ({List<_Entry>? chain, Map<String, double> values}) after = (chain: chain, values: known(use.params));
   for (var i = snapshots.length - 1; i >= 0 && out.length < limit; i--) {
     final slices = _slicesOf(snapshots[i]);
-    final beforeChain = slices == null ? null : _chainIn(slices, t);
-    if (beforeChain == null || !_sameOrder(beforeChain, after.chain)) break;
-    final entry = t.isInstrument ? beforeChain.single : beforeChain[t.slot];
+    if (slices == null) break;
+    final _Entry entry;
+    List<_Entry>? beforeChain;
+    if (slices.byUid.isNotEmpty) {
+      final found = slices.byUid[use.uid];
+      if (found == null) break;
+      entry = found;
+    } else {
+      beforeChain = _chainIn(slices, t);
+      if (beforeChain == null || after.chain == null || !_sameOrder(beforeChain, after.chain!)) break;
+      entry = t.isInstrument ? beforeChain.single : beforeChain[t.slot];
+    }
     if (entry.id != use.id) break;
     final before = known(entry.params);
     final keys = {...before.keys, ...after.values.keys};
@@ -61,8 +72,9 @@ int deviceHistoryDecodes = 0;
 /// One saved device entry: its component and values.
 typedef _Entry = ({String id, Map<String, double> params});
 
-/// The devices of one snapshot: each track's instrument and effects by track id, and the master's effects.
-typedef _Slices = ({Map<String, (_Entry?, List<_Entry>)> layers, List<_Entry> master});
+/// The devices of one snapshot: each track's instrument and effects by track id, the master's effects, and every
+/// device by its instance id (empty for a snapshot saved without ids).
+typedef _Slices = ({Map<String, (_Entry?, List<_Entry>)> layers, List<_Entry> master, Map<String, _Entry> byUid});
 
 /// The decoded devices of the snapshots seen, by the snapshot (the history keeps each one's text unchanged, so a
 /// later look decodes only the steps added since). Null: a snapshot that doesn't read.
@@ -89,13 +101,26 @@ _Slices? _decode(String snapshot) {
   }
   if (j is! Map) return null;
   List<_Entry> list(Object? x) => [if (x is List) for (final e in x) _entry(e) ?? (id: '', params: const {})];
+  final byUid = <String, _Entry>{};
+  // A chain's ids sit beside its entries (ComponentUseDoc.idsJson), one per entry.
+  void index(List<_Entry> chain, Object? uids) {
+    if (uids is! List || uids.length != chain.length) return;
+    for (var i = 0; i < chain.length; i++) {
+      if (uids[i] case final String uid) byUid[uid] = chain[i];
+    }
+  }
   final layers = <String, (_Entry?, List<_Entry>)>{};
   if (j['layers'] case final List ls) {
     for (final l in ls.whereType<Map>()) {
-      if (l['id'] case final String id) layers[id] = (_entry(l['instrument']), list(l['components']));
+      final instrument = _entry(l['instrument']), effects = list(l['components']);
+      if (instrument != null) index([instrument], [l['instrument_uid']]);
+      index(effects, l['component_uids']);
+      if (l['id'] case final String id) layers[id] = (instrument, effects);
     }
   }
-  return (layers: layers, master: list(j['master_components']));
+  final master = list(j['master_components']);
+  index(master, j['master_component_uids']);
+  return (layers: layers, master: master, byUid: byUid);
 }
 
 _Entry? _entry(Object? e) {

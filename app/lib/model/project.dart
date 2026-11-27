@@ -10,6 +10,7 @@ import 'automation_curve.dart';
 import 'clip_automation.dart';
 import 'clip_midi.dart';
 import 'cpp_component.dart';
+import 'instance_ids.dart';
 import 'midi_file.dart' show kMaxMidiFileBytes;
 import 'merged_devices.dart';
 import 'midi_mapping.dart';
@@ -172,7 +173,8 @@ class ClipDoc {
   /// A locked clip can't be moved, trimmed, split, glued or deleted until it is unlocked (REAPER's item lock).
   bool lock;
 
-  Map<String, dynamic> toJson() => {
+  /// [withIds]: its automation lanes' and points' instance ids too (the project file; a copy leaves them out).
+  Map<String, dynamic> toJson({bool withIds = false}) => {
         'id': id, 'pattern': patternId, 'start_steps': startSteps,
         'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
         if (name != null) 'name': name,
@@ -182,7 +184,7 @@ class ClipDoc {
         if (takes.isNotEmpty) 'takes': takes,
         if (comp.isNotEmpty) 'comp': [for (final p in comp) p.toJson()],
         if ((loopSteps ?? 0) > 0) 'loop_steps': loopSteps,
-        if (automation.isNotEmpty) 'automation': [for (final a in automation) a.toJson()],
+        if (automation.isNotEmpty) 'automation': [for (final a in automation) a.toJson(withIds: withIds)],
       };
 
   static ClipDoc fromJson(Map<String, dynamic> j) {
@@ -219,28 +221,38 @@ String automationKey(String type, String target, {String? layerId, String? modul
     '$type|${layerId ?? ''}|${moduleId ?? ''}|${component ?? ''}|$target';
 
 class AutomationPointDoc {
-  AutomationPointDoc({required this.step, required this.value, this.curve = AutomationCurve.linear, this.tension = 0});
+  AutomationPointDoc({required this.step, required this.value, this.curve = AutomationCurve.linear, this.tension = 0,
+      this._uid});
   double step, value;
+
+  /// Its instance id (`ap…`, lib/model/instance_ids.dart): made when first asked for, saved with the project.
+  String get uid => _uid ??= newId(InstanceIds.point);
+  set uid(String id) => _uid = id;
+  String? _uid;
 
   /// The segment's curve from this point to the next (#230; lib/model/automation_curve.dart), and its bend, -1..1.
   AutomationCurve curve;
   double tension;
 
-  Map<String, dynamic> toJson() => {
+  /// [withIds]: with its instance id (the project file and undo snapshots; never the engine's copy).
+  Map<String, dynamic> toJson({bool withIds = false}) => {
         'step': step,
         'value': value,
         if (curve != AutomationCurve.linear) 'curve': curve.json,
         if (curve.bends && tension != 0) 'tension': tension,
+        if (withIds) 'uid': uid,
       };
   static AutomationPointDoc fromJson(Map<String, dynamic> j) {
     final curve = AutomationCurve.parse(j['curve']);
     return AutomationPointDoc(step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0,
-        curve: curve, tension: boundTension(curve, j['tension']));
+        curve: curve, tension: boundTension(curve, j['tension']), uid: InstanceIds.read(j['uid'], InstanceIds.point));
   }
 
-  /// A copy, curve and all; [step] and [value] put it elsewhere.
-  AutomationPointDoc copy({double? step, double? value}) =>
-      AutomationPointDoc(step: step ?? this.step, value: value ?? this.value, curve: curve, tension: tension);
+  /// A copy, curve and all; [step] and [value] put it elsewhere. The same point (its id kept) unless [fresh]: a
+  /// paste or a repeat is a new one.
+  AutomationPointDoc copy({double? step, double? value, bool fresh = false}) =>
+      AutomationPointDoc(step: step ?? this.step, value: value ?? this.value, curve: curve, tension: tension,
+          uid: fresh ? null : uid);
 }
 
 /// The most a lane row can be dragged to and the least (#230; screen only, [AutomationLaneDoc.height]).
@@ -249,9 +261,14 @@ double? _laneHeight(Object? raw) =>
     raw is num && raw.isFinite ? raw.toDouble().clamp(kMinLaneHeight, kMaxLaneHeight).toDouble() : null;
 
 class AutomationLaneDoc {
-  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true, this.height})
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points, this.armed = true, this.height, this._uid})
       : points = points ?? [];
   String target;
+
+  /// Its instance id (`al…`, lib/model/instance_ids.dart).
+  String get uid => _uid ??= newId(InstanceIds.lane);
+  set uid(String id) => _uid = id;
+  String? _uid;
   List<AutomationPointDoc> points;
 
   /// Written by the Automate button (REAPER's envelope arm, UG 18.5); a disarmed lane only plays.
@@ -259,10 +276,12 @@ class AutomationLaneDoc {
 
   /// Its row's height under the track as dragged (#230; null: the default). Screen only.
   double? height;
-  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()], if (!armed) 'armed': false,
-        if (height != null) 'height': height};
+  Map<String, dynamic> toJson({bool withIds = false}) => {'target': target,
+        'points': [for (final p in points) p.toJson(withIds: withIds)], if (!armed) 'armed': false,
+        if (height != null) 'height': height, if (withIds) 'uid': uid};
   static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
     target: j['target'] as String, armed: j['armed'] != false, height: _laneHeight(j['height']),
+    uid: InstanceIds.read(j['uid'], InstanceIds.lane),
     points: ((j['points'] as List?) ?? const [])
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
@@ -272,11 +291,21 @@ class AutomationLaneDoc {
 class ProjectAutomationLaneDoc {
   ProjectAutomationLaneDoc(
       {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points,
-      this.armed = true, this.height})
+      this.armed = true, this.height, this._uid, this.device})
       : points = points ?? [];
 
   /// Its row's height under the track as dragged (#230; null: the default). Screen only.
   double? height;
+
+  /// Its instance id (`al…`, lib/model/instance_ids.dart).
+  String get uid => _uid ??= newId(InstanceIds.lane);
+  set uid(String id) => _uid = id;
+  String? _uid;
+
+  /// A `component` or `noteComponent` lane's device by its id (`d…`): what the lane follows. [component] is that
+  /// device's place in its chain, kept in step with it ([ProjectInstanceIds.settleIds], `followComponentLanes`) and
+  /// saved too, so an older build reads the lane by index. Null: none known yet (the index decides).
+  String? device;
   String targetType;
   String target;
   String? moduleId;
@@ -289,15 +318,17 @@ class ProjectAutomationLaneDoc {
 
   String get key => automationKey(targetType, target, layerId: layerId, moduleId: moduleId, component: component);
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool withIds = false}) => {
         'target_type': targetType,
         'target': target,
         if (moduleId != null) 'module': moduleId,
         if (layerId != null) 'layer': layerId,
         if (component != null) 'component': component,
-        'points': [for (final p in points) p.toJson()],
+        'points': [for (final p in points) p.toJson(withIds: withIds)],
         if (!armed) 'armed': false,
         if (height != null) 'height': height,
+        if (withIds) 'uid': uid,
+        if (withIds && device != null) 'device': device,
       };
 
   static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
@@ -308,6 +339,8 @@ class ProjectAutomationLaneDoc {
         component: (j['component'] as num?)?.toInt(),
         armed: j['armed'] != false,
         height: _laneHeight(j['height']),
+        uid: InstanceIds.read(j['uid'], InstanceIds.lane),
+        device: InstanceIds.read(j['device'], InstanceIds.device),
         points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
       );
 }
@@ -317,6 +350,14 @@ class ProjectAutomationLaneDoc {
 class ComponentUseDoc {
   ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1, this.preset])
       : params = params ?? {};
+
+  /// This device's instance id (`d…`, lib/model/instance_ids.dart): made when first asked for and kept while the
+  /// device stays in the project (moved, reordered, undone), so lanes, links and its undo history follow it. A copy
+  /// made through [toJson] and [fromJson] is a new device with a new id. The project file keeps the ids of a chain
+  /// beside its entries ([idsJson], [readIds]), so the entries themselves read as they always did.
+  String get uid => _uid ??= newId(InstanceIds.device);
+  set uid(String id) => _uid = id;
+  String? _uid;
 
   /// The synths that became Flagship presets (one synth, 2026-11-10), the drums that became org.caw.drums (one drum
   /// instrument, 2026-11-11) and Timber (split in 1.1.3, the engine's timber_migrate.cpp): a project naming one plays
@@ -378,7 +419,7 @@ class ComponentUseDoc {
 
   /// A bare id when nothing else is set, as older projects stored it. [withKey] false leaves the key out (the
   /// engine's copy, when the key would make a loop or names a layer that is gone: [RoutingPlan]).
-  Object toJson({bool withKey = true}) => params.isEmpty && !bypass && !autoGain && state == null && preset == null &&
+  Object toJson({bool withKey = true, bool withIds = false}) => params.isEmpty && !bypass && !autoGain && state == null && preset == null &&
           (key == null || !withKey) && samples.isEmpty && !(_isRack && !legacyRack) && !(_isTalon && !legacyTalon)
       ? id
       : {
@@ -391,7 +432,7 @@ class ComponentUseDoc {
           if (autoGain) 'auto_gain': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
           if (key != null && withKey) 'key': key!.toJson(),
-          if (samples.isNotEmpty) 'samples': [for (final x in samples) x.toJson()],
+          if (samples.isNotEmpty) 'samples': [for (final x in samples) x.toJson(withIds: withIds)],
         };
 
   /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
@@ -429,28 +470,49 @@ class ComponentUseDoc {
       ..legacyTalon = MergedDevices.isLegacyTalon(id, params);
   }
 
-  static List<ComponentUseDoc> listFromJson(Object? raw) => [
-        for (final entry in ((raw as List?) ?? const []).take(64)) ?ComponentUseDoc.fromJson(entry),
-      ];
+  /// [uids]: the chain's saved ids, one per entry of [raw] ([idsJson]); a malformed one is left out (a new id).
+  static List<ComponentUseDoc> listFromJson(Object? raw, [Object? uids]) {
+    final entries = (raw as List?) ?? const [];
+    final ids = uids is List ? uids : const [];
+    return [
+      for (var i = 0; i < entries.length && i < 64; i++)
+        if (ComponentUseDoc.fromJson(entries[i]) case final use?)
+          use.._uid = i < ids.length ? InstanceIds.read(ids[i], InstanceIds.device) : null,
+    ];
+  }
+
+  /// The ids of [chain]'s devices in order, saved beside its entries (`component_uids` and the like).
+  static List<String> idsJson(List<ComponentUseDoc> chain) => [for (final c in chain) c.uid];
+
+  /// [use] with the id saved for it ([raw], one id), when that is well formed.
+  static ComponentUseDoc? readIds(ComponentUseDoc? use, Object? raw) =>
+      use?.._uid = InstanceIds.read(raw, InstanceIds.device);
 }
 
 /// One sample slot of a component (the drums' pads): a file the app keeps ([path]) or a built-in pack sound
 /// ([builtin]), never both. The engine's limits (engine/src/project.cpp): 256 entries, slot 0..65535.
 class ComponentSampleDoc {
-  const ComponentSampleDoc(this.slot, {this.path, this.builtin});
+  ComponentSampleDoc(this.slot, {this.path, this.builtin, this._uid});
   final int slot;
   final String? path, builtin;
 
+  /// Its instance id (`cs…`, lib/model/instance_ids.dart).
+  String get uid => _uid ??= newId(InstanceIds.sample);
+  set uid(String id) => _uid = id;
+  String? _uid;
+
   String get label => builtin ?? (path ?? '').split(RegExp(r'[/\\]')).last;
 
-  Map<String, dynamic> toJson() => {'slot': slot, if (path != null) 'path': path, if (builtin != null) 'builtin': builtin};
+  Map<String, dynamic> toJson({bool withIds = false}) =>
+      {'slot': slot, if (path != null) 'path': path, if (builtin != null) 'builtin': builtin, if (withIds) 'uid': uid};
 
   static ComponentSampleDoc? fromJson(Object? j) {
     if (j is! Map) return null;
     final slot = j['slot'];
     final path = _boundedProjectText(j['path'], 4096), builtin = _boundedProjectText(j['builtin'], 256);
     if (slot is! int || slot < 0 || slot > 65535 || path.isEmpty == builtin.isEmpty) return null;
-    return ComponentSampleDoc(slot, path: path.isEmpty ? null : path, builtin: builtin.isEmpty ? null : builtin);
+    return ComponentSampleDoc(slot, path: path.isEmpty ? null : path, builtin: builtin.isEmpty ? null : builtin,
+        uid: InstanceIds.read(j['uid'], InstanceIds.sample));
   }
 
   /// One entry per slot (the last wins), at most 256.
@@ -737,8 +799,10 @@ class LayerDoc {
     'org.caw.drums': 'Acoustic kit: Studio',
   };
 
-  /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4).
-  Map<String, dynamic> toJson({int Function(String assetId)? rateOf}) => {
+  /// [rateOf] gives an asset's `source_rate`, so a clip's loop points are saved in frames (format v4). [withIds]: with
+  /// the instance ids of its devices, sends, lanes, points and samples (the project file and undo snapshots; a copy
+  /// of a track, a template, leaves them out and gets new ones).
+  Map<String, dynamic> toJson({int Function(String assetId)? rateOf, bool withIds = false}) => {
         'id': id,
         'name': name,
         'color': color,
@@ -748,13 +812,17 @@ class LayerDoc {
         'pan': pan,
         'mute': mute,
         'solo': solo,
-        'clips': [for (final c in clips) c.toJson()],
-        'automation': [for (final a in automation) a.toJson()],
-        if (components.isNotEmpty) 'components': [for (final c in components) c.toJson()],
-        if (noteComponents.isNotEmpty) 'noteComponents': [for (final c in noteComponents) c.toJson()],
+        'clips': [for (final c in clips) c.toJson(withIds: withIds)],
+        'automation': [for (final a in automation) a.toJson(withIds: withIds)],
+        if (components.isNotEmpty) 'components': [for (final c in components) c.toJson(withIds: withIds)],
+        if (withIds && components.isNotEmpty) 'component_uids': ComponentUseDoc.idsJson(components),
+        if (noteComponents.isNotEmpty) 'noteComponents': [for (final c in noteComponents) c.toJson(withIds: withIds)],
+        if (withIds && noteComponents.isNotEmpty) 'note_component_uids': ComponentUseDoc.idsJson(noteComponents),
         if (noteVoices != defaultNoteVoices) 'noteVoices': noteVoices,
         if (sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
-        if (instrument != null) 'instrument': instrument!.toJson(),
+        if (withIds && sends.isNotEmpty) 'send_uids': [for (final s in sends) s.uid],
+        if (instrument != null) 'instrument': instrument!.toJson(withIds: withIds),
+        if (withIds && instrument != null) 'instrument_uid': instrument!.uid,
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (output != null) 'output': output,
         if (spaceBelow > 0) 'space_below': spaceBelow,
@@ -784,14 +852,14 @@ class LayerDoc {
         solo: j['solo'] == true,
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
-        components: ComponentUseDoc.listFromJson(j['components']),
-        noteComponents: j['folder'] == true ? null : ComponentUseDoc.listFromJson(j['noteComponents']),
+        components: ComponentUseDoc.listFromJson(j['components'], j['component_uids']),
+        noteComponents: j['folder'] == true ? null : ComponentUseDoc.listFromJson(j['noteComponents'], j['note_component_uids']),
         noteVoices: switch (j['noteVoices']) {
           final num v when v.isFinite => v.round().clamp(1, maxNoteVoices),
           _ => defaultNoteVoices,
         },
-        sends: SendDoc.listFromJson(j['sends']),
-        instrument: j['folder'] == true ? null : ComponentUseDoc.fromJson(j['instrument']),
+        sends: SendDoc.listFromJson(j['sends'], j['send_uids']),
+        instrument: j['folder'] == true ? null : ComponentUseDoc.readIds(ComponentUseDoc.fromJson(j['instrument']), j['instrument_uid']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         output: switch (j['output']) { final String o when o.isNotEmpty && o.length <= 256 => o, _ => null },
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
@@ -1194,6 +1262,9 @@ class ProjectDoc {
         (playableComponents == null || playableComponents.contains(l.instrument!.id));
     int? engineIndex(String? layerId, int index) =>
         layerId != null && frozenIds.contains(layerId) ? null : playableIndex(chainOf(layerId), index);
+    // A lane or link follows its device by id; its saved index is the fallback (lib/model/instance_ids.dart).
+    int deviceAt(String? layerId, String? device, int index) =>
+        switch (deviceIndexIn(chainOf(layerId), device)) { -1 => index, final at => at };
     // Clip automation (owner, 2026-11-11) is unrolled onto the timeline: inside a clip its lane plays, elsewhere the
     // track's or project's lane on the same target (lib/model/clip_automation.dart).
     final unrolled = unrollClipAutomation();
@@ -1218,7 +1289,7 @@ class ProjectDoc {
             lane.toJson()..remove('height'),
         ] else if (lane.targetType != 'component')
           lane.toJson()..remove('height')
-        else if (engineIndex(lane.layerId, lane.component ?? -1) case final int index)
+        else if (engineIndex(lane.layerId, deviceAt(lane.layerId, lane.device, lane.component ?? -1)) case final int index)
           lane.toJson()..['component'] = index..remove('height'),
     ];
     final result = jsonEncode({
@@ -1319,12 +1390,17 @@ class ProjectDoc {
         'audition_only': auditionOnly && auditionInstrument != null,
         // Project modulation (#161): what can play of it (modulation.dart).
         ...engineModulationFields(routing, playableComponents: playableComponents,
-            engineIndex: engineIndex, instrumentPlays: instrumentPlays),
+            engineIndex: (layerId, index, device) => engineIndex(layerId, deviceAt(layerId, device, index)),
+            instrumentPlays: instrumentPlays),
       });
     return result;
   }
 
-  Map<String, dynamic> toJson() => {
+  /// The project file. Its instance ids are settled first ([ProjectInstanceIds.settleIds]: each used once, lanes
+  /// and links aimed at their devices), so a save and the next load agree.
+  Map<String, dynamic> toJson() => (this..settleIds())._toJson();
+
+  Map<String, dynamic> _toJson() => {
         'caw_app_project': savedFileVersion,
         'id': id,
         'name': name,
@@ -1337,20 +1413,21 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
-        'automation': [for (final lane in automation) lane.toJson()],
+        'automation': [for (final lane in automation) lane.toJson(withIds: true)],
         'modules': [for (final m in modules) ?m.toJson()],
-        'layers': [for (final l in layers) l.toJson(rateOf: (id) => asset(id)?.sourceRate ?? 0)],
+        'layers': [for (final l in layers) l.toJson(rateOf: (id) => asset(id)?.sourceRate ?? 0, withIds: true)],
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
         'cpp_components': [for (final component in cppComponents) component.toJson()],
-        'master_components': [for (final c in masterComponents) c.toJson()],
+        'master_components': [for (final c in masterComponents) c.toJson(withIds: true)],
+        if (masterComponents.isNotEmpty) 'master_component_uids': ComponentUseDoc.idsJson(masterComponents),
         if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (sections.isNotEmpty) 'sections': [for (final m in sections) m.toSectionJson()],
         if (markers.any((m) => !m.isRegion)) 'markers': [for (final m in markers) if (!m.isRegion) m.toMarkerJson()],
         if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
         if (modulators.isNotEmpty) 'modulators': [for (final m in modulators) m.toJson()],
-        if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson()],
+        if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson(withIds: true)],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
         if (musicVideo != null) 'music_video': musicVideo,
         if (automationFollowsClips) 'automation_follows_clips': true,
@@ -1388,7 +1465,8 @@ class ProjectDoc {
           return false;
         });
         l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?)
-          ..samples = use.samples;
+          ..samples = use.samples
+          ..uid = use.uid;  // the same device, migrated
         changed = true;
       } else if (params.length != use.params.length || params.entries.any((e) => use.params[e.key] != e.value)) {
         use.params = params;
@@ -1453,7 +1531,7 @@ class ProjectDoc {
             if (t.type != 'component' || t.layerId != layerId || t.index != i) return false;
             final to = moved(t.param);
             if (to == null) return true;
-            if (to != t.param) link.target = ModTarget.component(t.layerId, t.index, to);
+            if (to != t.param) link.target = ModTarget.component(t.layerId, t.index, to, device: t.device);
             return false;
           });
           final mappingLayer = layerId ?? masterMappingLayerId;
@@ -1508,7 +1586,7 @@ class ProjectDoc {
       },
       cppComponents: ((j['cpp_components'] as List?) ?? const [])
           .map((component) => CppComponentDoc.fromJson(component as Map<String, dynamic>)).toList(),
-      masterComponents: ComponentUseDoc.listFromJson(j['master_components']),
+      masterComponents: ComponentUseDoc.listFromJson(j['master_components'], j['master_component_uids']),
       midiFiles: [
         for (final raw in ((j['midi_files'] as List?) ?? const []).take(512))
           if (raw is Map<String, dynamic>) ?MidiFileDoc.fromJson(raw),
@@ -1653,6 +1731,9 @@ class ProjectDoc {
           ..sort((a, b) => a.step.compareTo(b.step));
       }
     }
+    // Instance ids: kept when well formed and used once, made for an older file, and lanes and links aimed at their
+    // devices by id (lib/model/instance_ids.dart).
+    project.settleIds();
     return project;
   }
 }

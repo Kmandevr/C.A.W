@@ -1,5 +1,6 @@
 // Routing in the project model: output overrides, sends to buses and tracks (feedback ones too), sidechain keys, and
 // which of them the engine is given (RoutingPlan: none that would make an unbroken loop or names a layer that is gone).
+import 'instance_ids.dart';
 import 'project.dart';
 
 /// A copy of a track's sound into another one's input (docs/app.md, "Routing"): a bus folder's, or a track's, summed
@@ -7,7 +8,15 @@ import 'project.dart';
 /// the track's effects), [mute] silences just this send. [feedback] lets the send close a loop (the engine delays it
 /// one 64-frame chunk), the only route that may; [limiter] keeps such a loop from running away (only with feedback).
 class SendDoc {
-  SendDoc(this.to, {this.level = 0.5, this.pre = false, this.mute = false, this.feedback = false, this.limiter = true});
+  SendDoc(this.to, {this.level = 0.5, this.pre = false, this.mute = false, this.feedback = false, this.limiter = true,
+      this._uid});
+
+  /// Its instance id (`s…`, lib/model/instance_ids.dart): kept through save, load and undo; a copy gets a new one.
+  /// The project file keeps a track's send ids beside its sends (`send_uids`, [listFromJson]), so each send's own
+  /// entry reads as it always did.
+  String get uid => _uid ??= newId(InstanceIds.send);
+  set uid(String id) => _uid = id;
+  String? _uid;
 
   /// Sends per track (the engine's `kMaxSends`).
   static const maxSends = 8;
@@ -36,10 +45,16 @@ class SendDoc {
         limiter: j['limiter'] != false);
   }
 
-  static List<SendDoc> listFromJson(Object? raw) => [
-        if (raw is List)
-          for (final entry in raw.take(maxSends)) ?SendDoc.fromJson(entry),
-      ];
+  /// [uids]: the track's saved send ids, one per entry of [raw]; a malformed one is left out (a new id).
+  static List<SendDoc> listFromJson(Object? raw, [Object? uids]) {
+    final ids = uids is List ? uids : const [];
+    return [
+      if (raw is List)
+        for (var i = 0; i < raw.length && i < maxSends; i++)
+          if (SendDoc.fromJson(raw[i]) case final send?)
+            send.._uid = i < ids.length ? InstanceIds.read(ids[i], InstanceIds.send) : null,
+    ];
+  }
 }
 
 /// Where a component's sidechain input listens: another layer's sound before its fader ([pre], after its effects)

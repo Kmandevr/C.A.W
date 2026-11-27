@@ -3,6 +3,7 @@
 import 'dart:math' as math;
 
 import 'automation_curve.dart';
+import 'instance_ids.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 
@@ -11,11 +12,21 @@ import 'project.dart';
 /// steps from its pattern's start, within its loop ([ClipDoc.loopLength]), joined as track lanes are (each point's
 /// curve to the next, holding before the first and after the last).
 class ClipAutomationLaneDoc {
-  ClipAutomationLaneDoc({required this.targetType, required this.target, this.component, List<AutomationPointDoc>? points})
+  ClipAutomationLaneDoc({required this.targetType, required this.target, this.component, List<AutomationPointDoc>? points,
+      this._uid, this.device})
       : points = points ?? [];
   String targetType;
   String target;
   int? component;
+
+  /// Its instance id (`al…`, lib/model/instance_ids.dart).
+  String get uid => _uid ??= newId(InstanceIds.lane);
+  set uid(String id) => _uid = id;
+  String? _uid;
+
+  /// A `component` lane's device by its id (`d…`), which it follows; [component] is its place in the chain, kept in
+  /// step and saved too. Null: none known yet (the index decides).
+  String? device;
   List<AutomationPointDoc> points;
 
   /// The key of the track or project lane on the same target ([automationKey]) on track [layerId].
@@ -23,11 +34,14 @@ class ClipAutomationLaneDoc {
 
   bool get isTrack => targetType == 'track';
 
-  Map<String, dynamic> toJson() => {
+  /// [withIds]: with its, its points' and its device's ids (the project file and undo snapshots).
+  Map<String, dynamic> toJson({bool withIds = false}) => {
         'target_type': targetType,
         'target': target,
         if (component != null) 'component': component,
-        'points': [for (final p in points) p.toJson()],
+        'points': [for (final p in points) p.toJson(withIds: withIds)],
+        if (withIds) 'uid': uid,
+        if (withIds && device != null) 'device': device,
       };
 
   /// Null for a lane that names nothing a clip can automate.
@@ -38,6 +52,8 @@ class ClipAutomationLaneDoc {
     final component = (j['component'] as num?)?.toInt();
     if (type == 'component' && (component == null || component < 0 || component >= 64)) return null;
     return ClipAutomationLaneDoc(targetType: type, target: target, component: type == 'component' ? component : null,
+        uid: InstanceIds.read(j['uid'], InstanceIds.lane),
+        device: type == 'component' ? InstanceIds.read(j['device'], InstanceIds.device) : null,
         points: [
           for (final p in (j['points'] as List?) ?? const [])
             if (p is Map<String, dynamic>) AutomationPointDoc.fromJson(p),
@@ -45,7 +61,8 @@ class ClipAutomationLaneDoc {
           ..sort((a, b) => a.step.compareTo(b.step)));
   }
 
-  ClipAutomationLaneDoc copy() => ClipAutomationLaneDoc.fromJson(toJson())!;
+  /// The same lane (ids kept: an undo snapshot), or with [fresh] a new one (a copied clip's).
+  ClipAutomationLaneDoc copy({bool fresh = false}) => ClipAutomationLaneDoc.fromJson(toJson(withIds: !fresh))!;
 }
 
 /// The most points one clip lane holds, and the most an unrolled lane sends the engine: past it a long clip's

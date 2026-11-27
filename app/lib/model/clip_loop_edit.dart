@@ -172,7 +172,7 @@ extension ClipLoopEdit on AppState {
     final local = <AutomationPointDoc>[];
     void add(double u, double v, [AutomationPointDoc? from]) {
       if (local.any((p) => (p.step - u).abs() < 0.01)) return;
-      local.add(from?.copy(step: u, value: v) ?? AutomationPointDoc(step: u, value: v));
+      local.add(from?.copy(step: u, value: v, fresh: true) ?? AutomationPointDoc(step: u, value: v));
     }
 
     for (final (a, b, u) in pieces) {
