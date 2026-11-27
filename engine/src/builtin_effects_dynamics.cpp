@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <new>
 #include <vector>
@@ -419,11 +420,15 @@ protected:
 
     void control(uint32_t at) noexcept override {
         const double sr = rate();
-        gainTarget_ = lib::dbToGain(param(kLimGain, at));
+        // Each gain and coefficient (an exp) worked out again only when its knob or the rate moved (2026-11-27: the
+        // same values; a wake costs a compare).
+        const double gainDb = param(kLimGain, at), releaseS = param(kLimRelease, at) * 0.001;
+        if (gainDb != gainDbFor_) gainDbFor_ = gainDb, gainTarget_ = lib::dbToGain(gainDb);
         if (gainNow_ < 0.0) gainNow_ = gainTarget_;
-        ceilingDb_ = param(kCeiling, at);
-        ceiling_ = lib::dbToGain(ceilingDb_);
-        release_ = lib::timeCoefficient(param(kLimRelease, at) * 0.001, sr);
+        const double ceilingDb = param(kCeiling, at);
+        ceilingDb_ = ceilingDb;
+        if (ceilingDb != ceilingFor_) ceilingFor_ = ceilingDb, ceiling_ = lib::dbToGain(ceilingDb);
+        if (releaseS != releaseFor_ || sr != rateFor_) releaseFor_ = releaseS, rateFor_ = sr, release_ = lib::timeCoefficient(releaseS, sr);
         truePeak_ = on(kTruePeak, at);
         const uint32_t most = truePeak_ ? kLookaheadFrames - 4 : kLookaheadFrames;
         const uint32_t window = std::clamp<uint32_t>(static_cast<uint32_t>(sampletime::roundFrames(param(kLimLookahead, at) * 0.001, sr)), 1u, most);
@@ -535,6 +540,7 @@ private:
     lib::SlidingMinimum min_;
     fxsimd::TruePeakPair tp_;
     double gMin_ = 1.0, gLast_ = 1.0;  // this run's smallest and last gain (the display's reduction)
+    double gainDbFor_ = std::numeric_limits<double>::quiet_NaN(), ceilingFor_ = std::numeric_limits<double>::quiet_NaN(), releaseFor_ = -1.0, rateFor_ = -1.0;  // what the cached values are for
     double gainTarget_ = 1, gainNow_ = -1, gainStep_ = 0, ceiling_ = 0.89, ceilingDb_ = -1, release_ = 0;
     double grMax_ = 0, grNow_ = 0;
     bool truePeak_ = true;
