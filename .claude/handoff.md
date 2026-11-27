@@ -20,6 +20,6 @@ clock #211).
 1. The rest of 1.1.3: per-build references for chaotic devices (agent in worktree perbuild-refs); the hidden
    collaboration groundwork (agents: G1+G2 in worktree g1-g2-uids, G3 in g3-collab; Hub
    docs/caw/collaboration-design.md). Back each up with `node scripts/worktree-tidy.js backup` after a dry run.
-   Then a 1.1.3 release (`changelog-join.js` first). Two playing modes
+   Then a 1.1.3 release (`scripts/changelog-join.js` first). Two playing modes
    (#11) and the main panel (#10) move to 1.1.4.
 2. Issue #271 (close after green Windows runs), #268.
