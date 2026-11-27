@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 88b9c3f on Main (1.1.3 maintenance merged: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 big engine tests, #282-#284 CI split and Dart balance, #285-#286 compat tables recorded for every build, #287 one list for bench modes and C API versions); this branch: changelog entries as one file per change.dart. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
+Commit: 88b9c3f on Main (1.1.3 maintenance merged: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 big engine tests, #282-#284 CI split and Dart balance, #285-#286 compat tables recorded for every build, #287 one list for bench modes and C API versions); this branch: changelog entries as one file per change. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
 tuba; #276 version; app.yml release run 45892645407; APK, Windows zip, patches). The owner (2026-11-26): Claude
 merges and releases when ready, and takes its own recommended option for any question (docs/decisions.md). A
 5-hourly scheduled wake-up resumes this session. Standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
