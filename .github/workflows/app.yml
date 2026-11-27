@@ -165,6 +165,7 @@ jobs:
       - name: Install ccache
         run: |
           if ! command -v ccache >/dev/null 2>&1; then
+            sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
             sudo apt-get update
             sudo apt-get install -y ccache
           fi
@@ -264,6 +265,7 @@ jobs:
       # The engine's native build (libcaw.so) reuses compiled files: only changed sources recompile.
       - name: Install ccache
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
           ccache --max-size=500M
           echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
@@ -303,6 +305,7 @@ jobs:
       - name: Package the on-device compiler
         if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip
           curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
             --output "$RUNNER_TEMP/android-ndk.zip"
@@ -416,6 +419,7 @@ jobs:
           key: android-sdk-cmake-3.22.1-ndk-28.2.13676358
       - name: Install ccache
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
           ccache --max-size=500M
           echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
