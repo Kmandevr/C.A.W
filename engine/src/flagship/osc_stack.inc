@@ -331,6 +331,7 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
         const float gl = gL[c], gr = gR[c], w1 = o.w1, w2 = o.w2, w3 = o.w3;
         alignas(16) uint32_t index[kControlFrames];
         alignas(16) float fr[kControlFrames];
+        const int32_t top = static_cast<int32_t>(m) - 1;  // the last index whose pair A[k], A[k + 1] is in the table
         for (uint32_t i = 0; i < count; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
             t -= whole(t);
@@ -338,7 +339,10 @@ void addStack(const OscVoice& o, const float* gL, const float* gR, float* L, flo
             if constexpr (W == kWarpFm) t = t < 0.99999994f ? t : 0.99999994f;  // as addTwice
             if constexpr (W == kWarpFmOsc) x = fmOscPhase(t, w1, fm[first + i]) * m;
             else x = warp<W>(t, w1, w2, w3) * m;
-            const int32_t k = static_cast<int32_t>(x);
+            // Held to the table (audio review, 2026-11-27): a warp's phase is in 0..1, so k is in 0..top and this
+            // changes nothing; a phase out of range (a NaN, a warp's bug) reads the table's ends, not memory past it.
+            int32_t k = static_cast<int32_t>(x);
+            k = k < 0 ? 0 : (k > top ? top : k);
             index[i] = static_cast<uint32_t>(k);
             fr[i] = x - static_cast<float>(k);
         }
@@ -379,12 +383,16 @@ void addTwice(OscVoice& o, const float* gL, const float* gR, float* L, float* R,
         const float half = 0.5f * dt, gl = gL[c], gr = gR ? gR[c] : 0.0f, mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
         alignas(16) uint32_t index[2 * kControlFrames];
         alignas(16) float fr[2 * kControlFrames];
+        const int32_t top = static_cast<int32_t>(m) - 1;  // the last index whose pair A[k], A[k + 1] is in the table
         for (uint32_t i = 0; i < count; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + (i >> 1))) * dt + ((i & 1u) ? half : 0.0f);
             t -= whole(t);
             t = t < 0.99999994f ? t : 0.99999994f;
             const float x = warp<W>(t, w1, w2, w3) * m;
-            const int32_t k = static_cast<int32_t>(x);
+            // Held to the table (audio review, 2026-11-27): a warp's phase is in 0..1, so k is in 0..top and this
+            // changes nothing; a phase out of range (a NaN, a warp's bug) reads the table's ends, not memory past it.
+            int32_t k = static_cast<int32_t>(x);
+            k = k < 0 ? 0 : (k > top ? top : k);
             index[i] = static_cast<uint32_t>(k);
             fr[i] = x - static_cast<float>(k);
         }

@@ -20,6 +20,7 @@
 #include "analysis.h"
 #include "filter_pairs.h"
 #include "presets.h"
+#include "simd4.h"
 #include "tolerance.h"
 #include "caw.h"
 #include "engine.h"
@@ -593,6 +594,84 @@ TEST(the_flagship_renders_the_same_bits_at_any_block_size) {
     }
 }
 
+// Kestrel's four-at-a-time table reads (engine/src/simd4.h): neighbouring pairs at any index, odd ones included
+// (only 4-byte aligned). The SSE2 path once read each pair through a double*, a misaligned load the sanitizer build
+// stops at (audio review, 2026-11-27); every path must give the scalar reads' values.
+TEST(simd4_pairs_read_neighbouring_pairs_at_any_index) {
+    alignas(16) float table[40];
+    for (int i = 0; i < 40; ++i) table[i] = 0.5f * static_cast<float>(i) - 3.25f;
+    const uint32_t picks[][4] = {{1, 3, 6, 9}, {0, 2, 4, 6}, {37, 1, 18, 5}, {7, 7, 7, 7}, {36, 0, 31, 13}};
+    for (const auto& k : picks) {
+        simd4::F4 first, second;
+        simd4::pairs(table + 1, k, first, second);  // table + 1: every pair starts 4 bytes off an 8-byte boundary too
+        float a[4], b[4];
+        simd4::store(a, first);
+        simd4::store(b, second);
+        for (int i = 0; i < 4; ++i) {
+            CHECK(a[i] == table[1 + k[i]]);
+            CHECK(b[i] == table[2 + k[i]]);
+        }
+    }
+}
+
+namespace {
+
+// A knob's automation lane: from `from` to `to` in a straight line over `over` frames, then held.
+struct Ramp {
+    const char* id;
+    double from, to;
+    double over = 36000.0;
+};
+
+// `notes` on a fresh Kestrel with `patch` and the ramps as sample lanes, in blocks of 37 frames.
+Stereo playRamped(Engine& e, const Values& patch, const std::vector<Event>& notes, const std::vector<Ramp>& ramps,
+                  uint32_t frames = 48000) {
+    Stereo out;
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return out;
+    const ModuleDescriptor& d = p->descriptor();
+    std::vector<ParameterValue> params(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
+    for (const auto& [id, v] : patch) params[static_cast<size_t>(paramIndex(d, id))].value = v;
+    const uint32_t block = 37;
+    std::vector<std::vector<double>> lanes(ramps.size(), std::vector<double>(block));
+    std::vector<float> l(block), r(block);
+    float* channels[2] = {l.data(), r.data()};
+    size_t next = 0;
+    for (uint32_t start = 0; start < frames; start += block) {
+        const uint32_t n = std::min(block, frames - start);
+        for (size_t q = 0; q < ramps.size(); ++q) {
+            for (uint32_t i = 0; i < n; ++i)
+                lanes[q][i] = ramps[q].from + (ramps[q].to - ramps[q].from) * std::min(1.0, (start + i) / ramps[q].over);
+            ParameterValue& pv = params[static_cast<size_t>(paramIndex(d, ramps[q].id))];
+            pv.samples = lanes[q].data();
+            pv.value = lanes[q][0];
+        }
+        std::vector<Event> in;
+        while (next < notes.size() && notes[next].frame < start + n) {
+            Event x = notes[next++];
+            x.frame -= start;
+            in.push_back(x);
+        }
+        const ChannelBufferView audio{channels, 2, n};
+        const EventInput ev{in.data(), static_cast<uint32_t>(in.size())};
+        ProcessBlock b;
+        b.frames = n;
+        b.audioOut = &audio;
+        b.audioOutCount = 1;
+        b.eventIn = &ev;
+        b.eventInCount = 1;
+        b.parameters = params.data();
+        b.parameterCount = d.parameterCount;
+        CHECK(p->processPorts(b));
+        out.left.insert(out.left.end(), l.begin(), l.begin() + n);
+        out.right.insert(out.right.end(), r.begin(), r.begin() + n);
+    }
+    return out;
+}
+
+}  // namespace
+
 // A ramping knob (automation) of an oscillator, a filter, the routing or an envelope reworks only its own voice
 // section (2026-11-27); a ramping knob outside them reworks everything, as every ramp did before. Glide ramping in
 // poly changes nothing heard but makes every control rework every section, so the two renders must match bit for
@@ -604,68 +683,36 @@ TEST(the_flagship_s_ramping_knobs_rework_only_their_section_with_the_same_bits) 
                           {"env1_release", 2.0}};
     const std::vector<Event> notes = {notes::noteOn(0, 1, 45, 0.9), notes::noteOn(300, 2, 52, 0.8), notes::noteOn(700, 3, 61, 0.7),
                                       notes::noteOff(30000, 1, 45), notes::noteOff(30000, 2, 52), notes::noteOff(30000, 3, 61)};
-    struct Ramp {
-        const char* id;
-        double from, to;
-    };
-    auto render = [&](const std::vector<Ramp>& ramps) {
-        Stereo out;
-        std::unique_ptr<ModuleProcessor> p = make(e);
-        if (!p) return out;
-        const ModuleDescriptor& d = p->descriptor();
-        std::vector<ParameterValue> params(d.parameterCount);
-        for (uint32_t k = 0; k < d.parameterCount; ++k) params[k].value = d.parameters[k].defaultValue;
-        for (const auto& [id, v] : patch) params[static_cast<size_t>(paramIndex(d, id))].value = v;
-        const uint32_t frames = 48000, block = 37;
-        std::vector<std::vector<double>> lanes(ramps.size(), std::vector<double>(block));
-        std::vector<float> l(block), r(block);
-        float* channels[2] = {l.data(), r.data()};
-        size_t next = 0;
-        for (uint32_t start = 0; start < frames; start += block) {
-            const uint32_t n = std::min(block, frames - start);
-            for (size_t q = 0; q < ramps.size(); ++q) {
-                for (uint32_t i = 0; i < n; ++i)
-                    lanes[q][i] = ramps[q].from + (ramps[q].to - ramps[q].from) * std::min(1.0, (start + i) / 36000.0);
-                ParameterValue& pv = params[static_cast<size_t>(paramIndex(d, ramps[q].id))];
-                pv.samples = lanes[q].data();
-                pv.value = lanes[q][0];
-            }
-            std::vector<Event> in;
-            while (next < notes.size() && notes[next].frame < start + n) {
-                Event x = notes[next++];
-                x.frame -= start;
-                in.push_back(x);
-            }
-            const ChannelBufferView audio{channels, 2, n};
-            const EventInput ev{in.data(), static_cast<uint32_t>(in.size())};
-            ProcessBlock b;
-            b.frames = n;
-            b.audioOut = &audio;
-            b.audioOutCount = 1;
-            b.eventIn = &ev;
-            b.eventInCount = 1;
-            b.parameters = params.data();
-            b.parameterCount = d.parameterCount;
-            CHECK(p->processPorts(b));
-            out.left.insert(out.left.end(), l.begin(), l.begin() + n);
-            out.right.insert(out.right.end(), r.begin(), r.begin() + n);
+    const auto render = [&](const Values& patch, const std::vector<Ramp>& ramps) { return playRamped(e, patch, notes, ramps); };
+    // The ramps alone against the same ramps with one (glide) that has every section reworked: the same bits.
+    const auto same = [&](const char* name, const Values& patch, const std::vector<Ramp>& sections, bool ramped = true) {
+        std::vector<Ramp> everything = sections;
+        everything.push_back({"glide", 0.01, 1.5});
+        const Stereo a = render(patch, sections), b = render(patch, everything), c = render(patch, {});
+        CHECK(!a.left.empty() && a.left.size() == b.left.size() && a.left.size() == c.left.size());
+        size_t differ = 0;
+        double moved = 0.0;
+        for (size_t i = 0; i < a.left.size() && i < b.left.size() && i < c.left.size(); ++i) {
+            differ += a.left[i] != b.left[i] || a.right[i] != b.right[i];
+            moved = std::max(moved, static_cast<double>(std::fabs(a.left[i] - c.left[i])));
         }
-        return out;
+        if (differ)
+            cawtest::fail(__FILE__, __LINE__, std::string(name) + ": " + std::to_string(differ) + " samples differ from every section reworked");
+        CHECK(moved > 0.01 || !ramped);
     };
-    const std::vector<Ramp> sections = {{"flt1_cutoff", 300.0, 6000.0}, {"osc1_frame", 0.0, 1.0}, {"osc2_warp_amt", 0.2, 0.9},
-                                        {"flt2_cutoff", 2000.0, 400.0}, {"env1_release", 0.5, 3.0}};
-    std::vector<Ramp> everything = sections;
-    everything.push_back({"glide", 0.01, 1.5});
-    const Stereo a = render(sections), b = render(everything), c = render({});
-    CHECK(!a.left.empty() && a.left.size() == b.left.size() && a.left.size() == c.left.size());
-    size_t differ = 0;
-    double moved = 0.0;
-    for (size_t i = 0; i < a.left.size() && i < b.left.size() && i < c.left.size(); ++i) {
-        differ += a.left[i] != b.left[i] || a.right[i] != b.right[i];
-        moved = std::max(moved, static_cast<double>(std::fabs(a.left[i] - c.left[i])));
-    }
-    if (differ) cawtest::fail(__FILE__, __LINE__, std::to_string(differ) + " samples differ from every section reworked");
-    CHECK(moved > 0.01);
+    same("sections", patch, {{"flt1_cutoff", 300.0, 6000.0}, {"osc1_frame", 0.0, 1.0}, {"osc2_warp_amt", 0.2, 0.9},
+                             {"flt2_cutoff", 2000.0, 400.0}, {"env1_release", 0.5, 3.0}});
+    // Osc FM (audio review, 2026-11-27): oscillator 2's ratio is oscillator 1's tuning against its own, so a ramp on
+    // oscillator 1's octave, semitones or fine must rework oscillator 2 too.
+    const Values oscFm = {{"mod1_amt", 0}, {"osc2_on", 1}, {"osc2_warp", 7}, {"osc2_warp_amt", 0.6}, {"osc2_mod_src", 1},
+                          {"env1_release", 2.0}};
+    same("osc FM, fine", oscFm, {{"osc1_fine", -60.0, 90.0}});
+    same("osc FM, semitones", oscFm, {{"osc1_semi", -7.0, 12.0}});
+    same("osc FM, octave", oscFm, {{"osc1_octave", -2.0, 2.0}});
+    // And a slot (LFO 1) on oscillator 1's fine tuning, no ramp: the slot's section rework against every section's.
+    Values slot = oscFm;
+    slot.insert(slot.end(), {{"mod2_src", 4}, {"mod2_dst", 8}, {"mod2_amt", 0.4}, {"lfo1_rate", 3}});
+    same("osc FM, a slot on fine", slot, {}, false);
 }
 
 TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {

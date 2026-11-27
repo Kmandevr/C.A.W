@@ -73,11 +73,18 @@ inline I4 operator&(I4 a, I4 b) noexcept { return {_mm_and_si128(a.v, b.v)}; }
 inline I4 shiftRight(I4 a, int s) noexcept { return {_mm_srl_epi32(a.v, _mm_cvtsi32_si128(s))}; }
 inline F4 toFloat(I4 a) noexcept { return {_mm_cvtepi32_ps(a.v)}; }
 inline void storeU(uint32_t* p, I4 a) noexcept { _mm_storeu_si128(reinterpret_cast<__m128i*>(p), a.v); }
+// Each pair is copied into a double (std::memcpy: x + k is only 4-byte aligned, and a float pair read through a
+// double* would be a misaligned, aliasing load, undefined behaviour the sanitizer build stops at); the compilers
+// turn the copies into the same two 8-byte loads (movsd, movhpd).
+inline __m128d pairLoad(const float* a, const float* b) noexcept {
+    double lo, hi;
+    std::memcpy(&lo, a, sizeof lo);
+    std::memcpy(&hi, b, sizeof hi);
+    return _mm_set_pd(hi, lo);
+}
 inline void pairs(const float* x, const uint32_t* k, F4& first, F4& second) noexcept {
-    const __m128 p01 = _mm_castpd_ps(_mm_loadh_pd(_mm_load_sd(reinterpret_cast<const double*>(x + k[0])),
-                                                  reinterpret_cast<const double*>(x + k[1])));
-    const __m128 p23 = _mm_castpd_ps(_mm_loadh_pd(_mm_load_sd(reinterpret_cast<const double*>(x + k[2])),
-                                                  reinterpret_cast<const double*>(x + k[3])));
+    const __m128 p01 = _mm_castpd_ps(pairLoad(x + k[0], x + k[1]));
+    const __m128 p23 = _mm_castpd_ps(pairLoad(x + k[2], x + k[3]));
     first.v = _mm_shuffle_ps(p01, p23, _MM_SHUFFLE(2, 0, 2, 0));
     second.v = _mm_shuffle_ps(p01, p23, _MM_SHUFFLE(3, 1, 3, 1));
 }
