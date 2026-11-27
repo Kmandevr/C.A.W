@@ -52,7 +52,12 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('caw-analysis'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  test('the bindings carry API 46', () => expect(cawApiVersion, 46));
+  // The version is written once in the engine (caw.h) and once here; this keeps the two equal (scripts/number-lists.js too).
+  test('the bindings carry caw.h\'s CAW_API_VERSION', () {
+    final m = RegExp(r'^#define CAW_API_VERSION (\d+)', multiLine: true).firstMatch(File('../engine/include/caw.h').readAsStringSync());
+    expect(m, isNotNull);
+    expect(cawApiVersion, int.parse(m!.group(1)!));
+  });
 
   test('a click track at 128 BPM is detected, and its clicks are the slices', () async {
     final e = Engine.create();

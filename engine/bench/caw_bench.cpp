@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "bench_modes.h"
 #include "reference_cost.h"
 #include "audio_clips.h"
 #include "builtin_components.h"
@@ -1104,27 +1105,30 @@ int runSpikes(double secs, int argc, char** argv) {
 
 int main(int argc, char** argv) {
     const double secs = argc > 1 ? std::atof(argv[1]) : 10.0;
-    // `caw_bench SECONDS N` plays only playback scenario N (1-5), for exact instruction counts under callgrind;
-    // N = 100 plays First loop (the app's starter project on the built-in instruments) and each built-in alone
-    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
-    // times each built-in effect.
+    // `caw_bench SECONDS MODE`: the modes are bench::kModes (bench_modes.h), the one list of their numbers; 1-5 play
+    // one playback scenario, for exact instruction counts under callgrind.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
-    if (only >= 300 && only <= 310) {  // the cost modes: each device is timed against the reference (reference_cost.h)
+    if (!bench::findMode(only)) {  // a number not in bench_modes.h runs nothing (it used to play scenario 5)
+        std::fprintf(stderr, "caw_bench: no mode %d; the modes (engine/bench/bench_modes.h):\n", only);
+        for (const bench::Mode& m : bench::kModes) std::fprintf(stderr, "  %4d  %s\n", m.number, m.what);
+        return 2;
+    }
+    if (only >= bench::mode("effects") && only <= bench::mode("clean")) {  // the cost modes 300-310: each device is timed against the reference (reference_cost.h)
         double ref = 1e30;
         for (int run = 0; run < bench::kRuns; ++run) ref = std::min(ref, bench::referenceUs(secs));
         std::printf("reference workload: %.0f µs/s now in a long run (1640 on the calibration box); the costs below "
                     "are relative to it, in that box's µs/s\n", ref);
     }
-    if (only == 308) return samplerCost(secs) ? 1 : 0;  // `caw_bench SECONDS 308`: only the sampler's zones (a CI test)
-    if (only == 321) return timberCost(secs) ? 1 : 0;  // `caw_bench SECONDS 321`: only the modelled instruments (a CI test)
-    if (only == 322) return flockCost(secs) ? 1 : 0;  // `caw_bench SECONDS 322`: only Flock (a CI test)
-    if (only == 307) return packCost(secs) ? 1 : 0;  // `caw_bench SECONDS 307`: only the AutoStacc beta pack (a CI test)
-    if (only == 310) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
-    if (only == 301) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
-    if (only == 500) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
-    if (only == 600) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
-    if (only == 601) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)
-    if (only == 602) return runSpikes(secs, argc, argv);  // `caw_bench SECONDS 602 [options]`: the one-off slow callbacks (runSpikes)
+    if (only == bench::mode("sampler")) return samplerCost(secs) ? 1 : 0;  // `caw_bench SECONDS 308`: only the sampler's zones (a CI test)
+    if (only == bench::mode("timber")) return timberCost(secs) ? 1 : 0;  // `caw_bench SECONDS 321`: only the modelled instruments (a CI test)
+    if (only == bench::mode("flock")) return flockCost(secs) ? 1 : 0;  // `caw_bench SECONDS 322`: only Flock (a CI test)
+    if (only == bench::mode("pack")) return packCost(secs) ? 1 : 0;  // `caw_bench SECONDS 307`: only the AutoStacc beta pack (a CI test)
+    if (only == bench::mode("clean")) return cleanCost(secs) ? 1 : 0;  // `caw_bench SECONDS 310`: only Preen and Hush (a CI test)
+    if (only == bench::mode("tools")) return toolsCost(secs) ? 1 : 0;  // `caw_bench SECONDS 301`: only 1.1.0's tools (a CI test)
+    if (only == bench::mode("suite")) return runSuite(secs, argc, argv);  // `caw_bench SECONDS 500 [options]`: the CI suite (runSuite)
+    if (only == bench::mode("long")) return runLong(secs, argc, argv);  // `caw_bench SECONDS 600 [options]`: a long run (runLong)
+    if (only == bench::mode("drift")) return runDrift(secs, argc, argv);  // `caw_bench SECONDS 601 [options]`: per-track drift (runDrift)
+    if (only == bench::mode("spikes")) return runSpikes(secs, argc, argv);  // `caw_bench SECONDS 602 [options]`: the one-off slow callbacks (runSpikes)
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
     {
@@ -1141,9 +1145,9 @@ int main(int argc, char** argv) {
                                {"16 tracks", manyTracks(16)},
                                {"64 tracks", manyTracks(64)},
                                {"first loop + delay + reverb each", withSpace()}};
-    if (only == 400 || only == 401) {  // the song scenarios: timed (400) or profiled per component (401)
+    if (only == bench::mode("song") || only == bench::mode("song_profile")) {  // the song scenarios: timed (400) or profiled per component (401)
         const int k = argc > 3 ? std::atoi(argv[3]) : 1;
-        if (only == 401) {
+        if (only == bench::mode("song_profile")) {
             profileSong(k, secs);
             return 0;
         }
@@ -1156,12 +1160,12 @@ int main(int argc, char** argv) {
         report(scenarioName(k), play(e, secs));
         return 0;
     }
-    if (only == 306) return larkCost(secs) ? 1 : 0;  // `caw_bench SECONDS 306`: only Lark (a CI test)
-    if (only == 320) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
-    if (only == 323) return rookCost(secs) ? 1 : 0;  // `caw_bench SECONDS 323`: only the drums' 1.1.0 additions (a CI test)
-    if (only == 303) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
-    if (only == 302) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
-    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
+    if (only == bench::mode("lark")) return larkCost(secs) ? 1 : 0;  // `caw_bench SECONDS 306`: only Lark (a CI test)
+    if (only == bench::mode("raven")) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
+    if (only == bench::mode("rook")) return rookCost(secs) ? 1 : 0;  // `caw_bench SECONDS 323`: only the drums' 1.1.0 additions (a CI test)
+    if (only == bench::mode("voice")) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
+    if (only == bench::mode("dynsplit")) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
+    if (only == bench::mode("effects")) {  // `caw_bench SECONDS 300`: each built-in effect's cost (exit 1 when one is over its ceiling)
         const bool suiteOver = !effectsCost(secs);  // the suite's ceilings, the EQ's and Filter's 1.1.0 modes among them
         const bool modesOver = modesCostOver(secs);  // a 1.1.0 mode over its ceiling fails the run
         const bool toolsOver = toolsCost(secs) != 0;  // so do 1.1.0's tools (bench/tools_cost.cpp)
@@ -1177,16 +1181,16 @@ int main(int argc, char** argv) {
         const bool flockOver = flockCost(secs) != 0;  // and Flock (bench/flock_cost.cpp)
         return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver || rookOver || flockOver) ? 1 : 0;
     }
-    if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
+    if (only == bench::mode("flagship_voices")) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
         return 0;
     }
-    if (only < 0) {  // `caw_bench SECONDS -1`: graph executor scenarios only
+    if (only == bench::mode("graph")) {  // `caw_bench SECONDS -1`: graph executor scenarios only
         graphStereoBench(secs);
         graphPlanarBench(secs);
         return 0;
     }
-    if (only == 100 || only == 0) {  // `caw_bench SECONDS 100`: First loop, its tracks and each built-in alone
+    if (only == bench::mode("first_loop") || only == bench::mode("full")) {  // `caw_bench SECONDS 100`: First loop, its tracks and each built-in alone
         std::vector<Case> native = {
             {"first loop (6 tracks, all unmuted)", firstLoop()},
             {"  track Kick", firstLoop("Kick")},
@@ -1219,7 +1223,7 @@ int main(int argc, char** argv) {
                                              {"osc2_frame", 0.5}, {"flt2_on", 1}, {"fx_dist_on", 1}, {"fx_eq_on", 1}, {"fx_chorus_on", 1},
                                              {"fx_delay_on", 1}, {"mod2_src", 4}, {"mod2_dst", 3}, {"mod2_amt", 0.3}})},
         };
-        const int pick = only == 100 && argc > 3 ? std::atoi(argv[3]) : -1;  // `caw_bench S 100 K`: case K only
+        const int pick = only == bench::mode("first_loop") && argc > 3 ? std::atoi(argv[3]) : -1;  // `caw_bench S 100 K`: case K only
         for (size_t k = 0; k < native.size(); ++k) {
             if (pick >= 0 && static_cast<size_t>(pick) != k) continue;
             Case& c = native[k];
@@ -1230,10 +1234,11 @@ int main(int argc, char** argv) {
             e.play();
             report(c.name, play(e, secs));
         }
-        if (only == 100) return 0;
+        if (only == bench::mode("first_loop")) return 0;
     }
-    if (only > 0) {
-        Case& c = cases[static_cast<size_t>(std::min<int>(only, static_cast<int>(cases.size())) - 1)];
+    if (only >= bench::mode("scenario1") && only <= bench::mode("scenario5")) {
+        static_assert(bench::mode("scenario5") - bench::mode("scenario1") == 4, "five playback scenarios");
+        Case& c = cases[static_cast<size_t>(only - bench::mode("scenario1"))];
         Engine e(kRate);
         e.setProject(c.p);
         e.play();

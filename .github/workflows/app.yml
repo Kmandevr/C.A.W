@@ -206,8 +206,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Test the small-update builder, the release-notes extraction, the CI test summaries and the Dart shard split
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js
+      - name: Test the small-update builder, the release-notes extraction, the CI test summaries, the Dart shard split and the numbered-lists check
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js scripts/number-lists.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}
