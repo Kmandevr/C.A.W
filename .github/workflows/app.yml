@@ -28,6 +28,8 @@ on:
       - "CHANGELOG.md"  # bundled in the app (What's new) and the top of each release's notes
       - "scripts/changelog-notes*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
+      - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
+      - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
@@ -47,6 +49,8 @@ on:
       - "CHANGELOG.md"
       - "scripts/changelog-notes*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
+      - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
+      - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
   workflow_dispatch:
     inputs:
@@ -122,8 +126,9 @@ jobs:
           flutter pub get
           flutter analyze
 
-  # The Dart tests in four jobs, each a quarter of the test files (every 4th of the sorted list), so a failure names its
-  # quarter and each job's summary names the failing tests. Split by file, not with `flutter test --total-shards`:
+  # The Dart tests in four jobs, each a quarter of the test files balanced by their measured times
+  # (scripts/dart-test-shard.js reads app/test/test_times.json), so a failure names its quarter and each job's
+  # summary names the failing tests. Split by file, not with `flutter test --total-shards`:
   # that splits each file's tests, so every job would still compile and load all of the files.
   test-shards:
     name: Dart tests (${{ matrix.shard }}/4)
@@ -182,7 +187,7 @@ jobs:
           SHARDS: 4
         run: |
           flutter pub get
-          mapfile -t files < <(find test -name '*_test.dart' | LC_ALL=C sort | awk -v n="$SHARDS" -v i="$SHARD" '(NR - 1) % n == i - 1')
+          mapfile -t files < <(node ../scripts/dart-test-shard.js "$SHARD" "$SHARDS")
           if [ "${#files[@]}" -eq 0 ]; then echo "::error::No test files in shard $SHARD/$SHARDS"; exit 1; fi
           echo "${#files[@]} test files in shard $SHARD/$SHARDS"
           flutter test --concurrency=4 --file-reporter "json:$RUNNER_TEMP/dart-tests.json" "${files[@]}"
@@ -198,8 +203,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Test the small-update builder, the release-notes extraction and the CI test summaries
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js
+      - name: Test the small-update builder, the release-notes extraction, the CI test summaries and the Dart shard split
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}
