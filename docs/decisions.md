@@ -6,6 +6,17 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: VCA groups: one per-frame gain per slot, their own mute and solo, folder-bus members scaled twice
+
+- **Asked (owner):** REAPER-style VCA groups: one fader moves several tracks' levels, mute and solo, without summing their audio and with no shared bus. Engine and model only; the screen waits for the owner (Hub #35).
+- **Chosen:** an immutable `VcaTable` (`engine/src/vca.h`) built on the control thread with the members resolved to slots, handed over and freed by command like a slot's automation. Once a chunk the audio thread works out each group's gain at every frame (its lane at each frame's song step, or its fader with the track faders' 5 ms one-pole) and fills one per-frame array per member slot, the product of its groups held to +12 dB; the track node, the bus node and post keys multiply it after the slot's own fader, lane and modulation, so the maths is in one place and an automated track still follows its VCA. A slot whose groups change ramps from the gain it had by a decaying offset (the same pole), and one at exactly 1 throughout takes the plain paths.
+- **Then (the audio review, 2026-11-27):** the first cut read lanes only at chunk ends and ramped linearly between them, so a curved or held lane sounded different at each buffer size and between playback and export; a change of membership, a new group at a level other than 1, a deleted group and a lane added or removed jumped in one frame; a folder without a bus (no slot) dropped its level while its mute reached its tracks; the product had no ceiling (32 groups at +12 dB, about +385 dB); members at unity left the fast paths; the audio thread compared ids; and a layer new in a reused slot could briefly run under its last owner's groups. All eight are fixed as above, each with a test.
+- **Mute and solo:** separate per-slot `vcaMute`/`vcaSolo`, never the user's own `mute`/`solo`, so leaving a group or unmuting it restores exactly what the track had. A group's solo counts toward "something is soloed" and reaches as a track's own does (member folders' contents, the buses members are heard through, send buses), worked out when the table is built, since a live solo can't wait for a project update.
+- **A folder bus may be a member** (its fader is scaled). A bus and its child in one group scale the child twice, as REAPER does; not prevented, documented. A folder without a bus passes its level to its tracks (down to the first bus inside it). Members are layers, so VCAs don't nest.
+- **Limits:** 32 groups (a slot's groups are one 32-bit mask), 256 members a group, ids 1-256 bytes and unique; unknown members are dropped, bad input refused by name.
+- **Live control:** `caw_engine_set_vca` by group id (API 47), writing the table's atomics. **File format v8** for a project with groups, so a build before 1.1.4 refuses it rather than dropping the groups on save; one without stays v7/v6/v5, byte for byte.
+- **Checked:** projects without groups render the same bits (every reference and golden passes unchanged); `vca_test.cpp`, `vca_rt_test.cpp`, `app/test/vca_test.dart`.
+
 ## 2026-11-27: `caw_collab` gains a session host core (not yet used by the app)
 
 - **Chosen:** `app/packages/caw_collab/lib/host/`, a transport-agnostic `HostCore`.

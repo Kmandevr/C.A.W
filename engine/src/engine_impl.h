@@ -19,6 +19,7 @@
 #include "caw/library/stereo.hpp"
 #include "hardware.h"
 #include "sample_preview.h"
+#include "vca.h"
 
 #include <algorithm>
 #include <bit>
@@ -55,6 +56,7 @@ struct Engine::Retired {
     DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
     SendTable* sends = nullptr;  // a route table replaced or freed
     SongTime* song = nullptr;    // a tempo map and signatures replaced
+    VcaTable* vca = nullptr;     // a VCA table replaced
 };
 
 // What one graph node (a slot's, or the master's) hands back while the graph runs (speed phase 5a): kept here and
@@ -134,6 +136,21 @@ struct Engine::Slot {
 
     std::atomic<uint64_t> vol{0}, pan{0};
     std::atomic<bool> mute{false}, solo{false};
+    // Audio thread: its VCA groups (vca.h), apart from its own mute and solo above: one of them muted or soloed
+    // (refreshed with the solo state), and this chunk's VCA gain per frame (runVca; vcaOn: not exactly 1 throughout).
+    // A change of its groups (a new table) ramps from vcaLast, the gain it had, by an offset that decays with the
+    // faders' 5 ms pole (vcaOffset); vcaFresh: a new layer here, which starts at its groups' gain.
+    bool vcaMute = false, vcaSolo = false, vcaOn = false;
+    bool vcaDirty = false, vcaFresh = false;
+    double vcaLast = 1.0, vcaOffset = 0.0;
+    double vca[kBlock] = {};
+    // A layer newly in this slot: no VCA state from the slot's last owner.
+    void resetVca() noexcept {
+        vcaMute = vcaSolo = vcaOn = false;
+        vcaDirty = vcaFresh = true;
+        vcaLast = 1.0;
+        vcaOffset = 0.0;
+    }
     std::atomic<float> peakL{0}, peakR{0}, progress{0};  // meters: each side's sample peak since the last read
     CorrelationMeter correlation;                         // of what it sends on
     std::atomic<bool> overloadFlag{false};
@@ -285,10 +302,11 @@ struct Engine::SendTable {
 };
 
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
+static_assert(VcaTable::kFrames == kBlock, "VCA groups work out a chunk's gains in Engine blocks");
 
 struct Engine::Cmd {
     // Install: the slot becomes a track (steps, order); its instrument and inserts come by their own commands.
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches, SetVca } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
@@ -301,6 +319,7 @@ struct Engine::Cmd {
     DelayLine* delay = nullptr;  // SetDelay: the slot's latency compensation (null: none)
     SendTable* sends = nullptr;  // SetSends: the slot's routes (owned; null: none)
     SongTime* song = nullptr;    // Transport, SetSong: the tempo map and signatures (owned; null: unchanged)
+    VcaTable* vca = nullptr;     // SetVca: the project's VCA groups (owned; null: none)
     bool sendMute = false;       // SetSendLevel: route `order` gets level `master`, pre `flag` and this mute
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;

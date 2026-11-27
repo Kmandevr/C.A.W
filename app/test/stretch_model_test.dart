@@ -124,8 +124,8 @@ void main() {
       expect(AudioClipDoc.fromJson({'id': 'c', 'asset': 'a', 'stretch': double.nan})!.stretchRatio, 1);
     });
 
-    test('a v8 file is refused whole', () {
-      expect(() => ProjectDoc.fromJson({'caw_app_project': 8, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
+    test('a file newer than this build is refused whole', () {
+      expect(() => ProjectDoc.fromJson({'caw_app_project': ProjectDoc.fileVersion + 1, 'id': 'x'}), throwsA(isA<NewerProjectFormat>()));
     });
   });
 

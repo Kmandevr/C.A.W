@@ -492,7 +492,8 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
-            case Cmd::Grow: retirementNeed = 1; break;
+            case Cmd::Grow:
+            case Cmd::SetVca: retirementNeed = 1; break;
             case Cmd::ConfigureBus: retirementNeed = c.flag ? 7 : 6; break;
             default: break;
         }
@@ -518,6 +519,7 @@ void Engine::applyCommands() noexcept {
                     s.bus = false;
                     s.k = -1;
                     s.epoch = -1;
+                    s.resetVca();
                     updateSolo();
                     const double initialTarget = slotTarget(s);
                     s.gain = initialTarget > 0.0 && s.automation && !s.automation->volume.empty() ? s.automation->volume.front().value : initialTarget;
@@ -583,6 +585,7 @@ void Engine::applyCommands() noexcept {
                 markLive(c.slot);
                 s.removing = false;
                 s.bus = true;
+                s.resetVca();
                 if (c.flag) {
                     retire(nullptr, nullptr, s.automation);
                     s.automation = nullptr;
@@ -842,6 +845,27 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::ClearOverload: resetShedding(); break;
+            case Cmd::SetVca: {
+                // The project's VCA groups: groups that stay carry on from their gain; the one replaced is freed on
+                // the control thread. Every slot ramps from the VCA gain it had to its new groups' (runVca), and
+                // updateSolo refreshes their mute and solo.
+                if (c.vca && vca_) c.vca->takeHistory(*vca_);
+                if (vca_) {
+                    Retired r;
+                    r.vca = vca_;
+                    retireEntry(r);
+                }
+                vca_ = c.vca;
+                for (int i = 0; i <= capacity_; ++i) {
+                    Slot& s = slotAt(i);
+                    s.vcaMute = s.vcaSolo = false;
+                    s.vcaDirty = true;
+                    s.vcaFresh = false;  // what played before this table played at its VCA gain (an Install after it is fresh)
+                }
+                vcaActive_ = true;
+                updateSolo();
+                break;
+            }
         }
     }
 }
@@ -850,19 +874,71 @@ double Engine::slotTarget(const Slot& s) const noexcept {
     if (s.removing || s.overloaded) return 0.0;
     if (auditionOnly_) return s.index == auditionSlot_ ? bitsToDouble(s.vol.load(std::memory_order_relaxed)) : 0.0;
     if (s.index == auditionSlot_) return 0.0;
-    if (s.mute.load(std::memory_order_relaxed)) return 0.0;
-    if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
+    if (s.mute.load(std::memory_order_relaxed) || s.vcaMute) return 0.0;  // its own mute, or a VCA group's
+    if (anySolo_ && !s.solo.load(std::memory_order_relaxed) && !s.vcaSolo) return 0.0;
     return s.automation && !s.automation->volume.empty() ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
 }
 
 void Engine::updateSolo() noexcept {
+    if (vca_) {  // the slots' VCA mute and solo first: a group's solo counts as its members'
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& s = slotAt(live_[k]);
+            vca_->flags(live_[k], s.vcaMute, s.vcaSolo);
+        }
+    }
     bool any = false;
     for (int k = 0; k < liveCount_ && !any; ++k) {
         const int i = live_[k];
         if (i >= capacity_) break;  // the audition, always last
-        any = slotAt(i).active && !slotAt(i).removing && slotAt(i).solo.load(std::memory_order_relaxed);
+        const Slot& s = slotAt(i);
+        any = s.active && !s.removing && (s.solo.load(std::memory_order_relaxed) || s.vcaSolo);
     }
     anySolo_ = any;
+}
+
+// Once a chunk, before the graph runs: each group's gain per frame, then each slot's product of its groups' gains,
+// which its track or bus node and its post keys multiply after its own volume (and volume lane). A slot whose groups
+// changed (a new table, or none) ramps from the gain it had by an offset that decays with the faders' pole, so
+// joining, leaving, a new or deleted group, or a lane added or taken away never jumps. A slot whose VCA gain is
+// exactly 1 throughout (in no group, or settled at unity) is off (vcaOn false) and takes the nodes' plain paths.
+void Engine::runVca(int m) noexcept {
+    const double coef = trackGainCoef_;
+    if (vca_) {
+        double steps[kBlock];
+        if (vca_->hasLane)
+            for (int i = 0; i < m; ++i) steps[i] = songStep(g_ + i);
+        vca_->advance(vca_->hasLane ? steps : nullptr, m, coef);
+    }
+    bool active = false;
+    for (int k = 0; k < liveCount_; ++k) {
+        Slot& s = slotAt(live_[k]);
+        const bool member = vca_ && vca_->product(live_[k], m, s.vca);
+        if (s.vcaDirty) {
+            s.vcaOffset = s.vcaFresh ? 0.0 : s.vcaLast - (member ? s.vca[0] : 1.0);
+            s.vcaDirty = s.vcaFresh = false;
+        }
+        if (!member) {
+            if (s.vcaOffset == 0.0) {
+                s.vcaOn = false;
+                s.vcaLast = 1.0;
+                continue;
+            }
+            std::fill_n(s.vca, m, 1.0);
+        }
+        bool unity = s.vcaOffset == 0.0;
+        for (int i = 0; i < m; ++i) {
+            if (s.vcaOffset != 0.0) {
+                s.vca[i] = std::max(0.0, s.vca[i] + s.vcaOffset);
+                s.vcaOffset -= s.vcaOffset * coef;
+                if (std::fabs(s.vcaOffset) < 1e-6) s.vcaOffset = 0.0;
+            }
+            unity = unity && s.vca[i] == 1.0;
+        }
+        s.vcaOn = !unity;
+        s.vcaLast = m > 0 ? s.vca[m - 1] : s.vcaLast;
+        active = active || s.vcaOn || s.vcaOffset != 0.0;
+    }
+    vcaActive_ = active;
 }
 
 int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
@@ -1630,6 +1706,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         chunkStepsAt_ = g_;
         chunkStepsLen_ = m;
     }
+    if (vca_ || vcaActive_) runVca(m);
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
     audioIn_->setLoopWrap(wrapAt(), loopRange_ ? loopFrom_ : 0);  // audio tracks pre-roll the loop's start
     ++chunkId_;
@@ -1972,7 +2049,8 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         gains(pan, pl, pr);
         for (int i = 0; i < m; ++i) {
             const double step = songStep(g_ + i);
-            const double v = volumeLane ? automationValue(s.automation->volume, step, 1.0) : vol;
+            double v = volumeLane ? automationValue(s.automation->volume, step, 1.0) : vol;
+            if (s.vcaOn) v *= s.vca[i];  // its VCA groups scale its post keys as they scale its fader
             if (panLane) gains(automationValue(s.automation->pan, step, pan), pl, pr);
             faderL[i] = v * pl;
             faderR[i] = v * pr;
@@ -2258,7 +2336,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
     // Project modulation of the fader (#161): offsets in its travel (the app's taper) and in pan's, per frame.
     const float* volumeMod = modulation_->volume(slot);
     const float* panMod = modulation_->pan(slot);
-    const bool steady = !volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod;
+    const double* vca = s.vcaOn ? s.vca : nullptr;  // its VCA groups' gain per frame (null: in none)
+    const bool steady = !volumeAutomated && !panAutomated && s.gain == settled && !volumeMod && !panMod && !vca;
     if (steady && allPositiveZero(s.insL, m) && allPositiveZero(s.insR, m) && !std::signbit(s.gain) &&
         !std::signbit(s.gl) && !std::signbit(s.gr)) {
         // Silence from the instrument and inserts (an asleep track): what the loop below gives, +0 everywhere
@@ -2310,7 +2389,8 @@ void Engine::runTrackNode(int slot, float* outL, float* outR, int m) noexcept {
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
+        double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[i]) : s.gain;  // muted stays silent
+        if (vca) gain *= vca[i];  // after the fader, its lane and modulation: an automated track follows its VCA
         const double vl = static_cast<double>(s.insL[i]) * gain;
         const double vr = static_cast<double>(s.insR[i]) * gain;
         const double v = 0.5 * (vl + vr);  // the scope and tail test read the mid
@@ -2399,7 +2479,8 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     const float* volumeMod = modulation_->volume(slot);  // project modulation (#161)
     const float* panMod = modulation_->pan(slot);
     const bool laneFree = !s.automation || (s.automation->volume.empty() && s.automation->pan.empty());
-    if (laneFree && !volumeMod && !panMod && s.gain == (target > 0.0 ? target : 0.0)) {
+    const double* vca = s.vcaOn ? s.vca : nullptr;  // its VCA groups' gain per frame (null: in none)
+    if (laneFree && !volumeMod && !panMod && !vca && s.gain == (target > 0.0 ? target : 0.0)) {
         // Settled, no lanes, no modulation (the usual case): the loop below with every frame's gains the same.
         const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0;
         const double rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
@@ -2425,7 +2506,8 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         if (panMod) automatedPan = std::clamp(automatedPan + 2.0 * panMod[j], -1.0, 1.0);
         const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
         const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
-        const double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[j]) : s.gain;  // muted stays silent
+        double gain = volumeMod && s.gain > 0.0 ? faderGain(faderPosition(s.gain) + volumeMod[j]) : s.gain;  // muted stays silent
+        if (vca) gain *= vca[j];  // a folder bus in a VCA group: its fader scaled (its children too, if also members)
         s.outL[j] *= gain * leftPan;
         s.outR[j] *= gain * rightPan;
     }

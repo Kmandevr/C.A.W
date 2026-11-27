@@ -1,5 +1,6 @@
 // Stable ids for a project's devices, sends, automation lanes and points and samples: shape, load check, index lookup.
 import 'project.dart';
+import 'vca.dart';
 
 /// The prefixes [newId] makes instance ids with: `d` a device (a [ComponentUseDoc]: an instrument, effect or
 /// per-note effect), `s` a send, `al` an automation lane, `ap` an automation point, `cs` a component's sample slot.
@@ -108,6 +109,13 @@ extension ProjectInstanceIds on ProjectDoc {
       lane.uid = once(lane.uid, InstanceIds.lane);
       points(lane.points);
     }
+    for (final g in vcaGroups) {
+      if (g.automation case final lane?) {
+        lane.uid = once(lane.uid, InstanceIds.lane);
+        points(lane.points);
+      }
+    }
+    settleVcaGroups();  // members whose layer is gone leave their groups
     // A chain that is gone (its track deleted) leaves its lanes and links as they are.
     automation.removeWhere((lane) {
       if (lane.targetType != 'component' && lane.targetType != 'noteComponent') {

@@ -1,6 +1,8 @@
 // Reads the project JSON into a ProjectSpec: values clamp to a safe range, song positions out of range are refused.
 #include "project.h"
 
+#include <set>
+
 #include "modulation_links.h"
 
 #include "presets.h"
@@ -637,6 +639,77 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 return false;
             }
             parent = found->parentId;
+        }
+    }
+    // VCA groups (vca.h): each a fader, mute and solo over member layers. Limits: kMaxVcaGroups groups of at most
+    // kMaxVcaMembers members; ids unique and not empty. A member that names no layer is left out, and so is a repeat.
+    if (const Json* vcas = root.get("vca_groups"); vcas && vcas->type != Json::Type::Null) {
+        if (vcas->type != Json::Type::Array) {
+            error = "vca_groups must be a list of groups";
+            return false;
+        }
+        if (vcas->arr.size() > static_cast<size_t>(kMaxVcaGroups)) {
+            error = "a project can have at most " + std::to_string(kMaxVcaGroups) + " VCA groups";
+            return false;
+        }
+        std::set<std::string> layerIds;
+        for (const LayerSpec& l : out.layers) layerIds.insert(l.id);
+        for (const Json& g : vcas->arr) {
+            if (g.type != Json::Type::Object) {
+                error = "each VCA group must be an object";
+                return false;
+            }
+            VcaGroupSpec spec;
+            spec.id = g.string("id");
+            spec.name = g.string("name");
+            if (spec.id.empty() || spec.id.size() > 256) {
+                error = "each VCA group needs an id of 1 to 256 bytes";
+                return false;
+            }
+            for (const VcaGroupSpec& other : out.vcaGroups)
+                if (other.id == spec.id) {
+                    error = "VCA group id '" + spec.id + "' is used twice";
+                    return false;
+                }
+            const std::string groupName = "VCA group '" + spec.id + "'";
+            spec.volume = clampd(g.number("volume", 1.0), 0, kMaxMixGain);
+            spec.mute = g.boolean("mute", false);
+            spec.solo = g.boolean("solo", false);
+            if (const Json* members = g.get("members"); members && members->type != Json::Type::Null) {
+                if (members->type != Json::Type::Array || members->arr.size() > static_cast<size_t>(kMaxVcaMembers)) {
+                    error = groupName + " members must be a list of at most " + std::to_string(kMaxVcaMembers) + " layer ids";
+                    return false;
+                }
+                for (const Json& m : members->arr) {
+                    if (m.type != Json::Type::String) {
+                        error = groupName + " members must be layer ids";
+                        return false;
+                    }
+                    if (layerIds.count(m.str) != 0 && std::find(spec.members.begin(), spec.members.end(), m.str) == spec.members.end())
+                        spec.members.push_back(m.str);
+                }
+            }
+            if (const Json* lanes = g.get("automation"); lanes && lanes->type != Json::Type::Null) {
+                if (lanes->type != Json::Type::Array) {
+                    error = groupName + " automation must be a list of lanes";
+                    return false;
+                }
+                for (const Json& laneJson : lanes->arr) {
+                    if (laneJson.type != Json::Type::Object || laneJson.string("target", "volume") != "volume") continue;
+                    if (!pointStepsOk(laneJson.get("points"), error, groupName + ": ")) return false;
+                    std::vector<AutomationPointSpec> points;
+                    if (const Json* pts = laneJson.get("points"); pts && pts->type == Json::Type::Array) {
+                        for (const Json& point : pts->arr) {
+                            if (point.type != Json::Type::Object) continue;
+                            points.push_back({point.number("step", 0), clampd(point.number("value", 1.0), 0, kMaxMixGain)});
+                            readPointCurve(point, points.back());
+                        }
+                    }
+                    std::stable_sort(points.begin(), points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });
+                    if (!points.empty()) spec.volumeLane = std::move(points);  // one volume lane: the last one wins
+                }
+            }
+            out.vcaGroups.push_back(std::move(spec));
         }
     }
     // Project modulation (#161): modulators and links (modulation_links.cpp), before the routing check that orders them.

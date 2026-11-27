@@ -123,6 +123,18 @@ struct LayerSpec {
     bool mute = false, solo = false;
 };
 
+// A VCA group (REAPER-style; vca.h, docs/engine.md "VCA groups"): one fader that scales its members' levels, and a
+// mute and solo that act on them, without summing their audio (no shared bus). Project "vca_groups".
+struct VcaGroupSpec {
+    std::string id, name;
+    double volume = 1.0;  // linear gain, 0..kMaxMixGain
+    bool mute = false, solo = false;
+    std::vector<std::string> members;             // layer ids (tracks or folder buses), each once
+    std::vector<AutomationPointSpec> volumeLane;  // sorted; empty: the fader
+};
+constexpr int kMaxVcaGroups = 32;    // groups per project (a slot's groups are a 32-bit mask)
+constexpr int kMaxVcaMembers = 256;  // members per group
+
 // Project modulation (#161; docs/engine.md, Modulation). A modulator is a component with modulation outputs (one
 // float per frame, 0..1) and at most one event input (notes) and one audio input: an LFO, an envelope, a follower, a
 // step sequencer, random, macros, MIDI to CV, or a user's C++ modulator. It hears the notes or audio of `input`.
@@ -180,6 +192,7 @@ struct ProjectSpec {
     std::vector<ProjectAutomationLaneSpec> automation;
     std::vector<ModulatorSpec> modulators;  // #161: project modulation (modulation_links.h)
     std::vector<ModLinkSpec> modulation;
+    std::vector<VcaGroupSpec> vcaGroups;  // VCA groups (vca.h); absent: none
     // The Builder's preview, if any: a C++ instrument (with its values) and native effects, as a track plays them
     // ("audition": {"instrument": ..., "components": [...]}).
     bool hasAuditionInstrument = false;

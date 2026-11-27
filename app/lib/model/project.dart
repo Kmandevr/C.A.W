@@ -18,6 +18,7 @@ import 'modulation.dart';
 import 'pattern_doc.dart';
 import 'routing.dart';
 import 'tempo_map.dart';
+import 'vca.dart';
 import '../version.dart';
 
 String newId(String prefix) {
@@ -974,7 +975,11 @@ class ProjectDoc {
   /// variant 0 included: an older engine refuses the parameter), or a rack (always saved with `rack_layout`, which
   /// an older engine refuses). A project using none of v7's is written as v6 or v5 as before, byte for byte
   /// ([baseFileVersion], [savedFileVersion]), so older builds open it; this build reads them all and refuses newer.
-  static const int fileVersion = 7;
+  /// v8 (VCA groups, 1.1.4): `vca_groups`; a project without any is written as v7, v6 or v5 as before.
+  static const int fileVersion = 8;
+
+  /// The format a project with v7's merged devices and no VCA groups is written as.
+  static const int mergedFileVersion = 7;
 
   /// The format a project with v6's routing and nothing of v7's is written as.
   static const int routingFileVersion = 6;
@@ -1002,9 +1007,13 @@ class ProjectDoc {
         layers.any((l) => l.components.any(merged) || l.noteComponents.any(merged));
   }
 
-  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesMergedDevicesV7], else [routingFileVersion] when
-  /// [usesRoutingV6], else [baseFileVersion].
-  int get savedFileVersion => usesMergedDevicesV7 ? fileVersion : usesRoutingV6 ? routingFileVersion : baseFileVersion;
+  /// Whether the project holds anything v8 added: a VCA group. Every v8 feature is tested here, in one place.
+  bool get usesV8 => vcaGroups.isNotEmpty;
+
+  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesV8], else [mergedFileVersion] when
+  /// [usesMergedDevicesV7], else [routingFileVersion] when [usesRoutingV6], else [baseFileVersion].
+  int get savedFileVersion => usesV8 ? fileVersion : usesMergedDevicesV7 ? mergedFileVersion
+      : usesRoutingV6 ? routingFileVersion : baseFileVersion;
 
   final String id;
   String name;
@@ -1127,6 +1136,9 @@ class ProjectDoc {
   /// Project modulation (#161, modulation.dart): modulators and the links from their outputs to any knob.
   List<ModulatorDoc> modulators = [];
   List<ModLinkDoc> modLinks = [];
+
+  /// VCA groups (vca.dart): faders over several tracks' levels, mute and solo (at most [kMaxVcaGroups]).
+  List<VcaGroupDoc> vcaGroups = [];
 
   /// When the project was first saved (Files › Projects shows it); null for one made before C.A.W recorded it
   /// (2026-11-12), shown as unknown. Copies (Duplicate) start again; imports keep the original's.
@@ -1395,6 +1407,10 @@ class ProjectDoc {
           if (playable(auditionComponents).isNotEmpty) 'components': [for (final c in playable(auditionComponents)) c.toJson()],
         },
         'audition_only': auditionOnly && auditionInstrument != null,
+        // VCA groups (API 47): left out when there are none, so older projects send what they did.
+        if (vcaGroups.isNotEmpty) 'vca_groups': [
+          for (final g in vcaGroups) g.toEngineJson({for (final l in layers) l.id}),
+        ],
         // Project modulation (#161): what can play of it (modulation.dart).
         ...engineModulationFields(routing, playableComponents: playableComponents,
             engineIndex: (layerId, index, device) =>
@@ -1436,6 +1452,7 @@ class ProjectDoc {
         if (midiMappings.isNotEmpty) 'midi_mappings': [for (final m in midiMappings) m.toJson()],
         if (modulators.isNotEmpty) 'modulators': [for (final m in modulators) m.toJson()],
         if (modLinks.isNotEmpty) 'modulation': [for (final l in modLinks) l.toJson(withIds: true)],
+        if (vcaGroups.isNotEmpty) 'vca_groups': [for (final g in vcaGroups) g.toJson(withIds: true)],
         if (assets.isNotEmpty) 'assets': [for (final a in assets) a.toJson()],
         if (musicVideo != null) 'music_video': musicVideo,
         if (automationFollowsClips) 'automation_follows_clips': true,
@@ -1694,6 +1711,11 @@ class ProjectDoc {
     ];
     project.modLinks = [
       for (final raw in ((j['modulation'] as List?) ?? const []).take(kMaxModLinks)) ?ModLinkDoc.fromJson(raw),
+    ];
+    final vcaIds = <String>{};
+    project.vcaGroups = [
+      for (final raw in ((j['vca_groups'] as List?) ?? const []).take(kMaxVcaGroups))
+        if (VcaGroupDoc.fromJson(raw) case final g? when vcaIds.add(g.id)) g,
     ];
     // The tempo map and signatures (v3); a v2 file has neither and reads as its one tempo in n/4.
     final maxSteps = project.maxArrangementSteps;
