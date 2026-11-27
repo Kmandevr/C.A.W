@@ -484,6 +484,7 @@ private:
     Slot slots_[kSlots];
     uint32_t slotCount_ = 0, targetCount_ = 0, used_ = 0;
     uint32_t moved_ = 0;          // the voice sections (sectionOf) a slot moves this control
+    uint32_t rampMoved_ = 0;      // the voice sections a ramping knob moved this control (control())
     bool knobsChanged_ = true;    // a knob, the tempo or the quality moved since the last control
     bool noiseUsed_ = false;      // an oscillator's mod source is Noise: each voice draws it at each control
     double lastTempo_ = 0.0;
