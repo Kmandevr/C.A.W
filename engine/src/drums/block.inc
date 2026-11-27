@@ -228,7 +228,10 @@
                 }
             }
         }
-        // Kit effects on the main bus.
+        // Kit effects on the main bus. The quality's oversampling read once for the chunk (2026-11-27; it was read
+        // twice a frame).
+        const int kitQ = qualityNow(quality_);
+        const int kitOs = kitQ == kQualityEco ? 1 : (kitQ == kQualityHigh ? 4 : 2);
         for (uint32_t k = 0; k < n; ++k) {
             double l = busL[0][k], r = busR[0][k];
             if (glueAmount_ > 0.0) {
@@ -241,10 +244,8 @@
                 r *= w;
             }
             if (kitDriveType_ != 0) {
-                const int q = qualityNow(quality_);
-                const int os = q == kQualityEco ? 1 : (q == kQualityHigh ? 4 : 2);
-                l += (kitDriveL_.process(l, os) - l) * kitDriveMix_;
-                r += (kitDriveR_.process(r, os) - r) * kitDriveMix_;
+                l += (kitDriveL_.process(l, kitOs) - l) * kitDriveMix_;
+                r += (kitDriveR_.process(r, kitOs) - r) * kitDriveMix_;
             }
             if (skipping) l += skipL[k], r += skipR[k];
             if (kitEq_) {
@@ -266,10 +267,8 @@
                 if (quietKit) echoQuiet_ = std::fabs(el) + std::fabs(er) < 1e-5 ? echoQuiet_ + 1 : 0;
             }
             if (kitClip_ != 0) {
-                const int q = qualityNow(quality_);
-                const int os = q == kQualityEco ? 1 : (q == kQualityHigh ? 4 : 2);
-                l = ceiling(kitClipL_.process(l, os));
-                r = ceiling(kitClipR_.process(r, os));
+                l = ceiling(kitClipL_.process(l, kitOs));
+                r = ceiling(kitClipR_.process(r, kitOs));
             }
             const float fl = static_cast<float>(l), fr = static_cast<float>(r);
             double outL = fl, outR = fr;

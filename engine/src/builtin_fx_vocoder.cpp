@@ -178,16 +178,23 @@ protected:
         an_.flush();
         syn_.flush();
         // The carrier's notes: the held chord, else the drone note; each voice glides to its pitch.
+        // The unison copies' ratios and each voice's pitch are worked out again only when what they come from
+        // changed (2026-11-27: the same values, so the same bits, without 1 + unison detPow per voice per period).
         const uint32_t voices = carrier_ == 0 ? std::max<uint32_t>(1, held_) : 0;
-        for (uint32_t v = 0; v < voices; ++v) {
-            const double note = (held_ ? static_cast<double>(notes_[v]) : drone_) + 12.0 * octave_;
-            const double hz = 440.0 * detPow(2.0, (note - 69.0) / 12.0);
-            Osc& o = osc_[v];
-            o.hz = (o.hz <= 0.0 || first_) ? hz : o.hz + (hz - o.hz) * glide_;
+        if (unison_ != ratioUnison_ || detune_ != ratioDetune_) {
             for (uint32_t u = 0; u < unison_; ++u) {
                 const double cents = unison_ == 1 ? 0.0 : detune_ * (static_cast<double>(u) - 0.5 * (unison_ - 1)) / (0.5 * (unison_ - 1));
-                o.dt[u] = std::min(0.45, o.hz * detPow(2.0, cents / 1200.0) / sr);
+                ratio_[u] = detPow(2.0, cents / 1200.0);
             }
+            ratioUnison_ = unison_, ratioDetune_ = detune_;
+        }
+        for (uint32_t v = 0; v < voices; ++v) {
+            const double note = (held_ ? static_cast<double>(notes_[v]) : drone_) + 12.0 * octave_;
+            Osc& o = osc_[v];
+            if (note != o.note) o.note = note, o.target = 440.0 * detPow(2.0, (note - 69.0) / 12.0);
+            const double hz = o.target;
+            o.hz = (o.hz <= 0.0 || first_) ? hz : o.hz + (hz - o.hz) * glide_;
+            for (uint32_t u = 0; u < unison_; ++u) o.dt[u] = std::min(0.45, o.hz * ratio_[u] / sr);
         }
         voices_ = voices;
         carrierGain_ = voices ? static_cast<float>(1.0 / std::sqrt(static_cast<double>(voices * unison_))) : 0.0f;
@@ -251,7 +258,11 @@ private:
         double phase[kMaxUnison] = {};
         double dt[kMaxUnison] = {};
         double hz = 0;
+        double note = -1.0, target = 0.0;  // the note target was worked out for (control())
     };
+    double ratio_[kMaxUnison] = {};  // each unison copy's pitch ratio, for ratioUnison_ copies at ratioDetune_ cents
+    uint32_t ratioUnison_ = 0;
+    double ratioDetune_ = -1.0;
     // The key's note events at frame `frame` of the block: ons build the chord, offs release their note.
     void takeNotes(const EventInput& notes, uint32_t frame) noexcept {
         for (uint32_t e = 0; e < notes.count; ++e) {

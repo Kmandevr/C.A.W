@@ -11,6 +11,7 @@
 #include "caw/library/filter.hpp"
 #include "component_chain.h"
 #include "fx_merged.h"
+#include "simd_fx.h"
 
 // Original code (C.A.W. is Apache-2.0); the technique is in docs/engine.md ("The ducker"). The key filters are
 // Simper's trapezoidal state-variable filter (caw/library/filter.hpp); the band split is a Linkwitz-Riley
@@ -87,6 +88,27 @@ double bend(double x, double tension) noexcept {
     return (detExp(c * x) - 1.0) / (detExp(c) - 1.0);  // detExp: the same bits on every platform (golden renders)
 }
 
+// bend() for one tension with its denominator worked out once (Bend::set): the same arithmetic, so the same bits,
+// with one detExp a sample instead of two (2026-11-27).
+struct Bend {
+    double tension = 0.0, c = 0.0, den = 1.0;
+    bool flat = true;
+    void set(double t) noexcept {
+        if (t == tension && !first) return;
+        first = false;
+        tension = t;
+        flat = !(std::fabs(t) >= 1e-3);
+        c = t * kTensionSteepness;
+        den = flat ? 1.0 : detExp(c) - 1.0;
+    }
+    double operator()(double x) const noexcept {
+        x = std::clamp(x, 0.0, 1.0);
+        if (flat) return x;
+        return (detExp(c * x) - 1.0) / den;
+    }
+    bool first = true;
+};
+
 class Ducker : public EffectBase, public VariableLatency, public ArmedFlag {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return duckDescriptor(); }
@@ -124,10 +146,10 @@ protected:
             hpf_[c].clear();
             lpf_[c].clear();
             follow_[c].clear();
-            for (auto& f : split_[c]) f.clear();
             amount_[c] = 0.0;
             followHold_[c] = 0;
         }
+        for (auto& f : split_) f.clear();
         at_ = -1;
         from_ = duck_ = 0.0;
         armed_ = true;
@@ -135,6 +157,7 @@ protected:
         scale_ = scaleTarget_ = 1.0;
         scaleStep_ = 0.0;
         grMax_ = keyMax_ = 0.0;
+        gMin_ = gLast_ = 1.0;
         triggers_ = 0;
     }
     uint64_t idleFrames() const noexcept override {
@@ -150,14 +173,16 @@ protected:
         for (int c = 0; c < 2; ++c) {
             hpf_[c].flushDenormals();
             lpf_[c].flushDenormals();
-            for (auto& f : split_[c]) f.flushDenormals();
         }
+        for (auto& f : split_) f.flush();
         mode_ = choice(kMode, at);
         depth_ = std::clamp(param(kDepth, at), 0.0, 1.0);
         attack_ = std::max(1.0, param(kAttack, at) * 0.001 * sr);
         hold_ = std::max(0.0, param(kHold, at) * 0.001 * sr);
         release_ = std::max(1.0, param(kRelease, at) * 0.001 * sr);
         tension_ = std::clamp(param(kTension, at), -1.0, 1.0);
+        releaseBend_.set(tension_);
+        followBend_.set(-tension_ * 0.5);
         mix_ = std::clamp(param(kMix, at), 0.0, 1.0);
         const int rate = std::clamp(choice(kRate, at), 0, static_cast<int>(std::size(kRateBeats)) - 1);
         periodBeats_ = kRateBeats[rate];
@@ -174,8 +199,8 @@ protected:
         lookahead_ = armed() ? 0 : lookaheadFrames(mode_, choice(kLookahead, at), sr);
         bands_ = std::clamp(choice(kBands, at), 0, 2);
         const double xo = param(kCrossover, at);
-        for (int c = 0; c < 2; ++c)
-            for (auto& f : split_[c]) f.set(xo, 0.70710678118654752, sr);
+        xover_.set(xo, 0.70710678118654752, sr);  // caches its coefficients: an unchanged crossover costs a compare
+        for (auto& f : split_) f.like(xover_);
         link_ = std::clamp(param(kLink, at), 0.0, 1.0);
         velocity_ = std::clamp(param(kVelocity, at), 0.0, 1.0);
         listen_ = on(kListen, at);
@@ -220,7 +245,7 @@ protected:
                             amount_[c] = target + (amount_[c] - target) * followRelease_;
                         }
                         if (!(amount_[c] >= 1e-9 && amount_[c] <= 1.0)) amount_[c] = 0.0;  // settled, or not finite
-                        g[c] = 1.0 - depth_ * mix_ * bend(amount_[c], -tension_ * 0.5);
+                        g[c] = 1.0 - depth_ * mix_ * followBend_(amount_[c]);
                     }
                     duck_ = std::max(amount_[0], amount_[1]);
                 } else {
@@ -248,7 +273,7 @@ protected:
                 double beat = 0.0;
                 if (beatAt(first + i, beat)) {
                     const double phase = beat / periodBeats_ - offset_;
-                    const int64_t period = static_cast<int64_t>(std::floor(phase + 1e-9));
+                    const int64_t period = static_cast<int64_t>(floorOf(phase + 1e-9));
                     if (period != lastPeriod_) {
                         // The first frame after Play (or a wake): it ducks only on the grid, within a frame of a
                         // division's start; from half a beat in, the next division is the first duck.
@@ -260,7 +285,7 @@ protected:
                         lastPeriod_ = period;
                         if (!started || phase - static_cast<double>(period) < oneFrame * (1.0 - 1e-6)) trigger(1.0);
                     }
-                    phase_ = phase - std::floor(phase);
+                    phase_ = phase - floorOf(phase);
                 } else {
                     lastPeriod_ = INT64_MIN;  // stopped: the next Play ducks on the next division it reaches
                     phase_ = -1.0;
@@ -301,17 +326,26 @@ protected:
                 bandsFade_ = fadeFrames_;
             }
             const double w = bandsFade_ > 0 ? fadeWeight(bandsFade_--) : 1.0;
+            // Both sides' Linkwitz-Riley split in one Pair (each lane lib::Svf's arithmetic: the same bits).
+            Pair lo, hi, band;
+            const Pair xx = pairOf(x[0], x[1]);
+            split_[0].step(xx, lo, band);
+            split_[1].step(lo, lo, band);
+            split_[2].step(xx, hi, band);
+            hi = split_[2].high(hi, band);
+            Pair h2;
+            split_[3].step(hi, h2, band);
+            hi = split_[3].high(h2, band);
             double y[2];
             for (int c = 0; c < 2; ++c) {
-                const double low = split_[c][1].lowpass(split_[c][0].lowpass(x[c]));
-                const double high = split_[c][3].highpass(split_[c][2].highpass(x[c]));
+                const double low = lane(lo, c), high = lane(hi, c);
                 auto path = [&](int b) { return b == 0 ? x[c] * g[c] : b == 1 ? low * g[c] + high : low + high * g[c]; };
                 const double now = path(bandsNow_);
                 y[c] = w < 1.0 ? path(bandsOld_) + (now - path(bandsOld_)) * w : now;
             }
             const double gr = std::min(g[0], g[1]);
-            grMax_ = std::min(grMax_, lib::gainToDb(gr, -120.0));
-            grNow_ = lib::gainToDb(gr, -120.0);
+            gLast_ = gr;  // the display's dB is worked out once a run, below
+            gMin_ = gr < gMin_ ? gr : gMin_;
             if (listen_) {
                 outL[i] = static_cast<float>(k[0]);
                 outR[i] = static_cast<float>(k[1]);
@@ -320,8 +354,15 @@ protected:
                 outR[i] = static_cast<float>(y[1]);
             }
         }
+        if (n) showReduction();
     }
 
+    // The gain reduction shown (display only), from the run's last and smallest gain: gainToDb rises with its gain.
+    void showReduction() noexcept {
+        grNow_ = lib::gainToDb(gLast_, -120.0);
+        grMax_ = std::min(grMax_, lib::gainToDb(gMin_, -120.0));
+        gMin_ = 1.0;
+    }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();
         out[1] = outPeakDb();
@@ -349,6 +390,10 @@ protected:
 
 private:
     static constexpr uint32_t kFresh = UINT32_MAX;
+    // std::floor without a library call where it is exact (|x| < 2^31: fastmath's floorSmall), else std::floor.
+    static double floorOf(double x) noexcept {
+        return x < 2147483648.0 && x > -2147483648.0 ? lib::fast_detail::floorSmall(x) : std::floor(x);
+    }
     // A crossfade's weight for the new side with `left` frames to go (fadeFrames_ down to 1).
     double fadeWeight(uint32_t left) const noexcept {
         return static_cast<double>(fadeFrames_ - left + 1) / static_cast<double>(fadeFrames_ + 1);
@@ -375,11 +420,11 @@ private:
         const double t = static_cast<double>(at_);
         double d;
         if (t < attack_) {
-            d = from_ + (1.0 - from_) * (1.0 - bend(1.0 - (t + 1.0) / attack_, 0.5));
+            d = from_ + (1.0 - from_) * (1.0 - attackBend_(1.0 - (t + 1.0) / attack_));
         } else if (t < attack_ + hold_) {
             d = 1.0;
         } else if (t < attack_ + hold_ + release_) {
-            d = 1.0 - bend((t - attack_ - hold_ + 1.0) / release_, tension_);
+            d = 1.0 - releaseBend_((t - attack_ - hold_ + 1.0) / release_);
         } else {
             at_ = -1;
             return 0.0;
@@ -391,7 +436,12 @@ private:
     std::vector<float> delay_[2];
     size_t pos_ = 0;
     lib::Svf hpf_[2], lpf_[2];
-    lib::Svf split_[2][4];  // per side: two low-passes, then two high-passes (Linkwitz-Riley, 24 dB/octave)
+    // Two low-passes, then two high-passes (Linkwitz-Riley, 24 dB/octave), both sides' states in one Pair's lanes,
+    // all four set like xover_.
+    lib::Svf xover_;
+    fxsimd::SvfLanes split_[4];
+    Bend releaseBend_, followBend_;
+    Bend attackBend_ = [] { Bend b; b.set(0.5); return b; }();
     lib::EnvelopeFollower follow_[2];
     double amount_[2] = {}, followAttack_ = 0, followRelease_ = 0;
     int64_t followHold_[2] = {};
@@ -407,6 +457,7 @@ private:
     int64_t at_ = -1, lastPeriod_ = INT64_MIN;
     double from_ = 0, duck_ = 0, scale_ = 1, scaleTarget_ = 1, scaleStep_ = 0;
     double grMax_ = 0, grNow_ = 0, keyMax_ = 0;
+    double gMin_ = 1.0, gLast_ = 1.0;  // this run's smallest and last gain (showReduction)
     uint32_t triggers_ = 0;
 };
 

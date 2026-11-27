@@ -13,6 +13,7 @@
 #include "fx_sidechain.h"
 #include "meters.h"
 #include "sample_time.h"
+#include "simd_fx.h"
 #include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0). The compressor's soft knee is the textbook curve (Giannoulis, Massberg and
@@ -407,8 +408,9 @@ protected:
         sum_ = static_cast<double>(window_);
         held_ = 1.0;
         min_.clear();
-        for (auto& t : tp_) t.clear();
+        tp_.clear();
         grMax_ = 0.0, grNow_ = 0.0;
+        gMin_ = gLast_ = 1.0;
         sinceExact_ = 0;
         gainNow_ = -1.0;
         if (meter_) meter_->requestReset();
@@ -453,7 +455,7 @@ protected:
             const uint32_t d = (pos_ - detectBack_) & mask;
             double peak;
             if (truePeak_) {
-                peak = std::max(tp_[0].process(ring_[0][d]), tp_[1].process(ring_[1][d]));
+                peak = tp_.process(ring_[0][d], ring_[1][d]);  // both sides' estimates in one Pair, the larger
             } else {
                 const double l = ring_[0][d], r = ring_[1][d];
                 peak = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
@@ -470,14 +472,20 @@ protected:
             double g = sum_ / window_;
             g = g > 1.0 ? 1.0 : g;
             const uint32_t a = (pos_ - kLookaheadFrames) & mask;
-            const double gr = lib::gainToDb(g, -120.0);
-            grMax_ = std::min(grMax_, gr);
-            grNow_ = gr;
+            gMin_ = g < gMin_ ? g : gMin_;  // the display's dB is worked out once a run, below
+            gLast_ = g;
             // The sample-peak ceiling holds exactly, whatever the estimate missed.
             const double l = std::clamp(ring_[0][a] * g, -ceiling_, ceiling_), r = std::clamp(ring_[1][a] * g, -ceiling_, ceiling_);
             outL[i] = static_cast<float>(l);
             outR[i] = static_cast<float>(r);
             pos_ = (pos_ + 1) & mask;
+        }
+        // The gain reduction shown (display only): its dB from the run's last and smallest gain, not per sample
+        // (gainToDb rises with its gain, so the smallest gain is the most reduction).
+        if (n) {
+            grNow_ = lib::gainToDb(gLast_, -120.0);
+            grMax_ = std::min(grMax_, lib::gainToDb(gMin_, -120.0));
+            gMin_ = 1.0;
         }
         if (meter_ && targetOn_.load(std::memory_order_relaxed)) meter_->process(outL, outR, static_cast<int>(n));
     }
@@ -525,7 +533,8 @@ private:
     uint32_t pos_ = 0, boxPos_ = 0, window_ = 72, detectBack_ = 0, sinceExact_ = 0;
     double sum_ = 72.0, held_ = 1.0;
     lib::SlidingMinimum min_;
-    lib::TruePeak tp_[2];
+    fxsimd::TruePeakPair tp_;
+    double gMin_ = 1.0, gLast_ = 1.0;  // this run's smallest and last gain (the display's reduction)
     double gainTarget_ = 1, gainNow_ = -1, gainStep_ = 0, ceiling_ = 0.89, ceilingDb_ = -1, release_ = 0;
     double grMax_ = 0, grNow_ = 0;
     bool truePeak_ = true;

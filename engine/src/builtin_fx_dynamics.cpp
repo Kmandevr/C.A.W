@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <new>
 
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "fx_merged.h"
+#include "simd_fx.h"
 
 // Original code (C.A.W. is Apache-2.0). Techniques, in our own words (docs/engine.md, "Dynamics and drive"):
 // - a level detector in dB (peak or RMS) smoothed with separate attack and release, then a static curve in dB,
@@ -52,7 +54,11 @@ public:
             if (ms_ < 1e-30) ms_ = 0.0;
             x = std::sqrt(ms_);
         }
-        const double target = lib::gainToDb(x, -120.0);
+        return processDb(lib::gainToDb(x, -120.0));
+    }
+    // process() for a level already in dB (floored at -120) and no RMS: two detectors fed the same level share
+    // its one conversion (the same bits).
+    double processDb(double target) noexcept {
         const double c = target > db_ ? att_ : rel_;
         db_ = target + (db_ - target) * c;
         if (db_ - target < 1e-9 && target - db_ < 1e-9) db_ = target;  // settled
@@ -202,6 +208,7 @@ constexpr const char* kBandNames[kBands] = {"Low", "Mid", "High"};
 constexpr double kMaxRatio = 50.0;
 // The most an upward compressor lifts (the quietest sound would otherwise be lifted without end).
 constexpr double kMaxBoostDb = 36.0;
+constexpr double kNormalMin = 2.2250738585072014e-308, kNormalMax = 1.7976931348623157e308;  // DBL_MIN, DBL_MAX
 
 // The OTT mode's per-band settings, low to high [Assumption: the values usually given for the "OTT" preset of
 // Ableton's Multiband Dynamics, not confirmed from a primary source (2026-11-11)]: downward threshold dB, upward
@@ -253,35 +260,49 @@ const ModuleDescriptor& mbDescriptor() {
     return d;
 }
 
-// One channel's three-band Linkwitz-Riley split and its matching all-pass for the dry path.
+// Both channels' three-band Linkwitz-Riley split and its matching all-pass for the dry path: one set of
+// lib::Svf designs (each caches its coefficients, so an unchanged crossover costs a compare) and each channel's
+// filter states in one lane of fxsimd::SvfLanes (2026-11-27: each lane the arithmetic one lib::Svf per channel
+// gave, so the same bits on x86-64 at half the instructions).
 struct ThreeWay {
-    lib::Svf s1, lp1, hp1, s2, lp2, hp2, ap2, dry1, dry2;
+    lib::Svf d1, d2;  // the designs at the two crossovers
+    fxsimd::SvfLanes s1, lp1, hp1, s2, lp2, hp2, ap2, dry1, dry2;
     void set(double f1, double f2, double sr) noexcept {
-        s1.set(f1, kButterworthQ, sr);
-        lp1.setLike(s1), hp1.setLike(s1), dry1.setLike(s1);
-        s2.set(f2, kButterworthQ, sr);
-        lp2.setLike(s2), hp2.setLike(s2), ap2.setLike(s2), dry2.setLike(s2);
+        d1.set(f1, kButterworthQ, sr);
+        d2.set(f2, kButterworthQ, sr);
+        for (fxsimd::SvfLanes* f : {&s1, &lp1, &hp1, &dry1}) f->like(d1);
+        for (fxsimd::SvfLanes* f : {&s2, &lp2, &hp2, &ap2, &dry2}) f->like(d2);
     }
-    // x into low, mid and high (they sum to the dry() all-pass of x).
-    void split(double x, double band[kBands]) noexcept {
-        const lib::SvfOutput a = s1.process(x);
-        const double low = lp1.process(a.low).low, rest = hp1.process(a.high).high;
-        const lib::SvfOutput b = s2.process(rest);
-        band[1] = lp2.process(b.low).low;
-        band[2] = hp2.process(b.high).high;
-        const lib::SvfOutput c = ap2.process(low);
-        band[0] = c.notch - kSqrt2 * c.band;  // the all-pass at the high crossover: x - 2k band
+    // x (left, right) into low, mid and high (they sum to the dry() all-pass of x).
+    void split(Pair x, Pair band[kBands]) noexcept {
+        Pair aLow, aBand, low, b, rest;
+        s1.step(x, aLow, aBand);
+        const Pair aHigh = s1.high(aLow, aBand);
+        lp1.step(aLow, low, b);
+        hp1.step(aHigh, aLow, b);
+        rest = hp1.high(aLow, b);
+        Pair bLow, bBand;
+        s2.step(rest, bLow, bBand);
+        const Pair bHigh = s2.high(bLow, bBand);
+        lp2.step(bLow, band[1], b);
+        hp2.step(bHigh, aLow, b);
+        band[2] = hp2.high(aLow, b);
+        Pair cLow, cBand;
+        ap2.step(low, cLow, cBand);
+        band[0] = ap2.notch(cBand) - splat(kSqrt2) * cBand;  // the all-pass at the high crossover: x - 2k band
     }
-    double dry(double x) noexcept {
-        const lib::SvfOutput a = dry1.process(x);
-        const lib::SvfOutput b = dry2.process(a.notch - kSqrt2 * a.band);
-        return b.notch - kSqrt2 * b.band;
+    Pair dry(Pair x) noexcept {
+        Pair low, band;
+        dry1.step(x, low, band);
+        const Pair a = dry1.notch(band) - splat(kSqrt2) * band;
+        dry2.step(a, low, band);
+        return dry2.notch(band) - splat(kSqrt2) * band;
     }
     void clear() noexcept {
-        for (lib::Svf* f : {&s1, &lp1, &hp1, &s2, &lp2, &hp2, &ap2, &dry1, &dry2}) f->clear();
+        for (fxsimd::SvfLanes* f : {&s1, &lp1, &hp1, &s2, &lp2, &hp2, &ap2, &dry1, &dry2}) f->clear();
     }
     void flush() noexcept {
-        for (lib::Svf* f : {&s1, &lp1, &hp1, &s2, &lp2, &hp2, &ap2, &dry1, &dry2}) f->flushDenormals();
+        for (fxsimd::SvfLanes* f : {&s1, &lp1, &hp1, &s2, &lp2, &hp2, &ap2, &dry1, &dry2}) f->flush();
     }
 };
 
@@ -292,7 +313,7 @@ public:
 protected:
     bool prepare(double, uint32_t) noexcept override { return true; }
     void clearState() noexcept override {
-        for (auto& s : split_) s.clear();
+        split_.clear();
         for (auto& d : det_) d.clear();
         for (auto& d : fast_) d.clear();
         in_.reset(), out_.reset(), depth_.reset();
@@ -303,6 +324,14 @@ protected:
         }
     }
     void control(uint32_t at) noexcept override {
+        // Every 16 frames the splits' states are flushed and the ramps set (as before); the designs, time
+        // coefficients and gains are worked out again only when a knob moved (2026-11-27: the same values, so the
+        // same bits; a wake from sleep with the knobs where they were redesigns nothing).
+        if (knobsUnchanged(knobs_, kMbKnobs, at)) {
+            split_.flush();
+            setRamps();
+            return;
+        }
         const double sr = rate();
         ott_ = choice(kMbMode, at) == 1;
         const double time = std::clamp(param(kMbTime, at), 0.1, 10.0);
@@ -311,10 +340,10 @@ protected:
         f1_ = std::clamp(param(kMbXLow, at), 40.0, 1000.0);
         f2_ = std::clamp(param(kMbXHigh, at), 1000.0, 12000.0);
         f2_ = std::max(f2_, f1_ * 2.0);
-        for (auto& s : split_) s.set(f1_, f2_, sr), s.flush();  // on the control grid: the same bits at any block size
-        in_.set(lib::dbToGain(param(kMbIn, at)), kControlFrames);
-        out_.set(lib::dbToGain(param(kMbOut, at)), kControlFrames);
-        depth_.set(std::clamp(param(kMbDepth, at), 0.0, 1.0), kControlFrames);
+        split_.set(f1_, f2_, sr), split_.flush();  // on the control grid: the same bits at any block size
+        inGain_ = lib::dbToGain(param(kMbIn, at));
+        outGain_ = lib::dbToGain(param(kMbOut, at));
+        depthNow_ = std::clamp(param(kMbDepth, at), 0.0, 1.0);
         for (int b = 0; b < kBands; ++b) {
             const uint32_t k = kMbBand0 + b * kBandParams;
             const double bandGain = param(k + kBGain, at);
@@ -339,21 +368,41 @@ protected:
             // OTT's makeup follows how much of the compression is used (upward or downward, whichever is more).
             const double scale = std::max(up_, down_);
             gainDb_[b] = makeup * scale + bandGain;
-            gain_[b].set(gainDb_[b], kControlFrames);
         }
+        setRamps();
+    }
+    void setRamps() noexcept {
+        in_.set(inGain_, kControlFrames);
+        out_.set(outGain_, kControlFrames);
+        depth_.set(depthNow_, kControlFrames);
+        for (int b = 0; b < kBands; ++b) gain_[b].set(gainDb_[b], kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
             const double ig = in_.next(), og = out_.next(), depth = depth_.next();
-            const double x[2] = {inL[i] * ig, inR[i] * ig};
-            double band[2][kBands];
-            split_[0].split(x[0], band[0]);
-            split_[1].split(x[1], band[1]);
+            const Pair x = pairOf(inL[i] * ig, inR[i] * ig);
+            Pair band[kBands];
+            split_.split(x, band);
             double y[2] = {0.0, 0.0};
+            // Each band's level in dB, once for both its detectors; the low and mid bands' logs as one Pair when
+            // both are normal numbers (fastLogNormalPair: fastLog's steps lane by lane, pinned: the same bits).
+            double most[kBands], db[kBands];
             for (int b = 0; b < kBands; ++b) {
-                const double l = band[0][b], r = band[1][b];
-                const double most = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
-                const double level = det_[b].process(most), fast = fast_[b].process(most);
+                const double l = lane(band[b], 0), r = lane(band[b], 1);
+                most[b] = std::max(l < 0 ? -l : l, r < 0 ? -r : r);
+            }
+            if (most[0] >= kNormalMin && most[1] >= kNormalMin && most[0] <= kNormalMax && most[1] <= kNormalMax) {
+                const Pair d = fastLogNormalPair(pairOf(most[0], most[1])) * splat(8.6858896380650366);  // gainToDb's 20 / ln(10)
+                db[0] = lane(d, 0) < -120.0 ? -120.0 : lane(d, 0);
+                db[1] = lane(d, 1) < -120.0 ? -120.0 : lane(d, 1);
+            } else {
+                db[0] = lib::gainToDb(most[0], -120.0);
+                db[1] = lib::gainToDb(most[1], -120.0);
+            }
+            db[2] = lib::gainToDb(most[2], -120.0);
+            double gdb[kBands];
+            for (int b = 0; b < kBands; ++b) {
+                const double level = det_[b].processDb(db[b]), fast = fast_[b].processDb(db[b]);
                 levelMax_[b] = std::max(levelMax_[b], level);
                 const double upG = std::min({kMaxBoostDb, kneeGain(upThr_[b] - level, upSlope_[b], 6.0),
                                              kneeGain(upThr_[b] - fast, upSlope_[b], 6.0)});
@@ -362,11 +411,17 @@ protected:
                 grNow_[b] = g;
                 boost_[b] = std::max(boost_[b], g);
                 cut_[b] = std::min(cut_[b], g);
-                const double k = lib::dbToGain(g + gain_[b].next());
-                y[0] += l * k;
-                y[1] += r * k;
+                gdb[b] = g + gain_[b].next();
             }
-            const double dl = split_[0].dry(x[0]), dr = split_[1].dry(x[1]);
+            // The bands' gains: the low and mid as one Pair (dbToGainPair: fastExp's steps lane by lane).
+            const Pair k01 = fxsimd::dbToGainPair(pairOf(gdb[0], gdb[1]));
+            const double k[kBands] = {lane(k01, 0), lane(k01, 1), lib::dbToGain(gdb[2])};
+            for (int b = 0; b < kBands; ++b) {
+                y[0] += lane(band[b], 0) * k[b];
+                y[1] += lane(band[b], 1) * k[b];
+            }
+            const Pair dry = split_.dry(x);
+            const double dl = lane(dry, 0), dr = lane(dry, 1);
             outL[i] = static_cast<float>((dl + (y[0] - dl) * depth) * og);
             outR[i] = static_cast<float>((dr + (y[1] - dr) * depth) * og);
         }
@@ -395,8 +450,11 @@ protected:
     }
 
 private:
-    ThreeWay split_[2];
+    static constexpr uint32_t kMbKnobs = kMbBand0 + kBands * kBandParams;
+    double knobs_[kMbKnobs] = {std::numeric_limits<double>::quiet_NaN()};  // the knobs control() last worked from
+    ThreeWay split_;
     DbDetector det_[kBands], fast_[kBands];
+    double inGain_ = 1.0, outGain_ = 1.0, depthNow_ = 0.5;
     Ramp in_, out_, depth_, gain_[kBands];
     bool ott_ = true;
     double up_ = 1, down_ = 1, f1_ = 88.3, f2_ = 2500;
