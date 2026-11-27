@@ -6,6 +6,7 @@ updated: 2026-11-27
 
 # Log
 
+- 2026-11-27: 1.1.3-alpha.7 released (#294; app.yml run 46013321866: APK, Windows zip, symbols, update manifest and both patches): a device's history follows it; the first release whose entry `scripts/changelog-join.js` wrote.
 - 2026-11-27: New per-build reference suites check what the shared ones had to leave out: Nightingale's overlapping notes, Curlew's release tails and the whole `every_instrument` mix, each build against its own render (`arm64`, `win64`, `x64_debug`, and `x64_clang` for the ThreadSanitizer job) ([engine](engine.md)).
 - 2026-11-27: Devices, sends, automation lanes and points, and samples have stable ids: device history survives a reorder, lanes and links follow their device by id, and old projects get ids on load ([decisions](decisions.md)).
 - 2026-11-27: `caw_collab` added: a pure-Dart shared-document model (ids, fractional keys, ops with JSON and binary codecs, a schema and a tree with tombstones), not yet used by the app; 34 tests ([decisions](decisions.md)).
