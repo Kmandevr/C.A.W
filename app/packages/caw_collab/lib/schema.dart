@@ -11,7 +11,8 @@ enum FieldType {
   /// Any value (a coarse node's `json`).
   json,
 
-  /// A whole text, written by `text` ops (or cleared by a `set` of null).
+  /// A whole text: given by an insert's initial fields, then written only by `text` ops (which carry the soft
+  /// lock's epoch); a `set` may only clear it with null.
   text,
   string,
   integer,

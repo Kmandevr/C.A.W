@@ -200,6 +200,21 @@ void main() {
     }
   });
 
+  test('decoded maps with keys that are not strings are refused, not a TypeError', () {
+    const header = {'author': 'a', 'clientSeq': 0, 'baseSeq': 0};
+    for (final m in <Map<Object?, Object?>>[
+      {...header, 'op': 'insert', 'parent': 'root', 'list': 'tracks', 'node': 'l12345678', 'key': 'V', 'kind': 'track', 'fields': {1: 'x'}},
+      {...header, 'op': 'insert', 'parent': 'root', 'list': 'tracks', 'node': 'l12345678', 'key': 'V', 'kind': 'track', 'fields': {'json': {2: 'x'}}},
+      {...header, 'op': 'set', 'node': 'd12345678', 'field': 'json', 'value': {3: 'x'}},
+      {...header, 'op': 'set', 'node': 'd12345678', 'field': 'json', 'value': [<Object?, Object?>{null: 1}]},
+      {...header, 'op': 'delete', 'node': 'd12345678', 4: 'x'},
+      {...header, 'op': 'access', 'member': 'b', 'grants': [<Object?, Object?>{5: 'view', 'scope': 'root'}]},
+      {...header, 'op': 'set', 'node': 'd12345678', 'field': 'json', 'value': {'x': Object()}},
+    ]) {
+      expect(() => opFromJson(m), throwsA(isA<CollabDecodeError>()), reason: '$m');
+    }
+  });
+
   test('nesting past the depth limit is refused before it can exhaust the stack', () {
     SetOp nested(int depth) {
       Object? v = 1;

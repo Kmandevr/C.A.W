@@ -43,7 +43,8 @@ abstract final class FractionalKeys {
   /// concurrent inserts at one position stay unique and ordered the same everywhere.
   ///
   /// Assumption: the short id's trailing `0`s are dropped (a key may not end in `0`), and an id left empty becomes
-  /// `1`. The result sorts just after [key] and before any sibling that does not start with [key].
+  /// `1`. The result sorts after [key] and before any sibling that does not start with [key]; a sibling that does
+  /// start with [key] may sort on either side of it (`withSuffix('V', 'abc')` is `Vabc`, after a sibling `V5`).
   static String withSuffix(String key, String author) {
     var s = AuthorIds.short(author);
     var end = s.length;

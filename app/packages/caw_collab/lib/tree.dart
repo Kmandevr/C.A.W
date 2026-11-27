@@ -1,5 +1,7 @@
 // The generic shared tree: nodes with ids, kinds, fields and ordered child lists, tombstones for deletes, and
 // apply(op), which checks an op against the tree, the schema and the limits, applies it, and returns its inverse.
+import 'dart:collection';
+
 import 'fractional_key.dart';
 import 'ids.dart';
 import 'limits.dart';
@@ -29,28 +31,37 @@ class OpRejected implements Exception {
 }
 
 /// One node. Tombstoned nodes keep everything, so a revive restores the subtree as it was.
+/// Read-only outside the tree: only [CollabTree.apply] changes a node, so its index and invariants hold.
 class TreeNode {
-  TreeNode._(this.id, this.kind, this.parent, this.list, this.key, this.fields);
+  TreeNode._(this.id, this.kind, this._parent, this._list, this._key, this._fields)
+      : fields = UnmodifiableMapView(_fields);
   final String id;
   final String kind;
 
+  String _parent, _list, _key;
+  bool _deleted = false;
+  final Map<String, Object?> _fields;
+
   /// The parent's id, the list it sits in and its key there; empty for the root.
-  String parent;
-  String list;
-  String key;
+  String get parent => _parent;
+  String get list => _list;
+  String get key => _key;
 
   /// Whether this node itself is deleted (its descendants are hidden too, but keep their own flags).
-  bool deleted = false;
+  bool get deleted => _deleted;
 
-  /// Field values, frozen. A field set to null is absent.
+  /// Field values, read-only and frozen. A field set to null is absent.
   final Map<String, Object?> fields;
 }
 
 /// A tree of nodes under one root, changed only through [apply].
 ///
-/// Every replica applies the host's ops in `seq` order, so every replica that applied the same ops holds the same
-/// tree. Ops that touch different nodes or different fields commute; children are ordered by (key, id), so
-/// concurrent inserts at one position keep one order however they arrive.
+/// Convergence rests on order: every replica applies the host's ops in `seq` order, so every replica that applied
+/// the same ops holds the same tree. Only some ops also commute: field ops (`set`, `text`) on different nodes or
+/// different fields, and inserts of distinct ids under parents that stay visible; children are ordered by
+/// (key, id), so concurrent inserts at one position keep one order however they arrive. Structural ops in general
+/// do not commute (a delete of a parent against an insert under it, crossed moves): which one lands depends on
+/// the host's order.
 class CollabTree {
   CollabTree(this.schema, {this.limits = TreeLimits.standard, this.opLimits = CollabLimits.standard}) {
     _nodes[rootId] = TreeNode._(rootId, schema.rootKind, '', '', '', {});
@@ -125,6 +136,10 @@ class CollabTree {
     switch (op) {
       case SetOp():
         final n = _visible(op.node);
+        // A text field changes only through `text` ops, which carry the soft lock's epoch; a set may only clear it.
+        if (op.value != null && schema.isText(n.kind, op.field)) {
+          throw OpRejected(OpRejected.schema, '${n.kind}.${op.field} is a text field: write it with a text op');
+        }
         _fieldCheck(n.kind, op.field, op.value);
         final old = n.fields[op.field];
         _write(n, op.field, op.value);
@@ -167,15 +182,15 @@ class CollabTree {
         final back = MoveOp(node: n.id, parent: n.parent, list: n.list, key: n.key, author: op.author, clientSeq: 0, baseSeq: 0);
         _unlink(n);
         n
-          ..parent = p.id
-          ..list = op.list
-          ..key = op.key;
+          .._parent = p.id
+          .._list = op.list
+          .._key = op.key;
         _link(n);
         return inv(back);
       case DeleteOp():
         if (op.node == rootId) throw const OpRejected(OpRejected.root, 'the root cannot be deleted');
         final n = _visible(op.node);
-        n.deleted = true;
+        n._deleted = true;
         return inv(ReviveOp(node: n.id, author: op.author, clientSeq: 0, baseSeq: 0));
       case ReviveOp():
         final n = _nodes[op.node];
@@ -184,7 +199,7 @@ class CollabTree {
         // Assumption: a node under a deleted ancestor can't be revived on its own (the design's undo revives
         // the parent first when the same person deleted it).
         if (!isVisible(n.parent)) throw OpRejected(OpRejected.targetDeleted, 'the parent of ${op.node} is deleted');
-        n.deleted = false;
+        n._deleted = false;
         return inv(DeleteOp(node: n.id, author: op.author, clientSeq: 0, baseSeq: 0));
       case BlobOp():
         // Assets are immutable by hash: the same declaration again changes nothing; a different one is refused.
@@ -253,9 +268,9 @@ class CollabTree {
 
   void _write(TreeNode n, String field, Object? value) {
     if (value == null) {
-      n.fields.remove(field);
+      n._fields.remove(field);
     } else {
-      n.fields[field] = freezeValue(value);
+      n._fields[field] = freezeValue(value);
     }
   }
 

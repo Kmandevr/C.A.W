@@ -98,6 +98,32 @@ void main() {
     expect(() => t.apply(ins(rootId, 'not an id')), rejected(OpRejected.invalid));
   });
 
+  test('a text field is written only by text ops; a set may only clear it', () {
+    final t = CollabTree(folders);
+    t.apply(ins(rootId, id(1), fields: {'source': 'note c4'}));
+    expect(() => t.apply(set(id(1), 'source', 'note d4')), rejected(OpRejected.schema));
+    expect(t.node(id(1))!.fields['source'], 'note c4');
+    t.apply(TextOp(node: id(1), field: 'source', value: 'note e4', lockEpoch: 3, author: 'kim', clientSeq: 1, baseSeq: 0));
+    expect(t.node(id(1))!.fields['source'], 'note e4');
+    t.apply(set(id(1), 'source', null));
+    expect(t.node(id(1))!.fields.containsKey('source'), isFalse);
+  });
+
+  test('nodes handed out are read-only', () {
+    final t = CollabTree(folders);
+    t.apply(ins(rootId, id(1), fields: {'name': 'Bass'}));
+    final n = t.node(id(1))!;
+    expect(() => n.fields['name'] = 'x', throwsUnsupportedError);
+    expect(() => n.fields.remove('name'), throwsUnsupportedError);
+    expect(() => n.fields.clear(), throwsUnsupportedError);
+    // parent, list, key and deleted are getters only; this would not compile:  n.parent = id(1);
+    expect(() => (n as dynamic).parent = id(1), throwsNoSuchMethodError);
+    expect(() => (n as dynamic).deleted = true, throwsNoSuchMethodError);
+    expect(t.node(id(1))!.fields, {'name': 'Bass'});
+    expect(t.node(id(1))!.parent, rootId);
+    checkInvariants(t, [id(1)]);
+  });
+
   test('stored values are frozen copies', () {
     final t = CollabTree(folders);
     final v = <String, Object?>{'a': [1]};

@@ -82,9 +82,15 @@ Op opFromJson(Object? json, [CollabLimits limits = CollabLimits.standard]) {
     case OpType.insert:
       final f = m['fields'];
       if (f is! Map) throw const CollabDecodeError('insert fields is not an object');
+      final fields = <String, Object?>{};
+      for (final e in f.entries) {
+        final k = e.key;
+        if (k is! String) throw const CollabDecodeError('an insert field name is not a string');
+        fields[k] = e.value;
+      }
       op = InsertOp(
           parent: _str(m, 'parent'), list: _str(m, 'list'), node: _str(m, 'node'), key: _str(m, 'key'), kind: _str(m, 'kind'),
-          fields: f.cast<String, Object?>(), author: author, clientSeq: clientSeq, baseSeq: baseSeq, seq: seq, time: time);
+          fields: fields, author: author, clientSeq: clientSeq, baseSeq: baseSeq, seq: seq, time: time);
     case OpType.move:
       op = MoveOp(node: _str(m, 'node'), parent: _str(m, 'parent'), list: _str(m, 'list'), key: _str(m, 'key'), author: author, clientSeq: clientSeq, baseSeq: baseSeq, seq: seq, time: time);
     case OpType.delete:
