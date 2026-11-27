@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
 covers: [engine/bench/, engine/src/meters.cpp, engine/src/load_stabilizer.h, engine/src/buffer_tuner.h, app/lib/model/freeze_hint.dart, app/lib/ui/capped_ticker.dart, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
-updated: 2026-11-26
+updated: 2026-11-27
 ---
 
 # Performance
@@ -24,7 +24,7 @@ Full plan, 166 s, Android 16 (SDK 36), 8 cores (4 fast), sustained performance n
 
 **Native component measurement still required:** add a `caw_bench` scenario that runs a trusted test component in `ProjectDoc.masterComponents`, then record mean/p99/max callback time, component-chain count scaling, project-state memory and retained memory after clearing/unloading the chain. The two preallocated stereo scratch stages live inside MasterChain and are included in the project-state estimate, so projects without native effects do not pay their baseline memory cost. ABI v1 does not report plugin-private heap/state size, so that portion is currently unknown rather than silently treated as zero.
 
-- **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports: Device costs against ceilings are its 300-series modes (Rook's drums: 323, the 1.1.2 Acoustic kit per quality, [engine](engine.md#performance)).
+- **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports: Device costs against ceilings are its 300-series modes (Rook's drums: 323, the 1.1.2 Acoustic kit per quality, [engine](engine.md#performance)). Every mode number is one row of `engine/bench/bench_modes.h` (number, name, Release ctest, what it runs): `caw_bench.cpp` picks modes by name, the cost ctests and the spike check are made from the rows that name one, a number used twice fails the build (`static_assert`) and the docs guard (`scripts/number-lists.js`, which also fails a `caw_bench S N` in the notes, workflows or CMake naming no listed mode), and an unlisted number exits 2 with the list (it used to play scenario 5).
   - the mean, p99 and maximum time per callback, and the load (mean time ÷ budget)
   - the time `setProject` takes
   - the cost of a pattern edit every 0.25 s while 16 tracks play, the time to re-send an unchanged project, the speed of a loop export, and memory (RSS)

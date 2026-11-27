@@ -1,6 +1,6 @@
 // Docs guard, no dependencies: keeps docs/ (and the README, CLAUDE.md and .claude/ notes) true to the repository.
 // FAIL (broken facts): note frontmatter, [[wikilinks]], relative links, repo paths named in `code`, npm scripts,
-// `covers:` entries and the vault index.
+// `covers:` entries, the vault index, and the numbered lists (bench modes, C API versions: scripts/number-lists.js).
 // WARN (maybe stale): files changed on this branch that a note covers while the note itself didn't change, and code
 // areas no note covers. Each note's `covers:` frontmatter lists the code it describes (.claude/rules/docs.md).
 // Usage: node scripts/docs-test.js [--base <ref>] [--stale] [--strict]   (exit 1 on any FAIL; --stale prints only the
@@ -122,6 +122,9 @@ const AREAS = [...new Set(FILES.flatMap((f) => {
 const uncovered = AREAS.filter((a) => !FILES.some((f) => f.startsWith(a) && covered(f)));
 if (uncovered.length) add("WARN", "uncovered", `no note's covers: names ${uncovered.join(", ")}`);
 else if (Object.keys(covers).length) add("PASS", "uncovered", "every code area is covered by a note");
+
+// ---------- the numbered lists: caw_bench's modes and the C API versions (scripts/number-lists.js) ----------
+out.push(...require("./number-lists.js").check(ROOT, FILES));
 
 // ---------- stale notes: covered code changed on this branch, the note didn't ----------
 const baseRef = baseArg || (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : git("rev-parse", "-q", "--verify", "origin/main") ? "origin/main" : "origin/HEAD");

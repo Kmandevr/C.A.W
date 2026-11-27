@@ -594,30 +594,28 @@ add_executable(caw_bench bench/caw_bench.cpp bench/tools_cost.cpp bench/dynsplit
   target_compile_options(caw_patch_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_patch_bench PRIVATE src)
   target_link_libraries(caw_patch_bench PRIVATE caw_core)
-  # 1.1.0's tools (MIDI effects, Meters, Lo-fi, Phase align) against their cost ceilings: a Release build only (a
-  # Debug or sanitized one is slower by design).
+  # The cost ceilings (each device family's `caw_bench 0.5 3xx`) and the spike check (602: no Benchmark scenario has a
+  # callback whose work, its fastest of 3 runs, is over 3 times the median's), made from the rows of
+  # bench/bench_modes.h that name a ctest, so a mode's number is written once. A Release build only (a Debug or
+  # sanitized one is slower by design).
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/bench_modes.h)
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_test(NAME caw_tools_cost COMMAND caw_bench 0.5 301)
-    # 1.1.0's dynamics split against its cost ceilings.
-    add_test(NAME caw_dynsplit_cost COMMAND caw_bench 0.5 302)
-    # 1.1.0's voice devices (Glint, Harmonizer, Octaver, Mimic) against their cost ceilings.
-    add_test(NAME caw_voice_cost COMMAND caw_bench 0.5 303)
-    add_test(NAME caw_clean_cost COMMAND caw_bench 0.5 310)  # 1.1.0: Preen and Hush
-    add_test(NAME caw_pack_cost COMMAND caw_bench 0.5 307)  # 1.1.0: the AutoStacc beta pack
-    add_test(NAME caw_lark_cost COMMAND caw_bench 0.5 306)  # 1.1.0: Lark (org.caw.pitchfix)
-    add_test(NAME caw_raven_cost COMMAND caw_bench 0.5 320)  # 1.1.0: Flagship's new synthesis (Raven)
-    add_test(NAME caw_sampler_cost COMMAND caw_bench 0.5 308)  # 1.1.0: the sampler's stretched zones
-    add_test(NAME caw_timber_cost COMMAND caw_bench 0.5 321)  # the modelled instruments (the name is Timber's, 1.1.0-1.1.2)
-    add_test(NAME caw_rook_cost COMMAND caw_bench 0.5 323)  # 1.1.0: the drums' new layers, pad FX and groove (Rook)
-    add_test(NAME caw_flock_cost COMMAND caw_bench 0.5 322)  # 1.1.0: Flock (org.caw.flock)
-    # 1.1.1: no Benchmark scenario has a callback whose work (its fastest of 3 runs) is over 3 times the median's: a
-    # rare costly block (a lazy build, a recompute on the audio thread) fails it; preemption does not.
-    add_test(NAME caw_spike_check COMMAND caw_bench 1 602 --runs 3 --check 3)
+    file(STRINGS bench/bench_modes.h _caw_bench_rows REGEX "^ *\\{-?[0-9]+, \"[a-z0-9_]+\", \"caw_[a-z_]+\",")
+    set(_caw_bench_ctests)
+    foreach(_row IN LISTS _caw_bench_rows)
+      if(NOT _row MATCHES "^ *\\{(-?[0-9]+), \"[a-z0-9_]+\", \"(caw_[a-z_]+)\", \"([^\"]+)\"")
+        message(FATAL_ERROR "bench/bench_modes.h: a ctest row this file can't read: ${_row}")
+      endif()
+      set(_number ${CMAKE_MATCH_1})
+      set(_name ${CMAKE_MATCH_2})
+      separate_arguments(_args UNIX_COMMAND "${CMAKE_MATCH_3}")
+      list(POP_FRONT _args _seconds)
+      add_test(NAME ${_name} COMMAND caw_bench ${_seconds} ${_number} ${_args})
+      list(APPEND _caw_bench_ctests ${_name})
+    endforeach()
     # Each alone: under `ctest --parallel` the test shards beside them share the cores' caches and clocks, and CI's
     # x64 runner then measured cases 10-20 % over their usual figure (an organ case 8,002 against 8,000 on PR #258).
-    set_tests_properties(caw_tools_cost caw_dynsplit_cost caw_voice_cost caw_clean_cost caw_pack_cost caw_lark_cost
-                         caw_raven_cost caw_sampler_cost caw_timber_cost caw_rook_cost caw_flock_cost caw_spike_check
-                         PROPERTIES RUN_SERIAL TRUE)
+    set_tests_properties(${_caw_bench_ctests} PROPERTIES RUN_SERIAL TRUE)
   endif()
 endif()
 

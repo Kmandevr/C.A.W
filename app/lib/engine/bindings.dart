@@ -1,10 +1,10 @@
-// Raw dart:ffi bindings to the engine's C API (engine/include/caw.h, version 1).
+// Raw dart:ffi bindings to the engine's C API (engine/include/caw.h; its version is cawApiVersion below).
 import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 46;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 46;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
