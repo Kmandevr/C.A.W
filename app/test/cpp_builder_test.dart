@@ -156,10 +156,12 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
   });
 
   test('every built-in in the Library is registered in the engine with those knobs', () {
-    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite; and fx_merged.h, which
+    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite; the hand-written parts
+    // they include from engine/src/<folder>/*.inc (Flagship's and Drums' since 2026-11-27); and fx_merged.h, which
     // names the merged devices' `variant`.
-    final src = (Directory('../engine/src').listSync().whereType<File>().map((f) => f.path)
-            .where((p) => RegExp(r'(builtin_[a-z_]+\.cpp|fx_merged\.h)$').hasMatch(p)).toList()..sort())
+    final src = (Directory('../engine/src').listSync(recursive: true).whereType<File>().map((f) => f.path)
+            .where((p) => RegExp(r'(builtin_[a-z_]+\.cpp|fx_merged\.h|[/\\][a-z_]+[/\\][a-z_]+\.inc)$').hasMatch(p))
+            .toList()..sort())
         .map((p) => File(p).readAsStringSync())
         .join('\n');
     for (final b in cppBuiltins) {
