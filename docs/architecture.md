@@ -2,7 +2,7 @@
 title: Architecture
 summary: Technical architecture and verified engine/app boundaries; future design proposals are kept privately.
 updated: 2026-11-27
-covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, engine/CMakeLists.txt]
+covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, app/packages/caw_collab/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
 # Architecture
@@ -152,6 +152,7 @@ The current repository contains the portable C++20 engine and CLI, platform audi
 
 **[Fact, checked 2026-11-18]** Inside the app:
 - **`app/packages/caw_services/`** is a pure-Dart package (no Flutter; Apache-2.0, a path dependency of the app) holding the platform-free services: the update check and small updates (`updates/`), the telemetry relay's client, config and report schema (`telemetry/`), SHA-256, and the companion protocol's constants (`companion/`). The companion app, when it is built, can share it.
+- **`app/packages/caw_collab/`** is a pure-Dart package (no Flutter; Apache-2.0, a path dependency of the app that depends only on `caw_services`) holding a shared-document model that nothing in the app uses yet: node ids, fractional keys, the edit operations (`set`, `insert`, `move`, `delete`, `revive`, `text`, `blob`, `access`, `checkpoint`, `restore`) and their binary and JSON codec, a generic tree of nodes with tombstones whose `apply` checks each op against a schema and limits and returns its inverse, and a coarse schema in which a track is one node holding its whole JSON.
 - **The platform seam:** each platform difference is one small Dart interface in `app/lib/platform/` with one implementation per platform, chosen once in `main.dart`. The companion link follows it (`CompanionLink`: Android's bound service, or none), and the adapters in `app/lib/model/companion/` sit behind the interfaces the app already had (`UpdateSource`, `UpdateInstaller`, `RelayClient`), so nothing above them knows whether a companion is installed ([companion protocol](companion-protocol.md)). The build's distribution (the Android `github` or `play` flavour) is read the same way, from `lib/platform/distribution.dart`.
 
 ### C++ component source

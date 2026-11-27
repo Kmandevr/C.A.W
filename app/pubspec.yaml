@@ -42,6 +42,9 @@ dependencies:
   # C.A.W's platform-free services, shared with the companion app (Apache-2.0; packages/caw_services).
   caw_services:
     path: packages/caw_services
+  # C.A.W's shared-document model (Apache-2.0; packages/caw_collab), not yet used by the app.
+  caw_collab:
+    path: packages/caw_collab
   # The C++ Builder's code editor (MIT; docs/decisions.md "The C++ Builder's editor is re_editor").
   re_editor: 0.10.0
   re_highlight: 0.0.3 # its syntax modes (C++, JSON); MIT, the same authors

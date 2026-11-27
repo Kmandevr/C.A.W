@@ -6,6 +6,14 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: `caw_collab`, a shared-document model package (not yet used by the app)
+
+- **Chosen:** a pure-Dart package `app/packages/caw_collab` (depends only on `caw_services`; no Flutter, so `flutter analyze` keeps it pure): ids, fractional ordering keys, a sealed `Op` with ten op types, a JSON and a binary codec, a schema, and `CollabTree`, a tree with tombstones whose `apply(op)` returns the inverse op or refuses with a reason and changes nothing. Decoded input is untrusted: decoders throw only `CollabDecodeError` and check every count and length against the bytes left, nesting depth (64) and size caps (8 MiB per op or batch) before allocating.
+- **[Assumption]** the limit values, the binary layout (an op starts `0x01`, a batch `0x02`; canonical LEB128 integers; tagged values), the fractional-key alphabet (`0-9A-Za-z`, never ending in `0`, first key `V`) and the coarse schema's names (`project`, `tracks`, `track`) are this package's own choices; each is marked in a code comment.
+- **Rules:** a text field is given at insert and then written only by `text` ops (a `set` may only clear it); nodes handed out are read-only; a tombstoned id stays taken; a revive under a deleted ancestor is refused; replicas converge by applying ops in the host's order.
+- **Checked:** `app/test/collab_codec_test.dart`, `collab_fractional_key_test.dart` and `collab_tree_test.dart` (34 tests: round trips across both codecs, fuzzed and corrupted input, key ordering and growth, tree invariants under random op storms, inverses), run by the Dart test shards; a code review found no defects, and its five hardening points are fixed.
+- **Not chosen:** `package:test` and a package-level `dart test` (a new dependency; the tests use the app's `flutter_test`, as `caw_services`' do).
+
 ## 2026-11-27: Per-build reference sets for chaotic devices (1.1.3 maintenance)
 
 - **[Fact] The problem:** chaotic devices (stick-slip bowed strings, self-oscillating winds) move by up to about 1 dB between compilers whatever the flags (2026-11-24, `.claude/rules/engine.md`), and every build compared with one set recorded on x86-64. So tolerances were widened for all builds: Nightingale's references use the Friction class (1 dB) and lone notes, Curlew's stop at its last release, and the Benchmark's `every_instrument` mix leaves out Nightingale and Curlew (`stress_test.cpp`, `withoutBowedStrings`).
