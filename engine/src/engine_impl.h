@@ -137,9 +137,20 @@ struct Engine::Slot {
     std::atomic<uint64_t> vol{0}, pan{0};
     std::atomic<bool> mute{false}, solo{false};
     // Audio thread: its VCA groups (vca.h), apart from its own mute and solo above: one of them muted or soloed
-    // (refreshed with the solo state), and this chunk's product of their gains per frame (runVca; vcaOn: a member).
+    // (refreshed with the solo state), and this chunk's VCA gain per frame (runVca; vcaOn: not exactly 1 throughout).
+    // A change of its groups (a new table) ramps from vcaLast, the gain it had, by an offset that decays with the
+    // faders' 5 ms pole (vcaOffset); vcaFresh: a new layer here, which starts at its groups' gain.
     bool vcaMute = false, vcaSolo = false, vcaOn = false;
+    bool vcaDirty = false, vcaFresh = false;
+    double vcaLast = 1.0, vcaOffset = 0.0;
     double vca[kBlock] = {};
+    // A layer newly in this slot: no VCA state from the slot's last owner.
+    void resetVca() noexcept {
+        vcaMute = vcaSolo = vcaOn = false;
+        vcaDirty = vcaFresh = true;
+        vcaLast = 1.0;
+        vcaOffset = 0.0;
+    }
     std::atomic<float> peakL{0}, peakR{0}, progress{0};  // meters: each side's sample peak since the last read
     CorrelationMeter correlation;                         // of what it sends on
     std::atomic<bool> overloadFlag{false};
@@ -291,6 +302,7 @@ struct Engine::SendTable {
 };
 
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
+static_assert(VcaTable::kFrames == kBlock, "VCA groups work out a chunk's gains in Engine blocks");
 
 struct Engine::Cmd {
     // Install: the slot becomes a track (steps, order); its instrument and inserts come by their own commands.

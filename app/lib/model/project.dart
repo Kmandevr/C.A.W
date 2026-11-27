@@ -1007,9 +1007,12 @@ class ProjectDoc {
         layers.any((l) => l.components.any(merged) || l.noteComponents.any(merged));
   }
 
-  /// The `caw_app_project` [toJson] writes: [fileVersion] with VCA groups, else [mergedFileVersion] when
+  /// Whether the project holds anything v8 added: a VCA group. Every v8 feature is tested here, in one place.
+  bool get usesV8 => vcaGroups.isNotEmpty;
+
+  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesV8], else [mergedFileVersion] when
   /// [usesMergedDevicesV7], else [routingFileVersion] when [usesRoutingV6], else [baseFileVersion].
-  int get savedFileVersion => vcaGroups.isNotEmpty ? fileVersion : usesMergedDevicesV7 ? mergedFileVersion
+  int get savedFileVersion => usesV8 ? fileVersion : usesMergedDevicesV7 ? mergedFileVersion
       : usesRoutingV6 ? routingFileVersion : baseFileVersion;
 
   final String id;

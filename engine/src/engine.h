@@ -583,6 +583,7 @@ private:
     int masterRamp_ = 0;
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     VcaTable* vca_ = nullptr;  // audio thread: the project's VCA groups (owned; null: none; replaced by SetVca)
+    bool vcaActive_ = false;   // audio thread: some slot's VCA gain was not exactly 1 last chunk, or a table changed
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note (the tempo map's first tempo; everywhere when timeConstant_)
     SongTime* song_ = nullptr;   // the tempo map and signatures (owned; swapped by Transport and SetSong)

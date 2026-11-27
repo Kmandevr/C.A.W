@@ -901,6 +901,26 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
+    // VCA groups (vca.h): members resolved to the slots planned above (the audition, and layers without a slot, are
+    // never members), sent before any Install so a layer new in a slot never runs under its last owner's groups. A
+    // project without groups sends nothing unless it clears a table an earlier one had.
+    if (!p.vcaGroups.empty() || ctlVca_) {
+        Cmd vc;
+        vc.type = Cmd::SetVca;
+        vc.vca = makeVcaTable(p, [&](const std::string& id) {
+            if (id.empty() || id[0] == '\x01') return -1;
+            auto it = slotByLayer.find(id);
+            return it == slotByLayer.end() ? -1 : it->second;
+        }, ctlVca_).release();
+        VcaTable* sent = vc.vca;
+        if (send(vc)) {  // send() frees the table if the queue rejects the command
+            ctlVca_ = sent;
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected the VCA groups update");
+        }
+    }
+
     // Pass 2: send what changed, and order layers so buses run after their children.
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
@@ -1209,25 +1229,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     if (!send(a)) {
         allOk = false;
         warnings["project"].push_back("audio command queue rejected audition mode update");
-    }
-
-    // VCA groups (vca.h): members resolved to the slots just installed (the audition, and layers without a slot, are
-    // never members). A project without groups sends nothing unless it clears a table an earlier one had.
-    if (!p.vcaGroups.empty() || ctlVca_) {
-        Cmd vc;
-        vc.type = Cmd::SetVca;
-        vc.vca = makeVcaTable(p, [&](const std::string& id) {
-            if (id.empty() || id[0] == '\x01') return -1;
-            auto it = layers_.find(id);
-            return it == layers_.end() ? -1 : it->second.slot;
-        }).release();
-        VcaTable* sent = vc.vca;
-        if (send(vc)) {  // send() frees the table if the queue rejects the command
-            ctlVca_ = sent;
-        } else {
-            allOk = false;
-            warnings["project"].push_back("audio command queue rejected the VCA groups update");
-        }
     }
 
     if (keepMasterChain) {

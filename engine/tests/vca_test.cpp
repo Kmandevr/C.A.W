@@ -62,6 +62,22 @@ bool sameBits(const std::vector<float>& a, const std::vector<float>& b) {
     return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
 }
 
+// The largest frame-to-frame change of the left output across a project update while playing (a DC signal: any step
+// is the gain jumping), and the output's last frame.
+double worstStep(const ProjectSpec& from, const ProjectSpec& to, double* last = nullptr, int block = 64) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(from)));
+    e.play();
+    const auto before = run(e, 9600, block);
+    CHECK(ok(e.setProject(to)));
+    const auto after = run(e, 19200, block);
+    double worst = std::fabs(static_cast<double>(after[0]) - before.back());
+    for (size_t i = 1; i < after.size(); ++i) worst = std::max(worst, std::fabs(static_cast<double>(after[i]) - after[i - 1]));
+    if (last) *last = after.back();
+    return worst;
+}
+
 std::string parseError(const std::string& json) {
     ProjectSpec p;
     std::string error;
@@ -270,3 +286,107 @@ TEST(vca_groups_are_parsed_with_limits) {
     Engine e(48000);
     CHECK(e.setProjectJson(head + R"([{"id":"v"},{"id":"v"}]})").find("used twice") != std::string::npos);
 }
+
+TEST(joining_leaving_creating_and_deleting_a_group_while_playing_never_jumps) {
+    // a DC of 0.5: a jump of a gain by 0.5 would step the output by 0.18; the faders' 5 ms pole moves it at most
+    // 0.5 * 0.5 * 0.707 * 0.0042 = 7e-4 a frame.
+    const double bound = 1.5e-3;
+    ProjectSpec none = cawtest::testSignalProject({track("a", 0.5), track("b", 0.25)});
+    ProjectSpec in = none;
+    in.vcaGroups = {group("v", 0.25, {"a"})};
+    ProjectSpec out = none;
+    out.vcaGroups = {group("v", 0.25, {})};
+    double last = 0;
+    CHECK(worstStep(none, in, &last) < bound);  // a new group at a level not 1
+    CHECK_NEAR(last, (0.5 * 0.25 + 0.25) * kCentre, 1e-5);
+    CHECK(worstStep(in, out, &last) < bound);  // a member leaves
+    CHECK_NEAR(last, 0.75 * kCentre, 1e-5);
+    CHECK(worstStep(out, in) < bound);  // and joins
+    CHECK(worstStep(in, none, &last) < bound);  // the group is deleted
+    CHECK_NEAR(last, 0.75 * kCentre, 1e-5);
+    ProjectSpec two = in;  // a second group joins the first
+    two.vcaGroups.push_back(group("w", 3.0, {"a", "b"}));
+    CHECK(worstStep(in, two, &last) < 3 * bound);
+    CHECK_NEAR(last, (0.5 * 0.25 * 3.0 + 0.25 * 3.0) * kCentre, 1e-5);
+}
+
+TEST(a_lane_added_or_taken_away_while_playing_never_jumps) {
+    ProjectSpec fader = cawtest::testSignalProject({track("a", 0.5)});
+    fader.vcaGroups = {group("v", 1.0, {"a"})};
+    ProjectSpec lane = fader;
+    lane.vcaGroups[0].volumeLane = {{0, 0.25}, {64, 0.25}};
+    double last = 0;
+    CHECK(worstStep(fader, lane, &last) < 1.5e-3);
+    CHECK_NEAR(last, 0.5 * 0.25 * kCentre, 1e-5);
+    CHECK(worstStep(lane, fader, &last) < 1.5e-3);
+    CHECK_NEAR(last, 0.5 * kCentre, 1e-5);
+}
+
+TEST(a_vca_lane_renders_the_same_bits_at_any_buffer_size) {
+    // Curved and held segments, as a track's lane: read at every frame, so the chunks don't show.
+    ProjectSpec p = cawtest::testSignalProject({cawtest::testSignalLayer("a", Shape::Saw, {{"level", 0.4}})});
+    p.vcaGroups = {group("v", 1.0, {"a"})};
+    p.vcaGroups[0].volumeLane = {{0, 1.0, 1, 0.6}, {4, 0.2, 4, 0}, {6, 0.9, 3, -0.4}, {12, 0.1}};
+    const auto small = render(p, 96000, 37);
+    CHECK(sameBits(render(p, 96000, 512), small));
+    CHECK(sameBits(render(p, 96000, 64), small));
+}
+
+TEST(a_folder_without_a_bus_moves_its_tracks) {
+    LayerSpec f;
+    f.id = f.name = "f";
+    f.folder = true;
+    f.busEnabled = false;
+    LayerSpec a = track("a", 0.5);
+    a.parentId = "f";
+    LayerSpec g = bus("g");  // a bus inside it takes the level once, for what plays through it
+    g.parentId = "f";
+    LayerSpec b = track("b", 0.25);
+    b.parentId = "g";
+    ProjectSpec p = cawtest::testSignalProject({f, a, g, b, track("c", 0.125)});
+    p.vcaGroups = {group("v", 0.5, {"f"})};
+    auto out = render(p, 4096);
+    CHECK_NEAR(out[4000], ((0.5 + 0.25) * 0.5 + 0.125) * kCentre, 1e-5);
+    p.vcaGroups[0].mute = true;
+    out = render(p, 4096);
+    CHECK_NEAR(out[4000], 0.125 * kCentre, 1e-5);
+}
+
+TEST(a_slots_vca_gain_is_held_to_plus_12_db) {
+    ProjectSpec p = cawtest::testSignalProject({track("a", 0.125)});
+    for (int g = 0; g < kMaxVcaGroups; ++g) p.vcaGroups.push_back(group("g" + std::to_string(g), kMaxMixGain, {"a"}));
+    const auto out = render(p, 4096);
+    CHECK_NEAR(out[4000], 0.125 * kMaxMixGain * kCentre, 1e-5);
+}
+
+TEST(members_at_unity_render_the_same_bits_as_no_group) {
+    LayerSpec f = bus("f");
+    LayerSpec a = cawtest::testSignalLayer("a", Shape::Saw, {{"level", 0.3}});
+    a.parentId = "f";
+    ProjectSpec p = cawtest::testSignalProject({f, a, cawtest::testSignalLayer("b", Shape::Sine, {{"level", 0.2}})});
+    const auto plain = render(p, 8192, 100);
+    p.vcaGroups = {group("v", 1.0, {"f", "a", "b"})};  // the members take their plain paths: exactly 1 throughout
+    CHECK(sameBits(render(p, 8192, 100), plain));
+}
+
+TEST(a_layer_new_in_a_slot_never_runs_under_its_last_owners_groups) {
+    ProjectSpec first = cawtest::testSignalProject({track("a", 0.5)});
+    first.vcaGroups = {group("v", 0.25, {"a"})};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(first)));
+    e.play();
+    run(e, 4096);
+    ProjectSpec gone = cawtest::testSignalProject({});
+    gone.vcaGroups = {group("v", 0.25, {})};
+    CHECK(ok(e.setProject(gone)));
+    run(e, 48000);  // a's slot fades out and is free again
+    ProjectSpec next = cawtest::testSignalProject({track("b", 0.5)});  // b takes a's slot, in no group
+    next.vcaGroups = {group("v", 0.25, {})};
+    CHECK(ok(e.setProject(next)));
+    const auto out = run(e, 4096);
+    for (size_t i = 0; i < out.size(); ++i)
+        if (out[i] > 1e-6f) CHECK(out[i] > 0.4 * kCentre);  // b at its own level from its first sound, no VCA ramp
+    CHECK_NEAR(out[4000], 0.5 * kCentre, 1e-5);
+}
+

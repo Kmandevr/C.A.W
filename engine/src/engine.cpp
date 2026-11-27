@@ -519,6 +519,7 @@ void Engine::applyCommands() noexcept {
                     s.bus = false;
                     s.k = -1;
                     s.epoch = -1;
+                    s.resetVca();
                     updateSolo();
                     const double initialTarget = slotTarget(s);
                     s.gain = initialTarget > 0.0 && s.automation && !s.automation->volume.empty() ? s.automation->volume.front().value : initialTarget;
@@ -584,6 +585,7 @@ void Engine::applyCommands() noexcept {
                 markLive(c.slot);
                 s.removing = false;
                 s.bus = true;
+                s.resetVca();
                 if (c.flag) {
                     retire(nullptr, nullptr, s.automation);
                     s.automation = nullptr;
@@ -845,7 +847,8 @@ void Engine::applyCommands() noexcept {
             case Cmd::ClearOverload: resetShedding(); break;
             case Cmd::SetVca: {
                 // The project's VCA groups: groups that stay carry on from their gain; the one replaced is freed on
-                // the control thread. Every slot's VCA state starts again (updateSolo and runVca refresh members').
+                // the control thread. Every slot ramps from the VCA gain it had to its new groups' (runVca), and
+                // updateSolo refreshes their mute and solo.
                 if (c.vca && vca_) c.vca->takeHistory(*vca_);
                 if (vca_) {
                     Retired r;
@@ -855,8 +858,11 @@ void Engine::applyCommands() noexcept {
                 vca_ = c.vca;
                 for (int i = 0; i <= capacity_; ++i) {
                     Slot& s = slotAt(i);
-                    s.vcaMute = s.vcaSolo = s.vcaOn = false;
+                    s.vcaMute = s.vcaSolo = false;
+                    s.vcaDirty = true;
+                    s.vcaFresh = false;  // what played before this table played at its VCA gain (an Install after it is fresh)
                 }
+                vcaActive_ = true;
                 updateSolo();
                 break;
             }
@@ -890,15 +896,49 @@ void Engine::updateSolo() noexcept {
     anySolo_ = any;
 }
 
-// Once a chunk, before the graph runs: each group's gain over the chunk, then each member's product of them as a
-// per-frame ramp, which its track or bus node and its post keys multiply after its own volume (and volume lane).
+// Once a chunk, before the graph runs: each group's gain per frame, then each slot's product of its groups' gains,
+// which its track or bus node and its post keys multiply after its own volume (and volume lane). A slot whose groups
+// changed (a new table, or none) ramps from the gain it had by an offset that decays with the faders' pole, so
+// joining, leaving, a new or deleted group, or a lane added or taken away never jumps. A slot whose VCA gain is
+// exactly 1 throughout (in no group, or settled at unity) is off (vcaOn false) and takes the nodes' plain paths.
 void Engine::runVca(int m) noexcept {
-    const double decay = detExp(-static_cast<double>(m) / (kGainSeconds * sr_));  // the track faders' smoothing
-    vca_->advance(songStep(g_), songStep(g_ + m), decay);
+    const double coef = trackGainCoef_;
+    if (vca_) {
+        double steps[kBlock];
+        if (vca_->hasLane)
+            for (int i = 0; i < m; ++i) steps[i] = songStep(g_ + i);
+        vca_->advance(vca_->hasLane ? steps : nullptr, m, coef);
+    }
+    bool active = false;
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
-        s.vcaOn = vca_->ramp(live_[k], m, s.vca);
+        const bool member = vca_ && vca_->product(live_[k], m, s.vca);
+        if (s.vcaDirty) {
+            s.vcaOffset = s.vcaFresh ? 0.0 : s.vcaLast - (member ? s.vca[0] : 1.0);
+            s.vcaDirty = s.vcaFresh = false;
+        }
+        if (!member) {
+            if (s.vcaOffset == 0.0) {
+                s.vcaOn = false;
+                s.vcaLast = 1.0;
+                continue;
+            }
+            std::fill_n(s.vca, m, 1.0);
+        }
+        bool unity = s.vcaOffset == 0.0;
+        for (int i = 0; i < m; ++i) {
+            if (s.vcaOffset != 0.0) {
+                s.vca[i] = std::max(0.0, s.vca[i] + s.vcaOffset);
+                s.vcaOffset -= s.vcaOffset * coef;
+                if (std::fabs(s.vcaOffset) < 1e-6) s.vcaOffset = 0.0;
+            }
+            unity = unity && s.vca[i] == 1.0;
+        }
+        s.vcaOn = !unity;
+        s.vcaLast = m > 0 ? s.vca[m - 1] : s.vcaLast;
+        active = active || s.vcaOn || s.vcaOffset != 0.0;
     }
+    vcaActive_ = active;
 }
 
 int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
@@ -1666,7 +1706,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         chunkStepsAt_ = g_;
         chunkStepsLen_ = m;
     }
-    if (vca_) runVca(m);
+    if (vca_ || vcaActive_) runVca(m);
     audioIn_->chunk(tapAt_, m, g_, playing_ && !previewChunk_);  // monitoring frames and the recorder's input
     audioIn_->setLoopWrap(wrapAt(), loopRange_ ? loopFrom_ : 0);  // audio tracks pre-roll the loop's start
     ++chunkId_;
