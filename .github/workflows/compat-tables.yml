@@ -1,0 +1,121 @@
+# Hand-started: records a per-build drums compat hash table from an old commit on each engine build (artifacts to commit as engine/tests/drums_compat_hashes*.inc).
+name: Compat tables
+# Bits are per build (engine.yml's runners, toolchains and flags), so a table is recorded from the old commit built
+# exactly as engine.yml builds it. Each job prints the old build's hashes with drums_compat_test.cpp (the old commit's
+# own, or this branch's dropped in where the old commit has none), keeps the presets the chosen table lists (this
+# branch's x86-64 Release table names them) and uploads the table, named per build. docs/engine.md "Compat tables".
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "The old commit whose renders define the table (7 to 40 hex characters)"
+        required: true
+        default: 2a9934c
+        type: string
+      table:
+        description: "drums-1.1.1-kits: the presets 1.1.0 and 1.1.1 added (from 2a9934c); drums-before-1.1: those before 1.1.0 (from 20bcb8b)"
+        required: true
+        default: drums-1.1.1-kits
+        type: choice
+        options:
+          - drums-1.1.1-kits
+          - drums-before-1.1
+permissions:
+  contents: read
+jobs:
+  record:
+    name: Record (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The same runners, generators and flags as engine.yml's test and sanitizer jobs. suffix: the table's file
+          # name after drums_compat_hashes (and _111), as drums_compat_test.cpp picks it per build.
+          - { name: Linux x64, os: ubuntu-24.04, config: Release, flags: "-DCMAKE_BUILD_TYPE=Release", jobs: 4, suffix: "", artifact: linux-x64 }
+          - { name: Linux Arm64, os: ubuntu-24.04-arm, config: Release, flags: "-DCMAKE_BUILD_TYPE=Release", jobs: 4, suffix: _arm64, artifact: linux-arm64 }
+          - { name: Windows x64 clang-cl, os: windows-2025, config: Release, flags: "-T ClangCL", jobs: 4, suffix: _win64, artifact: windows-x64 }
+          # The sanitizer job's build (ASan and UBSan, Debug, -O0); two compile jobs, as there (more run out of memory).
+          - { name: Linux x64 Debug, os: ubuntu-24.04, config: Debug, flags: "-DCMAKE_BUILD_TYPE=Debug -DCAW_SANITIZE=ON", jobs: 2, suffix: _x64_debug, artifact: linux-x64-debug }
+    env:
+      COMMIT: ${{ inputs.commit }}
+      TABLE: ${{ inputs.table }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the inputs
+        run: |
+          if ! [[ "$COMMIT" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "::error::commit must be 7 to 40 lower-case hex characters (a commit hash)"
+            exit 1
+          fi
+          case "$TABLE" in
+            drums-1.1.1-kits|drums-before-1.1) ;;
+            *) echo "::error::table must be drums-1.1.1-kits or drums-before-1.1"; exit 1 ;;
+          esac
+      # This branch (the names tables, the script and, for a commit without one, the test file), with its history so
+      # the old commit can be checked out beside it; blobs are fetched only as needed.
+      - uses: actions/checkout@v7
+        with:
+          path: current
+          fetch-depth: 0
+          filter: blob:none
+      - name: Check out the old commit
+        run: |
+          full=$(git -C current rev-parse --verify --quiet "${COMMIT}^{commit}") || { echo "::error::no commit $COMMIT in this repository"; exit 1; }
+          git -C current worktree add --detach "$GITHUB_WORKSPACE/old" "$full"
+          echo "FULL_COMMIT=$full" >> "$GITHUB_ENV"
+          echo "Recording from $full"
+      - name: Give the old commit the printing test where it has none
+        run: |
+          if [ -f old/engine/tests/drums_compat_test.cpp ]; then
+            echo "The old commit's own drums_compat_test.cpp prints its table."
+          else
+            # 20bcb8b and older: this branch's test file (its print mode prints every preset the old build has) and
+            # the tables it includes; the old tables were recorded so.
+            cp current/engine/tests/drums_compat_test.cpp current/engine/tests/drums_compat_hashes*.inc old/engine/tests/
+            printf '\nif(TARGET caw_tests)\n  target_sources(caw_tests PRIVATE tests/drums_compat_test.cpp)\nendif()\n' >> old/engine/CMakeLists.txt
+            echo "Added this branch's drums_compat_test.cpp to the old caw_tests."
+          fi
+      - name: Configure
+        run: |
+          cmake --version | head -1
+          cmake -S old/engine -B old/engine/build ${{ matrix.flags }}
+      - name: Build caw_tests
+        run: cmake --build old/engine/build --config ${{ matrix.config }} --parallel ${{ matrix.jobs }} --target caw_tests
+      - name: Print the old build's hashes
+        run: |
+          set -o pipefail
+          exe=old/engine/build/caw_tests
+          [ -f "$exe" ] || exe=old/engine/build/${{ matrix.config }}/caw_tests.exe
+          CAW_PRINT_DRUM_HASHES=1 "$exe" drums_presets_from_before_1_1_render_bit_identically | tee printed.txt
+      - name: Make the table
+        run: |
+          case "$TABLE" in
+            drums-1.1.1-kits)
+              names=drums_compat_hashes_111.inc; file="drums_compat_hashes_111${{ matrix.suffix }}.inc"; array=kKnown111
+              what="org.caw.drums' presets added in 1.1.0 and 1.1.1" ;;
+            drums-before-1.1)
+              names=drums_compat_hashes.inc; file="drums_compat_hashes${{ matrix.suffix }}.inc"; array=kKnown
+              what="org.caw.drums' presets before 1.1.0" ;;
+          esac
+          mkdir -p table
+          comment="$what, recorded at ${FULL_COMMIT::7} on ${{ matrix.name }} by compat-tables.yml (run $GITHUB_RUN_ID, $(date -u +%Y-%m-%d)): each one's render hash on the busy bar (drums_compat_test.cpp)."
+          node current/scripts/compat-table.js --printed printed.txt --names "current/engine/tests/$names" --array "$array" \
+            --comment "$comment" --compare "current/engine/tests/$file" > "table/$file" 2> status.txt || { cat status.txt; exit 1; }
+          cat status.txt
+          {
+            echo "### $file (${{ matrix.name }}, from ${FULL_COMMIT::7})"
+            sed 's/^/    /' status.txt
+            echo
+            echo '```cpp'
+            cat "table/$file"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: compat-table-${{ inputs.table }}-${{ matrix.artifact }}
+          path: table/
+          if-no-files-found: error

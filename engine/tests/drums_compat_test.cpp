@@ -66,18 +66,37 @@ struct Known {
     const char* preset;
     uint64_t hash;
 };
+// The 1.1.1 kits' tables (drums_presets_from_before_1_1_2_render_bit_identically) come from 2a9934c built for each
+// build by compat-tables.yml (docs/engine.md "Compat tables"); x86-64 Release's was recorded locally. A build whose
+// table is not committed yet prints that, and checks nothing.
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include "drums_compat_hashes_arm64.inc"
+#define CAW_DRUMS_BUILD "arm64"
+#if __has_include("drums_compat_hashes_111_arm64.inc")
+#include "drums_compat_hashes_111_arm64.inc"
+#define CAW_DRUMS_HASHES_111 "drums_compat_hashes_111_arm64.inc"
+#endif
 #elif defined(_WIN32)
 #include "drums_compat_hashes_win64.inc"
+#define CAW_DRUMS_BUILD "win64"
+#if __has_include("drums_compat_hashes_111_win64.inc")
+#include "drums_compat_hashes_111_win64.inc"
+#define CAW_DRUMS_HASHES_111 "drums_compat_hashes_111_win64.inc"
+#endif
 #elif !defined(__OPTIMIZE__)
 #include "drums_compat_hashes_x64_debug.inc"  // -O0 (Debug, the sanitizer job) rounds differently from Release
+#define CAW_DRUMS_BUILD "x64_debug"
+#if __has_include("drums_compat_hashes_111_x64_debug.inc")
+#include "drums_compat_hashes_111_x64_debug.inc"
+#define CAW_DRUMS_HASHES_111 "drums_compat_hashes_111_x64_debug.inc"
+#endif
 #else
 #include "drums_compat_hashes.inc"
 // 1.1.2 (Synth, Produced and Acoustic kits) appends again: the presets 1.1.0 and 1.1.1 added keep their bits.
-// Recorded at 1.1.1 (2a9934c) on x86-64 Release; the other builds' tables come from 2a9934c built so, as above.
-#define CAW_DRUMS_HASHES_111 1
+// Recorded at 1.1.1 (2a9934c) on x86-64 Release; always present here, so this build always checks it.
+#define CAW_DRUMS_BUILD "x64"
 #include "drums_compat_hashes_111.inc"
+#define CAW_DRUMS_HASHES_111 "drums_compat_hashes_111.inc"
 #endif
 
 }  // namespace
@@ -105,15 +124,19 @@ TEST(drums_presets_from_before_1_1_render_bit_identically) {
     if (!print) CHECK(i >= 60);
 }
 
-#ifdef CAW_DRUMS_HASHES_111
 TEST(drums_presets_from_before_1_1_2_render_bit_identically) {
+#ifdef CAW_DRUMS_HASHES_111
     size_t i = 0;
     for (const Known& k : kKnown111) {
         std::vector<std::pair<std::string, double>> values;
         CHECK(applyBuiltinPreset("org.caw.drums", k.preset, values));
-        if (renderHash(values) != k.hash) cawtest::fail(__FILE__, __LINE__, std::string(k.preset) + " renders differently from 1.1.1");
+        if (renderHash(values) != k.hash)
+            cawtest::fail(__FILE__, __LINE__, std::string(k.preset) + " renders differently from 1.1.1 (" CAW_DRUMS_HASHES_111 ")");
         ++i;
     }
     CHECK(i >= 30);
-}
+#else
+    std::printf("drums_compat_test: no 1.1.1 kits table for this build (drums_compat_hashes_111_" CAW_DRUMS_BUILD
+                ".inc): not checked; record it from 2a9934c with compat-tables.yml (docs/engine.md \"Compat tables\")\n");
 #endif
+}
