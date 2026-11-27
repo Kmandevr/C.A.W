@@ -27,6 +27,8 @@ on:
       - "scripts/update-delta*.js"  # the small-update assets the release jobs publish
       - "CHANGELOG.md"  # bundled in the app (What's new) and the top of each release's notes
       - "scripts/changelog-notes*.js"
+      - "changes/**"  # each change's entry, joined into CHANGELOG.md at release; the script tests parse them
+      - "scripts/changelog-join*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
       - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
@@ -49,6 +51,8 @@ on:
       - "scripts/update-delta*.js"
       - "CHANGELOG.md"
       - "scripts/changelog-notes*.js"
+      - "changes/**"
+      - "scripts/changelog-join*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
       - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
@@ -207,7 +211,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test the small-update builder, the release-notes extraction, the CI test summaries, the Dart shard split and the numbered-lists check
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js scripts/number-lists.test.js
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/changelog-join.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js scripts/number-lists.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}
