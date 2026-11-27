@@ -270,6 +270,20 @@ TEST(curlew_matches_its_reference_render) {
     }
 }
 
+// The whole render, release tails included, against this build's own render (curlew_tails.<build>.cawref;
+// tolerance.cpp, referenceBuild()): the held sound above checks that builds sound alike, this that a release on a
+// build doesn't change.
+TEST(curlew_release_tails_match_this_builds_reference) {
+    cawtest::References refs("curlew_tails");
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
+        const Values v = {{"variant", static_cast<double>(inst)}};
+        auto p = makeC(v);
+        const double k = kLow[inst];
+        Stereo s = play(*p, v, {{0.0, 0.4, k + 7, 0.7}, {0.3, 0.8, k + 12, 0.5}, {0.6, 1.0, k + 16, 0.9}}, 1.3);
+        CHECK_REFERENCE(refs, "curlew_tails_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
+    }
+}
+
 // Legato (owner, 2026-11-25: a flute "restarts every time a note changes"; it should work like a one-voice synth):
 // a note played while one is held moves the sounding note to it, the held one gone from the sound, and when the newer
 // note ends the held one sounds again. Poly keeps both, as chords.

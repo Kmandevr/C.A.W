@@ -378,6 +378,20 @@ TEST(nightingale_matches_its_reference_render) {
     }
 }
 
+// Overlapping notes and their releases, against this build's own render (nightingale_overlap.<build>.cawref;
+// tolerance.cpp, referenceBuild()): the lone notes above check that builds sound alike, this that nothing on a build
+// changes where a bowed attack starts while other voices sound.
+TEST(nightingale_overlapping_notes_match_this_builds_reference) {
+    cawtest::References refs("nightingale_overlap");
+    for (int inst = 0; inst < 4; ++inst) {
+        const Values v = {{"variant", static_cast<double>(inst)}};
+        const double k = nightingale::kLowestKey[inst];
+        auto p = makeN(v);
+        Stereo s = play(*p, v, {{0.0, 0.5, k + 7, 0.7}, {0.3, 0.9, k + 12, 0.5}, {0.6, 1.1, k + 16, 0.9}}, 1.5);
+        CHECK_REFERENCE(refs, "nightingale_overlap_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
+    }
+}
+
 // A string's body sounds the same at every rate the app runs at: its response at 44.1 and 96 kHz within 2.5 dB of 48
 // kHz up to 14 kHz (the audio review, 2026-11-26: violin bands pinned at 20 kHz made 96 kHz 8 dB darker at 14 kHz).
 // What is left is the RBJ designs' bilinear warping near 48 kHz's top: up to 1.96 dB, the bass at 10 kHz.
