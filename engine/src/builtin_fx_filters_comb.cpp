@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <new>
 #include <vector>
 
@@ -228,6 +229,7 @@ public:
 protected:
     bool prepare(double sr, uint32_t) noexcept override {
         release_ = detExp(-1.0 / (0.15 * sr));
+        glide_ = 1.0 - detExp(-static_cast<double>(kControlFrames) / (0.03 * sr));
         return true;
     }
     void clearState() noexcept override {
@@ -243,7 +245,15 @@ protected:
         const int chord = std::clamp(choice(kRChord, at), 0, 6), scale = std::clamp(choice(kRScale, at), 0, 5);
         // The pitch glides over ~30 ms (a new note sweeps the bank there rather than jumping).
         const double note = std::clamp(param(kRNote, at), 24.0, 96.0) + std::clamp(param(kRFine, at), -100.0, 100.0) / 100.0;
-        note_ = note_ < 0.0 ? note : note_ + (note - note_) * (1.0 - detExp(-static_cast<double>(kControlFrames) / (0.03 * sr)));
+        note_ = note_ < 0.0 ? note : note_ + (note - note_) * glide_;
+        // The knobs where they were and the pitch where the bank was built for (a settled glide, or a wake back
+        // to the same note): the bank's designs are what they are (2026-11-27: the same bits, no detPow storm).
+        if (knobsUnchanged(knobs_, kRCount, at) && note_ == builtNote_) {
+            mix_.set(mixTarget_, kControlFrames);
+            out_.set(outTarget_, kControlFrames);
+            return;
+        }
+        builtNote_ = note_;
         const double root = noteHz(note_);
         decay_ = std::clamp(param(kRDecay, at), 0.05, 10.0);
         bright_ = std::clamp(param(kRBright, at), 0.0, 1.0);
@@ -294,8 +304,10 @@ protected:
             }
             pack_[live_++] = {pairOf(l.a1, r.a1), pairOf(l.a2, r.a2), pairOf(l.a3, r.a3), pairOf(l.gain, r.gain), j};
         }
-        mix_.set(std::clamp(param(kRMix, at), 0.0, 1.0), kControlFrames);
-        out_.set(lib::dbToGain(std::clamp(param(kROutput, at), -24.0, 24.0)), kControlFrames);
+        mixTarget_ = std::clamp(param(kRMix, at), 0.0, 1.0);
+        outTarget_ = lib::dbToGain(std::clamp(param(kROutput, at), -24.0, 24.0));
+        mix_.set(mixTarget_, kControlFrames);
+        out_.set(outTarget_, kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
@@ -350,6 +362,8 @@ private:
     int live_ = 0;
     int mode_ = 0;
     double note_ = -1.0, decay_ = 1.0, bright_ = 0.5, spread_ = 0.3, env_ = 0.0, release_ = 0.9999;
+    double glide_ = 0.0, builtNote_ = std::numeric_limits<double>::quiet_NaN(), mixTarget_ = 0.0, outTarget_ = 1.0;
+    double knobs_[kRCount] = {std::numeric_limits<double>::quiet_NaN()};  // the knobs the bank was built from
     Ramp mix_, out_;
 };
 

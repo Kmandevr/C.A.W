@@ -40,6 +40,7 @@ inline constexpr Mode kModes[] = {
     {321, "timber", "caw_timber_cost", "0.5", "the modelled instruments (the name is Timber's, 1.1.0-1.1.2)"},
     {322, "flock", "caw_flock_cost", "0.5", "Flock (org.caw.flock)"},
     {323, "rook", "caw_rook_cost", "0.5", "the drums' 1.1.0 additions and the Acoustic kit (Rook)"},
+    {324, "fx_pass", "caw_fx_pass_cost", "0.5", "the effects the 2026-11-27 pass made faster, against ceilings from its figures"},
     {400, "song", "", "", "song scenario K, timed (400 K)"},
     {401, "song_profile", "", "", "song scenario K, profiled per component (401 K)"},
     {500, "suite", "", "", "the CI suite (options: --runs, --threads, --mode, --only, --json, --md, ...)"},

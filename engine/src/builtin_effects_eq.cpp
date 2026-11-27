@@ -149,6 +149,23 @@ protected:
         // A band waiting to switch type or channel is not steady: its switch happens in a later control.
         // Dynamic bands are work at every control (their gains follow their detectors), but only their own: the
         // knobs are read again only when one moved.
+        // The stereo bands' states settle to 0 when tiny here, on the control grid (the same at any block size),
+        // instead of at every sample in runStereo (2026-11-27: a third fewer operations per stage; class B, the
+        // difference stays below -400 dBFS).
+        for (uint32_t a = 0; a < active_; ++a) {
+            Band& band = bands_[order_[a]];
+            if (band.channel != kStereo) continue;
+            for (int k = 0; k < band.filter.stages(); ++k)
+                for (lib::SvfState* st : {&band.left[k], &band.right[k]}) {
+                    if (st->ic1 < 1e-20 && st->ic1 > -1e-20) st->ic1 = 0.0;
+                    if (st->ic2 < 1e-20 && st->ic2 > -1e-20) st->ic2 = 0.0;
+                }
+        }
+        for (auto* side : {soloL_, soloR_})  // the solo's listening filter runs runStereo too
+            for (int k = 0; k < lib::EqFilter::kMaxStages; ++k) {
+                if (side[k].ic1 < 1e-20 && side[k].ic1 > -1e-20) side[k].ic1 = 0.0;
+                if (side[k].ic2 < 1e-20 && side[k].ic2 > -1e-20) side[k].ic2 = 0.0;
+            }
         const bool same = knobsUnchanged(knobs_, kParamCount, at);
         if (same && !first_ && !pending_) {
             bool fading = false;
@@ -239,16 +256,6 @@ protected:
         for (uint32_t i = 0; i < n; ++i) L[i] = inL[i], R[i] = inR[i];
         if (dynCount_) detect(inL, inR, n);
         for (uint32_t a = 0; a < active_; ++a) {
-            // Two or more stereo bands in a row run sample by sample through all their stages at once
-            // (runStereoGroup, 2026-11-27): the same operations per sample in the same order as band by band,
-            // so the same bits, with the bands' recurrences overlapping instead of one after another.
-            uint32_t end = a;
-            while (end < active_ && bands_[order_[end]].channel == kStereo) ++end;
-            if (end - a >= 2) {
-                runStereoGroup(a, end, L, R, n);
-                a = end - 1;
-                continue;
-            }
             Band& band = bands_[order_[a]];
             const lib::EqFilter& f = band.filter;
             double w[kControlFrames];
@@ -314,75 +321,6 @@ protected:
                 analyzer_.push(static_cast<float>(0.5 * (static_cast<double>(inL[i]) + inR[i])), static_cast<float>(0.5 * (L[i] + R[i])));
     }
 
-    // The fade weights of `band` over the run (the loop at the top of run()'s band loop).
-    template <class B>  // Band (declared below)
-    void fadeWeights(B& band, double* w, uint32_t n) noexcept {
-        if (band.w != band.target) {
-            for (uint32_t i = 0; i < n; ++i) {
-                if (band.w != band.target)
-                    band.w = band.target > band.w ? std::min(band.target, band.w + fadeStep_) : std::max(band.target, band.w - fadeStep_);
-                w[i] = band.w;
-            }
-        } else {
-            for (uint32_t i = 0; i < n; ++i) w[i] = band.w;
-        }
-    }
-    // runStereo() for the stereo bands order_[from..to), sample by sample: each sample through band after band,
-    // each band's stages in order, then its fade (the same operations on each value as band-by-band runStereo).
-    void runStereoGroup(uint32_t from, uint32_t to, double* L, double* R, uint32_t n) noexcept {
-        struct Stage {
-            Pair a1, a2, a3, m0, m1, m2, ic1, ic2;
-        };
-        Stage st[kBands * lib::EqFilter::kMaxStages];
-        uint8_t first[kBands + 1];
-        Pair scale[kBands];
-        double w[kBands][kControlFrames];
-        uint32_t count = 0;
-        const uint32_t bands = to - from;
-        for (uint32_t g = 0; g < bands; ++g) {
-            Band& band = bands_[order_[from + g]];
-            const lib::EqFilter& f = band.filter;
-            fadeWeights(band, w[g], n);
-            first[g] = static_cast<uint8_t>(count);
-            for (int k = 0; k < f.stages(); ++k) {
-                const lib::SvfMix& c = f.stage(k);
-                Stage& s = st[count++];
-                s.a1 = splat(c.a1), s.a2 = splat(c.a2), s.a3 = splat(c.a3);
-                s.m0 = splat(c.m0), s.m1 = splat(c.m1), s.m2 = splat(c.m2);
-                s.ic1 = pairOf(band.left[k].ic1, band.right[k].ic1), s.ic2 = pairOf(band.left[k].ic2, band.right[k].ic2);
-            }
-            scale[g] = splat(f.scale());
-        }
-        first[bands] = static_cast<uint8_t>(count);
-        const Pair two = splat(2.0);
-        for (uint32_t i = 0; i < n; ++i) {
-            Pair x = pairOf(L[i], R[i]);
-            for (uint32_t g = 0; g < bands; ++g) {
-                Pair y = x;
-                for (uint32_t k = first[g]; k < first[g + 1]; ++k) {
-                    Stage& s = st[k];
-                    const Pair in = y;
-                    const Pair v3 = in - s.ic2;
-                    const Pair v1 = s.a1 * s.ic1 + s.a2 * v3;
-                    const Pair v2 = s.ic2 + s.a2 * s.ic1 + s.a3 * v3;
-                    s.ic1 = flushPair(two * v1 - s.ic1);
-                    s.ic2 = flushPair(two * v2 - s.ic2);
-                    y = s.m0 * in + s.m1 * v1 + s.m2 * v2;
-                }
-                const Pair v = y * scale[g];
-                x = x + (v - x) * splat(w[g][i]);
-            }
-            L[i] = lane(x, 0), R[i] = lane(x, 1);
-        }
-        for (uint32_t g = 0; g < bands; ++g) {
-            Band& band = bands_[order_[from + g]];
-            for (int k = 0; k < band.filter.stages(); ++k) {
-                const Stage& s = st[first[g] + k];
-                band.left[k].ic1 = lane(s.ic1, 0), band.right[k].ic1 = lane(s.ic1, 1);
-                band.left[k].ic2 = lane(s.ic2, 0), band.right[k].ic2 = lane(s.ic2, 1);
-            }
-        }
-    }
     // y = f.process(state, x) for each sample of the run, stage by stage (each sample through the stages in order).
     static void runMono(const lib::EqFilter& f, lib::SvfState* state, const double* x, double* y, uint32_t n) noexcept {
         for (uint32_t i = 0; i < n; ++i) y[i] = x[i];
@@ -412,8 +350,8 @@ protected:
                 const Pair v3 = x - ic2;
                 const Pair v1 = a1 * ic1 + a2 * v3;
                 const Pair v2 = ic2 + a2 * ic1 + a3 * v3;
-                ic1 = flushPair(two * v1 - ic1);
-                ic2 = flushPair(two * v2 - ic2);
+                ic1 = two * v1 - ic1;  // settled at the control points (control())
+                ic2 = two * v2 - ic2;
                 y[i] = m0 * x + m1 * v1 + m2 * v2;
             }
             left[k].ic1 = lane(ic1, 0), right[k].ic1 = lane(ic1, 1);
