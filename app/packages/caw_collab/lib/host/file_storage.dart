@@ -66,7 +66,7 @@ class FileSnapshotStore implements SnapshotStore {
   Uint8List? read() {
     if (!file.existsSync()) return null;
     final f = file.readAsBytesSync();
-    final (records, valid) = readFrames(f);
+    final (records, valid) = readFrames(f, maxBytes: maxSnapshotBytes);
     return records.length == 1 && valid == f.length ? Uint8List.fromList(records.single) : null;
   }
 
@@ -75,7 +75,7 @@ class FileSnapshotStore implements SnapshotStore {
     final tmp = File('${file.path}.tmp');
     final raf = tmp.openSync(mode: FileMode.write);
     try {
-      raf.writeFromSync(frameRecord(snapshot));
+      raf.writeFromSync(frameRecord(snapshot, maxBytes: maxSnapshotBytes));
       raf.flushSync();
     } finally {
       raf.closeSync();

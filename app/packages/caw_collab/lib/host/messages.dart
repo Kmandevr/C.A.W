@@ -22,8 +22,9 @@ sealed class ClientMessage {
   Map<String, Object?> toJson() => {'t': type, 'epoch': epoch, ...body()};
 }
 
-/// The join handshake. [lastSeq] asks to resume after that seq (null: send everything). [score] is the member's
-/// capability score for the successor ranking.
+/// The join handshake. [token] is the member's token: proposed at its first hello (at least 32 random
+/// characters), or issued by the host in that first welcome, and required on every later hello. [lastSeq] asks to resume after that seq (null: send everything). [score] is the member's
+/// self-reported capability score for the successor ranking (the host clamps it and ranks by role first).
 final class Hello extends ClientMessage {
   const Hello({
     required int epoch,
@@ -31,6 +32,7 @@ final class Hello extends ClientMessage {
     required this.version,
     this.password,
     this.invite,
+    this.token,
     this.lastSeq,
     this.score = 0,
   }) : super(epoch);
@@ -38,6 +40,7 @@ final class Hello extends ClientMessage {
   final VersionInfo version;
   final String? password;
   final String? invite;
+  final String? token;
   final int? lastSeq;
   final double score;
 
@@ -51,6 +54,7 @@ final class Hello extends ClientMessage {
         'protocol': version.protocol.toString(),
         if (password != null) 'password': password,
         if (invite != null) 'invite': invite,
+        if (token != null) 'token': token,
         if (lastSeq != null) 'lastSeq': lastSeq,
         'score': score,
       };
@@ -76,15 +80,29 @@ final class Resume extends ClientMessage {
   Map<String, Object?> body() => {'fromSeq': fromSeq};
 }
 
-/// Register an invite: the hash of its secret ([inviteSecretHash]) and the role it gives, at most the sender's.
+/// Register an invite: the hash of its secret ([inviteSecretHash]), the role it gives (at most the sender's),
+/// how many joins it admits (one by default) and how long it lasts (null: the host's default).
 final class CreateInvite extends ClientMessage {
-  const CreateInvite({required int epoch, required this.secretHash, required this.role}) : super(epoch);
+  const CreateInvite({required int epoch, required this.secretHash, required this.role, this.maxUses = 1, this.ttlMs}) : super(epoch);
   final String secretHash;
   final Role role;
+  final int maxUses;
+  final int? ttlMs;
   @override
   String get type => 'invite';
   @override
-  Map<String, Object?> body() => {'secretHash': secretHash, 'role': role.wire};
+  Map<String, Object?> body() => {'secretHash': secretHash, 'role': role.wire, 'maxUses': maxUses, if (ttlMs != null) 'ttlMs': ttlMs};
+}
+
+/// Proof that a newer host took over: its [epoch] and [proof] ([fenceProof]), as the new host's welcome carried
+/// them. A host that checks it stops accepting anything, for good.
+final class FenceNotice extends ClientMessage {
+  const FenceNotice({required int epoch, required this.proof}) : super(epoch);
+  final String proof;
+  @override
+  String get type => 'fence';
+  @override
+  Map<String, Object?> body() => {'proof': proof};
 }
 
 /// Leaving.
@@ -108,17 +126,28 @@ sealed class HostMessage {
   Map<String, Object?> toJson() => {'t': type, 'epoch': epoch, ...body()};
 }
 
-/// The join is accepted: the session, the member's grants and the host's position.
+/// The join is accepted: the session, the member's grants and the host's position. [token] is issued once, at
+/// a member's first admission when it proposed none: the member keeps it and sends it on every later hello. [fence] is this host's
+/// proof of its epoch ([fenceProof]) when it is a successor, for members to show an older host.
 final class Welcome extends HostMessage {
-  const Welcome({required int epoch, required this.sessionId, required this.seq, required this.grants, required this.owner}) : super(epoch);
+  const Welcome({required int epoch, required this.sessionId, required this.seq, required this.grants, required this.owner, this.token, this.fence}) : super(epoch);
   final String sessionId;
   final int seq;
   final List<Grant> grants;
   final String owner;
+  final String? token;
+  final String? fence;
   @override
   String get type => 'welcome';
   @override
-  Map<String, Object?> body() => {'sessionId': sessionId, 'seq': seq, 'grants': [for (final g in grants) g.toJson()], 'owner': owner};
+  Map<String, Object?> body() => {
+        'sessionId': sessionId,
+        'seq': seq,
+        'grants': [for (final g in grants) g.toJson()],
+        'owner': owner,
+        if (token != null) 'token': token,
+        if (fence != null) 'fence': fence,
+      };
 }
 
 /// Catching up: with a [snapshot] (the tree at [snapshotSeq], which replaces the member's state), then [ops] in
@@ -208,6 +237,10 @@ final class Refused extends HostMessage {
   static const staleHost = 'stale_host';
   static const sessionEnded = 'session_ended';
   static const noSession = 'no_session';
+  static const unauthorized = 'unauthorized';
+  static const epochAhead = 'epoch_ahead';
+  static const busy = 'busy';
+  static const locked = 'locked';
 
   @override
   String get type => 'refused';
@@ -289,7 +322,10 @@ ClientMessage _client(Object? v, CollabLimits limits) {
       final app = _f<String>(v, 'app');
       final password = _opt<String>(v, 'password');
       final invite = _opt<String>(v, 'invite');
-      if (app.length > 64 || (password?.length ?? 0) > 1024 || (invite?.length ?? 0) > 256) _bad('a hello field is too long');
+      final token = _opt<String>(v, 'token');
+      if (app.length > 64 || (password?.length ?? 0) > 1024 || (invite?.length ?? 0) > 256 || (token?.length ?? 0) > 256) {
+        _bad('a hello field is too long');
+      }
       final lastSeq = _opt<int>(v, 'lastSeq');
       if ((lastSeq ?? 0) < 0) _bad('lastSeq is negative');
       return Hello(
@@ -301,6 +337,7 @@ ClientMessage _client(Object? v, CollabLimits limits) {
             protocol: protocol),
         password: password,
         invite: invite,
+        token: token,
         lastSeq: lastSeq,
         score: score.isFinite ? score : 0,
       );
@@ -311,8 +348,14 @@ ClientMessage _client(Object? v, CollabLimits limits) {
     case 'invite':
       final h = _f<String>(v, 'secretHash');
       final r = Role.byWire(_f<String>(v, 'role'));
-      if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(h) || r == null) _bad('an invite is malformed');
-      return CreateInvite(epoch: epoch, secretHash: h, role: r);
+      final uses = _opt<int>(v, 'maxUses') ?? 1;
+      final ttl = _opt<int>(v, 'ttlMs');
+      if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(h) || r == null || uses < 1 || (ttl ?? 1) < 1) _bad('an invite is malformed');
+      return CreateInvite(epoch: epoch, secretHash: h, role: r, maxUses: uses, ttlMs: ttl);
+    case 'fence':
+      final proof = _f<String>(v, 'proof');
+      if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(proof)) _bad('a fence proof is malformed');
+      return FenceNotice(epoch: epoch, proof: proof);
     case 'bye':
       return Bye(epoch: epoch);
     default:
@@ -330,7 +373,9 @@ HostMessage _host(Object? v, CollabLimits limits) {
           sessionId: _f<String>(v, 'sessionId'),
           seq: _seqField(v, 'seq'),
           grants: [for (final g in _f<List>(v, 'grants')) grantFromJson(g)],
-          owner: _f<String>(v, 'owner'));
+          owner: _f<String>(v, 'owner'),
+          token: _opt<String>(v, 'token'),
+          fence: _opt<String>(v, 'fence'));
     case 'catchup':
       final hasSnap = v.containsKey('snapshot');
       return Catchup(

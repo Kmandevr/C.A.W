@@ -122,4 +122,9 @@ class Permissions {
   /// Whether every capability in [grants] is one [member] holds on the project (an invite gives at most one's own
   /// level).
   bool covers(String member, Iterable<Grant> grants) => grants.every((g) => holds(member, g.capability, rootId));
+
+  /// Whether [member] may hand out every one of [grants]: it holds each capability at that grant's scope or an
+  /// ancestor of it (an access change gives at most what its sender has).
+  bool coversAt(CollabTree tree, String member, Iterable<Grant> grants) =>
+      grants.every((g) => allows(tree, member, g.capability, g.scope));
 }

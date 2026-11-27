@@ -16,6 +16,7 @@ String hex(List<int> b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).joi
 Uint8List rec(String s) => Uint8List.fromList(utf8.encode(s));
 
 void main() {
+  useTestFloor();
   test('CRC-32 matches the standard check value', () {
     expect(crc32('123456789'.codeUnits), 0xcbf43926);
     expect(crc32(const []), 0);
@@ -218,7 +219,7 @@ void main() {
       expect([back.member, back.password, back.lastSeq, back.score, back.version.protocol, back.version.format], ['kim', 'pw', 4, 3.5, collabProtocol, goodVersion().format]);
       final sub = Submit(epoch: 1, ops: [SetOp(node: rootId, field: 'json', value: [1, 2], author: 'kim', clientSeq: 1, baseSeq: 0)]);
       expect((decodeClientMessage(encodeMessage(sub)) as Submit).ops.single, sub.ops.single);
-      final up = SessionUpdate(epoch: 3, successors: const [Successor('sam', 9)], state: SessionState(config: config(), grants: {'kim': Role.viewer.grants}, epoch: 3, seq: 8));
+      final up = SessionUpdate(epoch: 3, successors: const [Successor('sam', 9)], state: SessionState(config: config(), grants: {'kim': Role.viewer.grants}, tokens: {'kim': 'a' * 64}, epoch: 3, seq: 8));
       final upBack = decodeHostMessage(encodeMessage(up)) as SessionUpdate;
       expect(upBack.state!.grants['kim']!.single.capability, Capability.view);
       expect(upBack.successors.single.member, 'sam');
@@ -238,7 +239,7 @@ void main() {
 
     test('a host refuses an unreadable message and ends the connection', () async {
       final out = RecordingOutbox();
-      final h = HostCore.create(config: config(), schema: hostSchema, storage: MemoryHostStorage(), outbox: out, passwordCheck: inlineCheck);
+      final h = HostCore.create(config: config(), schema: hostSchema, storage: MemoryHostStorage(), outbox: out, ownerToken: ownerToken, passwordCheck: inlineCheck);
       h.connect('a', address: '1');
       await h.receiveText('a', '{"t":"submit"');
       expect((out.of('a').single as Refused).reason, Refused.invalid);

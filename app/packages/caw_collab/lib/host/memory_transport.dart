@@ -57,10 +57,10 @@ class MemoryNetwork implements HostOutbox {
   bool get busy => _queue.isNotEmpty;
 
   /// Opens a connection from [address] for [end]; returns its id.
-  String open(MemoryEndpoint end, {String address = '10.0.0.1'}) {
+  String open(MemoryEndpoint end, {String address = '10.0.0.1', String? identity}) {
     final id = 'c${_next++}';
     _ends[id] = end;
-    _host?.connect(id, address: address);
+    _host?.connect(id, address: address, identity: identity);
     return id;
   }
 

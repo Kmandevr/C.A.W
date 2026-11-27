@@ -26,6 +26,7 @@ Future<(HostRig, TestMember, TestMember)> twoMembers({HostSettings settings = co
 
 Future<void> heal(HostRig rig, List<TestMember> ms) async {
   for (var round = 0; round < 6; round++) {
+    rig.clock.now += 15000;
     for (final m in ms) {
       m.resync();
     }
@@ -34,6 +35,7 @@ Future<void> heal(HostRig rig, List<TestMember> ms) async {
 }
 
 void main() {
+  useTestFloor();
   test('an op is acked to its author with a seq and broadcast to the others, who converge', () async {
     final (rig, o, k) = await twoMembers();
     o.submit([track(o, 1), setOp(o, nid(1), 'gain', 1.5)]);
@@ -59,7 +61,7 @@ void main() {
     // Answer through a recording outbox to see the replies exactly.
     final rig2 = HostCore.recover(schema: hostSchema, storage: rig.storage, outbox: out, clock: rig.clock.call, passwordCheck: inlineCheck);
     rig2.connect('x', address: 'a');
-    await rig2.receive('x', Hello(epoch: 1, member: owner, version: goodVersion(), lastSeq: seqBefore));
+    await rig2.receive('x', Hello(epoch: 1, member: owner, version: goodVersion(), token: ownerToken, lastSeq: seqBefore));
     await rig2.receive('x', Submit(epoch: 1, ops: [op, op]));
     expect(out.of('x').whereType<Ack>().map((a) => a.seq), [1, 1]);
     expect(rig2.seq, seqBefore);
@@ -211,7 +213,7 @@ void main() {
     // A near resume: kim is at 1, the snapshot is at 0, so the tail alone covers it.
     final h = HostCore.recover(schema: hostSchema, storage: rig.storage, outbox: out, clock: rig.clock.call, passwordCheck: inlineCheck);
     h.connect('k', address: 'a');
-    await h.receive('k', Hello(epoch: 1, member: 'kim', version: goodVersion(), lastSeq: 1));
+    await h.receive('k', Hello(epoch: 1, member: 'kim', version: goodVersion(), token: k.token, lastSeq: 1));
     final near = out.of('k').whereType<Catchup>().single;
     expect(near.snapshot, isNull);
     expect(near.ops.map((x) => x.seq), [2]);
@@ -228,7 +230,7 @@ void main() {
     expect(k.snapshotText, hostText(rig.host));
     final h2 = HostCore.recover(schema: hostSchema, storage: rig.storage, outbox: out, clock: rig.clock.call, passwordCheck: inlineCheck);
     h2.connect('k2', address: 'a');
-    await h2.receive('k2', Hello(epoch: 1, member: 'kim', version: goodVersion(), lastSeq: 1));
+    await h2.receive('k2', Hello(epoch: 1, member: 'kim', version: goodVersion(), token: k.token, lastSeq: 1));
     final far = out.of('k2').whereType<Catchup>().single;
     expect(far.snapshotSeq, 4);
     expect(far.ops.map((x) => x.seq), [5, 6]);
@@ -338,7 +340,7 @@ void main() {
       await rig.net.settle();
       o.submit([track(o, 1), track(o, 2, key: 'W')]);
       await rig.net.settle();
-      expect(s.successors.first.member, 'sam');
+      expect(s.successors.map((x) => x.member), [owner, 'sam', 'kim'], reason: 'the owner ranks first, then by score');
       // The host drops. Sam continues from its replica at its last confirmed seq.
       rig.net.dropAll('host gone');
       final net2 = MemoryNetwork(seed: 2);
@@ -366,13 +368,22 @@ void main() {
       k.submit([setOp(k, nid(1), 'name', 'new')]);
       await net2.settle();
       expect(h2.tree.node(nid(1))!.fields['name'], 'new');
-      // The old host is still running; the first member that knows epoch 2 fences it, for good.
+      // The old host is still running. A claim of epoch 2 alone only ends that connection.
       expect(rig.host.state, HostState.running);
-      final late = TestMember(rig.net, 'kim')..epoch = 2;
+      final late = TestMember(rig.net, 'kim', token: k.token)..epoch = 2;
       late.join();
       await rig.net.settle();
-      expect(rig.host.state, HostState.fenced);
-      expect(late.refusals, [Refused.staleHost]);
+      expect(late.refusals, [Refused.epochAhead]);
+      expect(rig.host.state, HostState.running);
+      // A forged proof is refused; the new host's proof, which members got in its welcome, fences the old host.
+      expect(o.fence, isNotNull);
+      for (final (proof, want) in [('0' * 64, HostState.running), (o.fence!, HostState.fenced)]) {
+        final c = rig.net.open(late);
+        rig.net.post(c, FenceNotice(epoch: 2, proof: proof));
+        await rig.net.settle();
+        expect(rig.host.state, want);
+      }
+      expect(late.refusals, [Refused.epochAhead, Refused.invalid, Refused.staleHost]);
       final old = TestMember(rig.net, 'ana')..join();
       await rig.net.settle();
       expect(old.refusals, [Refused.staleHost]);
@@ -413,7 +424,7 @@ void main() {
           state: state, schema: hostSchema, replica: replica, seq: at, storage: MemoryHostStorage(), outbox: out,
           hostApp: appVersion, recentOps: s.confirmed, passwordCheck: inlineCheck);
       h3.connect('o', address: 'a');
-      await h3.receive('o', Hello(epoch: 1, member: owner, version: goodVersion(), lastSeq: 1));
+      await h3.receive('o', Hello(epoch: 1, member: owner, version: goodVersion(), token: ownerToken, lastSeq: 1));
       await h3.receive('o', Submit(epoch: 2, ops: [first]));
       expect(out.of('o').whereType<Ack>().single.seq, 1);
       expect(h3.seq, 1);

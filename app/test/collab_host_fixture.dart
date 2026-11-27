@@ -12,6 +12,9 @@ final hostSchema = Schema(version: 1, rootKind: 'project', kinds: const [
 ]);
 
 const owner = 'owner1';
+
+/// The owner's member token, given when the session is created.
+const ownerToken = 'owner-token-0123456789';
 const appVersion = '1.1.6';
 
 VersionInfo goodVersion({int fileVersion = 7, String? schemaHash, ProtocolVersion protocol = collabProtocol, String app = appVersion}) =>
@@ -25,17 +28,22 @@ class FakeClock {
 /// A password check that runs inline (tests use few iterations).
 Future<bool> inlineCheck(PasswordHash h, String p) async => h.verify(p);
 
-SessionConfig config({Lobby lobby = Lobby.public, String? password, Map<String, Role> invites = const {}, String? hostMember}) =>
-    SessionConfig(
+/// Lets tests hash passwords with few iterations.
+void useTestFloor() => PasswordHash.floor = 1;
+
+SessionConfig config({Lobby lobby = Lobby.public, String? password, Map<String, Role> invites = const {}, String? hostMember}) {
+  useTestFloor();
+  return SessionConfig(
       sessionId: 'sess1',
       owner: owner,
       hostApp: appVersion,
       fileVersion: 7,
       lobby: lobby,
       password: password == null ? null : PasswordHash.create(password, iterations: 50),
-      invites: invites,
+      invites: {for (final e in invites.entries) e.key: Invite(role: e.value, usesLeft: 5)},
       hostMember: hostMember,
     );
+}
 
 /// A host, its storage, its network and its clock; [crash] throws the host away and [recover] rebuilds it.
 class HostRig {
@@ -43,7 +51,7 @@ class HostRig {
       : net = MemoryNetwork(seed: seed, faults: faults) {
     host = HostCore.create(
         config: cfg ?? config(), schema: hostSchema, storage: storage, outbox: net, settings: settings, clock: clock.call,
-        passwordCheck: inlineCheck, faults: _hook);
+        ownerToken: ownerToken, passwordCheck: inlineCheck, faults: _hook);
     net.attach(host);
     net.onCrash = (_) => crashed = true;
   }
@@ -71,10 +79,17 @@ class HostRig {
 /// A member: it applies confirmed ops in seq order (its own when acked, others' when broadcast or caught up),
 /// keeps what it sent until it is acked or rejected, and on [resync] rejoins or asks to resume and resends.
 class TestMember implements MemoryEndpoint {
-  TestMember(this.net, this.id, {this.password, this.invite, this.score = 0, this.address = '10.0.0.1'});
+  TestMember(this.net, this.id, {this.password, this.invite, this.score = 0, this.address = '10.0.0.1', String? token})
+      : token = token ?? (id == owner ? ownerToken : 'token-of-$id-${'x' * 32}');
   MemoryNetwork net;
   final String id;
   String? password, invite;
+
+  /// The member token: the owner's from the start, anyone else's from its first welcome.
+  String? token;
+
+  /// The newest host's proof of its epoch, from its welcome.
+  String? fence;
   double score;
   String address;
 
@@ -99,7 +114,7 @@ class TestMember implements MemoryEndpoint {
   void join({VersionInfo? version}) {
     conn = net.open(this, address: address);
     net.post(conn!, Hello(
-        epoch: epoch, member: id, version: version ?? goodVersion(), password: password, invite: invite,
+        epoch: epoch, member: id, version: version ?? goodVersion(), password: password, invite: invite, token: token,
         lastSeq: hasState ? applied : null, score: score));
   }
 
@@ -137,6 +152,8 @@ class TestMember implements MemoryEndpoint {
     switch (m) {
       case Welcome():
         joined = true;
+        if (m.token != null) token = m.token;
+        if (m.fence != null) fence = m.fence;
         grants = m.grants;
         if (pending.isNotEmpty) {
           net.post(conn!, Submit(epoch: epoch, ops: (pending.values.toList()..sort((a, b) => a.clientSeq.compareTo(b.clientSeq)))));

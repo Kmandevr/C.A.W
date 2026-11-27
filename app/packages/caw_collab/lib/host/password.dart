@@ -170,28 +170,38 @@ class PasswordHash {
   /// The most iterations a stored hash may claim, so a tampered store can't stall the host.
   static const int maxIterations = 10000000;
 
+  /// The fewest iterations a new or stored hash may have, so a weak or tampered hash is refused.
+  ///
+  /// Assumption: 100,000, a sixth of OWASP's recommendation, leaves room for slow phones; the design sets no
+  /// floor.
+  static const int minIterations = 100000;
+
+  /// The floor in force: [minIterations]. Lower it only in tests, which use small counts to stay fast.
+  static int floor = minIterations;
+
   final String encoded;
   final int iterations;
   final Uint8List _salt, _hash;
 
-  /// A new hash of [password] with a 16-byte random salt.
-  ///
-  /// Assumption: no floor below the default is enforced, so tests can use small counts; [HostSettings] carries
-  /// the count a host uses.
+  /// A new hash of [password] with a 16-byte random salt; [iterations] must be within [floor] and
+  /// [maxIterations].
   factory PasswordHash.create(String password, {int iterations = defaultIterations, Random? random}) {
-    if (iterations < 1 || iterations > maxIterations) throw ArgumentError.value(iterations, 'iterations');
+    if (iterations < floor || iterations > maxIterations) {
+      throw ArgumentError.value(iterations, 'iterations', 'outside $floor..$maxIterations');
+    }
     final r = random ?? Random.secure();
     final salt = Uint8List.fromList(List.generate(16, (_) => r.nextInt(256)));
     final hash = pbkdf2HmacSha256(utf8.encode(password), salt, iterations, 32);
     return PasswordHash._('pbkdf2-sha256\$$iterations\$${_b64(salt)}\$${_b64(hash)}', iterations, salt, hash);
   }
 
-  /// Reads a stored hash, or returns null when [encoded] is not one.
+  /// Reads a stored hash, or returns null when [encoded] is not one or its iterations are outside [floor] and
+  /// [maxIterations].
   static PasswordHash? parse(String encoded) {
     final p = encoded.split('\$');
     if (p.length != 4 || p[0] != 'pbkdf2-sha256') return null;
     final it = int.tryParse(p[1]);
-    if (it == null || it < 1 || it > maxIterations) return null;
+    if (it == null || it < floor || it > maxIterations) return null;
     try {
       final salt = base64Url.decode(base64Url.normalize(p[2]));
       final hash = base64Url.decode(base64Url.normalize(p[3]));

@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'collab_host_fixture.dart';
 
 void main() {
+  useTestFloor();
   group('the version matrix', () {
     final host = goodVersion();
     final cases = <(String, VersionInfo, String?)>[
@@ -133,14 +134,15 @@ void main() {
       rig.net.post(k.conn!, CreateInvite(epoch: k.epoch, secretHash: inviteSecretHash('s-viewer'), role: Role.viewer));
       rig.net.post(k.conn!, CreateInvite(epoch: k.epoch, secretHash: inviteSecretHash('s-owner'), role: Role.owner));
       await rig.net.settle();
-      expect(rig.host.config.invites.values, [Role.viewer]);
+      expect(rig.host.config.invites.values.map((i) => i.role), [Role.viewer]);
       // The invite survives a restart (it is in the log).
       rig.recover();
-      expect(rig.host.config.invites.values, [Role.viewer]);
+      expect(rig.host.config.invites.values.map((i) => i.role), [Role.viewer]);
     });
 
     test('a private session must have a password or an invite', () {
-      expect(() => config(lobby: Lobby.private), throwsArgumentError);
+      expect(() => HostCore.create(config: config(lobby: Lobby.private), schema: hostSchema, storage: MemoryHostStorage(), outbox: RecordingOutbox(), ownerToken: ownerToken),
+          throwsArgumentError);
     });
 
     test('a slow password check does not stop the host ordering ops', () async {
@@ -148,12 +150,12 @@ void main() {
       final out = RecordingOutbox();
       final secret = 'owner-secret-0123';
       final h = HostCore.create(
-          config: config(lobby: Lobby.private, password: 'pw', invites: {inviteSecretHash(secret): Role.owner}), schema: hostSchema,
-          storage: MemoryHostStorage(), outbox: out, passwordCheck: (_, _) => check.future);
+          config: config(lobby: Lobby.private, password: 'pw', invites: {inviteSecretHash(secret): Role.viewer}), schema: hostSchema,
+          storage: MemoryHostStorage(), outbox: out, ownerToken: ownerToken, passwordCheck: (_, _) => check.future);
       h.connect('a', address: '1');
       h.connect('b', address: '2');
       final joining = h.receive('a', Hello(epoch: 0, member: 'kim', version: goodVersion(), password: 'pw'));
-      await h.receive('b', Hello(epoch: 0, member: owner, version: goodVersion(), invite: secret));
+      await h.receive('b', Hello(epoch: 0, member: owner, version: goodVersion(), token: ownerToken));
       await h.receive('b', Submit(epoch: 1, ops: [
         InsertOp(parent: rootId, list: 'tracks', node: nid(1), key: 'V', kind: 'track', author: owner, clientSeq: 1, baseSeq: 0),
       ]));

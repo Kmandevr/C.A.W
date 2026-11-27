@@ -6,14 +6,19 @@ import 'package:caw_services/sha256.dart';
 
 import 'crc32.dart';
 
-/// The most bytes one framed record may hold: one op batch at its cap plus room for its header.
+/// The most bytes one log record may hold: one op at the collab limits' cap (8 MiB) plus room for its header.
 ///
-/// Assumption: a log record is at most one batch of the collab limits (8 MiB) plus 1 MiB.
+/// Assumption: the host writes one record per op, so a record is at most one op plus 1 MiB.
 const int maxRecordBytes = 9 * 1024 * 1024;
 
+/// The most bytes a snapshot may hold: the tree's byte cap ([HostSettings.maxTreeBytes]) plus the session's
+/// bounded metadata (members, grants, tokens, dedupe memory, invites); a host refuses settings whose worst case
+/// passes it.
+const int maxSnapshotBytes = 256 * 1024 * 1024;
+
 /// One frame: the payload's length (u32, little-endian), its CRC-32 (u32, little-endian), then the payload.
-Uint8List frameRecord(List<int> payload) {
-  if (payload.length > maxRecordBytes) throw ArgumentError('a record over $maxRecordBytes bytes');
+Uint8List frameRecord(List<int> payload, {int maxBytes = maxRecordBytes}) {
+  if (payload.length > maxBytes) throw ArgumentError('a record over $maxBytes bytes');
   final out = Uint8List(8 + payload.length);
   final v = ByteData.sublistView(out);
   v.setUint32(0, payload.length, Endian.little);
@@ -23,14 +28,14 @@ Uint8List frameRecord(List<int> payload) {
 }
 
 /// The whole frames at the start of [bytes], and how many bytes they take. Reading stops at the first frame that
-/// is short, too long or fails its CRC: that frame and everything after it are a torn tail.
-(List<Uint8List>, int) readFrames(Uint8List bytes) {
+/// is short, over [maxBytes] or fails its CRC: that frame and everything after it are a torn tail.
+(List<Uint8List>, int) readFrames(Uint8List bytes, {int maxBytes = maxRecordBytes}) {
   final out = <Uint8List>[];
   final v = ByteData.sublistView(bytes);
   var at = 0;
   while (at + 8 <= bytes.length) {
     final n = v.getUint32(at, Endian.little);
-    if (n > maxRecordBytes || at + 8 + n > bytes.length) break;
+    if (n > maxBytes || at + 8 + n > bytes.length) break;
     final crc = v.getUint32(at + 4, Endian.little);
     if (crc32(bytes, at + 8, at + 8 + n) != crc) break;
     out.add(Uint8List.sublistView(bytes, at + 8, at + 8 + n));
@@ -181,13 +186,13 @@ class MemorySnapshotStore implements SnapshotStore {
   Uint8List? read() {
     final f = framed;
     if (f == null) return null;
-    final (records, valid) = readFrames(f);
+    final (records, valid) = readFrames(f, maxBytes: maxSnapshotBytes);
     return records.length == 1 && valid == f.length ? Uint8List.fromList(records.single) : null;
   }
 
   @override
   void write(Uint8List snapshot) {
-    framed = frameRecord(snapshot);
+    framed = frameRecord(snapshot, maxBytes: maxSnapshotBytes);
     writes++;
   }
 }

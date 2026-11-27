@@ -38,6 +38,7 @@ Future<void> storm(int seed, {required bool crashes, int steps = 400}) async {
     m.join();
   }
   for (var step = 0; step < steps; step++) {
+    rig.clock.now += 100;
     if (rig.crashed) rig.recover(tornBytes: r.nextInt(40));
     final roll = r.nextInt(100);
     if (roll < 35) {
@@ -69,6 +70,7 @@ Future<void> storm(int seed, {required bool crashes, int steps = 400}) async {
   if (rig.crashed) rig.recover(tornBytes: r.nextInt(40));
   rig.net.faults = NetworkFaults.none;
   for (var round = 0; round < 12; round++) {
+    rig.clock.now += 15000;
     for (final m in ms) {
       m.resync();
     }
@@ -98,6 +100,7 @@ Future<void> storm(int seed, {required bool crashes, int steps = 400}) async {
 }
 
 void main() {
+  useTestFloor();
   for (var seed = 1; seed <= 20; seed++) {
     test('a storm of drops, duplicates and reordering converges (seed $seed)', () => storm(seed, crashes: false));
   }
@@ -111,7 +114,7 @@ void main() {
     final net = MemoryNetwork();
     final clock = FakeClock();
     var h = HostCore.create(
-        config: config(), schema: hostSchema, storage: FileHostStorage(dir), outbox: net, clock: clock.call,
+        config: config(), schema: hostSchema, storage: FileHostStorage(dir), outbox: net, clock: clock.call, ownerToken: ownerToken,
         settings: const HostSettings(snapshotEveryOps: 4), passwordCheck: inlineCheck);
     net.attach(h);
     final o = TestMember(net, owner)..join();
