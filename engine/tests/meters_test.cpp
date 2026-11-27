@@ -1,5 +1,6 @@
 // The live meters: K-weighting against BS.1770-5's table, EBU Tech 3341's minimum test signals, true peak, correlation.
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -209,7 +210,12 @@ TEST(the_engine_meters_the_masters_loudness_and_each_layers_correlation) {
     CHECK(e.setProject(chordTrack({insert("org.caw.stereo.width", {{"width", 0.0}})})).find("\"ok\":true") !=
           std::string::npos);
     e.play();
-    // Its output, metered again by a meter of our own: the engine's reading is that of what it played.
+    // Asleep until read (2026-11-27): the first read reports nothing measured and wakes it.
+    const LoudnessMeter::Reading first = e.loudness();
+    CHECK_EQ(first.momentary, kMeterNone);
+    CHECK_EQ(first.integrated, kMeterNone);
+    CHECK_EQ(first.integratedSeconds, 0.0);
+    // Its output from then on, metered again by a meter of our own: the engine's reading is that of what it played.
     LoudnessMeter mine;
     mine.prepare(48000);
     std::vector<float> l(256), r(256);
@@ -244,6 +250,44 @@ TEST(the_engine_meters_the_masters_loudness_and_each_layers_correlation) {
     caw_engine_loudness(h, &cl);
     CHECK_EQ(cl.integrated_lufs, CAW_METER_NONE);
     CHECK_EQ(cl.integrated_seconds, 0.0f);
+}
+
+TEST(the_masters_loudness_meter_sleeps_until_read_and_measures_from_that_read) {
+    // 2026-11-27: the app never reads it, so it costs nothing until something does. Unread, the audio is the same
+    // bits as with it measuring; the read that wakes it reports nothing, and it measures from there.
+    Engine e(48000), awake(48000);
+    for (Engine* x : {&e, &awake})
+        CHECK(x->setProject(chordTrack({})).find("\"ok\":true") != std::string::npos);
+    e.play();
+    awake.play();
+    (void)awake.loudness();  // measuring from the first block
+    std::vector<float> l(256), r(256), l2(256), r2(256);
+    bool same = true;
+    for (int k = 0; k < 48000 * 3 / 256; ++k) {
+        e.process(l.data(), r.data(), 256);
+        awake.process(l2.data(), r2.data(), 256);
+        same = same && std::memcmp(l.data(), l2.data(), sizeof(float) * 256) == 0 &&
+               std::memcmp(r.data(), r2.data(), sizeof(float) * 256) == 0;
+    }
+    CHECK(same);
+    CHECK(awake.loudness().integratedSeconds > 2.5);
+    const LoudnessMeter::Reading woke = e.loudness();
+    CHECK_EQ(woke.momentary, kMeterNone);
+    CHECK_EQ(woke.shortTerm, kMeterNone);
+    CHECK_EQ(woke.integrated, kMeterNone);
+    CHECK_EQ(woke.truePeakMax, kMeterNone);
+    CHECK_EQ(woke.integratedSeconds, 0.0);
+    LoudnessMeter mine;
+    mine.prepare(48000);
+    for (int k = 0; k < 48000 * 2 / 256; ++k) {
+        e.process(l.data(), r.data(), 256);
+        mine.process(l.data(), r.data(), 256);
+    }
+    const LoudnessMeter::Reading got = e.loudness(), want = mine.read();
+    CHECK(got.momentary > -40 && got.momentary < 0);
+    CHECK_EQ(got.momentary, want.momentary);
+    CHECK_EQ(got.integrated, want.integrated);
+    CHECK_EQ(got.integratedSeconds, want.integratedSeconds);
 }
 
 TEST(a_track_with_one_side_inverted_reads_negative_correlation) {

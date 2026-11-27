@@ -168,7 +168,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     masterRetires_ = std::make_unique<RetireList>();
     loudness_->prepare(sampleRate);
-    loudness_->sleepWhenUnread(true);  // it measures while something reads it (meters.h)
+    loudness_->sleepWhenUnread(true);  // asleep until read, then measures while something reads it (meters.h)
     audioIn_ = std::make_unique<LiveAudio>(sampleRate);
     masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
