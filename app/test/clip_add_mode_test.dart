@@ -167,20 +167,76 @@ void main() {
       expect(_v(m, 40), closeTo(0.1, 1e-12));
     });
 
-    test('a span\'s sample times past the limit are thinned evenly and the same each time', () {
-      final base = [for (var i = 0; i <= 1000; i++) _p(i * 0.032, (i % 2) * 0.2)];
+    test('add parts past the cap are thinned evenly, the same each time, and the base after them is kept', () {
+      final base = [_p(0, 0), for (var i = 1; i < 1000; i++) _p(4 + i * 0.008, (i % 2) * 0.2), _p(20, 0.5), _p(32, -0.5)];
       final local = [for (var i = 0; i <= 1000; i++) _p(i * 0.0079, (i % 3) * 0.1)];
       List<AutomationPointDoc> run() =>
-          mergeClipLanes(base, 0, [_span(_clip(4, 8), local, 8, _add)], rule: _pan, limit: 100);
+          mergeClipLanes(base, 0, [_span(_clip(4, 8), local, 8, _add)], rule: _pan, cap: 200);
       final a = run(), b = run();
-      final inside = a.where((p) => p.step > 4 && p.step < 12).length;
-      expect(inside, lessThanOrEqualTo(2 * 100));
-      expect(inside, greaterThan(50));
+      expect(a.length, lessThanOrEqualTo(200));
+      expect(a.where((p) => p.step > 4 && p.step < 12).length, greaterThan(100));
       expect([for (final p in a) (p.step, p.value)], [for (final p in b) (p.step, p.value)]);
       expect(_v(a, 4), closeTo(_v(base, 4) + _v(local, 0), 1e-12), reason: 'the span\'s ends stay exact');
-      // Without the limit every breakpoint of both lanes inside the clip is sampled.
+      expect(_v(a, 16), closeTo(_v(base, 16), 1e-12));
+      expect((a.last.step, a.last.value), (32.0, -0.5), reason: 'the base after the clip is never cut');
+      // Under the cap every breakpoint of both lanes inside the clip is sampled.
       final full = mergeClipLanes(base, 0, [_span(_clip(4, 8), local, 8, _add)], rule: _pan);
       expect(full.where((p) => p.step > 4 && p.step < 12).length, greaterThan(1000));
+    });
+
+    test('a step lane adds one point per jump, as many as it overrides with', () {
+      final local = [for (var i = 0; i < 64; i++) _p(i * 0.25, (i % 4) * 0.1, AutomationCurve.step)];
+      final over = mergeClipLanes([_p(0, 0.2)], 0, [_span(_clip(0, 16), local, 16, _over)], rule: _pan);
+      final add = mergeClipLanes([_p(0, 0.2)], 0, [_span(_clip(0, 16), local, 16, _add)], rule: _pan);
+      expect(add.length, lessThanOrEqualTo(over.length + 2));
+      for (var at = 0.0; at < 16; at += 0.125) {
+        expect(_v(add, at), closeTo(0.2 + _v(local, at), 1e-12), reason: 'step $at');
+      }
+    });
+
+    test('a long looped step lane at the point budget keeps the base lane after the clip', () {
+      // 4 step points a 1-step loop over a clip of 2^15 steps: clipLaneSpan fills the whole budget.
+      final local = [for (var i = 0; i < 4; i++) _p(i * 0.25, i * 0.1, AutomationCurve.step)];
+      final clip = _clip(0, 1 << 15, loop: true);
+      final span = _span(clip, local, 1, _add);
+      expect(span.points.length, greaterThanOrEqualTo(kMaxClipLanePoints));
+      final end = (1 << 15).toDouble();
+      final after = [for (var i = 0; i < 2000; i++) _p(end + 1 + i, (i % 5) * 0.1)];
+      final base = [_p(0, -0.3), _p(end, -0.3), ...after];
+      final m = mergeClipLanes(base, 0, [span], rule: _pan);
+      expect(m.length, lessThanOrEqualTo(kMaxClipLanePoints * 2));
+      final tail = [for (final p in m) if (p.step > end) (p.step, p.value)];
+      expect(tail, [for (final p in after) (p.step, p.value)]);
+      expect(_v(m, 100.5), closeTo(-0.3 + 0.2, 1e-12));
+    });
+
+    test('a curved lane of 65,536 points stays in the cap and keeps the base after it', () {
+      final local = [for (var i = 0; i < kMaxClipLanePoints; i++) _p(i / 16, (i % 7) * 0.05, AutomationCurve.slow)];
+      final len = kMaxClipLanePoints ~/ 16;
+      final after = [for (var i = 0; i < 500; i++) _p(len + 1.0 + i, (i % 3) * 0.2)];
+      final base = [for (var i = 0; i < len; i += 2) _p(i.toDouble(), 0.1, AutomationCurve.fast), ...after];
+      final m = mergeClipLanes(base, 0, [_span(_clip(0, len), local, len, _add)], rule: _pan);
+      expect(m.length, lessThanOrEqualTo(kMaxClipLanePoints * 2));
+      // (The base's bent segment from inside the clip to its first point after is followed in pieces, as before.)
+      expect([for (final p in m) if (p.step >= len + 1) (p.step, p.value)], [for (final p in after) (p.step, p.value)]);
+    });
+
+    test('several add clips and overlaps share the cap; the base around them is kept', () {
+      final base = [for (var i = 0; i <= 100; i++) _p(i * 1.0, (i % 2) * 0.1)];
+      List<AutomationPointDoc> dense(int n) => [for (var i = 0; i < n; i++) _p(i * 0.05, (i % 3) * 0.1)];
+      final spans = [
+        _span(_clip(10, 20), dense(400), 20, _add),
+        _span(_clip(20, 20), dense(400), 20, _add), // overlaps the first
+        _span(_clip(25, 5), [_p(0, 0.7)], 5, _over), // an override inside both
+        _span(_clip(50, 20), dense(400), 20, _add),
+      ];
+      final m = mergeClipLanes(base, 0, spans, rule: _pan, cap: 600);
+      expect(m.length, lessThanOrEqualTo(600));
+      expect(_v(m, 27), closeTo(0.7, 1e-12));
+      for (final at in [0.0, 5.0, 9.0, 45.0, 75.0, 90.5, 100.0]) {
+        expect(_v(m, at), closeTo(_v(base, at), 1e-12), reason: 'base at $at');
+      }
+      expect(_v(m, 10), closeTo(_v(base, 10), 1e-12), reason: 'an add span starts at the base plus its first value, 0');
     });
   });
 

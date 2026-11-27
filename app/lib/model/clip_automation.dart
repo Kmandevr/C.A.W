@@ -255,10 +255,12 @@ int _shape(List<_P> pts, double a, double b) {
 /// clip's lane plays instead. Where clips with lanes on the target overlap, the one that starts later wins (the later
 /// one in [spans] on a tie); after it ends, the one under it plays again. An add-mode clip ([ClipLaneMode.add]) plays
 /// the base plus its offset by [rule] (default: a parameter's), sampled at every point of either lane inside it so the
-/// sum is exact at both lanes' breakpoints; it adds to the base, never to another clip. A span's sample times past
-/// [limit] are thinned evenly ([_decimate]).
+/// sum is exact at both lanes' breakpoints; it adds to the base, never to another clip. The merged lane holds at most
+/// [cap] points: when the add-mode parts would take it past that, they share what the rest leaves, each in proportion
+/// to what it needed, and thin their sample times evenly to fit ([_decimate]); the base and override parts are never
+/// cut for them (only those parts alone past [cap] are cut at its end, as before add mode).
 List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double baseValue, List<ClipLaneSpan> spans,
-    {ClipAddRule? rule, int limit = kMaxClipLanePoints}) {
+    {ClipAddRule? rule, int cap = kMaxClipLanePoints * 2}) {
   final baseP = base.isEmpty
       ? <_P>[_flat(0, baseValue)]
       : [for (final p in base) _of(p)]..sort((a, b) => a.step.compareTo(b.step));
@@ -279,71 +281,104 @@ List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double ba
   }
 
   final r = rule ?? clipAddRuleFor('instrument', '');
-  // base(t) + (clip(t) - centre) between x and y of [s], in its rule's terms, as points.
-  void addOver(ClipLaneSpan s, double x, double y) {
+  // base(t) + (clip(t) - centre) between x and y of [s], in its rule's terms: at most [share] points (at least 4).
+  List<_P> addOver(ClipLaneSpan s, double x, double y, int share) {
     final c = s.points;
     final centre = r.centre ?? _right(baseP, s.start);
     double raw(double b, double v) => r.gain ? (centre == 0 ? 0 : b * v / centre) : b + (v - centre);
     double sum(double b, double v) => raw(b, v).clamp(r.min, r.max).toDouble();
-    final times = <double>{x, y};
+    final set = <double>{x, y};
     for (final src in [c, baseP]) {
       for (var j = math.max(0, _at(src, x)); j < src.length && src[j].step < y; j++) {
-        if (src[j].step > x) times.add(src[j].step);
+        if (src[j].step > x) set.add(src[j].step);
       }
     }
-    final ts = _decimate(times.toList()..sort(), limit);
-    var made = 0;
-    void put(_P q) {
-      add(q);
-      made++;
-    }
+    final times = set.toList()..sort();
 
-    for (var k = 0; k < ts.length; k++) {
-      final t = ts[k];
-      if (k > 0) put(_flat(t, sum(_left(baseP, t), _left(c, t)))); // the value arriving at t
-      if (k + 1 == ts.length) break;
-      final next = ts[k + 1];
-      final u0 = raw(_right(baseP, t), _right(c, t)), u1 = raw(_left(baseP, next), _left(c, next));
-      put(_flat(t, u0.clamp(r.min, r.max).toDouble()));
-      final sb = _shape(baseP, t, next), sc = _shape(c, t, next);
-      // A curve, or two moving gains multiplied (not a straight line): straight pieces along the sum.
-      if (sb == 2 || sc == 2 || (r.gain && sb == 1 && sc == 1)) {
-        if (made + _cutPieces <= 2 * limit) {
-          for (var j = 1; j < _cutPieces; j++) {
-            final at = t + (next - t) * j / _cutPieces;
-            put(_flat(at, sum(_right(baseP, at), _right(c, at))));
+    List<_P> at(List<double> ts) {
+      final pts = <_P>[];
+      var flatBefore = false; // the piece arriving at this time is flat: one point with a step curve stands for it
+      for (var k = 0; k < ts.length; k++) {
+        final t = ts[k];
+        final last = k + 1 == ts.length;
+        final arrive = k > 0 ? sum(_left(baseP, t), _left(c, t)) : null;
+        final leave = last ? null : raw(_right(baseP, t), _right(c, t));
+        final leaving = leave?.clamp(r.min, r.max).toDouble();
+        if (arrive != null && (leaving == null || arrive != leaving)) {
+          if (flatBefore && leaving != null && pts.isNotEmpty && pts.last.value == arrive) {
+            pts[pts.length - 1] = (step: pts.last.step, value: arrive, curve: AutomationCurve.step, tension: 0.0); // a jump
+          } else {
+            pts.add(_flat(t, arrive));
           }
         }
-      } else {
-        // A straight sum meeting the range's edge bends there: a point where it does.
-        final cuts = <(double, double)>[
-          for (final edge in [r.min, r.max])
-            if ((u0 - edge) * (u1 - edge) < 0) ((edge - u0) / (u1 - u0), edge),
-        ]..sort((a, b) => a.$1.compareTo(b.$1));
-        for (final (f, edge) in cuts) {
-          put(_flat(t + (next - t) * f, edge));
+        if (last) break;
+        final next = ts[k + 1];
+        final u1 = raw(_left(baseP, next), _left(c, next));
+        pts.add(_flat(t, leaving!));
+        final sb = _shape(baseP, t, next), sc = _shape(c, t, next);
+        flatBefore = false;
+        // A curve, or two moving gains multiplied (not a straight line): straight pieces along the sum, while they fit.
+        if (sb == 2 || sc == 2 || (r.gain && sb == 1 && sc == 1)) {
+          if (pts.length + _cutPieces + 2 * (ts.length - k) <= share) {
+            for (var j = 1; j < _cutPieces; j++) {
+              final a = t + (next - t) * j / _cutPieces;
+              pts.add(_flat(a, sum(_right(baseP, a), _right(c, a))));
+            }
+          }
+        } else {
+          // A straight sum meeting the range's edge bends there: a point where it does.
+          final cuts = <(double, double)>[
+            for (final edge in [r.min, r.max])
+              if ((leave! - edge) * (u1 - edge) < 0) ((edge - leave) / (u1 - leave), edge),
+          ]..sort((a, b) => a.$1.compareTo(b.$1));
+          for (final (f, edge) in cuts) {
+            pts.add(_flat(t + (next - t) * f, edge));
+          }
+          flatBefore = cuts.isEmpty && sb == 0 && sc == 0;
         }
       }
+      return pts;
+    }
+
+    // Fewer sample times until it fits: each costs at most 4 points without pieces, so two (the ends) always do.
+    var n = math.min(times.length, math.max(2, share));
+    while (true) {
+      final pts = at(_decimate(times, n));
+      if (pts.length <= share || n <= 2) return pts;
+      n = math.max(2, math.min(n - 1, n * share ~/ pts.length));
     }
   }
 
-  _range(baseP, null, bounds.first, add);
-  for (var i = 0; i + 1 < bounds.length; i++) {
-    final x = bounds[i], y = bounds[i + 1];
-    ClipLaneSpan? winner;
-    for (final (_, s) in ranked) {
-      if (s.start <= x && s.end >= y) winner = s;
+  final addNeed = <int, int>{}; // add-mode interval -> the points it made
+  void build(Map<int, int>? shares) {
+    out.clear();
+    _range(baseP, null, bounds.first, add);
+    for (var i = 0; i + 1 < bounds.length; i++) {
+      final x = bounds[i], y = bounds[i + 1];
+      ClipLaneSpan? winner;
+      for (final (_, s) in ranked) {
+        if (s.start <= x && s.end >= y) winner = s;
+      }
+      if (winner != null && winner.mode == ClipLaneMode.add) {
+        final pts = addOver(winner, x, y, shares?[i] ?? 1 << 40);
+        addNeed[i] = pts.length;
+        pts.forEach(add);
+      } else {
+        _range(winner?.points ?? baseP, x, y, add);
+      }
     }
-    if (winner != null && winner.mode == ClipLaneMode.add) {
-      addOver(winner, x, y);
-    } else {
-      _range(winner?.points ?? baseP, x, y, add);
-    }
+    _range(baseP, bounds.last, null, add);
   }
-  _range(baseP, bounds.last, null, add);
+
+  build(null);
+  if (out.length > cap && addNeed.isNotEmpty) {
+    // The add parts share what the base and override parts leave (less a little for joins merged at the bounds).
+    final need = addNeed.values.fold(0, (a, b) => a + b);
+    final budget = math.max(0, cap - (out.length - need) - 2 * addNeed.length);
+    build({for (final MapEntry(:key, :value) in addNeed.entries) key: math.max(4, budget * value ~/ need)});
+  }
   return [
-    for (final p in out.take(kMaxClipLanePoints * 2))
-      AutomationPointDoc(step: p.step, value: p.value, curve: p.curve, tension: p.tension),
+    for (final p in out.take(cap)) AutomationPointDoc(step: p.step, value: p.value, curve: p.curve, tension: p.tension),
   ];
 }
 
