@@ -151,7 +151,7 @@ int dynsplitCost(double seconds) {
         {"Duck: Carve, 16 bands, linked", "org.caw.duck", {{"variant", 2}}, fx::duckCarveBytes(), 8000},
         // 24 bands is the High setting: the heavy budget.
         {"Duck: Carve, 24 bands, Mid/Side", "org.caw.duck", {{"variant", 2}, {"bands", 1}, {"stereo", 2}}, fx::duckCarveBytes(), 24000},
-        {"Tremolo/Pan: Shape (the old ducker, for scale)", "org.caw.tremolo", {{"variant", 2}}, 0, 8000},
+        {"Tremolo/Pan: Shape (the old ducker, for scale)", "org.caw.tremolo", {{"variant", 2}}, 0, 3000},  // 2026-11-27 effects pass: about 2,100 here
     };
     int over = 0;
     std::printf("1.1.0 dynamics split (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");

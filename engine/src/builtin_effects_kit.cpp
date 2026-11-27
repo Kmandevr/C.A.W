@@ -14,6 +14,7 @@
 #include "caw/library/lfo.hpp"
 #include "caw/library/stereo.hpp"
 #include "fx_merged.h"
+#include "stereo_pair.h"
 
 // Original code (C.A.W. is Apache-2.0), on the Library's filters and LFO.
 
@@ -273,8 +274,8 @@ protected:
         return true;
     }
     void clearState() noexcept override {
-        for (auto& c : z_) for (double& v : c) v = 0.0;
-        last_[0] = last_[1] = 0.0;
+        for (Pair& v : z_) v = splat(0.0);
+        last_ = splat(0.0);
         lfo_.clear();
         coef_[0].reset(), coef_[1].reset(), mix_.reset();
     }
@@ -294,26 +295,42 @@ protected:
         feedback_ = std::clamp(param(kPFeedback, at), -0.95, 0.95);
         mix_.set(std::clamp(param(kPMix, at), 0.0, 1.0), kControlFrames);
     }
+    // Both channels as one Pair (2026-11-27): each lane the arithmetic the channel-by-channel loop had, in its
+    // order (the same bits), with the stage count a template so the chain's states stay in registers.
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
-        for (uint32_t i = 0; i < n; ++i) {
-            const double x[2] = {inL[i], inR[i]};
-            const double m = mix_.next();
-            double y[2];
-            for (int c = 0; c < 2; ++c) {
-                const double a = coef_[c].next();
-                double s = x[c] + feedback_ * last_[c];
-                for (uint32_t k = 0; k < stages_; ++k) {
-                    const double o = a * s + z_[c][k];
-                    z_[c][k] = s - a * o;
-                    if (z_[c][k] < 1e-20 && z_[c][k] > -1e-20) z_[c][k] = 0.0;
-                    s = o;
-                }
-                last_[c] = s;
-                y[c] = x[c] + (s - x[c]) * m;
-            }
-            outL[i] = static_cast<float>(y[0]);
-            outR[i] = static_cast<float>(y[1]);
+        switch (stages_) {
+            case 2: return runStages<2>(inL, inR, outL, outR, n);
+            case 4: return runStages<4>(inL, inR, outL, outR, n);
+            case 6: return runStages<6>(inL, inR, outL, outR, n);
+            case 8: return runStages<8>(inL, inR, outL, outR, n);
+            case 10: return runStages<10>(inL, inR, outL, outR, n);
+            default: return runStages<12>(inL, inR, outL, outR, n);
         }
+    }
+    template <uint32_t N>
+    void runStages(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept {
+        Pair z[N];
+        for (uint32_t k = 0; k < N; ++k) z[k] = z_[k];
+        Pair last = last_;
+        const Pair fb = splat(feedback_);
+        for (uint32_t i = 0; i < n; ++i) {
+            const Pair x = pairOf(inL[i], inR[i]);
+            const double m = mix_.next();
+            const double al = coef_[0].next(), ar = coef_[1].next();
+            const Pair a = pairOf(al, ar);
+            Pair s = x + fb * last;
+            for (uint32_t k = 0; k < N; ++k) {
+                const Pair o = a * s + z[k];
+                z[k] = flushPair(s - a * o);
+                s = o;
+            }
+            last = s;
+            const Pair y = x + (s - x) * splat(m);
+            outL[i] = static_cast<float>(lane(y, 0));
+            outR[i] = static_cast<float>(lane(y, 1));
+        }
+        for (uint32_t k = 0; k < N; ++k) z_[k] = z[k];
+        last_ = last;
     }
     uint32_t fillDisplay(float* out, bool) noexcept override {
         out[0] = inPeakDb();
@@ -327,7 +344,8 @@ protected:
     }
 
 private:
-    double z_[2][kMaxStages] = {}, last_[2] = {}, feedback_ = 0.4, freq_[2] = {700, 700};
+    Pair z_[kMaxStages] = {}, last_ = {};  // lane 0 the left, 1 the right
+    double feedback_ = 0.4, freq_[2] = {700, 700};
     uint32_t stages_ = 6;
     StereoLfo lfo_;
     Ramp coef_[2], mix_;

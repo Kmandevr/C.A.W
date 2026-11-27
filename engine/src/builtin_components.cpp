@@ -10,6 +10,7 @@
 #include "builtin_fx_merged_stereomod.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 
 #include "caw/detmath.hpp"
@@ -157,7 +158,15 @@ public:
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
-        if (steadyKnobs(b, 5) && static_cast<int>(paramAt(b, 0, 0, 0.0)) == 0) return processDrive(b);
+        if (steadyKnobs(b, 5)) {
+            switch (static_cast<int>(paramAt(b, 0, 0, 0.0))) {
+                case 0: return processDrive(b);
+                case 1: return processSteady<1>(b);
+                case 2: return processSteady<2>(b);
+                case 3: return processSteady<3>(b);
+                default: break;
+            }
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
@@ -211,6 +220,33 @@ private:
             const float yl = shape(l, saturator_.processApprox(l));
             outL[i] = yl;
             outR[i] = r == l ? yl : shape(r, saturator_.processApprox(r));
+        }
+        return true;
+    }
+
+    // Clip, fold or crush with every knob holding still: the knobs read once and the shape chosen once for the
+    // block (2026-11-27: the loop above's arithmetic sample by sample, so the same bits).
+    template <int Shape>
+    bool processSteady(const AudioProcessBlock& b) noexcept {
+        const double amount = paramAt(b, 1, 0, 4.0), bits = paramAt(b, 2, 0, 8.0);
+        const double mix = paramAt(b, 3, 0, 1.0), out = paramAt(b, 4, 0, 1.0);
+        if (Shape == 3 && bits != bits_) {
+            bits_ = bits;
+            const double whole = bits < 1.0 ? 1.0 : (bits > 24.0 ? 24.0 : bits);
+            steps_ = detPow(2.0, std::floor(whole) - 1.0);
+        }
+        const double steps = steps_;
+        for (uint32_t c = 0; c < 2; ++c) {
+            const float* in = b.input.channels[c];
+            float* o = b.output.channels[c];
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                const double x = in[i];
+                double y;
+                if (Shape == 1) y = lib::hardClip(x, amount);
+                else if (Shape == 2) y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25);
+                else y = std::floor(finiteOr0(x) * steps + 0.5) / steps;
+                o[i] = static_cast<float>((x + (y - x) * mix) * out);
+            }
         }
         return true;
     }
@@ -346,6 +382,7 @@ public:
     void reset() noexcept override {
         chorus_.clear();
         left_ = 0;
+        zeroRun_ = 0;
     }
     using ModuleProcessor::process;
     // The LFO runs at the control rate (lib::Chorus::control every 16 frames, carried across blocks so a
@@ -354,6 +391,24 @@ public:
         if (!stereo(b)) return false;
         if (steadyKnobs(b, 3)) {  // the knobs read once (the same bits as the loop below)
             const double rate = paramAt(b, 0, 0, 0.6), depth = paramAt(b, 1, 0, 0.5), mix = paramAt(b, 2, 0, 0.5);
+            // Silence into a line of zeros (2026-11-27): every output frame is +0 and only the sweep and write
+            // position move, so they are moved without the reads (the same state and the same bits as the loop).
+            if (zeroRun_ >= chorus_.lineFrames() && mix == mix && mix - mix == 0.0 && silentInput(b)) {
+                for (uint32_t i = 0; i < b.frames;) {
+                    if (left_ == 0) {
+                        chorus_.control(rate, depth, kControlFrames);
+                        left_ = kControlFrames;
+                    }
+                    const uint32_t n = std::min(left_, b.frames - i);
+                    chorus_.stepSilent(n);
+                    left_ -= n;
+                    for (uint32_t k = 0; k < n; ++k) b.output.channels[0][i + k] = b.output.channels[1][i + k] = 0.0f;
+                    i += n;
+                }
+                zeroRun_ += b.frames;
+                return true;
+            }
+            countZeros(b);
             for (uint32_t i = 0; i < b.frames; ++i) {
                 if (left_ == 0) {
                     chorus_.control(rate, depth, kControlFrames);
@@ -367,6 +422,7 @@ public:
             }
             return true;
         }
+        countZeros(b);
         for (uint32_t i = 0; i < b.frames; ++i) {
             if (left_ == 0) {
                 chorus_.control(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), kControlFrames);
@@ -382,9 +438,25 @@ public:
     }
 
 private:
+    static bool silentInput(const AudioProcessBlock& b) noexcept {
+        uint32_t any = 0;
+        for (uint32_t i = 0; i < b.frames; ++i) any |= std::bit_cast<uint32_t>(b.input.channels[0][i]) | std::bit_cast<uint32_t>(b.input.channels[1][i]);
+        return any == 0;
+    }
+    // zeroRun_: the frames of +0 written to the line since the last other value (the line holds only +0 from its
+    // length on), counted over this block's input (what process() writes: finiteOr0 keeps a +0 a +0).
+    void countZeros(const AudioProcessBlock& b) noexcept {
+        uint32_t last = 0;  // 1 + the last frame that is not +0 on both sides
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            const uint32_t bits = std::bit_cast<uint32_t>(b.input.channels[0][i]) | std::bit_cast<uint32_t>(b.input.channels[1][i]);
+            last = bits ? i + 1 : last;
+        }
+        zeroRun_ = last ? b.frames - last : zeroRun_ + b.frames;
+    }
     static constexpr uint32_t kControlFrames = 16;
     lib::Chorus chorus_;
     uint32_t left_ = 0;  // frames until the next control
+    uint64_t zeroRun_ = 0;
 };
 
 

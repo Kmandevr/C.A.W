@@ -149,6 +149,23 @@ protected:
         // A band waiting to switch type or channel is not steady: its switch happens in a later control.
         // Dynamic bands are work at every control (their gains follow their detectors), but only their own: the
         // knobs are read again only when one moved.
+        // The stereo bands' states settle to 0 when tiny here, on the control grid (the same at any block size),
+        // instead of at every sample in runStereo (2026-11-27: a third fewer operations per stage; class B, the
+        // difference stays below -400 dBFS).
+        for (uint32_t a = 0; a < active_; ++a) {
+            Band& band = bands_[order_[a]];
+            if (band.channel != kStereo) continue;
+            for (int k = 0; k < band.filter.stages(); ++k)
+                for (lib::SvfState* st : {&band.left[k], &band.right[k]}) {
+                    if (st->ic1 < 1e-20 && st->ic1 > -1e-20) st->ic1 = 0.0;
+                    if (st->ic2 < 1e-20 && st->ic2 > -1e-20) st->ic2 = 0.0;
+                }
+        }
+        for (auto* side : {soloL_, soloR_})  // the solo's listening filter runs runStereo too
+            for (int k = 0; k < lib::EqFilter::kMaxStages; ++k) {
+                if (side[k].ic1 < 1e-20 && side[k].ic1 > -1e-20) side[k].ic1 = 0.0;
+                if (side[k].ic2 < 1e-20 && side[k].ic2 > -1e-20) side[k].ic2 = 0.0;
+            }
         const bool same = knobsUnchanged(knobs_, kParamCount, at);
         if (same && !first_ && !pending_) {
             bool fading = false;
@@ -333,8 +350,8 @@ protected:
                 const Pair v3 = x - ic2;
                 const Pair v1 = a1 * ic1 + a2 * v3;
                 const Pair v2 = ic2 + a2 * ic1 + a3 * v3;
-                ic1 = flushPair(two * v1 - ic1);
-                ic2 = flushPair(two * v2 - ic2);
+                ic1 = two * v1 - ic1;  // settled at the control points (control())
+                ic2 = two * v2 - ic2;
                 y[i] = m0 * x + m1 * v1 + m2 * v2;
             }
             left[k].ic1 = lane(ic1, 0), right[k].ic1 = lane(ic1, 1);

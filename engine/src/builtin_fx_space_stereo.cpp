@@ -7,6 +7,7 @@
 #include <new>
 
 #include "caw/library/filter.hpp"
+#include "simd_fx.h"
 
 // Original code (C.A.W. is Apache-2.0).
 
@@ -181,7 +182,7 @@ protected:
         for (auto& f : hi_) f.clear();
         for (auto& f : lo2_) f.clear();
         for (auto& f : hi2_) f.clear();
-        for (auto& f : ap_) f.clear();
+        ap_.clear();
         for (auto& r : width_) r.reset();
         mid_.reset(), side_.reset();
         for (auto& m : band_) m.clear();
@@ -191,20 +192,17 @@ protected:
     }
     void control(uint32_t at) noexcept override {
         // Recursive states flushed once per control block (on the grid: the same at any block size).
-        for (auto& f : lo_) f.flushDenormals();
-        for (auto& f : hi_) f.flushDenormals();
-        for (auto& f : lo2_) f.flushDenormals();
-        for (auto& f : hi2_) f.flushDenormals();
-        for (auto& f : ap_) f.flushDenormals();
+        for (auto& f : lo_) f.flush();
+        for (auto& f : hi_) f.flush();
+        for (auto& f : lo2_) f.flush();
+        for (auto& f : hi2_) f.flush();
+        ap_.flush();
         const double sr = rate();
         const double f1 = param(kILowFreq, at), f2 = std::max(param(kIHighFreq, at), f1 * 1.5);
         constexpr double q = 0.70710678118654752;
-        for (int c = 0; c < 2; ++c)
-            for (int s = 0; s < 2; ++s) {
-                lo_[2 * c + s].set(f1, q, sr), hi_[2 * c + s].set(f1, q, sr);
-                lo2_[2 * c + s].set(f2, q, sr), hi2_[2 * c + s].set(f2, q, sr);
-            }
-        for (auto& f : ap_) f.set(f2, q, sr);
+        x1_.set(f1, q, sr), x2_.set(f2, q, sr);  // each caches its coefficients
+        for (int s = 0; s < 2; ++s) lo_[s].like(x1_), hi_[s].like(x1_), lo2_[s].like(x2_), hi2_[s].like(x2_);
+        ap_.like(x2_);
         width_[0].set(std::clamp(param(kILowWidth, at), 0.0, 2.0), kControlFrames);
         width_[1].set(std::clamp(param(kIMidWidth, at), 0.0, 2.0), kControlFrames);
         width_[2].set(std::clamp(param(kIHighWidth, at), 0.0, 2.0), kControlFrames);
@@ -212,19 +210,32 @@ protected:
         mid_.set(lib::dbToGain(param(kIMidGain, at)) * out, kControlFrames);
         side_.set(lib::dbToGain(param(kISideGain, at)) * out, kControlFrames);
     }
-    // The 4th-order sections of channel c's crossover (two Svf in series), and the low band's all-pass.
-    double lp(lib::Svf* f, int c, double x) noexcept { return f[2 * c + 1].lowpass(f[2 * c].lowpass(x)); }
-    double hp(lib::Svf* f, int c, double x) noexcept { return f[2 * c + 1].highpass(f[2 * c].highpass(x)); }
+    // The 4th-order sections of the crossover (two Svf in series), both channels in one Pair's lanes (2026-11-27:
+    // each lane lib::Svf's arithmetic, so the same bits), and the low band's all-pass.
+    static Pair lp(fxsimd::SvfLanes* f, Pair x) noexcept {
+        Pair low, band;
+        f[0].step(x, low, band);
+        f[1].step(low, low, band);
+        return low;
+    }
+    static Pair hp(fxsimd::SvfLanes* f, Pair x) noexcept {
+        Pair low, band;
+        f[0].step(x, low, band);
+        const Pair h = f[0].high(low, band);
+        f[1].step(h, low, band);
+        return f[1].high(low, band);
+    }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         for (uint32_t i = 0; i < n; ++i) {
-            const double x[2] = {inL[i], inR[i]};
+            const Pair xx = pairOf(inL[i], inR[i]);
             double b[3][2];
-            for (int c = 0; c < 2; ++c) {
-                const double low = lp(lo_, c, x[c]), rest = hp(hi_, c, x[c]);
-                const lib::SvfOutput a = ap_[c].process(low);
-                b[0][c] = a.notch - 1.4142135623730951 * a.band;  // the upper crossover's 2nd-order all-pass
-                b[1][c] = lp(lo2_, c, rest);
-                b[2][c] = hp(hi2_, c, rest);
+            {
+                const Pair low = lp(lo_, xx), rest = hp(hi_, xx);
+                Pair aLow, aBand;
+                ap_.step(low, aLow, aBand);
+                const Pair b0 = ap_.notch(aBand) - splat(1.4142135623730951) * aBand;  // the upper crossover's 2nd-order all-pass
+                const Pair b1 = lp(lo2_, rest), b2 = hp(hi2_, rest);
+                for (int c = 0; c < 2; ++c) b[0][c] = lane(b0, c), b[1][c] = lane(b1, c), b[2][c] = lane(b2, c);
             }
             double mid = 0.0, side = 0.0;
             for (int k = 0; k < 3; ++k) {
@@ -267,7 +278,8 @@ protected:
     }
 
 private:
-    lib::Svf lo_[4], hi_[4], lo2_[4], hi2_[4], ap_[2];
+    lib::Svf x1_, x2_;  // the designs at the two crossovers
+    fxsimd::SvfLanes lo_[2], hi_[2], lo2_[2], hi2_[2], ap_;
     Ramp width_[3], mid_, side_;
     StereoMeter band_[3], meter_;
     float scope_[2 * kScopePoints] = {};

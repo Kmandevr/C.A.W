@@ -1,4 +1,5 @@
 // The trance gate (fx-creative): "org.caw.trancegate", a drawn pattern of 8, 16 or 32 steps opening the sound with an envelope on each step, with swing.
+#include <cstdint>
 #include <cmath>
 #include <string>
 
@@ -74,8 +75,11 @@ protected:
         const bool playing = beatAt(at, beat);
         clock_.control(playing, beat, stepBeats, tempo(), sr);
         attackStep_ = 1.0 / std::max(1.0, param(kAttack, at) * 0.001 * sr);
-        decayCoef_ = lib::timeCoefficient(param(kDecay, at) * 0.001 / 3.0, sr);  // the decay time to about -26 dB
-        releaseCoef_ = lib::timeCoefficient(param(kRelease, at) * 0.001 / 3.0, sr);
+        // Each coefficient (an exp) worked out again only when its time or the rate moved (the same values).
+        const double decay = param(kDecay, at) * 0.001 / 3.0, release = param(kRelease, at) * 0.001 / 3.0;
+        if (decay != decayFor_ || sr != rateFor_) decayFor_ = decay, decayCoef_ = lib::timeCoefficient(decay, sr);  // the decay time to about -26 dB
+        if (release != releaseFor_ || sr != rateFor_) releaseFor_ = release, releaseCoef_ = lib::timeCoefficient(release, sr);
+        rateFor_ = sr;
         sustain_ = clampTo(param(kSustain, at), 0.0, 1.0);
         length_ = clampTo(param(kLength, at), 0.05, 1.0);
         swing_ = clampTo(param(kSwing, at), 0.0, 1.0) * 0.5;  // at most half a step late
@@ -88,14 +92,17 @@ protected:
             // Where we are: pairs of steps, the second of each pair starting `swing_` of a step late.
             const double pos = clock_.pos < 0.0 ? 0.0 : clock_.pos;
             clock_.advance();
-            const double pair = std::floor(pos * 0.5);
+            const double half = pos * 0.5;  // floor without a library call where floorSmall is exact (the same value)
+            const double pair = half < 2147483648.0 ? lib::fast_detail::floorSmall(half) : std::floor(half);
             const double inPair = pos - 2.0 * pair;  // 0 .. 2
             const double split = 1.0 + swing_;
             const bool second = inPair >= split;
             const double into = second ? inPair - split : inPair;               // steps into this step
             const double span = second ? 2.0 - split : split;                   // this step's length in steps
             const auto index = static_cast<int64_t>(2.0 * pair) + (second ? 1 : 0);
-            const int k = static_cast<int>(((index % count_) + count_) % count_);
+            // The step's place in the pattern: two divisions worked out only when the step or the count changed.
+            if (index != kIndex_ || count_ != kCount_) kIndex_ = index, kCount_ = count_, kNow_ = static_cast<int>(((index % count_) + count_) % count_);
+            const int k = kNow_;
             const double level = level_[k];
             if (index != step_) {
                 step_ = index;
@@ -148,6 +155,9 @@ private:
     double length_ = 0.5, swing_ = 0.0;
     int count_ = 16, stage_ = sIdle;
     int64_t step_ = -1;
+    int64_t kIndex_ = INT64_MIN;  // the step index and count kNow_ was worked out for
+    int kCount_ = 0, kNow_ = 0;
+    double decayFor_ = -1.0, releaseFor_ = -1.0, rateFor_ = -1.0;  // what decayCoef_ and releaseCoef_ are for
     bool legato_ = false;
 };
 
