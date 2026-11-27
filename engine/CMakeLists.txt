@@ -512,6 +512,8 @@ target_include_directories(caw_cli PRIVATE src)
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
+  target_sources(caw_rt_tests PRIVATE tests/graph_routing_test.cpp tests/graph_typed_ports_test.cpp
+    tests/graph_parameters_test.cpp)  # the graph executor tests beside graph_channels_test.cpp
   target_sources(caw_rt_tests PRIVATE tests/fx_space_rt_test.cpp)  # fx-space effects: no allocation on the audio thread
   target_sources(caw_rt_tests PRIVATE tests/drums_acoustic_rt_test.cpp)  # Rook 1.1.2: Acoustic kits, no allocation
   target_sources(caw_rt_tests PRIVATE tests/flagship_raven_rt_test.cpp)  # Flagship's 1.1.0 synthesis (Raven)
