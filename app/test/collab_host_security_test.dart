@@ -325,11 +325,12 @@ void main() {
     test('a sender gives only what it holds, where it holds it', () async {
       final d = Direct();
       final o = await d.join(hello(owner, token: ownerToken));
+      final k = await d.join(hello('kim', token: tok('kim')));
+      await d.join(hello('sam', token: tok('sam')));
       await d.host.receive(o, Submit(epoch: 1, ops: [
         trackOp(owner, 1, 1),
         AccessOp(member: 'kim', grants: [Grant(Capability.view, rootId), Grant(Capability.manageAccess, rootId), Grant(Capability.editContent, nid(1))], author: owner, clientSeq: 2, baseSeq: 0),
       ]));
-      final k = await d.join(hello('kim', token: tok('kim')));
       Future<String?> give(int cs, List<Grant> grants) async {
         await d.host.receive(k, Submit(epoch: 1, ops: [AccessOp(member: 'sam', grants: grants, author: 'kim', clientSeq: cs, baseSeq: 0)]));
         final r = d.of(k).whereType<Reject>().where((r) => r.clientSeq == cs);
@@ -339,6 +340,133 @@ void main() {
       expect(await give(1, [Grant(Capability.publish, rootId)]), HostReject.permission);
       expect(await give(2, [Grant(Capability.editContent, rootId)]), HostReject.permission);
       expect(await give(3, [Grant(Capability.view, rootId), Grant(Capability.editContent, nid(1))]), isNull);
+    });
+  });
+
+  group('re-review', () {
+    test('access goes only to ids that have joined, so nobody can claim a grant by its id', () async {
+      final d = Direct();
+      final o = await d.join(hello(owner, token: ownerToken));
+      await d.host.receive(o, Submit(epoch: 1, ops: [AccessOp(member: 'kim', grants: Role.owner.grants, author: owner, clientSeq: 1, baseSeq: 0)]));
+      expect(d.of(o).whereType<Reject>().single.reason, HostReject.permission);
+      final k = await d.join(hello('kim', token: tok('mal')));
+      expect(d.of(k).whereType<Welcome>().single.grants.map((g) => g.capability).toSet(), Role.collaborator.capabilities,
+          reason: 'a first join gets the admitting role only');
+    });
+
+    test('demoting a successor out of the eligible set replaces the migration secret, and rejoining successors get it', () async {
+      final rig = HostRig();
+      final o = TestMember(rig.net, owner)..join();
+      final k = TestMember(rig.net, 'kim')..join();
+      final s = TestMember(rig.net, 'sam')..join();
+      await rig.net.settle();
+      final old = k.state!.config.migrationSecret;
+      expect(old, rig.host.config.migrationSecret);
+      // Kim becomes a viewer: no longer a possible successor.
+      o.submit([AccessOp(member: 'kim', grants: Role.viewer.grants, author: owner, clientSeq: o.nextCs(), baseSeq: 0)]);
+      await rig.net.settle();
+      final now = rig.host.config.migrationSecret;
+      expect(now, isNot(old));
+      expect(s.state!.config.migrationSecret, now, reason: 'connected successors get it at once');
+      // Kim's old proof no longer fences the host.
+      final c = rig.net.open(k);
+      rig.net.post(c, FenceNotice(epoch: 2, proof: fenceProof(old, 'sess1', 2)));
+      await rig.net.settle();
+      expect(rig.host.state, HostState.running);
+      // A successor that was away gets the current secret when it rejoins.
+      rig.net.hangUp(s.conn!);
+      o.submit([AccessOp(member: 'kim', grants: const [], author: owner, clientSeq: o.nextCs(), baseSeq: 0)]);
+      await rig.net.settle();
+      final latest = rig.host.config.migrationSecret;
+      expect(latest, isNot(now));
+      expect(s.state!.config.migrationSecret, now);
+      s.join();
+      await rig.net.settle();
+      expect(s.state!.config.migrationSecret, latest);
+      expect(rig.host.config.migrationSecret, latest);
+    });
+
+    test('a stricter whoMayHost at a restart replaces the secret', () async {
+      final rig = HostRig();
+      TestMember(rig.net, 'kim').join();
+      await rig.net.settle();
+      final before = rig.host.config.migrationSecret;
+      rig.recover();
+      expect(rig.host.config.migrationSecret, before, reason: 'same rule, same secret');
+      final strict = HostCore.recover(schema: hostSchema, storage: rig.storage, outbox: rig.net, settings: const HostSettings(whoMayHost: HostEligibility.managers), passwordCheck: inlineCheck);
+      expect(strict.config.migrationSecret, isNot(before));
+      final again = HostCore.recover(schema: hostSchema, storage: rig.storage, outbox: rig.net, settings: const HostSettings(whoMayHost: HostEligibility.managers), passwordCheck: inlineCheck);
+      expect(again.config.migrationSecret, strict.config.migrationSecret, reason: 'the rotation is logged once');
+    });
+
+    test('each new epoch gets its own migration secret; its proof still fences the old host', () async {
+      final rig = HostRig();
+      final o = TestMember(rig.net, owner)..join();
+      final k = TestMember(rig.net, 'kim')..join();
+      await rig.net.settle();
+      final st = k.state!;
+      final h2 = HostCore.continueSession(
+          state: st, schema: hostSchema, replica: k.tree, seq: k.applied, storage: MemoryHostStorage(), outbox: RecordingOutbox(),
+          hostApp: appVersion, passwordCheck: inlineCheck);
+      expect(h2.config.migrationSecret, isNot(st.config.migrationSecret));
+      final c = rig.net.open(o);
+      rig.net.post(c, FenceNotice(epoch: 2, proof: fenceProof(st.config.migrationSecret, 'sess1', 2)));
+      await rig.net.settle();
+      expect(rig.host.state, HostState.fenced);
+    });
+
+    test('ids that never did anything are forgotten after the idle timeout, freeing the cap; active ones stay', () async {
+      final d = Direct(settings: const HostSettings(maxKnownMembers: 4, maxMembers: 4, idleIdPruneMs: 1000));
+      final a = await d.join(hello('act', token: tok('act')), address: '1.1.1.1');
+      await d.host.receive(a, Submit(epoch: 1, ops: [trackOp('act', 1, 1)]));
+      for (final m in ['m1', 'm2']) {
+        final c = await d.join(hello(m, token: tok(m)), address: '2.2.2.$m');
+        d.host.disconnect(c);
+      }
+      d.host.disconnect(a);
+      expect(d.refusal(await d.join(hello('new', token: tok('new')), address: '3.3.3.3')), Refused.sessionFull);
+      d.clock.now += 1000;
+      expect(d.welcomed(await d.join(hello('new', token: tok('new')), address: '3.3.3.3')), isTrue, reason: 'idle ids were forgotten');
+      expect(d.host.knownMembers, containsAll([owner, 'act', 'new']));
+      expect(d.host.knownMembers, isNot(contains('m1')));
+      expect(d.recover().knownMembers, isNot(contains('m2')), reason: 'the pruning is logged');
+      expect(d.welcomed(await d.join(hello('act', token: tok('act')))), isTrue);
+    });
+
+    test('an invite join is not blocked by wrong-password spam using up the global cap', () async {
+      final secret = 'invite-secret-00001';
+      final d = Direct(cfg: config(lobby: Lobby.private, password: 'pw', invites: {inviteSecretHash(secret): Role.viewer}),
+          settings: const HostSettings(passwordTriesPerMinuteGlobal: 2, passwordTriesPerMinute: 100));
+      for (var i = 0; i < 3; i++) {
+        await d.join(hello('spam$i', password: 'no'), address: '9.9.9.$i');
+      }
+      expect(d.refusal(await d.join(hello('pwj', password: 'pw'), address: '8.8.8.8')), Refused.rateLimited);
+      expect(d.welcomed(await d.join(hello('inv', invite: secret), address: '8.8.8.8')), isTrue);
+    });
+
+    test('a torn write can\'t admit a member without spending its invite: both are one record', () async {
+      final secret = 'invite-secret-00002';
+      final d = Direct(cfg: config(lobby: Lobby.private, password: 'pw', invites: {inviteSecretHash(secret): Role.viewer}));
+      d.host.config.invites[inviteSecretHash(secret)]!.usesLeft = 1;
+      final before = d.storage.wal.bytes.length;
+      expect(d.welcomed(await d.join(hello('inv', token: tok('inv'), invite: secret))), isTrue);
+      final records = d.storage.wal.recover();
+      final metas = [for (final r in records) utf8.decode(r.sublist(9))];
+      final joined = metas.where((m) => m.contains('"member":"inv"')).toList();
+      expect(joined, hasLength(1));
+      expect(joined.single, contains(inviteSecretHash(secret)));
+      // Cut the log inside that record: neither the member nor the invite's use survives.
+      final whole = d.storage.wal.bytes;
+      d.storage.wal.bytes = whole.sublist(0, before + (whole.length - before) ~/ 2);
+      final h = d.recover();
+      expect(h.knownMembers, isNot(contains('inv')));
+      expect(h.config.invites.containsKey(inviteSecretHash(secret)), isTrue);
+    });
+
+    test('the owner token needs at least 32 characters', () {
+      expect(
+          () => HostCore.create(config: config(), schema: hostSchema, storage: MemoryHostStorage(), outbox: RecordingOutbox(), ownerToken: 'x' * 31),
+          throwsArgumentError);
     });
   });
 

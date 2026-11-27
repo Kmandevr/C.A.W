@@ -14,7 +14,7 @@ final hostSchema = Schema(version: 1, rootKind: 'project', kinds: const [
 const owner = 'owner1';
 
 /// The owner's member token, given when the session is created.
-const ownerToken = 'owner-token-0123456789';
+const ownerToken = 'owner-token-0123456789abcdefghijkl';
 const appVersion = '1.1.6';
 
 VersionInfo goodVersion({int fileVersion = 7, String? schemaHash, ProtocolVersion protocol = collabProtocol, String app = appVersion}) =>

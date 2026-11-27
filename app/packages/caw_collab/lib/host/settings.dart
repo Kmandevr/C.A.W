@@ -26,6 +26,7 @@ class HostSettings {
   const HostSettings({
     this.maxMembers = 8,
     this.maxKnownMembers = 256,
+    this.idleIdPruneMs = 60 * 60 * 1000,
     this.opsPerSecond = 60,
     this.opBurst = 600,
     this.messagesPerSecond = 50,
@@ -61,6 +62,10 @@ class HostSettings {
 
   /// The most distinct members a session ever admits (removed ones included), so random ids can't grow it.
   final int maxKnownMembers;
+
+  /// How long an id that never did anything (no confirmed op, never given access, not connected) is kept before
+  /// the host forgets it, so minted ids can't fill [maxKnownMembers] for good.
+  final int idleIdPruneMs;
 
   /// Each member's sustained op rate, and the burst a member may send at once (a token bucket).
   final int opsPerSecond;

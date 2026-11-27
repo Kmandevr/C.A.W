@@ -89,6 +89,8 @@ class Permissions {
 
   void set(String member, List<Grant> grants) => _grants[member] = List.unmodifiable(grants);
 
+  void remove(String member) => _grants.remove(member);
+
   void clear() => _grants.clear();
 
   /// Whether [member] holds [capability] on [scope] itself.

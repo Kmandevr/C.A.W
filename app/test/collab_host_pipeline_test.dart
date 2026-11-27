@@ -125,6 +125,7 @@ void main() {
 
     test('a move needs the capability at both ends; only the owner changes the owner\'s access', () async {
       final (rig, o, k) = await twoMembers();
+      TestMember(rig.net, 'sam').join();
       o.submit([track(o, 1), track(o, 2, key: 'W'), clip(o, 5, nid(1))]);
       o.submit([AccessOp(member: 'kim', grants: [...Role.worker.grants, Grant(Capability.editContent, nid(1)), Grant(Capability.manageAccess, rootId)], author: owner, clientSeq: o.nextCs(), baseSeq: 0)]);
       await rig.net.settle();

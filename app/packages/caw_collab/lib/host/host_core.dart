@@ -170,7 +170,14 @@ class _Window {
 /// host keeps only its hash); every later hello must carry it. The token is the one the member proposed in that
 /// hello when it has at least [minProposedToken] characters, else one the host issues in the welcome. The owner's
 /// token is given at [create], so the owner role is never granted from the wire. A public session still admits
-/// anyone under a new id, as a public lobby does.
+/// anyone under a new id, as a public lobby does. Access is given only to ids that have joined. Ids that never
+/// did anything are forgotten after [HostSettings.idleIdPruneMs].
+///
+/// Assumption (until device keys, G14): tokens travel in the clear inside the session's channel, which the
+/// transport step wraps in TLS; per-epoch proofs signed with device keys replace them then. The migration secret
+/// is replaced at every new epoch, whenever a member leaves the set of possible successors (removed, demoted, or
+/// a stricter [HostSettings.whoMayHost] at a restart), and eligible members get the current one whenever they
+/// connect.
 class HostCore {
   HostCore._({
     required this.config,
@@ -219,6 +226,10 @@ class HostCore {
   final _tail = <Op>[];
   final _seen = <String, _Seen>{};
   final _tokens = <String, String>{};
+  final _lastSeen = <String, int>{};
+  final _active = <String>{};
+  final _granted = <String>{};
+  String _eligibility = '';
   final _conns = <String, _Conn>{};
   final _scores = <String, double>{};
   final _buckets = <String, _Bucket>{};
@@ -270,7 +281,9 @@ class HostCore {
     void Function(PipelineStep)? faults,
   }) {
     if (!storage.isEmpty) throw StateError('storage already holds a session: recover it or purge it');
-    if (ownerToken.length < 16 || ownerToken.length > 256) throw ArgumentError('the owner token must be 16 to 256 characters');
+    if (ownerToken.length < minProposedToken || ownerToken.length > 256) {
+      throw ArgumentError('the owner token must be $minProposedToken to 256 characters');
+    }
     if (config.lobby == Lobby.private && config.password == null && config.invites.isEmpty) {
       throw ArgumentError('a private session needs a password or an invite');
     }
@@ -292,6 +305,8 @@ class HostCore {
     }
     h.permissions.set(config.owner, Role.owner.grants);
     h._tokens[config.owner] = secretHash(ownerToken);
+    h._lastSeen[config.owner] = now;
+    h._eligibility = settings.whoMayHost.name;
     h._lastActive = now;
     h._writeSnapshot();
     return h;
@@ -334,9 +349,18 @@ class HostCore {
       h.permissions.set(e.key, e.value);
     }
     h._tokens.addAll(state.tokens);
+    for (final m in state.tokens.keys) {
+      h._lastSeen[m] = h._now;
+      // Members the previous host knew keep their standing: nothing here says they were never active.
+      h._granted.add(m);
+    }
     if (!h.permissions.isKnown(config.owner)) h.permissions.set(config.owner, Role.owner.grants);
     h._epoch = state.epoch + 1;
+    // The proof uses the secret the previous host knows; this epoch then gets a secret of its own, so one leak
+    // doesn't cover every later epoch.
     h._fence = fenceProof(config.migrationSecret, config.sessionId, h._epoch);
+    config.migrationSecret = randomSecret(h.random);
+    h._eligibility = settings.whoMayHost.name;
     h._seq = seq;
     h._epochStartSeq = seq;
     for (final op in recentOps) {
@@ -387,6 +411,11 @@ class HostCore {
       h._replay(r);
     }
     h._lastActive = h._now;
+    if (h._eligibility != settings.whoMayHost.name && h._state == HostState.running) {
+      // Who may host changed: members who were eligible may no longer be, so they lose the secret.
+      h._rotateSecret();
+      h._sync();
+    }
     return h;
   }
 
@@ -534,6 +563,7 @@ class HostCore {
 
     // A member the session doesn't know yet.
     final now = _now;
+    if (_tokens.length >= settings.maxKnownMembers) _pruneIdle();
     if (_tokens.length >= settings.maxKnownMembers) {
       return _refuse(connection, Refused.sessionFull, 'The session has admitted its most members (${settings.maxKnownMembers}).');
     }
@@ -599,15 +629,20 @@ class HostCore {
       } else {
         token = issued = randomSecret(random);
       }
-      // Grants an access change gave this id before it first joined stand; otherwise the role's.
-      final grants = permissions.isKnown(m) ? permissions.grantsOf(m) : role.grants;
+      final grants = role.grants;
       permissions.set(m, grants);
       _tokens[m] = secretHash(token);
-      _appendMeta({'k': 'member', 'member': m, 'grants': [for (final g in grants) g.toJson()], 'token': _tokens[m]});
-      if (inviteHash != null) {
-        _useInvite(inviteHash);
-        _appendMeta({'k': 'invite_used', 'hash': inviteHash});
-      }
+      _lastSeen[m] = _now;
+      // One record: the member and the invite use it spent, so a torn write can't admit without spending.
+      _appendMeta({
+        'k': 'member',
+        'member': m,
+        'grants': [for (final g in grants) g.toJson()],
+        'token': _tokens[m],
+        'at': _now,
+        'invite': ?inviteHash,
+      });
+      if (inviteHash != null) _useInvite(inviteHash);
       _sync();
     }
     for (final e in _conns.entries.toList()) {
@@ -618,6 +653,7 @@ class HostCore {
       }
     }
     c.member = m;
+    _lastSeen[m] = _now;
     final score = h.score.isFinite ? h.score : 0.0;
     _scores[m] = score.clamp(0, settings.maxScore).toDouble();
     outbox.send(connection, Welcome(
@@ -750,6 +786,7 @@ class HostCore {
     final accepted = <Op>[];
     final kicked = <String>{};
     var sessionChanged = false;
+    final eligibleBefore = _eligibleIds();
     for (final op in msg.ops) {
       if (op.author != member) {
         reject(op.clientSeq, HostReject.wrongAuthor, 'An op must carry its sender as author.', record: false);
@@ -822,6 +859,7 @@ class HostCore {
         if (_applyAccess(stamped)) kicked.add(stamped.member);
         sessionChanged = true;
       }
+      _active.add(member);
       _tail.add(stamped);
       seen.record(op.clientSeq, _Outcome.ack(_seq, newKey), settings.dedupeMemory);
       replies.add(Ack(epoch: _epoch, clientSeq: op.clientSeq, seq: _seq, key: newKey));
@@ -832,11 +870,9 @@ class HostCore {
       for (final op in accepted) {
         _append(_recOp, encodeOpBinary(op));
       }
-      if (kicked.isNotEmpty) {
-        // A removed member may hold the migration secret: a new one goes to the remaining successors.
-        config.migrationSecret = randomSecret(random);
-        _appendMeta({'k': 'secret', 'value': config.migrationSecret});
-      }
+      // Anyone who left the eligible set (removed, demoted) may hold the migration secret: a new one goes to the
+      // remaining successors now and to eligible members when they rejoin.
+      if (kicked.isNotEmpty || (sessionChanged && eligibleBefore.difference(_eligibleIds()).isNotEmpty)) _rotateSecret();
       _step(PipelineStep.appended);
       _sync();
       _step(PipelineStep.synced);
@@ -866,6 +902,7 @@ class HostCore {
   /// the invites that member made are revoked too.
   bool _applyAccess(AccessOp op) {
     permissions.set(op.member, op.grants);
+    _granted.add(op.member);
     if (permissions.canView(op.member)) return false;
     config.invites.removeWhere((_, inv) => inv.createdBy == op.member);
     return true;
@@ -882,9 +919,8 @@ class HostCore {
       if (op.member == config.owner && member != config.owner) return 'Only the owner can change the owner\'s access.';
       if (op.grants.length > settings.maxGrantsPerMember) return 'Over ${settings.maxGrantsPerMember} grants for one member.';
       if (!permissions.coversAt(tree, member, op.grants)) return 'You can give only what you have yourself.';
-      if (!_tokens.containsKey(op.member) && permissions.all.length >= settings.maxKnownMembers) {
-        return 'The session has its most members (${settings.maxKnownMembers}).';
-      }
+      // A grant to an id that hasn't joined would go to whoever first says hello with it: grant after they join.
+      if (!_tokens.containsKey(op.member)) return 'Only members who have joined can be given access: grant it after they join.';
     }
     return null;
   }
@@ -925,6 +961,42 @@ class HostCore {
         HostEligibility.editors => permissions.holds(member, Capability.editContent, rootId),
         HostEligibility.managers => permissions.holds(member, Capability.manageAccess, rootId),
       };
+
+  Set<String> _eligibleIds() => {for (final m in _tokens.keys) if (m != config.hostMember && _eligible(m)) m};
+
+  void _rotateSecret() {
+    config.migrationSecret = randomSecret(random);
+    _eligibility = settings.whoMayHost.name;
+    _appendMeta({'k': 'secret', 'value': config.migrationSecret, 'whoMayHost': _eligibility});
+  }
+
+  /// Forgets ids that were never active: not the owner, not connected, never given access by an access change,
+  /// no confirmed op, and unseen for [HostSettings.idleIdPruneMs]. Returns how many it forgot.
+  int _pruneIdle() {
+    final now = _now, online = connectedMembers;
+    final gone = [
+      for (final m in _tokens.keys)
+        if (m != config.owner && !online.contains(m) && !_granted.contains(m) && !_active.contains(m) &&
+            now - (_lastSeen[m] ?? 0) >= settings.idleIdPruneMs)
+          m,
+    ];
+    if (gone.isEmpty || _state != HostState.running) return 0;
+    _forget(gone);
+    _appendMeta({'k': 'pruned', 'members': gone});
+    _sync();
+    return gone.length;
+  }
+
+  void _forget(Iterable<String> ids) {
+    for (final m in ids) {
+      _tokens.remove(m);
+      permissions.remove(m);
+      _lastSeen.remove(m);
+      _seen.remove(m);
+      _buckets.remove(m);
+      _scores.remove(m);
+    }
+  }
 
   bool _manages(String member) => member == config.owner || permissions.holds(member, Capability.manageAccess, rootId);
 
@@ -1004,6 +1076,7 @@ class HostCore {
       _writeSnapshot();
     }
     _pruneInvites();
+    if (_state == HostState.running) _pruneIdle();
     for (final m in [_tries, _joins, _resumes, _invitesMade]) {
       m.removeWhere((_, w) => w.count(now) == 0);
     }
@@ -1102,6 +1175,10 @@ class HostCore {
       if (_endedAt != null) 'endedAt': _endedAt,
       'grants': {for (final e in permissions.all.entries) e.key: [for (final g in e.value) g.toJson()]},
       'tokens': _tokens,
+      'lastSeen': _lastSeen,
+      'active': _active.toList(),
+      'granted': _granted.toList(),
+      'whoMayHost': _eligibility,
       'seen': {
         for (final e in _seen.entries)
           e.key: {'floor': e.value.floor, 'recent': {for (final r in e.value.recent.entries) '${r.key}': r.value.toJson()}},
@@ -1151,6 +1228,12 @@ class HostCore {
       for (final e in (s['tokens'] as Map).entries) {
         _tokens[e.key as String] = e.value as String;
       }
+      for (final e in (s['lastSeen'] as Map).entries) {
+        _lastSeen[e.key as String] = e.value as int;
+      }
+      _active.addAll((s['active'] as List).cast<String>());
+      _granted.addAll((s['granted'] as List).cast<String>());
+      _eligibility = s['whoMayHost'] as String;
       for (final e in (s['seen'] as Map).entries) {
         final v = e.value as Map;
         final seen = _seenOf(e.key as String)..floor = v['floor'] as int;
@@ -1179,20 +1262,25 @@ class HostCore {
         _treeBytes += delta;
         _seq = op.seq!;
         if (op is AccessOp) _applyAccess(op);
+        _active.add(op.author);
         _tail.add(op);
         _seenOf(op.author).record(op.clientSeq, _Outcome.ack(op.seq!, _keyOf(op)), settings.dedupeMemory);
       case _recMeta:
         final m = jsonDecode(utf8.decode(body)) as Map;
         switch (m['k']) {
           case 'member':
-            permissions.set(m['member'] as String, [for (final g in m['grants'] as List) grantFromJson(g)]);
-            _tokens[m['member'] as String] = m['token'] as String;
+            final id = m['member'] as String;
+            permissions.set(id, [for (final g in m['grants'] as List) grantFromJson(g)]);
+            _tokens[id] = m['token'] as String;
+            _lastSeen[id] = m['at'] as int;
+            if (m['invite'] != null) _useInvite(m['invite'] as String);
           case 'invite':
             config.invites[m['hash'] as String] = Invite.fromJson(m['invite']);
-          case 'invite_used':
-            _useInvite(m['hash'] as String);
           case 'secret':
             config.migrationSecret = m['value'] as String;
+            _eligibility = m['whoMayHost'] as String;
+          case 'pruned':
+            _forget((m['members'] as List).cast<String>());
           case 'fenced':
             _state = HostState.fenced;
           case 'ended':
