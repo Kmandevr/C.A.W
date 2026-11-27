@@ -83,6 +83,28 @@ uint32_t tuneWorker(const CallbackThread& callback, WorkerState& state) noexcept
 void untuneWorker(WorkerState& state) noexcept;
 int32_t currentThreadId() noexcept;  // the kernel's id of the calling thread (Linux, Android), else 0
 
+// A utilization clamp (Linux 5.3+: sched_setattr with SCHED_FLAG_UTIL_CLAMP_MIN; docs.kernel.org "Utilization
+// Clamping", read 2026-11-27): a floor under the utilization schedutil picks the core's clock from and that EAS
+// places the thread by, without busy work. Asked for on Android only (2026-11-27 probe: the phone's callback runs
+// on a little core at ~43 % clock, its hint session refused), on the callback once per thread and on each worker
+// once; the result is reported in caw_audio_threads' "util_clamp". A thread whose floor is already at or above
+// the request (a real-time thread's default is 1024) is left alone. Applied: raised and read back; Kept: already
+// as high; Refused: the system said no (`error` is its errno); Unsupported: no such call or no uclamp in the
+// kernel; None: not asked (not Android, or not yet).
+enum class ClampState : uint8_t { None = 0, Applied = 1, Kept = 2, Refused = 3, Unsupported = 4 };
+const char* clampStateName(ClampState state) noexcept;
+struct UtilClamp {
+    ClampState state = ClampState::None;
+    int error = 0;        // errno of the refused call
+    int32_t utilMin = -1; // the thread's util_min as read back afterwards (-1: unknown)
+};
+constexpr uint32_t kUtilMinRequest = 512;  // of 1024: [Assumption] enough to leave the littles' lowest clocks
+// The calling thread's util_min raised to at least `utilMin` (two or three system calls, no allocation: callback-
+// safe). Linux and Android; elsewhere Unsupported.
+UtilClamp raiseUtilMin(uint32_t utilMin) noexcept;
+// What the engine's threads ask for: raiseUtilMin(kUtilMinRequest) on Android, None elsewhere.
+UtilClamp probeUtilMin() noexcept;
+
 // A performance hint session (Android 13+: ADPF APerformanceHint) for the callback and the workers, with the
 // callback period as its target. The system calls (create, set threads, report) run on the hint's own thread,
 // never on the callback or a worker: the callback only stores numbers (hintReport: each callback's own duration,

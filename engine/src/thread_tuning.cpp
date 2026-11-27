@@ -45,6 +45,17 @@ Topology classifyCores(const int* cpus, const int64_t* values, size_t count, con
     return t;
 }
 
+const char* clampStateName(ClampState state) noexcept {
+    switch (state) {
+        case ClampState::Applied: return "applied";
+        case ClampState::Kept: return "kept";
+        case ClampState::Refused: return "refused";
+        case ClampState::Unsupported: return "unsupported";
+        case ClampState::None: break;
+    }
+    return "none";
+}
+
 const char* hintStateName(HintState state) noexcept {
     switch (state) {
         case HintState::Waiting: return "waiting";

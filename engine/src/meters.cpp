@@ -171,6 +171,17 @@ void LoudnessMeter::clearAudioState() noexcept {
     truePeakMax_.store(0.0f, std::memory_order_relaxed);
 }
 
+void LoudnessMeter::clearReadings() noexcept {
+    clearAudioState();
+    for (auto& b : bins_) b.store(0, std::memory_order_relaxed);
+    blocks_.store(0, std::memory_order_relaxed);
+}
+
+void LoudnessMeter::sleepWhenUnread(bool on) noexcept {
+    sleepWhenUnread_ = on;
+    asleep_ = on;  // asleep from the start: the first read() wakes it
+}
+
 double LoudnessMeter::truePeak(int side, double x) noexcept {
     double* h = tpHistory_[side];
     h[tpPos_] = x;
@@ -251,15 +262,16 @@ void LoudnessMeter::process(const float* left, const float* right, int frames) n
             }
         } else if (!asleep_ && (unreadFrames_ += frames) > kUnreadSeconds * sampleRate_) {
             asleep_ = true;
+            clearReadings();  // the read that wakes it reports nothing measured, not what was before the pause
+            truePeakL_.store(0.0f, std::memory_order_relaxed);
+            truePeakR_.store(0.0f, std::memory_order_relaxed);
         }
         if (asleep_) return;
     }
     const uint32_t asked = resetAsked_.load(std::memory_order_relaxed);
     if (asked != resetSeen_) {  // a reset: once per request, 8,000 stores
         resetSeen_ = asked;
-        clearAudioState();
-        for (auto& b : bins_) b.store(0, std::memory_order_relaxed);
-        blocks_.store(0, std::memory_order_relaxed);
+        clearReadings();
     }
     double tp[2] = {0.0, 0.0};  // this block's true peak per side
     for (int i = 0; i < frames;) {

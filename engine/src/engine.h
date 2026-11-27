@@ -352,8 +352,13 @@ public:
     void stopMixPool() noexcept;
     uint32_t mixWorkers() const noexcept;
     // When the pool is used: Auto (the default) once the callbacks' measured load (reportLoad) has stayed above
-    // kMixParallelLoad for kMixParallelSeconds, back to one thread once the load less the time the callback spent
-    // waiting for workers stays below kMixSerialLoad for kMixSerialSeconds; Always; or Never. Any thread; read at
+    // kMixParallelLoad for kMixParallelSeconds, or its peaks have (2026-11-27: a bursty song's peaks, not its mean,
+    // are what miss the deadline): callbacks over kMixPeakLoad, counted with a kMixPeakSeconds decay, above
+    // kMixPeakCount (three such callbacks within about a second: two stalled callbacks, a preempted thread's, are not
+    // enough); back to one thread once the load
+    // less the time the callback spent waiting for workers stays below kMixSerialLoad for kMixSerialSeconds with
+    // the count of callbacks over kMixPeakOffLoad under kMixPeakOffCount (the pool cuts the peaks it is on for, so
+    // the off test's peak is lower); Always; or Never. Any thread; read at
     // each callback. Auto also sizes the pool from that wait (speed phase 5d): while the callback waits more than
     // kMixWaitShare of the budget and longer than the workers ran tasks (the pool costs more than it gives) for
     // kMixWaitSeconds, one worker fewer takes tasks; at none, one thread, not tried again for kMixRetrySeconds;
@@ -362,6 +367,8 @@ public:
     void setMixParallel(MixParallel mode) noexcept { mixMode_.store(static_cast<int>(mode), std::memory_order_relaxed); }
     static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
     static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
+    static constexpr double kMixPeakLoad = 0.5, kMixPeakSeconds = 2.0, kMixPeakCount = 2.5;
+    static constexpr double kMixPeakOffLoad = 0.25, kMixPeakOffCount = 0.5;
     static constexpr double kMixWaitShare = 0.1, kMixWaitSeconds = 0.5, kMixGrowSeconds = 2.0, kMixRetrySeconds = 10.0;
     // Auto turning the pool on, or a shedding reset or a new device while it is on: for this long its callbacks
     // don't count toward shedding and it adds no worker (the pool starting, not the song). Longer than one of
@@ -380,6 +387,8 @@ public:
     uint32_t mixTailFallbacks() const noexcept { return tailFallbacks_.load(std::memory_order_relaxed); }
     // Auto's workers now (tests, diagnostics): those taking tasks, at most mixWorkers().
     uint32_t mixActiveWorkers() const noexcept;
+    // Any thread: callbacks so far that handed the pool at least one level (the Benchmark's share of pooled ones).
+    uint64_t mixPooledCallbacks() const noexcept { return pooledCallbacks_.load(std::memory_order_relaxed); }
     // Audio thread diagnostics (speed phase 5d) as JSON, for caw_audio_threads; reads the callback core's clock
     // from sysfs or the power API, so never on the audio thread.
     std::string audioThreadsJson() const;
@@ -648,7 +657,7 @@ private:
     double loadDt_ = 0, loadKeep_ = 0, shareKeep_ = 0;  // the last callback's length and the averages' weights for it
     // The weights for the last few callback lengths (a device that takes its own sizes, AAudio's, varies them every
     // callback between a few values): pow and exp only for a length not among them.
-    struct LoadWeights { double dt = -1, load = 0, share = 0, tail = 0; };
+    struct LoadWeights { double dt = -1, load = 0, share = 0, tail = 0, peak = 0; };
     static constexpr int kLoadWeights = 4;
     LoadWeights loadWeights_[kLoadWeights];
     int loadWeightsNext_ = 0;
@@ -666,6 +675,9 @@ private:
     bool mixParallel_ = false;
     bool mixAuto_ = false;
     double mixOverSeconds_ = 0, mixUnderSeconds_ = 0, mixSettleSeconds_ = 0;
+    // Auto's peak counts (kMixPeak*): callbacks over kMixPeakLoad and over kMixPeakOffLoad, each decaying with
+    // kMixPeakSeconds, and the decay for the last callback's length.
+    double peakCount_ = 0, peakOffCount_ = 0, peakKeep_ = 0;
     // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
     uint32_t mixActive_ = 0;
     double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;
@@ -679,6 +691,8 @@ private:
     std::atomic<float> stabilizerWork_{0};
     int retireStart_ = 0;  // where assignRetireBudgets hands out what is left after the even shares
     bool poolUsed_ = false, poolUsedLast_ = false;  // this callback, the last one handed the pool a level
+    std::atomic<uint64_t> pooledCallbacks_{0};       // callbacks that handed the pool a level (mixPooledCallbacks)
+    std::atomic<bool> mixOn_{false};                 // the last callback ran with the pool on (audio_threads' mix_on)
     int64_t processNs_ = 0;  // process() time since the last reportLoad (with a pool), for Auto's shares
     bool wantsMixPool() const noexcept;
     bool slotForeign(const Slot& s) noexcept;  // a node in the serial lane: it holds third-party native code

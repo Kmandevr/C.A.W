@@ -350,7 +350,9 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             RunResult step;
             if (!warmUp(e, r, true, l, rr, step, cancel)) return -1;
             readCore(step.coreStart, step.khzStart, step.maxKHz);
+            const uint64_t pooledFrom = e.mixPooledCallbacks();
             const int64_t done = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel);
+            step.mixPooledPct = done > 0 ? 100.0 * static_cast<double>(e.mixPooledCallbacks() - pooledFrom) / static_cast<double>(done) : 0.0;
             readCore(step.coreEnd, step.khzEnd, step.maxKHz);
             step.mixWorkers = e.mixWorkers();
             step.mixActive = e.mixActiveWorkers();
@@ -375,7 +377,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
             out.warmupS = heldStep.warmupS;
             out.coreStart = heldStep.coreStart, out.coreEnd = heldStep.coreEnd;
             out.khzStart = heldStep.khzStart, out.khzEnd = heldStep.khzEnd, out.maxKHz = heldStep.maxKHz;
-            out.mixWorkers = heldStep.mixWorkers, out.mixActive = heldStep.mixActive;
+            out.mixWorkers = heldStep.mixWorkers, out.mixActive = heldStep.mixActive, out.mixPooledPct = heldStep.mixPooledPct;
             fill(out, heldUs, heldN, r);
         }
         out.ok = !o.stopped;
@@ -410,11 +412,13 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
     std::vector<uint64_t> partNs(profile ? static_cast<size_t>(calls) * kPartCount : 0);
     if (profile) profile->parts = PartProfile{};  // the warm-up's are not the timed span's
     readCore(out.coreStart, out.khzStart, out.maxKHz);
+    const uint64_t pooledFrom = e.mixPooledCallbacks();
     const int64_t n = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel,
                                     profile ? &profile->parts : nullptr, profile ? partNs.data() : nullptr);
     readCore(out.coreEnd, out.khzEnd, out.maxKHz);
     out.mixWorkers = e.mixWorkers();
     out.mixActive = e.mixActiveWorkers();
+    out.mixPooledPct = n > 0 ? 100.0 * static_cast<double>(e.mixPooledCallbacks() - pooledFrom) / static_cast<double>(n) : 0.0;
     e.setProfile(nullptr);
     if (n > 0) fill(out, us, n, r);
     if (profile && n > 0) {

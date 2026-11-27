@@ -759,9 +759,9 @@ TEST(mix_pool_engine_auto_goes_parallel_under_load_and_back_with_hysteresis) {
     };
     callbacks(0.2, 2.0);
     CHECK(!e.mixParallelForTest());  // light: one thread
-    callbacks(0.9, 0.2);
+    callbacks(0.45, 0.2);
     CHECK(!e.mixParallelForTest());  // not yet: the average has to stay up for a while
-    callbacks(0.9, 1.0);
+    callbacks(0.45, 1.0);
     e.process(l, r, 256);
     CHECK(e.mixParallelForTest());
     callbacks(0.2, 10.0);
@@ -775,6 +775,52 @@ TEST(mix_pool_engine_auto_goes_parallel_under_load_and_back_with_hysteresis) {
     e.process(l, r, 256);
     CHECK(e.mixParallelForTest());
     e.setMixParallel(Engine::MixParallel::Never);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
+}
+
+// 2026-11-27: Auto goes by the peaks too: a light mean with bursts over kMixPeakLoad (a bar's first callbacks, a
+// kick waking a drum chain) runs on the pool; one or two stalled callbacks (a preempted thread) don't turn it on;
+// and it goes back to one thread only once the peaks are gone as well as the mean.
+TEST(mix_pool_engine_auto_goes_parallel_for_bursts_not_for_one_stall) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2));
+    e.setMixParallel(Engine::MixParallel::Auto);
+    CHECK(ok(e.setProject(randomMix(3))));
+    e.play();
+    float l[256], r[256];
+    auto callbacks = [&](double load, int count) {
+        for (int k = 0; k < count; ++k) {
+            e.process(l, r, 256);
+            e.reportLoad(load, 256);
+        }
+    };
+    const int second = 48000 / 256;
+    callbacks(0.1, 2 * second);
+    CHECK(!e.mixParallelForTest());
+    // Two stalls far over the deadline, then quiet: still one thread.
+    callbacks(3.0, 1);
+    callbacks(0.1, 10);
+    callbacks(3.0, 1);
+    callbacks(0.1, 3 * second);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
+    // A song at a 0.1 mean whose bar starts reach 0.7 for four callbacks: on, though the mean never reaches 0.4.
+    for (int bar = 0; bar < 2; ++bar) {
+        callbacks(0.7, 4);
+        callbacks(0.1, second);
+    }
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    // Its peaks while parallel (0.3: over kMixPeakOffLoad) keep it there through a light mean...
+    for (int bar = 0; bar < 8; ++bar) {
+        callbacks(0.3, 4);
+        callbacks(0.02, second);
+    }
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    // ...and with the bursts gone, one thread again once their count has decayed and kMixSerialSeconds passed.
+    callbacks(0.02, 12 * second);
     e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());
 }
@@ -1019,8 +1065,14 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
     for (const char* key : {"\"callback_cpu\":", "\"core_kind\":", "\"clock_khz\":", "\"max_khz\":", "\"hint\":", "\"hint_state\":",
                             "\"mmcss\":", "\"worker_tuning\":", "\"workers\":2", "\"active_workers\":2", "\"wait_share\":",
                             "\"cores\":", "\"fast_cores\":", "\"hybrid\":", "\"core_source\":",
-                            "\"stabilizer\":\"off\"", "\"stabilizer_share\":", "\"stabilizer_work\":"})
+                            "\"stabilizer\":\"off\"", "\"stabilizer_share\":", "\"stabilizer_work\":",
+                            "\"mix_on\":", "\"mix_pooled_callbacks\":", "\"util_clamp\":{\"request\":512,"})
         CHECK(j.find(key) != std::string::npos);
+#if !defined(__ANDROID__)
+    // Asked for on Android only (thread_tuning.h): elsewhere nothing is asked of the threads.
+    CHECK(j.find("\"callback\":\"none\"") != std::string::npos);
+    CHECK(j.find("\"workers\":\"none\"") != std::string::npos);
+#endif
     // The platform's stabilizer reports itself through the engine (load_stabilizer.h).
     // Its "stabilizer_work" is the smoothed work share that decides on or idle (LoadStabilizer::wanted).
     e.noteStabilizer(static_cast<uint8_t>(StabilizerState::On), 0.5f, 0.25f);
@@ -1029,6 +1081,32 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
     e.noteStabilizer(static_cast<uint8_t>(StabilizerState::Idle), 0.0f, 0.05f);
     CHECK(e.audioThreadsJson().find("\"stabilizer\":\"idle\"") != std::string::npos);
     CHECK(e.audioThreadsJson().find("\"stabilizer_work\":0.05") != std::string::npos);
+}
+
+// The utilization clamp (2026-11-27 probe, thread_tuning.h) on a thread of the test's own: it raises the floor, or
+// keeps one already as high, or the system refuses it or has none; it never fails silently, and it never lowers
+// a floor (asking for less than the thread has keeps it).
+TEST(util_clamp_raises_or_reports_why_not) {
+    tuning::UtilClamp first, lower;
+    std::thread t([&] {
+        first = tuning::raiseUtilMin(256);
+        lower = tuning::raiseUtilMin(64);
+    });
+    t.join();
+#if defined(__linux__)
+    CHECK(first.state != tuning::ClampState::None);
+    if (first.state == tuning::ClampState::Applied || first.state == tuning::ClampState::Kept) {
+        CHECK(first.utilMin >= 256);
+        CHECK(lower.state == tuning::ClampState::Kept);
+        CHECK_EQ(lower.utilMin, first.utilMin);
+    } else if (first.state == tuning::ClampState::Refused) {
+        CHECK(first.error != 0);
+    }
+#else
+    CHECK(first.state == tuning::ClampState::Unsupported);
+#endif
+    CHECK(std::string(tuning::clampStateName(tuning::ClampState::Applied)) == "applied");
+    CHECK(std::string(tuning::clampStateName(tuning::ClampState::Refused)) == "refused");
 }
 
 // The engine tells the device callback when its clock matters (the stabilizer runs only then): playing, not stopped.
