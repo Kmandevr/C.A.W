@@ -159,6 +159,7 @@ void Engine::drainRetired() {
         delete r.delay;
         delete r.sends;
         delete r.song;
+        delete r.vca;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -182,6 +183,7 @@ bool Engine::send(const Cmd& c) {
             delete c.delay;
             delete c.sends;
             delete c.song;
+            delete c.vca;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1207,6 +1209,25 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     if (!send(a)) {
         allOk = false;
         warnings["project"].push_back("audio command queue rejected audition mode update");
+    }
+
+    // VCA groups (vca.h): members resolved to the slots just installed (the audition, and layers without a slot, are
+    // never members). A project without groups sends nothing unless it clears a table an earlier one had.
+    if (!p.vcaGroups.empty() || ctlVca_) {
+        Cmd vc;
+        vc.type = Cmd::SetVca;
+        vc.vca = makeVcaTable(p, [&](const std::string& id) {
+            if (id.empty() || id[0] == '\x01') return -1;
+            auto it = layers_.find(id);
+            return it == layers_.end() ? -1 : it->second.slot;
+        }).release();
+        VcaTable* sent = vc.vca;
+        if (send(vc)) {  // send() frees the table if the queue rejects the command
+            ctlVca_ = sent;
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected the VCA groups update");
+        }
     }
 
     if (keepMasterChain) {

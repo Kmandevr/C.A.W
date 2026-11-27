@@ -54,6 +54,8 @@ struct LayerMeter {
 constexpr int kScopeMaster = -1;
 constexpr int kScopeAudition = -2;
 
+struct VcaTable;  // a project's VCA groups (vca.h)
+
 class Engine {
 public:
     // sampleRate must be 8,000-192,000 Hz. Throws std::runtime_error if the mix graph cannot be
@@ -149,6 +151,9 @@ public:
     // armed (near-zero-delay) version. 1, 0 busy, -1 none. The instrument (kInstrumentIndex) has one too.
     int32_t componentCost(const std::string& layerId, uint32_t index, double& share, uint32_t& latency, bool& armed);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
+    // A VCA group's fader (linear, 0..+12 dB), mute and solo while it plays (API 47; vca.h). False if the project
+    // has no such group. A later project update sets the values it names again.
+    bool setVca(const std::string& groupId, double volume, bool mute, bool solo);
     // A send while it plays (send `index` of the layer's project "sends"): its level (linear, 0..+12 dB), pre- or
     // post-fader and mute, ramped over a block. False if the layer has no such send. A later project update sets
     // the values it names again.
@@ -461,6 +466,7 @@ private:
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
+    void runVca(int m) noexcept;  // audio thread, once a chunk: each member slot's VCA ramp (Slot::vca)
     // A track's instrument, first in its track node: its pattern notes and note motion as events, then
     // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
     void runInstrument(Slot& s, int m) noexcept;
@@ -576,6 +582,7 @@ private:
     double masterTarget_ = 0.7, masterStep_ = 0.0;
     int masterRamp_ = 0;
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
+    VcaTable* vca_ = nullptr;  // audio thread: the project's VCA groups (owned; null: none; replaced by SetVca)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note (the tempo map's first tempo; everywhere when timeConstant_)
     SongTime* song_ = nullptr;   // the tempo map and signatures (owned; swapped by Transport and SetSong)
@@ -695,6 +702,7 @@ private:
     // update with the same components keeps it and only sets values.
     ComponentChain* ctlMasterChain_ = nullptr;
     std::string ctlMasterAutomationKey_;
+    VcaTable* ctlVca_ = nullptr;  // control thread: the VCA table last sent (alive until a later one replaces it)
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> ctlAutomation_;  // the last project's lanes  // the lanes the master chain's automation table was made from
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     // A project module: a pattern (note clip) and the last version that parsed.

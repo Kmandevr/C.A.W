@@ -203,8 +203,13 @@ extern "C" {
    caw_drums_kit_build and caw_drums_kit_tool build and finish kits; caw_drums_info gains "builders". Old kits render
    the same bits. Playback (1.1.2, same functions): caw_audio_tune_buffer grows a fixed size on underruns; caw_audio_set_thermal acts on nothing; the
    load stabilizer is off unless CAW_LOAD_STABILIZER=1; overload shedding never sheds the last layer still
-   sounding. */
-#define CAW_API_VERSION 46
+   sounding.
+   47 (2026-11-27, 1.1.4): VCA groups (docs/engine.md "VCA groups"). A project's optional "vca_groups" (absent:
+   none, so older projects play the same bits): at most 32 groups {"id","name","volume","mute","solo","members":[layer
+   ids, at most 256],"automation":[a volume lane]}, each a fader that scales its members' levels (after their own
+   fader and volume lane) and a mute and solo that act on them beside their own, without summing their audio.
+   caw_engine_set_vca moves a group live. */
+#define CAW_API_VERSION 47
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -464,6 +469,10 @@ CAW_API int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, Caw
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
 CAW_API int32_t caw_engine_set_master(CawEngine* e, double volume);
+/* A VCA group's fader (linear gain 0..3.981, +12 dB; more is held there), mute and solo while it plays (API version
+   47): 1 when set (the audio thread reads it from its next callback), 0 when the project has no group `group_id`. A
+   later project update sets the values it names again. */
+CAW_API int32_t caw_engine_set_vca(CawEngine* e, const char* group_id, double volume, int32_t mute, int32_t solo);
 /* Note previews: a held note on a layer's instrument, heard through the layer's effects and mix (mute and solo
    apply), while playing or stopped; stopped, the transport stays where it is. `id` is the caller's handle: a second
    note on with the same id ends the first. Pitch is a MIDI note number (fractions allowed), velocity 0..1. Only a

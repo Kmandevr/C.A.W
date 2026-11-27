@@ -222,7 +222,7 @@ void main() {
       for (final v in MergedDevices.variants.where((v) => v.oldId != v.id)) {
         expect(saved, isNot(contains('"${v.oldId}"')), reason: v.oldId);
       }
-      expect(jsonDecode(saved)['caw_app_project'], ProjectDoc.fileVersion);
+      expect(jsonDecode(saved)['caw_app_project'], ProjectDoc.mergedFileVersion);
       expect(jsonEncode(ProjectDoc.fromJson(jsonDecode(saved) as Map<String, dynamic>).toJson()), saved);
     }, skip: noLib);
 

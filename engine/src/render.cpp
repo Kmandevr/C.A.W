@@ -362,6 +362,7 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             }
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
+            p.vcaGroups.clear();  // as its own mute, solo and folder: a VCA group's don't reach a one-shot
             if (!record(p, sr, 0, len, out, progress, cancel)) return false;
             trimSilentEnd(out, sr);
             return true;

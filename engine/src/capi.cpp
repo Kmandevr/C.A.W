@@ -286,6 +286,12 @@ int32_t caw_engine_notes_off(CawEngine* e) {
     return e ? e->engine->notesOff() : 0;
 }
 
+int32_t caw_engine_set_vca(CawEngine* e, const char* group_id, double volume, int32_t mute, int32_t solo) try {
+    return e && group_id && e->engine->setVca(group_id, volume, mute != 0, solo != 0) ? 1 : 0;
+} catch (const std::bad_alloc&) {
+    return 0;
+}
+
 int32_t caw_engine_set_master(CawEngine* e, double volume) {
     return e && e->engine->setMaster(volume) ? 1 : 0;
 }
