@@ -6,6 +6,13 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: Clip automation lanes can add to the track lane (model; the look waits for the owner)
+
+- **Chosen:** `ClipAutomationLaneDoc.mode` is `override` (as before, the default) or `add`, saved as `"mode": "add"` only when add, so old files keep their bytes. An add lane plays base + clip − neutral over the clip's span: volume adds in dB (a gain of 1.0 is neutral, so it multiplies the linear gain), pan adds around centre, and a device parameter adds relative to the base's value at the clip's start (`ProjectDoc` has no descriptors, and an export without app state must sound like playback). The result is clamped to the target's range. "Later start wins" between overlapping clips is unchanged across modes, and an add clip adds to the base, never to another clip. The engine still receives merged song-time points; it needs no change.
+- **The point cap:** the merged lane keeps its 131,072-point cap. Add parts that would pass it share what the base and override parts leave, in proportion to need, thinning evenly and deterministically with their ends kept, so the base after a clip is never cut. A jump is one step-curve point.
+- **Checked:** `app/test/clip_add_mode_test.dart` (19 tests); full `flutter test` 2858 pass; a code review found the cap overflow, fixed in the second commit.
+- **Open (owner, Hub #35, question 1b):** whether switching a lane to Add re-centres its points.
+
 ## 2026-11-27: Stable instance ids for devices, sends, automation lanes and points, and samples
 
 - **[Fact] The problem:** devices, sends and lanes were known only by their place in a list, so a device's history stopped at a reorder and lanes and modulation links had to be re-pointed by hand at every chain edit.

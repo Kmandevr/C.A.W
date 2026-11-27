@@ -1,4 +1,4 @@
-// Edits of a MIDI clip's own loop point and its clip automation lanes (owner, 2026-11-11), each one undo step.
+// Edits of a MIDI clip's own loop point and its clip automation lanes and their modes (owner, 2026-11-11), each one undo step.
 import 'dart:math' as math;
 
 import 'app_state.dart';
@@ -80,6 +80,18 @@ extension ClipLoopEdit on AppState {
     endUndoStep();
   }
 
+  /// Sets whether [lane] overrides the track's (or project's) lane inside [clip] or adds to it ([ClipLaneMode]); its
+  /// points stay as they are. One undo step.
+  void setClipLaneMode(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane, ClipLaneMode mode) {
+    if (guardFrozen(layer)) return;
+    if (lane.mode == mode || !clip.automation.contains(lane)) return;
+    endUndoStep();
+    beginAutomationGesture();
+    editLayer(layer, (_) => lane.mode = mode);
+    endAutomationGesture();
+    endUndoStep();
+  }
+
   double _clampValue(ClipAutomationLaneDoc lane, double value) => lane.isTrack
       ? value.clamp(lane.target == 'volume' ? 0.0 : -1.0, lane.target == 'volume' ? kMaxMixGain : 1.0).toDouble()
       : value.clamp(-1000000.0, 1000000.0).toDouble();
@@ -117,16 +129,16 @@ extension ClipLoopEdit on AppState {
     endAutomationGesture();
   }
 
-  /// "Move to track": [lane]'s values over every pass of [clip] go into the track's (or project's) lane on the
-  /// same target, made if there is none, and the clip lane goes. One undo step.
+  /// "Move to track": [lane]'s values over every pass of [clip] (an add lane's sum with the base) go into the
+  /// track's (or project's) lane on the same target, made if there is none, and the clip lane goes. One undo step.
   void moveClipLaneToTrack(LayerDoc layer, ClipDoc clip, ClipAutomationLaneDoc lane) {
     final key = lane.keyOn(layer.id);
     final trackLane = lane.isTrack ? layer.automation.where((a) => a.target == lane.target).firstOrNull : null;
     final projectLane = lane.isTrack ? null : project.automation.where((a) => a.key == key).firstOrNull;
     final base = trackLane?.points ?? projectLane?.points ?? const <AutomationPointDoc>[];
     final value = laneValueAt(layer, lane.targetType, lane.target, lane.component, clip.startSteps.toDouble());
-    final span = clipLaneSpan(clip, lane.points, project.clipLoopSteps(clip));
-    final merged = mergeClipLanes(base, value, [span]);
+    final span = clipLaneSpan(clip, lane.points, project.clipLoopSteps(clip), mode: lane.mode);
+    final merged = mergeClipLanes(base, value, [span], rule: clipAddRuleFor(lane.targetType, lane.target));
     endUndoStep();
     beginAutomationGesture();
     editLayer(layer, (l) {
