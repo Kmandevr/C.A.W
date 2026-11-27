@@ -487,12 +487,18 @@ target_include_directories(caw_cli PRIVATE src)
   enable_testing()
   # Split the suite into independent processes so CTest can run shards concurrently.
   # Process isolation avoids sharing test state while keeping every case enabled.
-  set(CAW_TEST_SHARDS 4)
+  # The shard count changes only how the cases are split, never which run: CI's sanitizer jobs set more shards and run
+  # one shard (both kinds) per job (.github/workflows/engine.yml).
+  set(CAW_TEST_SHARDS 4 CACHE STRING "Number of caw_tests shards CTest registers (each case runs in exactly one)")
+  if(NOT CAW_TEST_SHARDS MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "CAW_TEST_SHARDS must be a positive whole number, not '${CAW_TEST_SHARDS}'")
+  endif()
+  math(EXPR CAW_TEST_LAST_SHARD "${CAW_TEST_SHARDS} - 1")
   # Each shard runs the mix graph on one thread and writes every reference render's raw-bit digest; the parallel
   # shards run the same tests with every Engine's mix graph on 3 workers (speed phase 5c), and
   # caw_parallel_identity checks that every render has the same bits both ways.
   set(CAW_DIGEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/render_digests")
-  foreach(shard RANGE 0 3)
+  foreach(shard RANGE 0 ${CAW_TEST_LAST_SHARD})
     add_test(NAME caw_tests_shard_${shard}
       COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
         "CAW_RENDER_DIGEST=${CAW_DIGEST_DIR}/serial_${shard}.txt"
@@ -505,7 +511,8 @@ target_include_directories(caw_cli PRIVATE src)
       PROCESSORS 1 FIXTURES_SETUP caw_render_digests)
   endforeach()
   add_test(NAME caw_parallel_identity
-    COMMAND ${CMAKE_COMMAND} -DDIGEST_DIR=${CAW_DIGEST_DIR} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareDigests.cmake")
+    COMMAND ${CMAKE_COMMAND} -DDIGEST_DIR=${CAW_DIGEST_DIR} -DSHARD_COUNT=${CAW_TEST_SHARDS}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareDigests.cmake")
   set_tests_properties(caw_parallel_identity PROPERTIES FIXTURES_REQUIRED caw_render_digests)
   file(MAKE_DIRECTORY "${CAW_DIGEST_DIR}")
   # Real-time contract tests in their own binary: it replaces global operator new/delete to count
