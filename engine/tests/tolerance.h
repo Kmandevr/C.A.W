@@ -79,15 +79,24 @@ Audio quantize(const Audio& a);
 std::vector<uint8_t> encodeAudio(const Audio& a);
 bool decodeAudio(const std::vector<uint8_t>& bytes, uint32_t frames, Audio& out);
 
-// One suite's references, engine/tests/references/<suite>.cawref. check() compares a render with its reference, or,
-// under `caw_tests --update-references` (or --update-golden), records it; the file is written when the set goes,
-// unless a failure was logged while it lived. Comparing, every stored reference must be compared before the set goes.
-// CAW_REFERENCE_REPORT=1 prints each comparison's measurements (REF lines) for classifying cases.
+// This build's name for its own reference sets (docs/engine.md "Reference renders"), as drums_compat_test.cpp picks
+// its compat tables: "arm64" (Linux Arm64), "win64" (Windows clang-cl), "x64_debug" (unoptimised x86-64, the
+// sanitizer jobs), "" for x86-64 Release, whose sets are the common files.
+const char* referenceBuild();
+
+// One suite's references, engine/tests/references/<suite>.cawref, or this build's own <suite>.<build>.cawref where
+// that file exists (recorded on the build by reference-sets.yml: chaotic devices differ between compilers, so a
+// build compares with its own renders). check() compares a render with its reference, or, under `caw_tests
+// --update-references` (or --update-golden), records it, into the build's own file on a build other than x86-64
+// Release; the file is written when the set goes, unless a failure was logged while it lived. Comparing, every stored
+// reference must be compared before the set goes. CAW_REFERENCE_REPORT=1 prints each comparison's measurements (REF
+// lines) for classifying cases.
 class References {
 public:
     explicit References(std::string suite);
-    // The suite's file in `dir` instead, recording when `updating` (for tolerance_test.cpp).
-    References(std::string suite, std::string dir, bool updating);
+    // The suite's file in `dir` instead, recording when `updating`; `build` as referenceBuild() names one, "" for the
+    // common file alone (for tolerance_test.cpp).
+    References(std::string suite, std::string dir, bool updating, std::string build = std::string());
     ~References();
     References(const References&) = delete;
     References& operator=(const References&) = delete;
@@ -95,7 +104,10 @@ public:
     void check(const std::string& name, const Audio& render, Class c, const char* file, int line);
     // "" when the render is accepted (or recorded), else why not.
     std::string compare(const std::string& name, const Audio& render, Class c);
+    // The file read (this build's own where it exists, else the common one), or the one recording writes.
     std::string path() const;
+    // True when path() is this build's own set rather than the common file.
+    bool ownSet() const { return own_; }
     bool loaded() const { return loaded_; }
     size_t size() const { return entries_.size(); }
 
@@ -112,10 +124,12 @@ private:
     Entry* find(const std::string& name);
     bool load();
     bool save() const;
-    std::string suite_, dir_;
+    std::string fileFor(const std::string& build) const;
+    std::string suite_, dir_, build_;
     std::vector<Entry> entries_;
     bool loaded_ = false;
     bool updating_ = false;
+    bool own_ = false;
     int failuresAtStart_ = 0;
 };
 

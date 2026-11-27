@@ -1,0 +1,97 @@
+# Hand-started: records each other engine build's own reference sets (engine/tests/references/<suite>.<build>.cawref) with caw_tests --update-references, as artifacts to commit.
+name: Reference sets
+# Chaotic devices differ by up to about 1 dB between compilers whatever the flags, so a build other than x86-64
+# Release can compare with its own renders instead of the common (x86-64) file: tolerance.cpp reads
+# <suite>.<build>.cawref where it exists. Each job builds caw_tests exactly as engine.yml does on that runner, runs the
+# named tests recording (which writes only that build's own files), runs them again comparing, and uploads the files.
+# docs/engine.md "Reference renders".
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "caw_tests filters (each part of a test name), space-separated: each one's reference suites are recorded"
+        required: true
+        default: "nightingale_matches_its_reference_render curlew_matches_its_reference_render stress_scenarios_unchanged_by_the_move"
+        type: string
+permissions:
+  contents: read
+jobs:
+  record:
+    name: Record (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The same runners, generators and flags as engine.yml's test and sanitizer jobs. build: the name
+          # tolerance.cpp's referenceBuild() gives that build (x86-64 Release has the common files, recorded locally).
+          - { name: Linux Arm64, os: ubuntu-24.04-arm, config: Release, flags: "-DCMAKE_BUILD_TYPE=Release", jobs: 4, build: arm64 }
+          - { name: Windows x64 clang-cl, os: windows-2025, config: Release, flags: "-T ClangCL", jobs: 4, build: win64 }
+          # The sanitizer jobs' build (ASan and UBSan, Debug, -O0); two compile jobs, as there (more run out of memory).
+          - { name: Linux x64 Debug, os: ubuntu-24.04, config: Debug, flags: "-DCMAKE_BUILD_TYPE=Debug -DCAW_SANITIZE=ON", jobs: 2, build: x64_debug }
+    env:
+      TESTS: ${{ inputs.tests }}
+      BUILD: ${{ matrix.build }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the inputs
+        run: |
+          read -r -a names <<< "$TESTS"
+          if [ "${#names[@]}" -lt 1 ] || [ "${#names[@]}" -gt 12 ]; then
+            echo "::error::tests must name 1 to 12 caw_tests filters"; exit 1
+          fi
+          for n in "${names[@]}"; do
+            if ! [[ "$n" =~ ^[a-z0-9_]{3,100}$ ]]; then
+              echo "::error::each test filter is 3 to 100 lower-case letters, digits and underscores"; exit 1
+            fi
+          done
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: |
+          cmake --version | head -1
+          cmake -S engine -B engine/build ${{ matrix.flags }}
+      - name: Build caw_tests
+        run: cmake --build engine/build --config ${{ matrix.config }} --parallel ${{ matrix.jobs }} --target caw_tests
+      - name: Record this build's sets
+        run: |
+          exe=engine/build/caw_tests
+          [ -f "$exe" ] || exe=engine/build/${{ matrix.config }}/caw_tests.exe
+          read -r -a names <<< "$TESTS"
+          for n in "${names[@]}"; do
+            echo "::group::record $n"
+            "$exe" --update-references "$n" || { echo "::error::$n failed while recording on ${{ matrix.name }}"; exit 1; }
+            echo "::endgroup::"
+          done
+          # Recording on this build writes only its own files: a changed common file means the build was named wrong.
+          if git status --porcelain -- engine/tests/references | grep -vE "\.${BUILD}\.cawref\$"; then
+            echo "::error::files other than this build's own sets changed (above)"; exit 1
+          fi
+      - name: Compare with the new sets
+        run: |
+          exe=engine/build/caw_tests
+          [ -f "$exe" ] || exe=engine/build/${{ matrix.config }}/caw_tests.exe
+          read -r -a names <<< "$TESTS"
+          for n in "${names[@]}"; do "$exe" "$n" || { echo "::error::$n does not match the set just recorded"; exit 1; }; done
+      - name: Collect the sets
+        run: |
+          mkdir -p sets
+          cp engine/tests/references/*."$BUILD".cawref sets/
+          {
+            echo "### Reference sets for ${{ matrix.name }} (\`$BUILD\`, ${GITHUB_SHA::7}, run $GITHUB_RUN_ID)"
+            echo
+            echo "Commit each file to engine/tests/references/."
+            echo
+            echo '```'
+            (cd sets && sha256sum -- *)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reference-sets-${{ matrix.build }}
+          path: sets/
+          if-no-files-found: error
