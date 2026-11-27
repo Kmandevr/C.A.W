@@ -1,5 +1,6 @@
 // Reads every connected MIDI device (USB, Bluetooth once opened, virtual) and sends what it plays to Dart, each
-// message with its time on the device's clock, so the engine places it at the frame it was played (caw.h, API 11).
+// message with its time on the device's clock, so the engine places it at the frame it was played (caw.h, API 11);
+// while following, the devices' MIDI clock too (API 47).
 package com.kmandevr.caw
 
 import android.content.Context
@@ -84,12 +85,47 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
         sink = null
     }
 
-    /** "setClosed" {names}: the devices Settings › MIDI turned off (closed now, opened again when removed). */
+    /**
+     * "setClosed" {names}: the devices Settings › MIDI turned off (closed now, opened again when removed).
+     * "setClockFollow" {on}: while on, each device's clock bytes (F8, FA, FB, FC, and F2 with its two data bytes) are
+     * posted as {"clock": bytes, "t": time, "name"} for the engine's clock follow (caw_engine_midi_clock_in).
+     */
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method != "setClosed") return result.notImplemented()
-        closedNames = (call.argument<List<String>>("names") ?: emptyList()).toSet()
-        refresh()
+        when (call.method) {
+            "setClosed" -> {
+                closedNames = (call.argument<List<String>>("names") ?: emptyList()).toSet()
+                refresh()
+            }
+            "setClockFollow" -> follow = call.argument<Boolean>("on") == true
+            else -> return result.notImplemented()
+        }
         result.success(null)
+    }
+
+    @Volatile private var follow = false
+
+    /** A port's clock bytes from one onSend, posted together; a full batch is posted at once, never cut. */
+    private inner class ClockBatch(private val source: String) {
+        private val bytes = ByteArray(48)
+        private var n = 0
+        /** A one-byte message (F8, FA, FB, FC). */
+        fun add(b: Int, timestamp: Long) {
+            if (n + 1 > bytes.size) post(timestamp)
+            bytes[n++] = b.toByte()
+        }
+        /** A Song Position Pointer, whole. */
+        fun addSpp(lsb: Int, msb: Int, timestamp: Long) {
+            if (n + 3 > bytes.size) post(timestamp)
+            bytes[n++] = 0xF2.toByte()
+            bytes[n++] = lsb.toByte()
+            bytes[n++] = msb.toByte()
+        }
+        fun post(timestamp: Long) {
+            if (n == 0) return
+            val event = mapOf("clock" to bytes.copyOf(n), "t" to timestamp, "name" to source)
+            n = 0
+            main.post { sink?.success(event) }
+        }
     }
 
     private fun nameOf(info: MidiDeviceInfo): String =
@@ -197,15 +233,31 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
         private val data = IntArray(2)
         private var have = 0
         private var sysex = false
+        private val clock = ClockBatch(source)
+        private var spp = -1 // a Song Position Pointer's data bytes so far (-1: none coming)
+        private var sppLow = 0
 
         override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
+            val following = follow
             for (i in offset until offset + count) {
                 val b = msg[i].toInt() and 0xFF
                 when {
-                    b >= 0xF8 -> continue // clock and other real-time bytes may appear anywhere
-                    b == 0xF0 -> { sysex = true; status = 0 }
+                    b >= 0xF8 -> { // clock and other real-time bytes may appear anywhere
+                        if (following && (b == 0xF8 || b == 0xFA || b == 0xFB || b == 0xFC)) clock.add(b, timestamp)
+                        continue
+                    }
+                    b == 0xF0 -> { sysex = true; status = 0; spp = -1 }
                     b == 0xF7 -> sysex = false
-                    b >= 0x80 -> { sysex = false; status = if (b >= 0xF0) 0 else b; have = 0 }
+                    b >= 0x80 -> {
+                        sysex = false; status = if (b >= 0xF0) 0 else b; have = 0
+                        spp = if (b == 0xF2 && following) 0 else -1
+                    }
+                    spp >= 0 -> {
+                        if (spp == 0) { sppLow = b; spp = 1 } else {
+                            clock.addSpp(sppLow, b, timestamp)
+                            spp = -1
+                        }
+                    }
                     sysex || status == 0 -> continue
                     else -> {
                         data[have++] = b
@@ -221,6 +273,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
                     }
                 }
             }
+            clock.post(timestamp)
         }
     }
 
@@ -229,16 +282,34 @@ class MidiInput(context: Context) : EventChannel.StreamHandler, MethodChannel.Me
         private val partial = ByteArray(4)
         private var have = 0
         private val words = ArrayList<Long>(16)
+        private val clock = ClockBatch(source)
+        private var rest = 0 // the current packet's words still to come
 
         override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
+            val following = follow
             for (i in offset until offset + count) {
                 partial[have++] = msg[i]
                 if (have < 4) continue
                 have = 0
                 var w = 0L
                 for (k in 0 until 4) w = (w shl 8) or (partial[k].toLong() and 0xFF)
+                if (rest > 0) { // a longer packet's later word
+                    rest--
+                    words.add(w)
+                    continue
+                }
+                val type = (w shr 28).toInt()
+                rest = when (type) { 0, 1, 2, 6, 7 -> 0; 3, 4, 8, 9, 10 -> 1; 11, 12 -> 2; else -> 3 }
+                // A System message (type 1, one word) carrying the clock: to the follow, not the instrument.
+                val st = ((w shr 16) and 0xFF).toInt()
+                if (following && type == 1 && (st == 0xF8 || st == 0xFA || st == 0xFB || st == 0xFC || st == 0xF2)) {
+                    if (st == 0xF2) clock.addSpp(((w shr 8) and 0x7F).toInt(), (w and 0x7F).toInt(), timestamp)
+                    else clock.add(st, timestamp)
+                    continue
+                }
                 words.add(w)
             }
+            clock.post(timestamp)
             if (words.isEmpty()) return
             val event = mapOf("ump" to words.toLongArray(), "t" to timestamp, "name" to source, "id" to id)
             words.clear()

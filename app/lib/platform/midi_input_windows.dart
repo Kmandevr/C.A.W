@@ -38,7 +38,7 @@ class _WinMM {
 
 /// Every WinMM input port, open unless Settings › Sound › MIDI and controllers turned it off. WinMM has no plug-in notification: the port
 /// list is checked every two seconds, and a change reopens the ports (their numbers shift when one goes).
-class WindowsMidiInput implements MidiInput {
+class WindowsMidiInput implements MidiInput, MidiClockSource {
   WindowsMidiInput(this._clock);
   final int Function() _clock;
 
@@ -64,6 +64,15 @@ class WindowsMidiInput implements MidiInput {
     };
     return c;
   }
+
+  final _clockBytes = StreamController<MidiClockBytes>.broadcast();
+  bool _follow = false;
+
+  @override
+  Stream<MidiClockBytes> get clock => _clockBytes.stream;
+
+  @override
+  void setClockFollow(bool on) => _follow = on;
 
   late final _m = _watched(_messages);
   late final _n = _watched(_names);
@@ -174,8 +183,14 @@ class WindowsMidiInput implements MidiInput {
     final port = _open[instance];
     if (port == null || port.handle != handle) return;
     final status = param1 & 0xFF;
-    if (status < 0x80 || status >= 0xF0) return; // real-time and system messages
     final t = port.startNs > 0 ? port.startNs + (param2 & 0xFFFFFFFF) * 1000000 : 0;
+    if (status >= 0xF0) {
+      // The clock and its transport go to the engine while following; other system messages are dropped.
+      final clock = _follow ? clockBytesOfShortMessage(param1) : null;
+      if (clock != null) _clockBytes.add(MidiClockBytes(clock, t, port.name));
+      return;
+    }
+    if (status < 0x80) return;
     _m.add(MidiMessage(status, (param1 >> 8) & 0x7F, (param1 >> 16) & 0x7F, port.name, t));
   }
 }
