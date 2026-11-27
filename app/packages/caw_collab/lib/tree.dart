@@ -2,6 +2,7 @@
 // apply(op), which checks an op against the tree, the schema and the limits, applies it, and returns its inverse.
 import 'dart:collection';
 
+import 'codec.dart';
 import 'fractional_key.dart';
 import 'ids.dart';
 import 'limits.dart';
@@ -236,6 +237,75 @@ class CollabTree {
       },
       'blobs': {for (final h in hashes) h: _blobs[h]!.bodyJson()},
     };
+  }
+
+  /// A tree rebuilt from [snapshot] (what [snapshot] returned, possibly after a trip through JSON), checked as
+  /// untrusted input: the schema hash must match [schema], every id, kind, key and value must be well-formed and
+  /// within the limits, every parent must exist and accept the child, and no node may sit in a cycle. Throws
+  /// [CollabDecodeError] on any problem.
+  factory CollabTree.fromSnapshot(Schema schema, Object? snapshot,
+      {TreeLimits limits = TreeLimits.standard, CollabLimits opLimits = CollabLimits.standard}) {
+    Never bad(String why) => throw CollabDecodeError('snapshot: $why');
+    if (snapshot is! Map) bad('not an object');
+    if (snapshot['schema'] != schema.hash) bad('made with another schema');
+    final nodes = snapshot['nodes'], blobs = snapshot['blobs'];
+    if (nodes is! Map || blobs is! Map) bad('nodes or blobs is not an object');
+    if (nodes.length > limits.maxNodes) bad('over ${limits.maxNodes} nodes');
+    final t = CollabTree(schema, limits: limits, opLimits: opLimits);
+    for (final e in nodes.entries) {
+      final id = e.key, n = e.value;
+      if (id is! String || !NodeIds.isValid(id)) bad('a node id is not an id');
+      if (n is! Map) bad('node $id is not an object');
+      final kind = n['kind'], parent = n['parent'], list = n['list'], key = n['key'], deleted = n['deleted'], fields = n['fields'];
+      if (kind is! String || parent is! String || list is! String || key is! String || deleted is! bool || fields is! Map) {
+        bad('node $id is malformed');
+      }
+      if (!schema.kinds.containsKey(kind)) bad('node $id has an unknown kind');
+      final f = <String, Object?>{};
+      for (final fe in fields.entries) {
+        final name = fe.key;
+        if (name is! String || !isValidName(name)) bad('node $id has a bad field name');
+        final p = valueProblem(fe.value, opLimits) ?? schema.fieldProblem(kind, name, fe.value);
+        if (p != null) bad('node $id: $p');
+        if (fe.value != null) f[name] = freezeValue(fe.value);
+      }
+      if (id == rootId) {
+        if (kind != schema.rootKind || parent.isNotEmpty || deleted) bad('the root is malformed');
+        t._nodes[rootId]!._fields.addAll(f);
+        continue;
+      }
+      if (!NodeIds.isValid(parent) || !isValidName(list) || !FractionalKeys.isValid(key, maxLength: opLimits.maxKeyLength)) {
+        bad('node $id has a bad position');
+      }
+      t._nodes[id] = TreeNode._(id, kind, parent, list, key, f).._deleted = deleted;
+    }
+    for (final n in t._nodes.values) {
+      if (n.id == rootId) continue;
+      final p = t._nodes[n.parent];
+      if (p == null) bad('the parent of ${n.id} does not exist');
+      final cp = schema.childProblem(p.kind, n.list, n.kind);
+      if (cp != null) bad(cp);
+      t._link(n);
+    }
+    for (final n in t._nodes.values) {
+      var depth = 0;
+      for (var a = n; a.id != rootId; a = t._nodes[a.parent]!) {
+        if (++depth > limits.maxDepth) bad('a cycle or a node deeper than ${limits.maxDepth} at ${n.id}');
+      }
+    }
+    for (final e in blobs.entries) {
+      final b = e.value;
+      if (b is! Map) bad('a blob is not an object');
+      final Op op;
+      try {
+        op = opFromJsonBody(OpType.blob, b, opLimits);
+      } on CollabDecodeError catch (err) {
+        bad(err.message);
+      }
+      if (op is! BlobOp || op.hash != e.key) bad('blob ${e.key} is malformed');
+      t._blobs[op.hash] = op;
+    }
+    return t;
   }
 
   /// What a reader sees: the visible nodes from the root down, children in order, tombstones left out.

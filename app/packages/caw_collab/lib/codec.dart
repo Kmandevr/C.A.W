@@ -28,10 +28,15 @@ List<Op> decodeBatchJson(String text, [CollabLimits limits = CollabLimits.standa
 }
 
 // The op map, its fields map and a grant add up to 3 levels above a value's own nesting; a batch adds one more.
-Object? _parseJson(String text, CollabLimits limits, int extraDepth) {
-  if (text.length > limits.maxOpBytes) throw CollabDecodeError('over ${limits.maxOpBytes} characters');
-  // Bound the nesting before the parser sees it, so a deep input can't exhaust the stack.
-  final most = limits.maxDepth + 3 + extraDepth;
+Object? _parseJson(String text, CollabLimits limits, int extraDepth) =>
+    parseJsonLimited(text, maxChars: limits.maxOpBytes, maxDepth: limits.maxDepth + 3 + extraDepth);
+
+/// Parses untrusted JSON [text] of at most [maxChars] UTF-16 code units and [maxDepth] levels of nesting, or
+/// throws [CollabDecodeError]. The nesting is bounded before the parser sees it, so a deep input can't exhaust
+/// the stack.
+Object? parseJsonLimited(String text, {required int maxChars, required int maxDepth}) {
+  if (text.length > maxChars) throw CollabDecodeError('over $maxChars characters');
+  final most = maxDepth;
   var depth = 0;
   var inString = false;
   for (var i = 0; i < text.length; i++) {
@@ -45,7 +50,7 @@ Object? _parseJson(String text, CollabLimits limits, int extraDepth) {
     } else if (c == 0x22) {
       inString = true;
     } else if (c == 0x5b || c == 0x7b) {
-      if (++depth > most) throw CollabDecodeError('nesting deeper than ${limits.maxDepth}');
+      if (++depth > most) throw CollabDecodeError('nesting deeper than $most');
     } else if (c == 0x5d || c == 0x7d) {
       depth--;
     }
@@ -122,6 +127,14 @@ Op opFromJson(Object? json, [CollabLimits limits = CollabLimits.standard]) {
   }
   return _checked(op, limits);
 }
+
+/// Reads an op of [type] from its body alone (no header, as [Op.bodyJson] writes it), with an empty header: for
+/// stored data that keeps only bodies, such as a tree snapshot's blobs.
+Op opFromJsonBody(OpType type, Map body, [CollabLimits limits = CollabLimits.standard]) =>
+    opFromJson({...body, 'op': type.wire, 'author': snapshotAuthor, 'clientSeq': 0, 'baseSeq': 0}, limits);
+
+/// The author an op read from a body alone carries.
+const String snapshotAuthor = 'snapshot';
 
 const _bodyKeys = <OpType, List<String>>{
   OpType.set: ['node', 'field', 'value'],
