@@ -263,9 +263,24 @@ TEST(curlew_matches_its_reference_render) {
         auto p = makeC(v);
         const double k = kLow[inst];
         Stereo s = play(*p, v, {{0.0, 0.4, k + 7, 0.7}, {0.3, 0.8, k + 12, 0.5}, {0.6, 1.0, k + 16, 0.9}}, 1.3);
-        // The whole render, release tails included: a self-oscillating model's tail differs between builds, so each
-        // build compares with its own set (tolerance.cpp, referenceBuild()).
+        // Compared up to the last note's release: a self-oscillating model's release tail differs between builds
+        // (the chaotic class's 0.1 dB is for the held sound), and the release has its own checks.
+        s.l.resize(48000), s.r.resize(48000);
         CHECK_REFERENCE(refs, "curlew_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
+    }
+}
+
+// The whole render, release tails included, against this build's own render (curlew_tails.<build>.cawref;
+// tolerance.cpp, referenceBuild()): the held sound above checks that builds sound alike, this that a release on a
+// build doesn't change.
+TEST(curlew_release_tails_match_this_builds_reference) {
+    cawtest::References refs("curlew_tails");
+    for (int inst = 0; inst < curlew::kInstruments; ++inst) {
+        const Values v = {{"variant", static_cast<double>(inst)}};
+        auto p = makeC(v);
+        const double k = kLow[inst];
+        Stereo s = play(*p, v, {{0.0, 0.4, k + 7, 0.7}, {0.3, 0.8, k + 12, 0.5}, {0.6, 1.0, k + 16, 0.9}}, 1.3);
+        CHECK_REFERENCE(refs, "curlew_tails_" + std::to_string(inst), (cawtest::Audio{s.l, s.r}), cawtest::Class::Chaotic);
     }
 }
 

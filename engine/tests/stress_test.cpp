@@ -136,6 +136,19 @@ cawtest::Audio renderSecond(const ProjectSpec& p) {
     return a;
 }
 
+// every_instrument's render less the self-oscillating instruments (owner, 2026-11-24: "It doesn't necessarily need to
+// sound identical every time just close enough... You're also welcome to narrow the test"): Nightingale's stick-slip
+// friction (Timber's bowed strings until 1.1.3) and Curlew's reeds, jets and lips are chaotic, so each compiler's
+// rounding moves them by up to 1.2 dB (measured 2026-11-24, PR #261), past this mix's 0.1 dB match. The Benchmark
+// still plays them; their own references (nightingale_test.cpp, curlew_test.cpp) check them on every build, and the
+// whole mix is checked against each build's own render below.
+ProjectSpec withoutBowedStrings(ProjectSpec p) {
+    std::erase_if(p.layers, [](const LayerSpec& l) {
+        return l.name.rfind("Nightingale", 0) == 0 || l.name.rfind("Curlew", 0) == 0;
+    });
+    return p;
+}
+
 }  // namespace
 
 // The builders moved from caw_bench.cpp to stress_scenarios.cpp unchanged: each project's every field hashes as it
@@ -197,8 +210,18 @@ TEST(stress_scenarios_unchanged_by_the_move) {
         const std::string hash = hex(fnv(describeProject(p, dir).data(), describeProject(p, dir).size()));
         if (it == specHash.end()) cawtest::fail(__FILE__, __LINE__, id + ": no hash recorded (it is " + hash + ")");
         else if (hash != it->second) cawtest::fail(__FILE__, __LINE__, id + ": the project differs from its recorded one (" + hash + ")");
-        CHECK_REFERENCE(refs, id, renderSecond(p), cawtest::Class::Chaotic);
+        CHECK_REFERENCE(refs, id, renderSecond(id == "every_instrument" ? withoutBowedStrings(p) : p), cawtest::Class::Chaotic);
     }
+}
+
+// The whole every_instrument mix, Nightingale and Curlew included, against this build's own render
+// (stress_chaotic.<build>.cawref; tolerance.cpp, referenceBuild()): the shared suite above checks that builds sound
+// alike, this one that nothing on a build changes, the self-oscillating instruments too.
+TEST(stress_every_instrument_matches_this_builds_reference) {
+    const std::string dir = workDir();
+    cawtest::References refs("stress_chaotic");
+    for (const auto& [id, p] : builtProjects(dir))
+        if (id == "every_instrument") CHECK_REFERENCE(refs, id, renderSecond(p), cawtest::Class::Chaotic);
 }
 
 // 1.1.2 (the owner: "make sure the benchmark actually tests all of the plugins"): every built-in the engine lists

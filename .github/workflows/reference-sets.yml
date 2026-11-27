@@ -11,7 +11,7 @@ on:
       tests:
         description: "caw_tests filters (each part of a test name), space-separated: each one's reference suites are recorded"
         required: true
-        default: "nightingale_matches_its_reference_render curlew_matches_its_reference_render stress_scenarios_unchanged_by_the_move"
+        default: "nightingale_overlapping_notes_match_this_builds_reference curlew_release_tails_match_this_builds_reference stress_every_instrument_matches_this_builds_reference"
         type: string
 permissions:
   contents: read
@@ -68,6 +68,8 @@ jobs:
           [ -f "$exe" ] || exe=engine/build/${{ matrix.config }}/caw_tests.exe
           read -r -a names <<< "$TESTS"
           for n in "${names[@]}"; do
+            # The ThreadSanitizer job runs only stress_ tests: it needs no other own set.
+            if [ "$BUILD" = x64_clang ] && [[ "$n" != stress_* ]]; then echo "skip $n (not run by the ThreadSanitizer job)"; continue; fi
             echo "::group::record $n"
             "$exe" --update-references "$n" || { echo "::error::$n failed while recording on ${{ matrix.name }}"; exit 1; }
             echo "::endgroup::"
@@ -81,7 +83,10 @@ jobs:
           exe=engine/build/caw_tests
           [ -f "$exe" ] || exe=engine/build/${{ matrix.config }}/caw_tests.exe
           read -r -a names <<< "$TESTS"
-          for n in "${names[@]}"; do "$exe" "$n" || { echo "::error::$n does not match the set just recorded"; exit 1; }; done
+          for n in "${names[@]}"; do
+            if [ "$BUILD" = x64_clang ] && [[ "$n" != stress_* ]]; then continue; fi
+            "$exe" "$n" || { echo "::error::$n does not match the set just recorded"; exit 1; }
+          done
       - name: Collect the sets
         run: |
           mkdir -p sets
