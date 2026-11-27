@@ -34,6 +34,7 @@ on:
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
       - "scripts/compat-table*.js"  # its test runs with the script tests
+      - "scripts/worktree-tidy*.js"  # so does the worktree tool's
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -58,6 +59,7 @@ on:
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
       - "scripts/compat-table*.js"  # its test runs with the script tests
+      - "scripts/worktree-tidy*.js"  # so does the worktree tool's
   workflow_dispatch:
     inputs:
       installables:
@@ -211,7 +213,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test the small-update builder, the release-notes extraction, the CI test summaries, the Dart shard split and the numbered-lists check
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/changelog-join.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js scripts/number-lists.test.js
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/changelog-join.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js scripts/number-lists.test.js scripts/worktree-tidy.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}

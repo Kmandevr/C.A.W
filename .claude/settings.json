@@ -58,6 +58,17 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/worktree-tidy.js\" backup > /dev/null 2>&1 || true",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [

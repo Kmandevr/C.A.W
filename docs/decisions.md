@@ -6,6 +6,13 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: Automatic worktree backups and a scratch-build cleanup (1.1.3 maintenance)
+
+- **[Fact] The problem:** worker restarts and usage limits have ended sessions mid-task, and agent worktrees under `.claude/worktrees/` live only in the container; backing one up to `caw-backup-<name>` was a step to remember (`.claude/README.md`). Scratch builds are about 2 GB each and fill the disk.
+- **Chosen:** `scripts/worktree-tidy.js`. `backup` pushes each worktree whose commits `origin/Main` lacks to `caw-backup-<folder name>` when that branch is missing or behind; it never commits, and warns about uncommitted changes. A `SubagentStop` hook in `.claude/settings.json` runs it whenever an agent finishes, so a finished agent's work is on GitHub before the main session reads its report. `clean` lists by default; `--apply` removes a worktree only when it has no uncommitted changes and Main or its backup branch holds its tip (its branch stays: deleting branches asks first), and a CMake build folder (`engine/build*`, or a scratchpad folder when `CLAUDE_SCRATCHPAD` is set) whose top-level entries are older than `--days` (default 1).
+- **Checked:** `scripts/worktree-tidy.test.js` (which worktrees are pushed or removed, branch names, when a build is stale) runs in the *App* workflow's script tests.
+- **Not chosen:** committing a worktree's uncommitted changes in the hook (it would put a half-done edit into the agent's history), and removing worktrees whose commits were squash-merged without a backup (their tips aren't on Main, so the tool can't tell; back them up first, then clean).
+
 ## 2026-11-27: CHANGELOG entries as one file per change, joined at release (1.1.3 maintenance)
 
 - **[Fact] The problem:** each pull request added its lines to the next version's entry in `CHANGELOG.md` and its copy `app/assets/CHANGELOG.md`, so two of them conflicted on the same lines (`.claude/README.md` listed both CHANGELOGs among the files parallel branches collide in), and a release PR that wrote the entry had to recall every change by hand.
