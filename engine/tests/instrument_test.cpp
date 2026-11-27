@@ -1,5 +1,6 @@
 // Native instruments on tracks: notes reach them on their frames, previews, stop, values, state, reloads, the built-in synth.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -690,7 +691,10 @@ TEST(a_rebuilt_instrument_takes_over_its_held_notes_while_playing) {
     const char* path = caw::test::nativeComponentPath();
     CHECK(path != nullptr);
     if (!path) return;
-    const std::string rebuild = std::string(path) + ".instrument-rebuild-test";
+    // One file per test process, as track_components_test.cpp's rebuild: ctest runs a shard and its parallel twin
+    // side by side, and a shared name let one rewrite the library while the other loaded it (a failed reload, PR #285).
+    const std::string rebuild = std::string(path) + ".instrument-rebuild-test-" +
+                                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     {
         std::FILE* in = std::fopen(path, "rb");
         std::FILE* out = std::fopen(rebuild.c_str(), "wb");

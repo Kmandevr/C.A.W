@@ -31,6 +31,7 @@ on:
       - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
+      - "scripts/compat-table*.js"  # its test runs with the script tests
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -52,6 +53,7 @@ on:
       - "scripts/dart-test-shard*.js"  # splits the Dart tests by measured time
       - "scripts/dart-test-times*.js"  # measures them (app/test/test_times.json is under app/**)
       - "scripts/gh-annotation*.js"  # escapes their annotations
+      - "scripts/compat-table*.js"  # its test runs with the script tests
   workflow_dispatch:
     inputs:
       installables:
@@ -163,6 +165,7 @@ jobs:
       - name: Install ccache
         run: |
           if ! command -v ccache >/dev/null 2>&1; then
+            sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
             sudo apt-get update
             sudo apt-get install -y ccache
           fi
@@ -204,7 +207,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test the small-update builder, the release-notes extraction, the CI test summaries and the Dart shard split
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/dart-test-times.test.js scripts/dart-test-shard.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js scripts/compat-table.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}
@@ -262,6 +265,7 @@ jobs:
       # The engine's native build (libcaw.so) reuses compiled files: only changed sources recompile.
       - name: Install ccache
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
           ccache --max-size=500M
           echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
@@ -301,6 +305,7 @@ jobs:
       - name: Package the on-device compiler
         if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip
           curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
             --output "$RUNNER_TEMP/android-ndk.zip"
@@ -414,6 +419,7 @@ jobs:
           key: android-sdk-cmake-3.22.1-ndk-28.2.13676358
       - name: Install ccache
         run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
           if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
           ccache --max-size=500M
           echo "CAW_CCACHE=1" >> "$GITHUB_ENV"

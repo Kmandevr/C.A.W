@@ -40,7 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Ninja
-        run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build
+        run: |
+          sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true  # its mirror 403s at times; nothing here needs it
+          sudo apt-get update -q && sudo apt-get install -y -q ninja-build
       - name: Download Android NDK r30 (Google SDK licence accepted by owner)
         run: |
           curl --fail --location --retry 3 \
