@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `905ccd3baf761221730ad052e92de21f89a86195` on the default branch at 2026-11-27T07:32:07Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `317e312d5f01be39b3adff77e1a200750e375c72` on the default branch at 2026-11-27T09:22:02Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`905ccd3`).
+1. The commit this file was generated from (`317e312`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -296,6 +296,7 @@ paths:
 - The *Dart tests (N/4)* jobs split the files by `app/test/test_times.json` (`scripts/dart-test-shard.js`); after adding or growing heavy test files, re-measure with a full local `flutter test --file-reporter json:<report>` and `node scripts/dart-test-times.js <report>`.
 - A failed *Dart tests (N/4)* or engine test job names each failing test in its summary and annotations (`scripts/dart-test-summary.js`, `scripts/ctest-summary.js`); for the full output download the job log (`get_job_logs` without content, then the URL) and search for `❌` (Dart) or `FAIL ` (engine). A failure gets one re-run, and only after the test passes locally alone and with its file (known timing-sensitive: the startup reveal, Arrange's focus double tap).
 - `flutter analyze && flutter test` skips the tests when analyze finds anything: check that the tests ran.
+- Before any `apt-get update`, drop the runner's `packages.microsoft.com` source (its mirror has answered 403 and failed the whole job; everything the workflows install is in Ubuntu's archive): `sudo find /etc/apt/sources.list.d -type f -exec grep -l 'packages.microsoft.com' {} + | xargs -r sudo rm -f || true`. The `|| true` matters: steps run under `pipefail`, and `grep -l` exits 1 when no file matches.
 
 ---
 
