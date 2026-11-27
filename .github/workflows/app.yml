@@ -28,6 +28,7 @@ on:
       - "CHANGELOG.md"  # bundled in the app (What's new) and the top of each release's notes
       - "scripts/changelog-notes*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
+      - "scripts/gh-annotation*.js"  # escapes their annotations
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -46,6 +47,7 @@ on:
       - "CHANGELOG.md"
       - "scripts/changelog-notes*.js"
       - "scripts/dart-test-summary*.js"  # names the failing Dart tests
+      - "scripts/gh-annotation*.js"  # escapes their annotations
   workflow_dispatch:
     inputs:
       installables:
@@ -197,7 +199,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test the small-update builder, the release-notes extraction and the CI test summaries
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/ctest-summary.test.js
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/ctest-summary.test.js scripts/gh-annotation.test.js
       - name: Every Dart test shard passed
         env:
           SHARDS_RESULT: ${{ needs.test-shards.result }}

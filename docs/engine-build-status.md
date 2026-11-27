@@ -1,7 +1,7 @@
 ---
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented and what is only a contract; the next engineering stages are kept privately.
-covers: [engine/, .github/workflows/engine.yml, scripts/ctest-summary.js, scripts/ctest-summary.test.js, app/lib/engine/, app/lib/model/app_state.dart, app/lib/model/app_state/, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, examples/cpp/minimal/, scripts/caw-component-build.js, scripts/caw-component-build.test.js, .github/workflows/cpp-components.yml]
+covers: [engine/, .github/workflows/engine.yml, scripts/ctest-summary.js, scripts/ctest-summary.test.js, scripts/gh-annotation.js, scripts/gh-annotation.test.js, app/lib/engine/, app/lib/model/app_state.dart, app/lib/model/app_state/, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, examples/cpp/minimal/, scripts/caw-component-build.js, scripts/caw-component-build.test.js, .github/workflows/cpp-components.yml]
 updated: 2026-11-27
 ---
 

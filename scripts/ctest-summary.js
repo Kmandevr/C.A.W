@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const { errorLine } = require('./gh-annotation.js');
 
 // The failing CTest entries, each caw_tests case's FAIL line and each sanitizer report, in log order.
 function summarize(text) {
@@ -69,8 +70,8 @@ function main(argv) {
   const r = summarize(text);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown(title, r));
   // One annotation per failing case (the run's page shows them without the log), then the CTest entries.
-  for (const c of r.cases) console.log(`::error title=Engine test failed::${c.name} (${c.where}): ${cut(c.message, 200)}`);
-  for (const s of r.sanitizer.slice(0, 5)) console.log(`::error title=Sanitizer report::${cut(s, 200)}`);
+  for (const c of r.cases) console.log(errorLine('Engine test failed', `${c.name} (${c.where}): ${cut(c.message, 200)}`));
+  for (const s of r.sanitizer.slice(0, 5)) console.log(errorLine('Sanitizer report', cut(s, 200)));
   for (const t of r.ctest) console.log(`FAIL ctest - ${t} (${file})`);
   if (!r.ctest.length && !r.cases.length && !r.sanitizer.length) console.log(`PASS ctest-summary - no failing test in ${file}`);
   return 0;  // the Test step's own exit code fails the job

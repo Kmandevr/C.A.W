@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const { errorLine, flat } = require('./gh-annotation.js');
 
 // Reads the JSON reporter's events (one per line) and returns the counts and the failures, in the order they ran.
 function summarize(text) {
@@ -87,8 +88,8 @@ function main(argv) {
   for (const f of r.failures) {
     // An annotation per failing test: the run's page names it without opening the log.
     const where = f.line ? `${f.file}:${f.line}` : f.file;
-    console.log(`::error title=Dart test failed::${where}: ${f.name}`);
-    console.log(`FAIL dart-test - ${f.name}: ${oneLine(f.error)} (${f.file})`);
+    console.log(errorLine('Dart test failed', `${where}: ${f.name}`));
+    console.log(flat(`FAIL dart-test - ${f.name}: ${oneLine(f.error)} (${f.file})`));
   }
   if (r.done === null && r.failures.length === 0) {
     console.log(`FAIL dart-test-summary - no finished test report (${file})`);
