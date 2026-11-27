@@ -1,4 +1,4 @@
-# Engine tests on every push and pull request: Linux x64 and Arm64, Windows (clang-cl), a sanitizer build and a ThreadSanitizer run of the mix pool. The same reference renders, within their tolerances, everywhere; on one thread and on the mix pool, the same bits.
+# Engine tests on every push and pull request: Linux x64 and Arm64, Windows (clang-cl), a sanitizer build split across fifteen jobs and a ThreadSanitizer run of the mix pool. The same reference renders, within their tolerances, everywhere; on one thread and on the mix pool, the same bits.
 name: Engine
 on:
   # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
@@ -10,12 +10,14 @@ on:
       - "!engine/compiler/**"  # the compiler wrapper has its own workflow
       - "examples/**"          # examples are built in and checked by reference renders
       - ".github/workflows/engine.yml"
+      - "scripts/ctest-summary*.js"  # names the failing engine tests
   pull_request:
     paths:
       - "engine/**"
       - "!engine/compiler/**"  # the compiler wrapper has its own workflow
       - "examples/**"          # examples are built in and checked by reference renders
       - ".github/workflows/engine.yml"
+      - "scripts/ctest-summary*.js"  # names the failing engine tests
   workflow_dispatch:
 permissions:
   contents: read
@@ -38,7 +40,6 @@ jobs:
           - { name: Linux Arm64, os: ubuntu-24.04-arm, flags: "", jobs: 4 }
           # clang-cl (Visual Studio's ClangCL toolset, MSVC ABI): the shipped Windows engine's compiler (2026-11-13).
           - { name: Windows x64 clang-cl, os: windows-2025, flags: "-T ClangCL", jobs: 4 }
-          - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug", jobs: 2 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -69,7 +70,117 @@ jobs:
       - name: Build
         run: cmake --build engine/build --config Release --parallel ${{ matrix.jobs }}
       - name: Test
-        run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
+        id: test
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4 2>&1 | tee engine/build/ctest.log
+      - name: Name the failing tests
+        if: failure() && steps.test.outcome == 'failure'
+        shell: bash
+        run: node scripts/ctest-summary.js engine/build/ctest.log "Tests (${{ matrix.name }})"
+
+  # ASan and UBSan (a Debug build): the slowest suite (75-110 minutes as one job), so split across jobs. CAW_TEST_SHARDS
+  # registers 14 caw_tests shards (each case in exactly one, by its name's hash; 14 keeps the two slowest cases apart) and
+  # each job runs one shard on one thread and on the mix pool, then compares that shard's render digests; the last job
+  # runs every other CTest test. Each job builds for itself: with the compiler cache the build takes 1-2 minutes, less
+  # than building once and passing the 580 MB test binary (and its libraries) to the other jobs as an artifact.
+  sanitizers:
+    name: Tests (Linux sanitizers, ${{ matrix.part }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Shard 10 first, so it starts first when runners are short: it holds the slowest case (Rook's every-control
+          # audit, about 29 minutes under the sanitizers, measured 2026-11-27).
+          - { part: shard 10/14, shard: "9" }
+          - { part: shard 1/14, shard: "0" }
+          - { part: shard 2/14, shard: "1" }
+          - { part: shard 3/14, shard: "2" }
+          - { part: shard 4/14, shard: "3" }
+          - { part: shard 5/14, shard: "4" }
+          - { part: shard 6/14, shard: "5" }
+          - { part: shard 7/14, shard: "6" }
+          - { part: shard 8/14, shard: "7" }
+          - { part: shard 9/14, shard: "8" }
+          - { part: shard 11/14, shard: "10" }
+          - { part: shard 12/14, shard: "11" }
+          - { part: shard 13/14, shard: "12" }
+          - { part: shard 14/14, shard: "13" }
+          - { part: other tests, shard: other }
+    env:
+      SHARDS: 14
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          ccache --max-size=500M
+      # One cache for every job (the same build); only the job that builds everything saves it.
+      - name: Restore compiler cache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-engine-Linux sanitizers-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: |
+            ccache-engine-Linux sanitizers-
+      - name: Configure
+        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Debug -DCAW_SANITIZE=ON -DCAW_TEST_SHARDS=$SHARDS -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      # Two compile jobs: more run the runner out of memory mid-build ("lost communication", 2026-11-17/18). A shard job
+      # builds caw_tests and the components it loads; the other-tests job builds everything, as the single job did.
+      - name: Build
+        run: |
+          if [ "$SHARD" = other ]; then
+            cmake --build engine/build --config Release --parallel 2
+          else
+            cmake --build engine/build --config Release --parallel 2 --target caw_tests
+          fi
+      - name: Test
+        id: test
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ "$SHARD" = other ]; then
+            ctest --test-dir engine/build --build-config Release --output-on-failure --no-tests=error --parallel 4 \
+              -E '^(caw_tests_(parallel_)?shard_[0-9]+|caw_parallel_identity)$' 2>&1 | tee engine/build/ctest.log
+          else
+            ctest --test-dir engine/build --build-config Release --output-on-failure --no-tests=error --parallel 2 \
+              -R "^caw_tests_(parallel_)?shard_${SHARD}\$" 2>&1 | tee engine/build/ctest.log
+            # caw_parallel_identity for this shard: its renders have the same bits on one thread and on the mix pool.
+            cmake -DDIGEST_DIR="$PWD/engine/build/render_digests" -DSHARD_COUNT=$SHARDS -DSHARDS=$SHARD \
+              -P engine/cmake/CompareDigests.cmake 2>&1 | tee -a engine/build/ctest.log
+          fi
+      - name: Name the failing tests
+        if: failure() && steps.test.outcome == 'failure'
+        run: node scripts/ctest-summary.js engine/build/ctest.log "Tests (Linux sanitizers, ${{ matrix.part }})"
+      - name: Save compiler cache
+        if: matrix.shard == 'other' && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-engine-Linux sanitizers-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+
+  # The sanitizer result as one check: it fails unless every sanitizer job passed.
+  sanitizers-result:
+    name: Tests (Linux sanitizers)
+    needs: sanitizers
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every sanitizer job passed
+        env:
+          RESULT: ${{ needs.sanitizers.result }}
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::A sanitizer job did not pass ($RESULT): its summary names the failing tests."
+            exit 1
+          fi
 
   # The mix pool (speed phase 5c) under ThreadSanitizer: its tests and a long stress run (random graphs with sends,
   # keys and buses, the project changed while it plays, injected worker delays), each against one thread's output.

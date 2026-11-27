@@ -1,10 +1,23 @@
 # Speed phase 5c: every reference render's raw-bit digest from the one-thread shards against the mix-pool shards.
+# SHARD_COUNT: the shards CTest registered (CAW_TEST_SHARDS); SHARDS: the ones to compare (all by default; a CI job
+# that ran one shard compares that one, and every render belongs to exactly one shard, so a check per shard is as
+# strict as one over all of them).
 if(NOT DIGEST_DIR)
   message(FATAL_ERROR "DIGEST_DIR is not set")
 endif()
+if(NOT SHARD_COUNT)
+  set(SHARD_COUNT 4)
+endif()
+if(NOT DEFINED SHARDS)
+  math(EXPR last_shard "${SHARD_COUNT} - 1")
+  set(SHARDS "")
+  foreach(shard RANGE 0 ${last_shard})
+    list(APPEND SHARDS ${shard})
+  endforeach()
+endif()
 foreach(kind serial parallel)
   set(${kind}_lines "")
-  foreach(shard RANGE 0 3)
+  foreach(shard IN LISTS SHARDS)
     set(f "${DIGEST_DIR}/${kind}_${shard}.txt")
     if(NOT EXISTS "${f}")
       message(FATAL_ERROR "${f} is missing: its shard wrote no digests (did it run?)")
