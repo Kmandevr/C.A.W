@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 88b9c3f on Main (1.1.3 maintenance merged: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 big engine tests, #282-#284 CI split and Dart balance, #285-#286 compat tables recorded for every build, #287 one list for bench modes and C API versions); this branch: changelog entries as one file per change. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
+Commit: 32ca79d on Main (1.1.3 maintenance merged: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 big engine tests, #282-#284 CI split and Dart balance, #285-#286 compat tables recorded for every build, #287 one list for bench modes and C API versions, #288 changelog per change); this branch: `scripts/worktree-tidy.js` (worktree backup by hand, scratch-build cleanup; security-reviewed). 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
 tuba; #276 version; app.yml release run 45892645407; APK, Windows zip, patches). The owner (2026-11-26): Claude
 merges and releases when ready, and takes its own recommended option for any question (docs/decisions.md). A
 5-hourly scheduled wake-up resumes this session. Standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
@@ -17,8 +17,9 @@ clock #211).
 - Owner: Hub #33 (rear Antiphonal stops, where the rock organ lives); otherwise my recommendations stand.
 
 ## Next
-1. The rest of 1.1.3's maintenance list: per-build references for chaotic devices (Linux x64 and Arm64 reference
-   sets), and an automatic backup of agent worktrees plus a cleanup of old scratch builds. Then the hidden
-   collaboration groundwork G1-G3 (Hub docs/caw/collaboration-design.md), then a 1.1.3 release. Two playing modes
+1. The rest of 1.1.3: per-build references for chaotic devices (agent in worktree perbuild-refs); the hidden
+   collaboration groundwork (agents: G1+G2 in worktree g1-g2-uids, G3 in g3-collab; Hub
+   docs/caw/collaboration-design.md). Back each up with `node scripts/worktree-tidy.js backup` after a dry run.
+   Then a 1.1.3 release (`changelog-join.js` first). Two playing modes
    (#11) and the main panel (#10) move to 1.1.4.
 2. Issue #271 (close after green Windows runs), #268.
