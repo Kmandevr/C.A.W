@@ -20,6 +20,7 @@
 #include "analysis.h"
 #include "filter_pairs.h"
 #include "presets.h"
+#include "simd4.h"
 #include "tolerance.h"
 #include "caw.h"
 #include "engine.h"
@@ -590,6 +591,26 @@ TEST(the_flagship_renders_the_same_bits_at_any_block_size) {
         }
         CHECK(energy > 1.0);
         if (differ) cawtest::fail(__FILE__, __LINE__, std::string(v ? "busy" : "default") + ": " + std::to_string(differ) + " samples differ by block size");
+    }
+}
+
+// Kestrel's four-at-a-time table reads (engine/src/simd4.h): neighbouring pairs at any index, odd ones included
+// (only 4-byte aligned). The SSE2 path once read each pair through a double*, a misaligned load the sanitizer build
+// stops at (audio review, 2026-11-27); every path must give the scalar reads' values.
+TEST(simd4_pairs_read_neighbouring_pairs_at_any_index) {
+    alignas(16) float table[40];
+    for (int i = 0; i < 40; ++i) table[i] = 0.5f * static_cast<float>(i) - 3.25f;
+    const uint32_t picks[][4] = {{1, 3, 6, 9}, {0, 2, 4, 6}, {37, 1, 18, 5}, {7, 7, 7, 7}, {36, 0, 31, 13}};
+    for (const auto& k : picks) {
+        simd4::F4 first, second;
+        simd4::pairs(table + 1, k, first, second);  // table + 1: every pair starts 4 bytes off an 8-byte boundary too
+        float a[4], b[4];
+        simd4::store(a, first);
+        simd4::store(b, second);
+        for (int i = 0; i < 4; ++i) {
+            CHECK(a[i] == table[1 + k[i]]);
+            CHECK(b[i] == table[2 + k[i]]);
+        }
     }
 }
 
