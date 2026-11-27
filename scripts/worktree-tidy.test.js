@@ -3,7 +3,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { decide, backupBranch, staleBuild } = require('./worktree-tidy.js');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { decide, backupBranch, staleBuild, blocked, safeScratchpad } = require('./worktree-tidy.js');
 
 const w = (o) => ({ name: 'a', dirty: false, ahead: 0, tip: 't1', backupTip: null, ...o });
 
@@ -35,4 +38,27 @@ test('a build is stale only when untouched for longer than the given days', () =
   assert.strictEqual(staleBuild(0, 2 * day, 1), true);
   assert.strictEqual(staleBuild(0, day / 2, 1), false);
   assert.strictEqual(staleBuild(0, 1, 0), true);
+});
+
+test('an unknown commit count keeps the worktree and pushes nothing', () => {
+  const d = decide(w({ ahead: null }));
+  assert.strictEqual(d.backup, false);
+  assert.strictEqual(d.remove, false);
+});
+
+test('a backup refuses secret-like files and private-plan paths', () => {
+  const paths = ['app/lib/a.dart', '.env', 'a/.env.local', 'x/key.properties', 'docs/caw/plan.md', 'k.jks', 'my_token.txt', 'docs/app.md'];
+  assert.deepStrictEqual(blocked(paths), ['.env', 'a/.env.local', 'x/key.properties', 'docs/caw/plan.md', 'k.jks', 'my_token.txt']);
+});
+
+test('the scratchpad is cleaned only when it is under the temp folder', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tidy-'));
+  const inner = path.join(tmp, 'pad');
+  fs.mkdirSync(inner);
+  assert.strictEqual(safeScratchpad(inner, tmp), fs.realpathSync(inner));
+  assert.strictEqual(safeScratchpad(tmp, tmp), null);
+  assert.strictEqual(safeScratchpad('/', tmp), null);
+  assert.strictEqual(safeScratchpad(os.homedir(), tmp), null);
+  assert.strictEqual(safeScratchpad(undefined, tmp), null);
+  fs.rmSync(tmp, { recursive: true });
 });

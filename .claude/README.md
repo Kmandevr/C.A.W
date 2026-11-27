@@ -18,7 +18,7 @@ Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows
 | `agents/*.md` | description every session, body in the subagent's own context | Read-only reviewers that return findings only: `architect` (placement and boundaries), `code-reviewer` (defects), `audio-reviewer` (real-time safety, DSP correctness, determinism), `security-reviewer` (untrusted modules, auth, secrets, platform permissions). |
 | `rules/*.md` | when matching files are touched | Conventions scoped by `paths:` globs: `claude`, `docs`, `scripts`, `ci`, `engine`, `app`, `modules`, and `done` (the definition of done for instruments and devices). |
 | `workflows/change.js` | on call | Multi-agent plan, parallel build, parallel verify, then docs. Takes `args: { task, agents? }` and reads the project's checks from `CLAUDE.md`. Never commits. |
-| `settings.json` | every session | Allow rules for the tools and checks above, hook registration (including the `SubagentStop` hook that runs `scripts/worktree-tidy.js backup`), `enabledMcpjsonServers`, `MCP_TIMEOUT`. |
+| `settings.json` | every session | Allow rules for the tools and checks above, hook registration, `enabledMcpjsonServers`, `MCP_TIMEOUT`. |
 
 ## Where instructions live
 
@@ -54,7 +54,7 @@ They answer different questions, so don't use both for the same one.
 
 ## Session quirks (cloud container, 2026-11-24)
 
-- Push after every commit. Worker restarts and usage limits have ended sessions mid-task, so a `SubagentStop` hook runs `node scripts/worktree-tidy.js backup`, pushing each agent worktree with commits Main lacks to `caw-backup-<name>`; run it by hand before a long wait too. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
+- Push after every commit. Worker restarts and usage limits have ended sessions mid-task, so when an agent finishes, read what `node scripts/worktree-tidy.js backup --dry-run` would push, then run it without `--dry-run`: it pushes each agent worktree with commits Main lacks to `caw-backup-<name>`, refusing secret-like files and the private plans' paths. The remote is public, so it never runs from a hook. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
 - Scratch builds are about 2 GB each and the disk fills: `node scripts/worktree-tidy.js clean` lists old builds and backed-up worktrees, and `--apply` removes them, before a new build.
 - Parallel branches collide in `docs/app.md`, `docs/decisions.md`, `cawApiVersion` and the bench mode numbers: expect to resolve these when merging.
 - Narrowing or removing a test needs the owner's explicit OK first; the permission check blocks it otherwise.
