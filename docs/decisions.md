@@ -6,6 +6,13 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: A four-float SIMD wrapper for Kestrel's oscillators (Claude)
+
+- **Chosen (built):** `engine/src/simd4.h`, a header of four-float vectors with only what its callers use (load, store, add, subtract, multiply, 32-bit integer lanes for the fixed-point phase, and `pairs`: four neighbouring table pairs, each one 8-byte load, split into two vectors). SSE2 on x86-64 (the baseline every shipped x86 build targets, clang-cl's included), NEON on Arm64 (Android, Linux Arm64), plain arrays elsewhere (`-DCAW_SIMD4_SCALAR` forces them, to test). Each operation is one IEEE single-precision operation per lane, so code written with it gives the bits of the scalar loop it replaces; its first user, Kestrel (`builtin_flagship.cpp`, built strict), renders bit-identically to before on x86-64 GCC and Clang and on Arm64 ([engine performance](engine-performance.md#a8-kestrels-oscillator-reads-and-ramping-knobs-2026-11-27)).
+- **Why a wrapper and not more GCC vector extensions:** clang-cl (the Windows build) does not define `__GNUC__`, so the `Pair` vector-extension paths fall back to scalar code there; intrinsics behind one small header reach every build. No AVX branch: no shipped build enables AVX (A5), and a runtime-dispatched copy was ruled out there.
+- **Why not `-ffast-math` or a compiler's own vectorization of the gather:** fast-math changes bits per build; no compiler vectorized the read loops (NEON has no gather instruction, and the warped stacks' single loop kept its reads inside).
+- **No new dependency** (compiler intrinsics only).
+
 ## 2026-11-27: MIDI senders: one portable core, a native thread on Windows, a Kotlin thread polling it on Android (Claude)
 
 - **Chosen (built, engine API 48, compile-checked by CI, untested on real devices):** the drain, the hold-until-time and the notes-off are one portable class in the engine core (`engine/src/midi_sender.*`), tested on Linux with a fake clock and send; each platform adds only its send and its wait (`engine/platform/midi_out_*.cpp`). The process has one sender, attached to one engine; `caw_engine_destroy` detaches it, so its engine can't be used after free whatever the app does.
