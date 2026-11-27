@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `0f4e849b6fc6e6038bd6cf6fccdb98724962ec8b` on the default branch at 2026-11-25T07:18:50Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `f709ea6ace80687b25297d6033f504de8a21b415` on the default branch at 2026-11-27T07:05:06Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/roadmap.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`0f4e849`).
+1. The commit this file was generated from (`f709ea6`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -293,7 +293,7 @@ paths:
 - Apple targets (iOS, macOS) need macOS runners, which cost more: build them on release branches or on demand, not on every push.
 - Android debug APKs are signed with one fixed keystore kept in repository secrets, so each build installs over the last. Never commit a keystore.
 - Start each file with a one-line `#` comment saying what it is for (the repo map reads it).
-- The Dart test summary doesn't name a failing test: download the job log (`get_job_logs` without content, then the URL) and search for `❌`. A failure gets one re-run, and only after the test passes locally alone and with its file (known timing-sensitive: the startup reveal, Arrange's focus double tap).
+- A failed *Dart tests (N/4)* or engine test job names each failing test in its summary and annotations (`scripts/dart-test-summary.js`, `scripts/ctest-summary.js`); for the full output download the job log (`get_job_logs` without content, then the URL) and search for `❌` (Dart) or `FAIL ` (engine). A failure gets one re-run, and only after the test passes locally alone and with its file (known timing-sensitive: the startup reveal, Arrange's focus double tap).
 - `flutter analyze && flutter test` skips the tests when analyze finds anything: check that the tests ran.
 
 ---
