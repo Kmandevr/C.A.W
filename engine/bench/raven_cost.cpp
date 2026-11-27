@@ -126,7 +126,10 @@ struct Case {
 // Prints each case (the eight voices' cost and a voice's share) and returns how many went over their ceilings.
 // Ceilings: about 1.4 times the highest of four runs on the local x86 box after the 2026-11-27 speed pass (Kestrel's
 // oscillator reads four at a time; docs/engine-performance.md), rounded up to 500, per the rule for cost tests (CI's
-// runners read 10-20 % slower than this box), so a regression of a third fails.
+// runners read 10-20 % slower than this box), so a regression of a third fails. The cases under 10,000 µs/s take
+// twice the local figure instead: a few hundred µs of a shared runner's noise is a larger share of them, and the
+// same ceilings gate Arm64 and Windows (clang-cl, whose decimators take the scalar path), measured only by CI; one
+// CI run on each runner checks them before this merges.
 int ravenCost(double seconds) {
     const Values one = {{"osc1_unison", 1}, {"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0},
                         {"osc2_on", 1}, {"osc2_unison", 1}, {"osc2_semi", 7}};
@@ -137,12 +140,12 @@ int ravenCost(double seconds) {
     };
     const Case cases[] = {
         {"default patch (x7, ladder)", {}, 17000},
-        {"two oscs, one copy each", with({}), 4500},
-        {"Osc RM from osc 2", with({{"osc1_warp", 8}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 2}}), 6500},
-        {"Osc AM from noise", with({{"osc1_warp", 9}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 4}}), 6000},
-        {"Osc sync to osc 2 (polyBLEP)", with({{"osc1_warp", 10}, {"osc1_warp_amt", 0.4}, {"osc1_mod_src", 2}}), 7500},
-        {"Stretch, on a bank level", with({{"osc1_warp", 11}, {"osc1_warp_amt", 3.0 / 7.0}}), 5000},
-        {"Formant, between levels, frame moving", with({{"osc1_warp", 14}, {"osc1_warp_amt", 0.5}, {"osc1_frame", 0.5}}), 6000},
+        {"two oscs, one copy each", with({}), 6500},
+        {"Osc RM from osc 2", with({{"osc1_warp", 8}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 2}}), 9500},
+        {"Osc AM from noise", with({{"osc1_warp", 9}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 4}}), 9000},
+        {"Osc sync to osc 2 (polyBLEP)", with({{"osc1_warp", 10}, {"osc1_warp_amt", 0.4}, {"osc1_mod_src", 2}}), 11000},
+        {"Stretch, on a bank level", with({{"osc1_warp", 11}, {"osc1_warp_amt", 3.0 / 7.0}}), 7500},
+        {"Formant, between levels, frame moving", with({{"osc1_warp", 14}, {"osc1_warp_amt", 0.5}, {"osc1_frame", 0.5}}), 9000},
         {"Formant x7 between levels", with({{"osc1_unison", 7}, {"osc1_warp", 14}, {"osc1_warp_amt", 0.5}}), 11500},
         {"Diode LP", with({{"flt1_on", 1}, {"flt1_type", 9}, {"flt1_resonance", 0.6}}), 26000},
         {"Sallen-Key", with({{"flt1_on", 1}, {"flt1_type", 10}, {"flt1_resonance", 0.6}}), 16000},
@@ -151,7 +154,7 @@ int ravenCost(double seconds) {
         {"Vowel", with({{"flt1_on", 1}, {"flt1_type", 13}}), 13000},
         {"LFO 4 and a macro on slots", with({{"mod2_src", 15}, {"mod2_dst", 3}, {"mod2_amt", 0.3}, {"lfo4_mode", 1},
                                              {"mod3_src", 16}, {"mod3_dst", 4}, {"mod3_amt", -0.3}, {"macro1", 0.5}}),
-         8000},
+         11500},
     };
     int over = 0;
     std::printf("Flagship 1.1.0 (Raven), 8 held notes (µs of CPU per second of audio; a voice's share; ceiling µs/s):\n");

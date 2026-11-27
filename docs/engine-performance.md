@@ -587,7 +587,7 @@ Per-device costs and ceilings are in [engine](engine.md) and [performance](perfo
 
 - **Where it pays:** the warped stacks (Medusa's Sync and Mirror warps: about 3x fewer instructions a copy), the FM warp at 2x and the spectral banks. The default patch's unwarped copies were already vectorized and its time goes to the ladder (35 % of its render, `filterStereo`), so it does not move.
 - **Arm64 [Fact, qemu, relative]:** qemu times every float operation in software per lane, so a change that packs the same operations into vectors reads the same there (Medusa's patch 9,400 against 9,600 µs, Init within ±3 %), as expected; the Arm64 build's hot loops are vectorized as x86-64's are (`addStack<2>`: NEON `fcvtzs`/`scvtf` on four lanes, checked in the object). **[Assumption]** the S22+ gains about what x86-64 does; the Bench workflow measures it.
-- **The cost ceilings** (`caw_raven_cost`) are now about 1.4 times these figures ([engine](engine.md)).
+- **The cost ceilings** (`caw_raven_cost`) are now about 1.4 times these figures, twice for the cases under 10,000 µs/s ([engine](engine.md)); Arm64 and Windows clang-cl (scalar decimators) are measured only by CI, one run on each runner before the merge.
 
 **B (vectorization that changes bits), tried:**
 - **The ladder in float, four ladders to a vector** (two voices' stereo pairs; scratch, not kept): **worst null −113.4 dBFS peak** (`flt1_type` 2, band-pass, resonance 0.7, drive 2.5, 24 voices at 48 kHz), over the −120 dBFS rule; the float state rounds in the resonant feedback. It gained 4-5 % on the default patch and 1 % on Medusa. **Not kept.**
