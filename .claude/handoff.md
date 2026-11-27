@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: e5e1b30 on Main (#277 split engine.cpp, #278 the piano roll and Arrange screens); this branch adds the split of AppState. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
+Commit: ab5358f on Main (#277 engine.cpp, #278 piano roll and Arrange, #279 AppState); this branch splits Flagship and Drums into included parts. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
 tuba; #276 version; app.yml release run 45892645407; APK, Windows zip, patches). The owner (2026-11-26): Claude
 merges and releases when ready, and takes its own recommended option for any question (docs/decisions.md). A
 5-hourly scheduled wake-up resumes this session. Standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
@@ -18,8 +18,8 @@ clock #211).
 
 ## Next
 1. The rest of 1.1.3 (my recommendation to the owner, 2026-11-26): the maintenance list. Done: engine.cpp (#277),
-   the piano roll and Arrange screens (#278), AppState (this branch). Left: `engine/src/builtin_flagship.cpp`, `engine/src/builtin_drums.cpp` (builtins: keep golden bits, as #277 did), the
-   big test files, the long CI jobs, a hand-started job recording per-build compat tables, per-build references,
+   the piano roll and Arrange screens (#278), AppState (#279), Flagship and Drums (this branch, one
+   translation unit each, byte-identical objects). Left: the big test files, the long CI jobs, a hand-started job recording per-build compat tables, per-build references,
    changelog per change, one list for bench and C API numbers, worktree backup. Then the hidden collaboration
    groundwork G1-G3 (Hub docs/caw/collaboration-design.md). Two playing modes (#11) and the main panel (#10) move
    to 1.1.4.
