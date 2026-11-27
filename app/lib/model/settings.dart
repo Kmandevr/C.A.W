@@ -598,6 +598,15 @@ class Settings extends ChangeNotifier {
   bool midiMpe = false;
   int midiBendRange = 2;
 
+  /// MIDI out (engine API 48): the device each MIDI-out port (0..15) sends to on this machine, by the device's name
+  /// (a project names only the port: devices are per machine). `MidiOutRouting` opens them; no screen sets it yet
+  /// (the look is the owner's, Hub #35).
+  Map<int, String> midiOutDevices = {};
+
+  /// Following an incoming MIDI clock (engine API 47): its transport and tempo drive the engine's, and the devices'
+  /// clock bytes reach it (`MidiClockFollow`). Off by default; no screen sets it yet.
+  bool midiClockFollow = false;
+
   /// The on-screen keys: velocity from where a key is touched (0), else this fixed velocity; the octave they open on.
   double keysVelocity = 0;
   int keysOctave = 3;
@@ -790,6 +799,8 @@ class Settings extends ChangeNotifier {
         'midi_closed': midiClosed.toList(),
         'midi_mpe': midiMpe,
         'midi_bend_range': midiBendRange,
+        if (midiOutDevices.isNotEmpty) 'midi_out_devices': {for (final e in midiOutDevices.entries) '${e.key}': e.value},
+        if (midiClockFollow) 'midi_clock_follow': true,
         'keys_velocity': keysVelocity,
         'keys_octave': keysOctave,
         'click_sound': clickSound.name,
@@ -977,6 +988,15 @@ class Settings extends ChangeNotifier {
     if (closed is List) midiClosed = {for (final n in closed.take(64)) if (n is String && n.length <= 255) n};
     midiMpe = flag('midi_mpe') ?? midiMpe;
     midiBendRange = num_('midi_bend_range', 1, 48)?.round() ?? midiBendRange;
+    final outs = j['midi_out_devices'];
+    if (outs is Map) {
+      midiOutDevices = {
+        for (final e in outs.entries.take(16))
+          if (int.tryParse('${e.key}') case final p? when p >= 0 && p < 16)
+            if (e.value case final String name when name.isNotEmpty && name.length <= 255) p: name,
+      };
+    }
+    midiClockFollow = flag('midi_clock_follow') ?? midiClockFollow;
     keysVelocity = num_('keys_velocity', 0, 1) ?? keysVelocity;
     keysOctave = num_('keys_octave', 1, 6)?.round() ?? keysOctave;
     clickSound = pick(ClickSound.values, j['click_sound'], clickSound);

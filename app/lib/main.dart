@@ -16,6 +16,7 @@ import 'model/av_sync.dart';
 import 'model/background_playback.dart';
 import 'model/component_bench.dart';
 import 'model/live_midi.dart';
+import 'model/midi_out_routing.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
 import 'model/telemetry/app_telemetry.dart';
@@ -30,6 +31,7 @@ import 'platform/mic_permission.dart';
 import 'platform/update_installer.dart';
 import 'platform/playback_service.dart';
 import 'platform/midi_input.dart';
+import 'platform/midi_output.dart';
 import 'ui/frame_rate.dart';
 import 'ui/glass.dart';
 import 'ui/haptics.dart';
@@ -88,6 +90,8 @@ Future<void> main(List<String> args) async {
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
   LiveMidi.current = LiveMidi(state, platformMidiInput(clock: () => state.engine?.midiClockNs ?? 0));
   AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
+  // MIDI out (engine API 48): the ports' devices from the settings, and the sender attached while one is open.
+  MidiOutRouting.current = MidiOutRouting.forApp(state, platformMidiOutput());
   // Audio recording follows the transport's Record (armed audio tracks); the input choice is app-wide.
   final midi = LiveMidi.current!;
   AudioRecorder.current = AudioRecorder(state, permission: platformMicPermission())

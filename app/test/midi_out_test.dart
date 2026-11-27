@@ -1,5 +1,5 @@
 // MIDI out (engine API 47) in the app's model: a track's midiOut round trips, existing files stay byte-identical,
-// the engine JSON carries it without an instrument, effects or sends, the platform output is a no-op, and (with
+// the engine JSON carries it without an instrument, effects or sends, the output is a no-op off Android and Windows, and (with
 // CAW_LIB) the engine queues the track's notes and the clock for a sender.
 import 'dart:convert';
 import 'dart:io';
@@ -56,11 +56,11 @@ void main() {
     expect(jsonEncode(inst['instrument']), contains('org.caw.synth.flagship'));
   });
 
-  test('the platform output is the no-op one until a sender is built', () async {
+  test('off Android and Windows the platform output is the no-op one', () async {
     final out = platformMidiOutput();
     expect(out.available, isFalse);
-    out.send([const MidiOutEvent(1, 0, [0x90, 60, 100])]);
-    await out.route(0, 'x');
+    expect(await out.route(0, 'x'), isFalse);
+    expect(await out.route(0, null), isTrue);
     expect(await out.devices.isEmpty, isTrue);
     await out.close();
     expect(const MidiOutEvent(5, 1, [0xF8]), const MidiOutEvent(5, 1, [0xF8]));

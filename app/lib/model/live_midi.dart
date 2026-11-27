@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../platform/midi_input.dart';
+import 'midi_clock_follow.dart';
 import 'app_state.dart';
 import 'device_target.dart';
 import 'easter_eggs.dart';
@@ -67,7 +68,15 @@ class LiveMidi extends ChangeNotifier {
     }));
     _closed = {...state.settings.midiClosed};
     i.setClosed(_closed);
+    if (i case final MidiClockSource source) {
+      clockFollow = MidiClockFollow(source);
+      _subs.add(source.clock.listen(clockFollow.add));
+    }
   }
+
+  /// Following a device's clock (Settings' `midiClockFollow`; no screen yet): the engine's follow and the clock
+  /// bytes, on together.
+  MidiClockFollow clockFollow = MidiClockFollow(null);
 
   /// Every device the platform sees, open or turned off (Settings › Sound › MIDI and controllers's list).
   List<MidiPort> ports = const [];
@@ -99,6 +108,7 @@ class LiveMidi extends ChangeNotifier {
       _midiOptions = want;
       e.setMidiOptions(mpe: s.midiMpe, bendRange: s.midiBendRange.toDouble());
     }
+    clockFollow.apply(on: s.midiClockFollow, engine: e);
   }
 
   static bool _sameSet(Set<String> a, Set<String> b) => a.length == b.length && a.containsAll(b);

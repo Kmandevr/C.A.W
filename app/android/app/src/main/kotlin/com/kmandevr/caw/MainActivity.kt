@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
     private var pendingSave: Pair<String, MethodChannel.Result>? = null
     private var linkedFolders: LinkedFolders? = null
     private var bluetoothMidi: BluetoothMidi? = null
+    private var midiOutput: MidiOutput? = null
     private var pendingFolder: FolderSave? = null
     private var micPermission: MicPermission? = null
     private var updateInstaller: UpdateInstaller? = null
@@ -188,6 +189,11 @@ class MainActivity : FlutterActivity() {
         val midi = MidiInput(applicationContext)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL).setStreamHandler(midi)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_METHOD_CHANNEL).setMethodCallHandler(midi)
+        // MIDI out (MidiOutput.kt, engine API 48): the devices' input ports and the sender thread.
+        val midiOut = MidiOutput(applicationContext)
+        midiOutput = midiOut
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/midi/out/devices").setStreamHandler(midiOut)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/midi/out").setMethodCallHandler(midiOut)
         // The routed audio devices and their changes, for output latency compensation (AudioRoute.kt).
         val route = AudioRoute(applicationContext)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_EVENT_CHANNEL).setStreamHandler(route)
@@ -368,6 +374,9 @@ class MainActivity : FlutterActivity() {
         stopMonitoring()
         bluetoothMidi?.close()
         bluetoothMidi = null
+        // MIDI out: notes ended on every device and the engine detached, so a new activity's engine can attach.
+        midiOutput?.close()
+        midiOutput = null
         updateInstaller?.dispose()
         updateInstaller = null
         companion?.dispose()

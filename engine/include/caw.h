@@ -213,8 +213,13 @@ extern "C" {
    instead of an instrument; caw_engine_set_midi_out_active attaches a sender, caw_engine_midi_out_drain hands it the
    timed messages (CawMidiOutEvent), caw_engine_set_midi_out_port sets a port's offset; caw_engine_set_midi_clock_out
    sends 24 ppqn clock with Start/Continue/Stop/Song Position; caw_engine_midi_clock_in and
-   caw_engine_set_midi_clock_follow follow an incoming clock. Projects without "midiOut" play the same bits. */
-#define CAW_API_VERSION 47
+   caw_engine_set_midi_clock_follow follow an incoming clock. Projects without "midiOut" play the same bits.
+   48 (2026-11-27): the platform MIDI-out senders (docs/engine.md "MIDI senders (API 48)"): caw_midi_out_start and
+   caw_midi_out_stop attach the process's one sender to an engine and detach it (CC 123 on every channel each port
+   used); caw_midi_out_devices lists, caw_midi_out_open and caw_midi_out_close open and close, the devices a port sends
+   to (Windows: WinMM's output ports, sent from a native thread at each message's time; Android: the app's Kotlin
+   thread opens the devices and takes the due messages through JNI; elsewhere no sender). Nothing else changes. */
+#define CAW_API_VERSION 48
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -946,6 +951,36 @@ CAW_API int32_t caw_engine_midi_clock_in(CawEngine* e, const uint8_t* bytes, int
    come, after a gap of a second, or while following is off. */
 CAW_API double caw_engine_midi_clock_in_bpm(CawEngine* e);
 /* ---- end of API version 47's MIDI out and clock ---- */
+
+/* ---- API version 48: the platform MIDI-out sender (docs/engine.md "MIDI senders (API 48)"). ----
+   One sender per process drains one engine's MIDI-out queue (caw_engine_midi_out_drain is then the sender's: don't
+   drain it elsewhere), holds each message until its time and sends it to the device its port is open on; a message
+   for a port with no device is dropped. Windows: a native thread waits for each time on QueryPerformanceCounter
+   (caw_midi_clock_ns is steady_clock, which reads it) and sends through WinMM's midiOutShortMsg. Android: the app's
+   Kotlin thread opens the devices (MidiInputPort) and takes the due messages through JNI (com.kmandevr.caw.
+   MidiOutNative), sending each with MidiInputPort.send and its time as the timestamp (the same clock as
+   System.nanoTime). Elsewhere there is no sender: caw_midi_out_start returns 0 and caw_midi_out_devices "[]".
+   Any thread but the audio callback's. */
+/* Attaches the sender to [e] (caw_engine_set_midi_out_active(e, 1): its queue starts empty). 1 on success or when
+   already attached to [e]; 0 with no engine or no sender on this platform. Another engine attached is detached first,
+   as caw_midi_out_stop does (its owner may be gone). */
+CAW_API int32_t caw_midi_out_start(CawEngine* e);
+/* Detaches it: the engine queues nothing more, messages not yet sent are dropped, and CC 123 (All Notes Off) goes on every
+   channel each port carried, timed just after the last message handed out for that port (so a receiver that holds
+   messages until their timestamps plays it after them). Windows waits for its thread to send them. caw_engine_destroy does this
+   for its own engine. */
+CAW_API void caw_midi_out_stop(void);
+/* The devices a port can send to, as JSON (caw_free): Windows, WinMM's output ports in its order, ["name", ...] (a
+   repeated name gets " 2", " 3"); "[]" elsewhere (Android lists its devices in the app). */
+CAW_API char* caw_midi_out_devices(void);
+/* Opens device [device_index] (caw_midi_out_devices' order) for [port] (0..15), closing what the port had (with
+   CC 123 on the channels it used). 1 on success, 0 on failure or where the platform opens devices itself. */
+CAW_API int32_t caw_midi_out_open(int32_t port, int32_t device_index);
+/* Closes [port]'s device, after CC 123 on each channel the port used. */
+CAW_API void caw_midi_out_close(int32_t port);
+/* Messages the sender dropped: no room to hold them (the engine's own drops are caw_engine_midi_out_dropped). */
+CAW_API int64_t caw_midi_out_dropped(void);
+/* ---- end of API version 48's MIDI senders ---- */
 
 /* Song renders for the Export sheet (API version 15, roadmap 0.3, 6.4, 6.5): the mix and aligned stems (a file per
    track and per folder bus: what it sends to its parent or the master, after its effects, volume and pan) over the
