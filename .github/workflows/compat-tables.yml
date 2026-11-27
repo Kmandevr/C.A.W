@@ -62,9 +62,16 @@ jobs:
           path: current
           fetch-depth: 0
           filter: blob:none
+          # The old commit's build runs below: leave it no token in the checkout's git config.
+          persist-credentials: false
       - name: Check out the old commit
         run: |
+          # A branch or tag named like the hash would win over it: refuse one, and the commit must start with the hash given.
+          if git -C current show-ref | awk '{print $2}' | grep -qE "/${COMMIT}\$"; then
+            echo "::error::a branch or tag is named $COMMIT: give the full 40-character hash"; exit 1
+          fi
           full=$(git -C current rev-parse --verify --quiet "${COMMIT}^{commit}") || { echo "::error::no commit $COMMIT in this repository"; exit 1; }
+          case "$full" in "$COMMIT"*) ;; *) echo "::error::$COMMIT resolved to $full, not a commit starting with it"; exit 1 ;; esac
           git -C current worktree add --detach "$GITHUB_WORKSPACE/old" "$full"
           echo "FULL_COMMIT=$full" >> "$GITHUB_ENV"
           echo "Recording from $full"
