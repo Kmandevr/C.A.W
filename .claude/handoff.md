@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: f709ea6 on Main (1.1.3 maintenance: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 the big engine test files, #282 the CI split: sanitizers 28 min, Dart 11 min). 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
+Commit: f709ea6 on Main (1.1.3 maintenance: #277 engine.cpp, #278 piano roll and Arrange, #279 AppState, #280 Flagship and Drums, #281 the big engine test files, #282 the CI split: sanitizers 28 min; #283 Dart shards balanced by measured time, 7.4 min); this branch splits use_like_owner_test.dart. 1.1.3-alpha.6 released 2026-11-26 (#275 Curlew's piccolo, oboe and
 tuba; #276 version; app.yml release run 45892645407; APK, Windows zip, patches). The owner (2026-11-26): Claude
 merges and releases when ready, and takes its own recommended option for any question (docs/decisions.md). A
 5-hourly scheduled wake-up resumes this session. Standing rules: `.claude/rules/done.md`, docs/decisions.md 2026-11-25.
@@ -17,8 +17,7 @@ clock #211).
 - Owner: Hub #33 (rear Antiphonal stops, where the rock organ lives); otherwise my recommendations stand.
 
 ## Next
-1. The rest of 1.1.3's maintenance list: balance the Dart test shards by measured time (shard 1/4 takes 10.7 of
-   the 11 minutes; decisions.md 2026-11-27), a hand-started job recording per-build compat tables, per-build
+1. The rest of 1.1.3's maintenance list: a hand-started job recording per-build compat tables, per-build
    references, changelog per change, one list for bench and C API numbers, worktree backup. Then the hidden
    collaboration groundwork G1-G3 (Hub docs/caw/collaboration-design.md). Two playing modes (#11) and the main
    panel (#10) move to 1.1.4.
