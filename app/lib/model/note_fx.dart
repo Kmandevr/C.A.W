@@ -2,6 +2,7 @@
 // and per-note knobs and bypass (they reach every slot).
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'collab/project_ops.dart';
 import 'mixer_fx.dart';
 import 'project.dart';
 
@@ -28,33 +29,20 @@ extension NoteFxEdits on AppState {
   bool runPerNote(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.components.length) return false;
     if (perNoteBlocker(layer, layer.components[index].id) != null) return false;
-    final before = List.of(layer.components), notesBefore = List.of(layer.noteComponents);
-    editProject((p) {
-      layer.noteComponents.add(layer.components.removeAt(index));
-      followComponentLanes(p, engineLayerId(layer), before);
-      followNoteLanes(p, layer, notesBefore);
-    });
+    apply(ProjectMove(layer.components[index].uid, layer.id, OpList.noteComponents, kAtEnd));
     return true;
   }
 
   /// Moves per-note effect [index] back to the front of the track's effects (it then runs on the whole track).
   void runOnTrack(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    final before = List.of(layer.components), notesBefore = List.of(layer.noteComponents);
-    editProject((p) {
-      layer.components.insert(0, layer.noteComponents.removeAt(index));
-      followComponentLanes(p, engineLayerId(layer), before);
-      followNoteLanes(p, layer, notesBefore);  // its per-note lanes go, as a moved effect's lanes do
-    });
+    // Its per-note lanes go, as a moved effect's lanes do.
+    apply(ProjectMove(layer.noteComponents[index].uid, layer.id, OpList.components, 0));
   }
 
   void removeNoteEffect(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    final before = List.of(layer.noteComponents);
-    editProject((p) {
-      layer.noteComponents.removeAt(index);
-      followNoteLanes(p, layer, before);
-    });
+    apply(ProjectDelete(layer.noteComponents[index].uid));
   }
 
   /// How many notes get their own slot (1..16).
@@ -72,17 +60,12 @@ extension NoteFxEdits on AppState {
 
   void setNoteBypass(LayerDoc layer, int index, bool bypass) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    final at = engineNoteIndex(layer, index);
-    if (at != null) engine?.setComponentBypass(layer.id, at | noteComponentFlag, bypass);
-    editLayer(layer, (l) => l.noteComponents[index].bypass = bypass);
+    apply(ProjectSet(layer.noteComponents[index].uid, OpField.bypass, bypass));
   }
 
   /// A knob move on per-note effect [index]: every slot at once, kept in the project ([commitNativeParams] saves).
   void setNoteParamLive(LayerDoc layer, int index, String param, double value) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    layer.noteComponents[index].params[param] = value;
-    final at = engineNoteIndex(layer, index);
-    if (at != null) engine?.setComponentParam(layer.id, at | noteComponentFlag, param, value);
-    layerValueTick(layer.id).value++;
+    apply(ProjectSet(layer.noteComponents[index].uid, OpField.param(param), value));
   }
 }

@@ -63,20 +63,16 @@ extension AppStateArrange on AppState {
       }
       return false;
     }
-    final subtree = project.layers.where((candidate) =>
-      candidate.id == layer.id || inSubtree(candidate, layer.id)).toList();
-    project.layers.removeWhere((candidate) => subtree.contains(candidate));
-    layer.parentId = folderId;
-    if (folderId == null) {
-      project.layers.addAll(subtree);
-    } else {
-      var insertAt = project.layers.indexWhere((x) => x.id == folderId) + 1;
-      while (insertAt < project.layers.length && inSubtree(project.layers[insertAt], folderId)) {
+    // Where it lands among the other tracks: at the end, or after everything inside [folderId].
+    final rest = [for (final c in project.layers) if (c.id != layer.id && !inSubtree(c, layer.id)) c];
+    var insertAt = rest.length;
+    if (folderId != null) {
+      insertAt = rest.indexWhere((x) => x.id == folderId) + 1;
+      while (insertAt < rest.length && inSubtree(rest[insertAt], folderId)) {
         insertAt++;
       }
-      project.layers.insertAll(insertAt, subtree);
     }
-    _changed();
+    apply(ProjectMove(layer.id, folderId ?? kProjectNode, OpList.layers, insertAt));
     return true;
   }
 
@@ -273,61 +269,47 @@ extension AppStateArrange on AppState {
 
   /// Adds an empty track (no instrument yet: drop one on it, or pick one in its FX).
   void addLayer() {
-    project.layers.add(LayerDoc(
+    apply(ProjectInsert(kProjectNode, OpList.layers, kAtEnd, LayerDoc(
       id: newId('l'),
       name: 'Layer ${project.layers.length + 1}',
       color: newTrackColor(NewTrackKind.midi),
       lengthSteps: project.stepsPerBar,
       volume: 1, // 0 dB (owner, 2026-11-10)
-    ));
-    _changed();
+    )));
   }
 
+  /// Removes [l]; the tracks inside it move up to its folder.
   void removeLayer(LayerDoc l) {
-    for (final child in project.layers.where((x) => x.parentId == l.id)) {
-      child.parentId = l.parentId;
-    }
-    project.layers.remove(l);
-    _pruneClipSelection();
+    if (apply(ProjectDelete(l.id), andThen: _pruneClipSelection).isNotEmpty) return;
+    _pruneClipSelection();  // not in the project (already gone): the screens still settle
     _changed();
   }
 
+  /// Moves the one track at [from] (the tracks inside it stay) to before the track now at [to].
   void moveLayer(int from, int to) {
     if (to > from) to--;
-    final l = project.layers.removeAt(from);
-    project.layers.insert(to, l);
-    _changed();
+    final l = project.layers[from];
+    apply(ProjectMove(l.id, l.parentId ?? kProjectNode, OpList.layers, to, withInside: false));
   }
 
   /// Volume, pan, mute and solo go straight to the audio thread.
   /// Master gain shares the same project/engine state but updates only value listeners during a drag.
-  void setMaster(double value) {
-    project.master = value.clamp(0.0, kMaxMixGain).toDouble();
-    engine?.setMaster(project.master);
-    _save();
-    masterValueTick.value++;
-    values.value++;
-  }
+  void setMaster(double value) =>
+      apply(ProjectSet(kMasterNode, OpField.volume, value.clamp(0.0, kMaxMixGain).toDouble()));
 
   void mixLayer(LayerDoc l, {double? volume, double? pan, bool? mute, bool? solo}) {
     if (volume != null) volume = volume.clamp(0.0, kMaxMixGain).toDouble();
     if (volume != null) onParamMove?.call(AutomationTarget('track', 'volume', layerId: l.id), volume);
     if (pan != null) onParamMove?.call(AutomationTarget('track', 'pan', layerId: l.id), pan);
-    if (volume != null) l.volume = volume;
-    if (pan != null) l.pan = pan;
-    if (mute != null) l.mute = mute;
-    if (solo != null) l.solo = solo;
     // Volume and pan drags only redraw their sliders and go straight to the audio thread. Mute and solo reach
     // through folders and buses (soloing a track keeps its buses and send buses open; muting a folder without a bus
     // mutes its tracks), which the engine works out from the whole project, so they go as a project update.
-    if (mute == null && solo == null) {
-      engine?.setLayerMix(l.id, l.volume, l.pan, l.mute, l.solo);
-      _save();
-      layerValueTick(l.id).value++;
-      values.value++;
-    } else {
-      _changed();
-    }
+    applyAll([
+      if (volume != null) ProjectSet(l.id, OpField.volume, volume),
+      if (pan != null) ProjectSet(l.id, OpField.pan, pan),
+      if (mute != null) ProjectSet(l.id, OpField.mute, mute),
+      if (solo != null) ProjectSet(l.id, OpField.solo, solo),
+    ]);
   }
 
   // VCA groups (lib/model/vca.dart): model edits, each an undo step. No screen yet (the owner decides the look).
@@ -351,15 +333,11 @@ extension AppStateArrange on AppState {
   void mixVca(String groupId, {double? volume, bool? mute, bool? solo}) {
     final g = project.vcaGroup(groupId);
     if (g == null) return;
-    if (volume != null) g.volume = volume.clamp(0.0, kMaxMixGain).toDouble();
-    if (mute != null) g.mute = mute;
-    if (solo != null) g.solo = solo;
-    if (engine?.setVca(g.id, g.volume, g.mute, g.solo) ?? false) {
-      _save();
-      values.value++;
-    } else {
-      _changed();
-    }
+    applyAll([
+      if (volume != null) ProjectSet(g.id, OpField.volume, volume.clamp(0.0, kMaxMixGain).toDouble()),
+      if (mute != null) ProjectSet(g.id, OpField.mute, mute),
+      if (solo != null) ProjectSet(g.id, OpField.solo, solo),
+    ]);
   }
 
   void addVcaMember(String groupId, String layerId) {
@@ -513,23 +491,24 @@ extension AppStateArrange on AppState {
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
     if (guardFrozen(layer)) return;
-    editLayer(layer, (l) {
-      final to = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
+    final to = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
+    applyAll([
       // "Automation follows clips" (#230): the track's points over the clip go along.
-      followClipAutomation(l, [(clip.startSteps.toDouble(), (clip.startSteps + clip.lengthSteps).toDouble())],
-          (to - clip.startSteps).toDouble());
-      clip.startSteps = to;
-    });
+      ...clipFollowOps(project, layer, [(clip.startSteps.toDouble(), (clip.startSteps + clip.lengthSteps).toDouble())],
+          (to - clip.startSteps).toDouble()),
+      ProjectSet(clip.id, OpField.start, to),
+    ]);
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
     if (guardFrozen(layer)) return;
-    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt());
+    apply(ProjectSet(clip.id, OpField.length, lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt()));
   }
 
   void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
     if (guardFrozen(layer)) return;
-    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt());
+    apply(ProjectSet(clip.id, OpField.offset,
+        (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt()));
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
@@ -553,8 +532,6 @@ extension AppStateArrange on AppState {
         at++;
       }
     }
-    project.layers.insert(at, folder);
-    selectedLayerId = folder.id;
-    _changed();
+    apply(ProjectInsert(kProjectNode, OpList.layers, at, folder), andThen: () => selectedLayerId = folder.id);
   }
 }

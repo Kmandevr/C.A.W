@@ -2,8 +2,7 @@
 // effects dragged from one strip to another (copied, or moved).
 import 'project.dart';
 import 'app_state.dart';
-import 'arrange_fx.dart';
-import 'instance_ids.dart';
+import 'collab/project_ops.dart';
 
 /// The id the master's stand-in track goes by ([masterLayerOf]); no real track can have it (ids are made by
 /// `newId`, never with a NUL).
@@ -51,27 +50,12 @@ extension MixerFx on AppState {
   /// same values, or with [move] the effect itself, leaving the source. One undo step; false when it can't go there.
   bool dropFx(FxSlotDrag drag, LayerDoc to, {bool move = false}) {
     if (!canDropFx(drag, to)) return false;
-    final from = chainLayer(drag.layerId)!;
-    final use = from.components[drag.index];
-    final copy = move ? use : ComponentUseDoc.fromJson(use.toJson())!;
-    final before = List.of(from.components);
-    editProject((p) {
-      if (move) {
-        from.components.removeAt(drag.index);
-        // Its lanes go with it (they follow its device id, lib/model/instance_ids.dart; the master's have no layer).
-        for (final lane in p.automation) {
-          if (lane.targetType == 'component' && lane.layerId == engineLayerId(from) &&
-              identical(aimedDevice(before, lane.device, lane.component ?? -1), use)) {
-            lane.layerId = engineLayerId(to);
-            lane.component = to.components.length;
-            lane.device = use.uid;
-          }
-        }
-      }
-      // At the end of [to]'s chain, so its own lanes keep their indexes.
-      to.components.add(copy);
-      if (move) followComponentLanes(p, engineLayerId(from), before);
-    });
+    final use = chainLayer(drag.layerId)!.components[drag.index];
+    // At the end of [to]'s chain, so its own lanes keep their indexes; a moved effect's lanes go with it (they
+    // follow its device id, lib/model/instance_ids.dart; the master's have no layer).
+    apply(move
+        ? ProjectMove(use.uid, chainNode(to), OpList.components, kAtEnd)
+        : ProjectInsert(chainNode(to), OpList.components, kAtEnd, ComponentUseDoc.fromJson(use.toJson())!));
     return true;
   }
 }

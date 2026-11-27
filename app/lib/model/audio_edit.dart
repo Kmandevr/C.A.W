@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import '../engine/audio_engine.dart';
 import 'app_state.dart';
+import 'collab/project_ops.dart';
 import 'freeze.dart';
 import 'audio_clips.dart';
 import 'project.dart';
@@ -254,8 +255,13 @@ extension AudioEdit on AppState {
     endUndoStep();
   }
 
-  void moveAudioClip(LayerDoc layer, AudioClipDoc clip, double start) => editAudioClip(layer, clip,
-      (c) => c.startSteps = start.clamp(0.0, project.maxArrangementSteps - c.lengthAt(project.bpm)).toDouble());
+  void moveAudioClip(LayerDoc layer, AudioClipDoc clip, double start) {
+    if (guardFrozen(layer)) return;
+    endUndoStep();
+    apply(ProjectSet(clip.id, OpField.start,
+        start.clamp(0.0, project.maxArrangementSteps - clip.lengthAt(project.bpm)).toDouble()));
+    endUndoStep();
+  }
 
   /// Moves (or with [copy] copies) [clip] onto [to] at [start]; [to] null: a new audio track at the end. A track that
   /// plays an instrument gets a new audio track under it instead.
@@ -264,17 +270,16 @@ extension AudioEdit on AppState {
     final at = math.max(0.0, start);
     endUndoStep();
     AudioClipDoc placed = clip;
-    editProject((_) {
-      if (copy) {
+    if (copy) {
+      editProject((_) {
         placed = clip.copyWith(id: newId('ac'), startSteps: at);
         target.audioClips.add(placed);
-      } else {
-        from.audioClips.remove(clip);
-        clip.startSteps = at;
-        target.audioClips.add(clip);
-      }
-      target.input ??= newTrackInput();
-    });
+        target.input ??= newTrackInput();
+      });
+    } else {
+      applyAll([ProjectMove(clip.id, target.id, OpList.audioClips, kAtEnd), ProjectSet(clip.id, OpField.start, at)],
+          andThen: () => target.input ??= newTrackInput());
+    }
     endUndoStep();
     selectAudioClip(target, placed);
     return placed;

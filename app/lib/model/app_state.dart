@@ -23,7 +23,6 @@ import 'project.dart';
 import 'tempo_map.dart';
 import 'vca.dart';
 import 'project_dependencies.dart';
-import 'automation_edit.dart' show AutomationEdits;
 import 'sample_use.dart' show SampleUse;
 import 'automation_writer.dart' show AutomationTarget;
 import 'clip_automation.dart';
@@ -45,6 +44,7 @@ import 'pattern_templates.dart';
 import 'templates.dart';
 import 'easter_eggs.dart';
 import 'project_names.dart';
+import 'collab/project_ops.dart';
 
 part 'app_state/playback.dart';
 part 'app_state/engine_sync.dart';
@@ -684,6 +684,15 @@ class AppState extends ChangeNotifier implements StressHost {
   final foreground = ValueNotifier<bool>(true);
 
   bool _automationGestureOpen = false;
+
+  /// The end of an edit [ProjectOps.apply] made: [sync] sends the project to the engine (after its debounce), every
+  /// edit autosaves and opens an undo burst, and [notify] redraws the screens. The edit methods and the ops call it;
+  /// screens edit through them.
+  void finishEdit({bool sync = true, bool notify = true}) {
+    if (sync) _sync();
+    _save();
+    if (notify) notifyListeners();
+  }
 
   /// Structural layer changes (modules, length) go through a project sync.
   void editLayer(LayerDoc l, void Function(LayerDoc) change) {

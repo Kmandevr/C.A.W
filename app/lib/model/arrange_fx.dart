@@ -15,6 +15,7 @@ import 'midi_clips.dart';
 import 'modulation.dart';
 import 'mixer_fx.dart';
 import 'chain_templates.dart';
+import 'collab/project_ops.dart';
 import 'cpp_component.dart';
 import 'device_names.dart';
 import 'freeze.dart';
@@ -179,22 +180,14 @@ extension ArrangeFx on AppState {
   ComponentUseDoc? insertNativeEffect(LayerDoc layer, ComponentUseDoc use, {int? at}) {
     if (guardFrozen(layer)) return null;
     if ((layer.isFolder && !layer.busEnabled) || layer.components.length >= 64 || use.id.isEmpty) return null;
-    final before = List.of(layer.components);
-    editProject((p) {
-      layer.components.insert((at ?? layer.components.length).clamp(0, layer.components.length), use);
-      followComponentLanes(p, engineLayerId(layer), before);
-    });
+    apply(ProjectInsert(chainNode(layer), OpList.components, at ?? kAtEnd, use));
     return use;
   }
 
   void removeNativeEffect(LayerDoc layer, int index) {
     if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
-    final before = List.of(layer.components);
-    editProject((p) {
-      layer.components.removeAt(index);
-      followComponentLanes(p, engineLayerId(layer), before);
-    });
+    apply(ProjectDelete(layer.components[index].uid));
   }
 
   /// Moves native effect [from] so it ends up at index [to] of the new order.
@@ -202,20 +195,14 @@ extension ArrangeFx on AppState {
     if (guardFrozen(layer)) return;
     final n = layer.components.length;
     if (from < 0 || from >= n || to < 0 || to >= n || from == to) return;
-    final before = List.of(layer.components);
-    editProject((p) {
-      layer.components.insert(to, layer.components.removeAt(from));
-      followComponentLanes(p, engineLayerId(layer), before);
-    });
+    apply(ProjectMove(layer.components[from].uid, chainNode(layer), OpList.components, to));
   }
 
   /// Bypasses (or brings back) native effect [index]: live in the engine, and stored in the project.
   void setNativeBypass(LayerDoc layer, int index, bool bypass) {
     if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
-    final engineIndex = engineComponentIndex(layer, index);
-    if (engineIndex != null) engine?.setComponentBypass(engineLayerId(layer), engineIndex, bypass);
-    editLayer(layer, (l) => l.components[index].bypass = bypass);
+    apply(ProjectSet(layer.components[index].uid, OpField.bypass, bypass));
   }
 
   /// Switches native effect [index]'s auto gain (the device header's ear): live in the engine, and stored in the
@@ -223,10 +210,8 @@ extension ArrangeFx on AppState {
   void setNativeAutoGain(LayerDoc layer, int index, bool on) {
     if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length || layer.components[index].autoGain == on) return;
-    final engineIndex = engineComponentIndex(layer, index);
-    if (engineIndex != null) engine?.setComponentAutoGain(engineLayerId(layer), engineIndex, on);
     endUndoStep();
-    editLayer(layer, (l) => l.components[index].autoGain = on);
+    apply(ProjectSet(layer.components[index].uid, OpField.autoGain, on));
     endUndoStep();
   }
 
@@ -236,10 +221,7 @@ extension ArrangeFx on AppState {
     if (guardFrozen(layer)) return;
     if (index < 0 || index >= layer.components.length) return;
     onParamMove?.call(AutomationTarget('component', param, layerId: engineLayerId(layer), component: index), value);
-    layer.components[index].params[param] = value;
-    final engineIndex = engineComponentIndex(layer, index);
-    if (engineIndex != null) engine?.setComponentParam(engineLayerId(layer), engineIndex, param, value);
-    layerValueTick(layer.id).value++;
+    apply(ProjectSet(layer.components[index].uid, OpField.param(param), value));
   }
 
   void commitNativeParams(LayerDoc layer) => editLayer(layer, (_) {});
@@ -329,8 +311,7 @@ extension ArrangeFx on AppState {
     if (guardFrozen(layer)) return;
     final use = layer.instrument;
     if (use == null) return;
-    if (componentPlayable(use.id)) engine?.setComponentBypass(layer.id, ProjectDoc.instrumentIndex, bypass);
-    editLayer(layer, (l) => l.instrument?.bypass = bypass);
+    apply(ProjectSet(use.uid, OpField.bypass, bypass));
   }
 
   /// A knob move on [layer]'s native instrument: live at once, kept in the project ([commitNativeParams] saves it).
@@ -339,9 +320,7 @@ extension ArrangeFx on AppState {
     final use = layer.instrument;
     if (use == null) return;
     onParamMove?.call(AutomationTarget('instrument', param, layerId: layer.id), value);
-    use.params[param] = value;
-    if (componentPlayable(use.id)) engine?.setComponentParam(layer.id, ProjectDoc.instrumentIndex, param, value);
-    layerValueTick(layer.id).value++;
+    apply(ProjectSet(use.uid, OpField.param(param), value));
   }
 
   /// Puts what was picked or dropped on [layer]: an effect joins its chain, an instrument becomes its instrument,
@@ -421,7 +400,7 @@ extension ArrangeFx on AppState {
         }
       }
     }
-    editProject((p) => p.layers.insert(at, track));
+    apply(ProjectInsert(kProjectNode, OpList.layers, at, track));
     return track;
   }
 
@@ -455,11 +434,7 @@ extension ArrangeFx on AppState {
         moveClip(from, clip, start);
         return clip;
       }
-      editProject((_) {
-        from.clips.remove(clip);
-        clip.startSteps = start;
-        target.clips.add(clip);
-      });
+      applyAll([ProjectMove(clip.id, target.id, OpList.clips, kAtEnd), ProjectSet(clip.id, OpField.start, start)]);
       selectClip(target, clip);
       return clip;
     }
@@ -504,22 +479,19 @@ extension ArrangeFx on AppState {
       endUndoStep();
       return moved;
     }
-    final subtree = [for (final l in p.layers) if (identical(l, track) || _isInside(l, track.id)) l];
-    editProject((p) {
-      p.layers.removeWhere(subtree.contains);
-      var at = p.layers.length;
-      if (target != null) {
-        at = p.layers.indexOf(target);
-        if (where == TrackDrop.below) {
+    // Where it lands among the other tracks (it moves with everything inside it).
+    final rest = [for (final l in p.layers) if (!identical(l, track) && !_isInside(l, track.id)) l];
+    var at = rest.length;
+    if (target != null) {
+      at = rest.indexOf(target);
+      if (where == TrackDrop.below) {
+        at++;
+        while (at < rest.length && _isInside(rest[at], target.id)) {
           at++;
-          while (at < p.layers.length && _isInside(p.layers[at], target.id)) {
-            at++;
-          }
         }
       }
-      track.parentId = target?.parentId;
-      p.layers.insertAll(at, subtree);
-    });
+    }
+    apply(ProjectMove(track.id, target?.parentId ?? kProjectNode, OpList.layers, at));
     return true;
   }
 
@@ -572,11 +544,11 @@ extension ArrangeFx on AppState {
     final end = clip.startSteps + clip.lengthSteps;
     final earliest = clip.startSteps - clip.sourceOffsetSteps;
     final start = startSteps.clamp(earliest < 0 ? 0 : earliest, end - 1).toInt();
-    editLayer(layer, (_) {
-      clip.sourceOffsetSteps += start - clip.startSteps;
-      clip.startSteps = start;
-      clip.lengthSteps = end - start;
-    });
+    applyAll([
+      ProjectSet(clip.id, OpField.offset, clip.sourceOffsetSteps + start - clip.startSteps),
+      ProjectSet(clip.id, OpField.start, start),
+      ProjectSet(clip.id, OpField.length, end - start),
+    ]);
   }
 
   /// A new empty pattern in a clip on [layer] from [startSteps], [lengthSteps] long (REAPER: Ctrl+drag in an empty
