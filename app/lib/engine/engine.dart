@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import '../model/tempo_map.dart' show TempoEngine, TempoPoint, TimeSignature;
+import '../platform/midi_output.dart' show MidiOutEvent;
 import 'audio_bindings.dart';
 import 'bindings.dart';
 import 'component_info.dart';
@@ -902,6 +903,51 @@ class Engine implements TempoEngine {
 
   /// The MIDI clock (monotonic ns; Android's System.nanoTime) that device timestamps are on.
   int get midiClockNs => _b.midiClockNs();
+
+  /// MIDI out (caw.h, API 47): up to [capacity] timed messages the audio thread queued for MIDI-out layers and the
+  /// clock, oldest first, for a platform sender ([MidiOutput]) to send at each one's time. One caller at a time.
+  List<MidiOutEvent> midiOutDrain([int capacity = 256]) {
+    if (capacity <= 0) return const [];
+    final p = calloc<CawMidiOutEventStruct>(capacity);
+    try {
+      final n = _b.midiOutDrain(_handle, p, capacity);
+      return [
+        for (var k = 0; k < n; k++)
+          MidiOutEvent((p + k).ref.timeNs, (p + k).ref.port, [for (var j = 0; j < (p + k).ref.size; j++) (p + k).ref.data[j]]),
+      ];
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// A MIDI-out sender attaches (true: messages are queued from now, from an empty queue) or goes (false).
+  void setMidiOutActive(bool on) => _b.setMidiOutActive(_handle, on ? 1 : 0);
+
+  /// Outbound MIDI messages dropped (a full queue, or a starting one too late) since the engine was made.
+  int get midiOutDropped => _b.midiOutDropped(_handle);
+
+  /// A MIDI-out port's own delay offset in nanoseconds (-1 s..+1 s), added to each of its messages.
+  void setMidiOutPortOffset(int port, int offsetNs) => _b.setMidiOutPort(_handle, port, offsetNs);
+
+  /// MIDI clock out on the ports in [portMask] (bit k: port k; 0 off).
+  void setMidiClockOut(int portMask) => _b.setMidiClockOut(_handle, portMask);
+
+  /// Following an incoming MIDI clock: its transport and tempo drive the engine's (the project's map stays).
+  void setMidiClockFollow(bool on) => _b.setMidiClockFollow(_handle, on ? 1 : 0);
+
+  /// Incoming clock bytes (0xF8, 0xFA, 0xFB, 0xFC, 0xF2 and its data) at [timeNs] on [midiClockNs] (0: now); returns
+  /// the messages recognised.
+  int midiClockIn(List<int> bytes, int timeNs) {
+    if (bytes.isEmpty) return 0;
+    final p = calloc<Uint8>(bytes.length);
+    p.asTypedList(bytes.length).setAll(0, bytes);
+    final n = _b.midiClockIn(_handle, p, bytes.length, timeNs);
+    calloc.free(p);
+    return n;
+  }
+
+  /// The followed clock's tempo (0: none yet, or not following).
+  double get midiClockInBpm => _b.midiClockInBpm(_handle);
 
   /// [TempoEngine]: replaces the tempo map (API 31) until the next project update sets the project's "tempo_map" again. False when
   /// the engine refuses it (1..4096 points, BPM 1..999, the first at beat 0); nothing changes then.

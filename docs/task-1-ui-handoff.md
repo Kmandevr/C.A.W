@@ -38,6 +38,8 @@ The owner's UI redesign (2026-11-04) is specified in the private UI plan, with s
 
 ## Verified UI/workflow gaps
 
+- MIDI out (2026-11-27): `LayerDoc.midiOut` and the engine's MIDI out and clock are built, with no screen to set them; ask the owner how they should look (Hub #35) before building one.
+
 - Correlation, phase and loudness meters: there are only peak meters (dB) and scopes.
 - A VCA group screen (the engine and model hold VCA groups since 2026-11-27, [app](app.md); the look waits for the owner, Hub #35).
 - Screens for general routing (output overrides, sends into tracks, feedback sends; the model holds them since 2026-11-18, [app](app.md) Routing), parallel mixer paths and master effect chains. Sends to buses and sidechain keys have screens.

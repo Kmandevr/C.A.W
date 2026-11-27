@@ -609,6 +609,11 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.seed = p.seed;
     t.master = p.master;
     SongTime song = songTimeOf(p, ctlSr_);
+    // Following a MIDI clock (API 47): the live tempo stays the follower's; the project's map waits for it to stop.
+    if (ctlFollowBpm_ > 0) {
+        ctlProjectTempo_ = song.tempo.points();
+        song.tempo.build({TempoPointSpec{0, ctlFollowBpm_, false}}, ctlSr_);
+    }
     // While recording, the tempo map stays: a take's steps are worked out on the map it was played against.
     const bool keepTempo = audioIn_->recordingNow() && song.tempo.points() != ctlSong_.tempo.points();
     if (keepTempo) song.tempo = ctlSong_.tempo;
@@ -668,6 +673,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         // The armed signal (1.1.0): an audio track armed with monitoring on or auto plays its inserts' near-zero-delay
         // versions (ArmedVersion); an export never does.
         bool armed = false;
+        const MidiOutSpec* midiOut = nullptr;  // a MIDI-out layer (API 47): its notes go out as MIDI, not to an instrument
     };
     std::vector<Want> wants;
     int order = 0;
@@ -683,6 +689,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         const auto& track = l.instrument.audioTrack;
         wants.back().armed = !offline && !l.folder && track && track->input.present && track->input.armed &&
                              track->input.monitor != 0;
+        wants.back().midiOut = l.hasMidiOut && !l.folder ? &l.midiOut : nullptr;
     }
 
     // Pass 1: whether each layer plays (a track needs an instrument), its notes, and its slot.
@@ -733,7 +740,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::vector<std::vector<int>> readsFrom(static_cast<size_t>(slotCount));
     for (Want& w : wants) {
         Planned pl{w, {}, nullptr, {}, {}};
-        pl.track = w.instrument != nullptr && !w.bus;
+        pl.track = (w.instrument != nullptr || w.midiOut != nullptr) && !w.bus;
         uint64_t layerStateBytes = 0;
         // Arrangement clips are compiled into an immutable absolute-time event stream here,
         // on the control thread. A layer still plays them on one instrument through one chain.
@@ -823,6 +830,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.track = false;
             pl.ls.inserts = nullptr;
             pl.ls.instrument = nullptr;
+            pl.ls.midiOut = false;
             pl.ls.compensation = 0;
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
@@ -986,6 +994,26 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 ls.instrument->setValues(instrumentSpecs(*w.instrument, w.midi));
                 updateAutomation(ls.slot, *ls.instrument, w.id, ls.instrumentAutomationKey);
             }
+            // A MIDI-out layer (API 47): its lane (made once per slot, kept while the Engine lives) and settings.
+            const bool wantsMidi = pl.track && w.midiOut;
+            if (wantsMidi ? (!ls.midiOut || ls.midiSpec != *w.midiOut) : ls.midiOut) {
+                Cmd midi;
+                midi.type = Cmd::SetMidiOut;
+                midi.slot = ls.slot;
+                if (wantsMidi) {
+                    std::unique_ptr<MidiOutLane>& lane = ctlMidiLanes_[ls.slot];
+                    if (!lane) lane = std::make_unique<MidiOutLane>();
+                    midi.midiLane = lane.get();
+                    midi.midiSpec = *w.midiOut;
+                }
+                if (send(midi)) {
+                    ls.midiOut = wantsMidi;
+                    if (wantsMidi) ls.midiSpec = *w.midiOut;
+                } else {
+                    allOk = false;
+                    warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its MIDI out");
+                }
+            }
         }
         if (w.bus) {
             Cmd bus;
@@ -1005,6 +1033,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             if (newBus) {  // the slot dropped what it had as a track (its chain, inserts, instrument and delay)
                 ls.inserts = nullptr;
                 ls.instrument = nullptr;
+                ls.midiOut = false;
                 ls.compensation = 0;
             }
             ls.bus = true;
@@ -1390,6 +1419,11 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
         for (int to : n.out) nodes[to].in = std::max(nodes[to].in, n.raw);
         if (toMaster) masterIn = std::max(masterIn, n.raw);
     }
+    // MIDI out (API 47): a layer with no latency of its own reaches the master after masterIn frames, then the
+    // master chain's: what every MIDI-out time adds so the external sound lines up with the mix.
+    midiOutDelayFrames_.store(masterIn + static_cast<int64_t>(std::min<uint64_t>(
+                                             ctlMasterChain_ ? ctlMasterChain_->latencyFrames() : 0, 1u << 30)),
+                              std::memory_order_relaxed);
     bool capped = false;
     auto delayTo = [&](const Node& from, int64_t arrival) {
         const int64_t d = arrival - from.raw;

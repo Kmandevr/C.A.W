@@ -222,6 +222,8 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
     }
     playRampIn_ = g_ > 0 || stopFade_ > 0 ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
     stopFade_ = 0;
+    lanesOff(midiFrame_, true);  // MIDI-out layers: what sounds ends, and each one's program goes out (API 47)
+    clockStart(midiFrame_);
     epoch_ = 0;
     dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
     limEnv_ = 0;
@@ -238,6 +240,14 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
             Slot& s = slotAt(live_[k]);
             if (!s.active) continue;
             s.playTailLen = s.playTailAt = 0;
+            if (s.midiOut) {  // a MIDI-out layer (API 47): what it played ends, the new pass starts from silence
+                NoteEvents& notes = s.midiOut->notes();
+                notes.releaseAll(0, true);
+                if (!notes.holdsPreview()) {
+                    notes.forget(false);
+                    notes.clearEvents();
+                }
+            }
             if (s.instrument) {
                 // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
                 NoteEvents& notes = *s.instrument->notes();
@@ -323,14 +333,15 @@ void Engine::updateTiming() noexcept {
 // Audio thread: a new tempo map and signatures (Transport, SetSong). The one it replaces goes back to the control
 // thread. Held notes end when the tempo changes (every note moves in time). While playing, a change of one tempo to
 // another keeps the sample position, as before the map; any change involving a tempo map keeps the beat instead.
-void Engine::takeSong(SongTime* next) noexcept {
+void Engine::takeSong(SongTime* next, bool follow) noexcept {
     if (!next) return;
     SongTime* old = song_;
     const bool changed = old->tempo.points() != next->tempo.points();
-    if (changed)
+    // Following a MIDI clock (API 47) moves the tempo a little at a time: the beat and the held notes stay.
+    if (changed && !follow)
         for (int i = 0; i < slotCount_; ++i)
-            if (slotAt(i).instrument) slotAt(i).instrument->notes()->releaseAll(0, true);
-    const bool keepBeat = changed && !(old->tempo.constant() && next->tempo.constant());
+            if (NoteEvents* n = notesOf(slotAt(i))) n->releaseAll(0, true);
+    const bool keepBeat = changed && (follow || !(old->tempo.constant() && next->tempo.constant()));
     const double beat = keepBeat ? old->tempo.stepAt(static_cast<double>(g_)) : 0.0;
     // Inside the loop range, playback stays inside it (keepInRange, after the new timing is worked out): the kept
     // beat rounded could land on the new range's end, where wrapAt() would no longer wrap.
@@ -338,7 +349,13 @@ void Engine::takeSong(SongTime* next) noexcept {
     song_ = next;
     bpm_ = next->tempo.points().front().bpm;
     audioIn_->setSongTime(next);
-    if (keepBeat) g_ = std::max<int64_t>(0, static_cast<int64_t>(std::floor(next->tempo.frameAt(beat))));
+    if (keepBeat) {
+        const double at = next->tempo.frameAt(beat);
+        // Following a clock (API 47) the new map keeps the timing up to past the playhead: the sample stays (a
+        // round trip through beats may land a hair under it, which floor would turn into a one-sample jump).
+        if (!(follow && std::fabs(at - static_cast<double>(g_)) < 1.0))
+            g_ = std::max<int64_t>(0, static_cast<int64_t>(std::floor(at)));
+    }
     Retired r;
     r.song = old;
     retireEntry(r);
@@ -568,6 +585,13 @@ void Engine::applyCommands() noexcept {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
                 s.instrument = s.instrumentFading = nullptr;
                 s.instrumentFadeLeft = 0;
+                if (s.midiOut) {
+                    s.midiOut->allOff(0);
+                    flushLane(*s.midiOut, midiFrame_);
+                    s.midiOut->notes().forget(false);
+                    s.midiOut->notes().clearEvents();
+                    s.midiOut = nullptr;
+                }
                 s.delay = nullptr;
                 {
                     Retired d;
@@ -604,9 +628,9 @@ void Engine::applyCommands() noexcept {
                 auto carried = [map](uint32_t note) {
                     return map && note < map->size() ? (*map)[note] : -1;
                 };
-                if (s.instrument) {
+                if (NoteEvents* held = notesOf(s)) {
                     // None keeps pointing into the old pattern.
-                    NoteEvents& notes = *s.instrument->notes();
+                    NoteEvents& notes = *held;
                     for (NoteEvents::Held& h : notes.held()) {
                         if (!h.active || h.source != NoteEvents::Source::Pattern) continue;
                         h.ex = nullptr;
@@ -626,12 +650,19 @@ void Engine::applyCommands() noexcept {
             case Cmd::Remove: {
                 Slot& s = slotAt(c.slot);
                 s.removing = true;
+                if (s.midiOut) {  // a removed MIDI-out layer's notes end now; the slot sends nothing more
+                    s.midiOut->allOff(0);
+                    flushLane(*s.midiOut, midiFrame_);
+                    s.midiOut->notes().forget(false);
+                    s.midiOut->notes().clearEvents();
+                    s.midiOut = nullptr;
+                }
                 retire(nullptr, nullptr, s.automation);
                 s.automation = nullptr;
                 break;
             }
             case Cmd::SetSong:
-                takeSong(c.song);
+                takeSong(c.song, c.flag);
                 updateTiming();
                 keepInRange();
                 if (g_ >= loopLen_) g_ = 0;
@@ -782,6 +813,26 @@ void Engine::applyCommands() noexcept {
                 s.instrument = next;
                 break;
             }
+            case Cmd::SetMidiOut: {
+                Slot& s = slotAt(c.slot);
+                if (s.midiOut && s.midiOut != c.midiLane) {  // not one any more (or another lane): its notes end
+                    s.midiOut->allOff(0);
+                    flushLane(*s.midiOut, midiFrame_);
+                    s.midiOut->notes().forget(false);
+                    s.midiOut->notes().clearEvents();
+                }
+                if (c.midiLane) {
+                    const int program = c.midiLane->config().program;
+                    c.midiLane->configure(c.midiSpec);  // a new port or channel ends the old one's notes first
+                    // The program goes at each Play (startPlay); here only a change, or a new layer while playing.
+                    const bool fresh = c.midiLane != s.midiOut;
+                    if (c.midiSpec.program >= 0 && (fresh ? playing_ : program != c.midiSpec.program))
+                        c.midiLane->sendProgram(0);
+                    flushLane(*c.midiLane, midiFrame_);
+                }
+                s.midiOut = c.midiLane;
+                break;
+            }
             case Cmd::Play:
                 countInLeft_ = 0;
                 if (c.countInBeats > 0 && stepLen_ > 0 && !playing_) {
@@ -810,6 +861,11 @@ void Engine::applyCommands() noexcept {
                 touchPlayStamp_ = c.touchStamp;
                 break;
             case Cmd::Stop:
+                if (playing_ && stopFade_ == 0) {  // MIDI out (API 47): notes end and the clock stops at once
+                    lanesOff(midiFrame_, false);
+                    if (clockPorts_) clockSend(clockPorts_, midiFrame_, midibyte::kStop);
+                    clockPorts_ = 0;
+                }
                 countInLeft_ = 0;  // a Stop during the count-in cancels it
                 if (playing_ && stopFade_ == 0) stopFade_ = std::max(1, static_cast<int>(kStopSeconds * sr_));
                 playRampIn_ = 0;
@@ -988,7 +1044,7 @@ void Engine::takeDeviceMidi(int frames) noexcept {
             for (int i = 0; i < slotCount_; ++i) {
                 if (p.e.target >= 0 && i != p.e.target) continue;
                 Slot& s = slotAt(i);
-                if (s.instrument) s.deviceNotes.apply(*s.instrument->notes(), p.e, 0, o);  // its notes, then reset
+                if (NoteEvents* n = notesOf(s)) s.deviceNotes.apply(*n, p.e, 0, o);  // its notes, then reset
                 else s.deviceNotes.reset();
             }
             p.done = true;
@@ -1017,7 +1073,7 @@ void Engine::takeDeviceMidi(int frames) noexcept {
             continue;
         }
         Slot& s = slotAt(p.e.target);
-        if (!s.active || !s.track || !s.instrument) {
+        if (!s.active || !s.track || !notesOf(s)) {
             p.done = true;
             continue;
         }
@@ -1064,15 +1120,15 @@ void Engine::previewCommand(const Cmd& c) noexcept {
         for (int i = 0; i < slotCount_; ++i) {
             Slot& s = slotAt(i);
             // The app's previews only: a device's held keys stay (caw_engine_midi_release ends those).
-            if (s.instrument) s.instrument->notes()->releasePreviews(0, kDevicePreviewBase);
+            if (NoteEvents* n = notesOf(s)) n->releasePreviews(0, kDevicePreviewBase);
         }
         return;
     }
     if (c.slot < 0 || c.slot >= slotCount_) return;
     Slot& s = slotAt(c.slot);
-    if (!s.active || !s.track || !s.instrument) return;
-    NoteEvents& notes = *s.instrument->notes();
-    if (s.instrumentIdle) {  // it hasn't run since it fell silent: start it from silence now
+    if (!s.active || !s.track || !notesOf(s)) return;
+    NoteEvents& notes = *notesOf(s);
+    if (s.instrument && s.instrumentIdle) {  // it hasn't run since it fell silent: start it from silence now
         s.instrument->reset();
         notes.forget(false);
         notes.clearEvents();
@@ -1109,6 +1165,15 @@ void Engine::updatePreviewing(int frames) noexcept {
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
         bool voices = false;  // a preview note is held
         if (!silent && samplePreview_->route() == live_[k]) voices = true;  // the sample preview plays through it
+        if (s.midiOut && s.midiOut->notes().holdsPreview()) {  // a MIDI-out layer's held previews (API 47)
+            if (silent) {
+                s.midiOut->notes().releasePreviews(0);
+                s.midiOut->allOff(0);
+                flushLane(*s.midiOut, frames);
+            } else {
+                voices = true;
+            }
+        }
         if (s.instrument && (s.instrument->notes()->holdsPreview() || s.instrument->monitorsStopped())) {
             if (silent) {
                 s.instrument->notes()->releasePreviews(0);
@@ -1195,6 +1260,13 @@ void Engine::endPlayback() noexcept {
         if (!s.track) continue;
         // The instrument's notes end and ring out (their release, its effects' tails) until quiet.
         if (s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
+        if (s.midiOut) {  // its notes ended at the Stop (lanesOff); what the pattern held is forgotten
+            s.midiOut->notes().releaseAll(0, true);
+            if (!s.midiOut->notes().holdsPreview()) {
+                s.midiOut->notes().forget(false);
+                s.midiOut->notes().clearEvents();
+            }
+        }
         s.insertTail = false;  // the track runs whole, as for a preview, not just its inserts
         if (s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
             s.previewing = true;
@@ -1509,6 +1581,33 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
             s.instrument->setVoices(nullptr);
             noteFx->end(static_cast<uint32_t>(m));
         }
+    } else if (s.midiOut) {
+        // A MIDI-out layer (API 47): where an instrument would play its notes, they become MIDI 1.0 bytes, staged
+        // in its lane for the end of the chunk (processChunk queues them; the mix pool may run nodes at once).
+        MidiOutLane& lane = *s.midiOut;
+        NoteEvents& notes = lane.notes();
+        const bool stopping = stopFade_ > 0;
+        const bool muted = s.target <= 0.0 || offline_.load(std::memory_order_relaxed);
+        const bool sends = !muted && !stopping;
+        if (muted && !stopping) {
+            // Muted or soloed out (while its fader fades): what it sent ends, and it holds nothing, so unmuted it
+            // picks up the notes sounding there (chaseNotes) and sends them again.
+            if (lane.sounding()) lane.allOff(0);
+            notes.forget(false);
+            notes.clearEvents();
+            s.chase = true;
+        } else {
+            const PartScope voices(parts(), Part::Voices);
+            if (!previewChunk_ && !stopping) instrumentNotes(s, notes, m);
+            if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
+            instrumentMotion(notes, m);
+            notes.sort();
+            if (!sends && lane.sounding()) lane.allOff(0);
+            lane.convert(notes.events(), notes.count(), sends);
+            notes.clearEvents();
+        }
+        std::fill_n(s.instL, m, 0.0f);
+        std::fill_n(s.instR, m, 0.0f);
     } else {
         std::fill_n(s.instL, m, 0.0f);
         std::fill_n(s.instR, m, 0.0f);
@@ -1570,6 +1669,7 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
     if (k != s.k || epoch_ != s.epoch) {
         // The layer restarts its pattern: held notes ring out, the instrument and its effects carry on.
         if (!s.fresh && s.instrument && !s.instrumentIdle) s.instrument->notes()->releaseAll(0, true);
+        if (!s.fresh && s.midiOut) s.midiOut->notes().releaseAll(0, true);
         s.fresh = false;
         s.chase = true;  // play, a loop back or a new pass may start inside notes: they sound from here (#226)
         s.k = k;
@@ -1634,6 +1734,13 @@ int Engine::planChunk(int maxFrames) noexcept {
             s.instrumentIdle = s.instrumentIdle || s.instrument || s.instrumentFading;
             s.delayStale = true;
             s.routesStale = true;
+            if (s.midiOut && s.midiOut->sounding()) {  // muted or soloed out: what it sent ends (API 47)
+                s.midiOut->allOff(0);
+                flushLane(*s.midiOut, tapAt_);
+                s.midiOut->notes().forget(false);
+                s.midiOut->notes().clearEvents();
+                s.chase = true;
+            }
             if (s.removing && canRetire(6)) {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrument);
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
@@ -1757,6 +1864,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     if (mixGraph_->executor.parallelLevelsRun() != 0) poolUsed_ = true;
     routeFrame_ += m;  // the route clock: feedback sends' rings move on by the frames just run
     flushRetires();  // what the nodes handed back, now that nothing in the graph reads it
+    // MIDI-out layers' bytes (API 47), in slot order, now that no node writes them.
+    for (int k = 0; k < liveCount_; ++k)
+        if (MidiOutLane* lane = slotAt(live_[k]).midiOut; lane && lane->stagedCount() > 0) flushLane(*lane, tapAt_);
     if (!ran) {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
@@ -2862,6 +2972,17 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     const auto processStart = pool_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
     updateSolo();
+    // MIDI out (API 47): frame 0 of this callback as it will be heard, on the MIDI clock, before any command can
+    // send a message (a Stop's note-offs, a Play's Start).
+    {
+        const int64_t test = midiClockTest_.load(std::memory_order_relaxed);
+        const int64_t now = test >= 0 ? test : midiClockNs();
+        // Smoothed over the callbacks (CallbackClock), so the wake-up's own jitter isn't in the messages' times.
+        midiOutAnchorNs_ = midiOutClock_.anchor(now, frames, sr_) + midiOutLatencyNs_.load(std::memory_order_relaxed) +
+            static_cast<int64_t>(std::llround(static_cast<double>(midiOutDelayFrames_.load(std::memory_order_relaxed)) * 1e9 / sr_));
+        midiOutQ_->beginCallback();
+        midiFrame_ = 0;
+    }
     applyCommands();
     updateSolo();
     // The pool for this callback (speed phase 5c); idle workers sleep at once while nothing plays. Speed phase 5d:
@@ -2926,6 +3047,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             }
             countInLeft_ -= done;
             i += done;
+            midiFrame_ = i;  // a Play here sends its clock and programs from this frame
             if (countInLeft_ == 0) {
                 if (canRetire(static_cast<size_t>(2 * slotCount_))) startPlay(countInFrom_, countInPlayCount_, countInTouchStamp_);
                 else countInLeft_ = 1;  // [Assumption] a full retire queue is rare; the start slips by a sample
@@ -2954,6 +3076,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         midiChunkFrom_ = i;
         tapAt_ = i;
         const int m = processChunk(left + i, right + i, maxM);
+        if (clockPorts_) clockChunk(i, m);  // MIDI clock out (API 47): this chunk's ticks
         if (stopEnded_) {
             stopEnded_ = false;
             endPlayback();
@@ -2962,6 +3085,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         if (g_ >= wrap) {
             g_ = loopRange_ ? loopFrom_ : 0;
             ++epoch_;
+            if (clockPorts_) clockLoop(i + m);
         }
         i += m;
     }

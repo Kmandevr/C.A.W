@@ -6,6 +6,7 @@ updated: 2026-11-27
 
 # Log
 
+- 2026-11-27: MIDI out and the MIDI clock in the engine and project model (API 47; no screen or platform senders yet): MIDI-out tracks send notes, controllers, pitch bend and program changes timed with the audio (output latency, delay compensation and a per-port offset, on a smoothed callback clock); clock out from the tempo map with start, continue, song position and stop; clock follow overrides the live tempo only, keeps the playhead continuous and locks to the master ([decisions](decisions.md)).
 - 2026-11-27: VCA groups in the engine and project model (API 47; no screen yet): one fader moves several tracks' levels, mute and solo without summing their audio, as one per-frame gain per slot; projects with groups save as format v8 ([decisions](decisions.md)).
 - 2026-11-27: VCA groups in the engine and project model (API 47; no screen yet): one fader moves several tracks' levels, mute and solo without summing their audio, as one per-frame gain per slot; projects with groups save as format v8 ([decisions](decisions.md)).
 - 2026-11-27: `caw_collab` gains a session host core (admission by project format and protocol, public or password lobbies, invites, the op pipeline with a write-ahead log, snapshots and resume, host migration with epochs and proof-based fencing), not yet used by the app; 162 tests and two security reviews ([decisions](decisions.md)).

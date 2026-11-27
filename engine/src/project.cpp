@@ -460,6 +460,52 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 if (!componentEntry(*inst, layerName + " instrument", spec.instrument, error)) return false;
                 spec.hasInstrument = true;
             }
+            if (const Json* mo = l.get("midiOut"); mo && mo->type != Json::Type::Null) {
+                // API 47: the layer's notes to external MIDI. Untrusted: each field checked, fail closed.
+                const std::string what = layerName + " midiOut";
+                if (mo->type != Json::Type::Object) {
+                    error = what + " must be {\"port\": 0..15, \"channel\": 1..16, \"program\", \"bend_range\"}";
+                    return false;
+                }
+                // A field that is there must be a number (a string or a list is refused, not read as the default).
+                for (const char* field : {"port", "channel", "program", "bend_range"})
+                    if (const Json* v = mo->get(field); v && v->type != Json::Type::Null && v->type != Json::Type::Number) {
+                        error = what + ": " + field + " must be a number";
+                        return false;
+                    }
+                if (!wholeIn(mo->number("port", 0), 0, 15, spec.midiOut.port)) {
+                    error = what + ": port must be a whole number from 0 to 15";
+                    return false;
+                }
+                if (!wholeIn(mo->number("channel", 1), 1, 16, spec.midiOut.channel)) {
+                    error = what + ": channel must be a whole number from 1 to 16";
+                    return false;
+                }
+                if (const Json* pr = mo->get("program"); pr && pr->type != Json::Type::Null &&
+                                                         !wholeIn(mo->number("program", -2), 0, 127, spec.midiOut.program)) {
+                    error = what + ": program must be a whole number from 0 to 127 (or absent)";
+                    return false;
+                }
+                if (const Json* br = mo->get("bend_range"); br && br->type != Json::Type::Null) {
+                    const double range = mo->number("bend_range", 0);
+                    if (!std::isfinite(range) || range < 1 || range > 48) {
+                        error = what + ": bend_range must be from 1 to 48 semitones";
+                        return false;
+                    }
+                    spec.midiOut.bendRange = range;
+                }
+                const char* clash = spec.hasInstrument ? "an instrument"
+                    : !spec.components.empty() ? "components"
+                    : !spec.noteComponents.empty() ? "noteComponents"
+                    : !spec.midiComponents.empty() ? "midiComponents"
+                    : l.get("sends") && l.get("sends")->type == Json::Type::Array && !l.get("sends")->arr.empty() ? "sends"
+                    : l.boolean("folder", false) ? "a folder" : nullptr;
+                if (clash) {
+                    error = what + ": a MIDI-out layer makes no audio, so it can't also have " + clash;
+                    return false;
+                }
+                spec.hasMidiOut = true;
+            }
             if (!wholeIn(l.number("length_steps", 0), 0, maxSteps, spec.lengthSteps)) {
                 error = layerName + ": length_steps must be a whole number from " + range(0, maxSteps);
                 return false;
@@ -476,6 +522,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.folder = l.boolean("folder", false);
             spec.busEnabled = l.boolean("bus", true);
             if (!parseAudioTrack(l, assets, layerName, static_cast<double>(maxSteps), spec, audioEndSteps, error)) return false;
+            if (spec.hasMidiOut && spec.hasInstrument) {
+                error = layerName + " midiOut: a MIDI-out layer makes no audio, so it can't also have audio clips or an input";
+                return false;
+            }
             if (const Json* sends = l.get("sends"); sends && sends->type != Json::Type::Null) {
                 if (sends->type != Json::Type::Array) {
                     error = layerName + ": sends must be a list of {\"to\": bus or track id, \"level\", \"pre\", \"mute\", \"feedback\", \"limiter\"}";

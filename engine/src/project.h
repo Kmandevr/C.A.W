@@ -94,6 +94,20 @@ constexpr int kMaxSends = 8;  // sends per layer
 // A layer's "output" straight to the master (layer ids never start with '@').
 inline constexpr const char* kMasterOutput = "@master";
 
+// A MIDI-out layer (API 47, midi_out.h): its notes go to external hardware or an app as MIDI 1.0 on `port` (0..15)
+// and `channel` (1..16), with an optional `program` (0..127, -1 none) sent at each Play, and `bendRange` the
+// receiver's pitch-bend range in semitones (1..48) a note's own pitch is sent over.
+struct MidiOutSpec {
+    int port = 0;
+    int channel = 1;
+    int program = -1;
+    double bendRange = 2.0;
+    bool operator==(const MidiOutSpec& o) const noexcept {
+        return port == o.port && channel == o.channel && program == o.program && bendRange == o.bendRange;
+    }
+    bool operator!=(const MidiOutSpec& o) const noexcept { return !(*this == o); }
+};
+
 struct LayerSpec {
     std::string id, name;
     int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project (a pattern sets its own)
@@ -111,6 +125,10 @@ struct LayerSpec {
     // follow it. A track without one plays nothing and takes no slot.
     bool hasInstrument = false;
     ComponentSpec instrument;
+    // "midiOut" (API 47): instead of an instrument, the layer's notes go out as MIDI (v1: no instrument, components,
+    // noteComponents, midiComponents or sends with it). It keeps a slot, as a track does.
+    bool hasMidiOut = false;
+    MidiOutSpec midiOut;
     // Per-note FX (#127, note_fx_host.h): effects run once per note between the instrument's voices and its shared
     // stage, in up to `noteVoices` slots (1..16), before `components`. The instrument must expose a voice bus.
     std::vector<ComponentSpec> noteComponents;
