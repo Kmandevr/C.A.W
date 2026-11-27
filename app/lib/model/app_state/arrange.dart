@@ -330,6 +330,50 @@ extension AppStateArrange on AppState {
     }
   }
 
+  // VCA groups (lib/model/vca.dart): model edits, each an undo step. No screen yet (the owner decides the look).
+
+  /// A new group over [layerIds] (by default the selected track); null when the project has [kMaxVcaGroups].
+  VcaGroupDoc? createVcaGroup([Iterable<String>? layerIds]) {
+    final g = project.createVcaGroup(layerIds ?? [?selectedLayerId]);
+    if (g != null) _changed();
+    return g;
+  }
+
+  void renameVcaGroup(String groupId, String name) {
+    final g = project.vcaGroup(groupId);
+    if (g == null || name.trim().isEmpty || g.name == name.trim()) return;
+    g.name = name.trim();
+    _changed(engine: false);
+  }
+
+  /// A group's fader, mute and solo, straight to the audio thread (caw_engine_set_vca), as [mixLayer] does a track's
+  /// volume; a group the engine doesn't hold yet goes as a project update.
+  void mixVca(String groupId, {double? volume, bool? mute, bool? solo}) {
+    final g = project.vcaGroup(groupId);
+    if (g == null) return;
+    if (volume != null) g.volume = volume.clamp(0.0, kMaxMixGain).toDouble();
+    if (mute != null) g.mute = mute;
+    if (solo != null) g.solo = solo;
+    if (engine?.setVca(g.id, g.volume, g.mute, g.solo) ?? false) {
+      _save();
+      values.value++;
+    } else {
+      _changed();
+    }
+  }
+
+  void addVcaMember(String groupId, String layerId) {
+    if (project.addVcaMember(groupId, layerId)) _changed();
+  }
+
+  void removeVcaMember(String groupId, String layerId) {
+    if (project.removeVcaMember(groupId, layerId)) _changed();
+  }
+
+  void deleteVcaGroup(String groupId) {
+    if (project.deleteVcaGroup(groupId)) _changed();
+  }
+
   void _pruneClipSelection() {
     final valid = {
       for (final layer in project.layers) ...[for (final clip in layer.clips) clip.id, for (final c in layer.audioClips) c.id],

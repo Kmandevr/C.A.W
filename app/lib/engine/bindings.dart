@@ -337,6 +337,8 @@ class Bindings {
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         setMaster = lib.lookupFunction<Int32 Function(Pointer<Void>, Double),
             int Function(Pointer<Void>, double)>('caw_engine_set_master'),
+        setVca = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Double, Int32, Int32),
+            int Function(Pointer<Void>, Pointer<Utf8>, double, int, int)>('caw_engine_set_vca'),
         noteOn = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32, Double, Double),
             int Function(Pointer<Void>, Pointer<Utf8>, int, double, double)>('caw_engine_note_on'),
         notePitch = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32, Double),
@@ -638,6 +640,7 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<CawSlotCostStruct>) componentCost;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final int Function(Pointer<Void>, double) setMaster; // API 40: 1 queued, 0 the queue was full
+  final int Function(Pointer<Void>, Pointer<Utf8>, double, int, int) setVca; // API 47: 1 set, 0 no such VCA group
   final int Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn; // also -1: nothing to send
   final int Function(Pointer<Void>, int, double) notePitch;
   final int Function(Pointer<Void>, int) noteOff;

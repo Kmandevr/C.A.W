@@ -21,6 +21,7 @@ import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
 import 'tempo_map.dart';
+import 'vca.dart';
 import 'project_dependencies.dart';
 import 'automation_edit.dart' show AutomationEdits;
 import 'sample_use.dart' show SampleUse;

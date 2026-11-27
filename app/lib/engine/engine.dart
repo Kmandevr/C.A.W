@@ -833,6 +833,17 @@ class Engine implements TempoEngine {
   /// (API 40); callers may ignore it.
   bool setMaster(double volume) => _b.setMaster(_handle, volume) == 1;
 
+  /// A VCA group's fader (linear, 0..+12 dB), mute and solo while it plays (API 47): false when the project the
+  /// engine has holds no group [groupId].
+  bool setVca(String groupId, double volume, bool mute, bool solo) {
+    final id = groupId.toNativeUtf8();
+    try {
+      return _b.setVca(_handle, id, volume, mute ? 1 : 0, solo ? 1 : 0) == 1;
+    } finally {
+      calloc.free(id);
+    }
+  }
+
   /// Note previews: a held note on a layer's instrument, through its effects and mix, playing or stopped. A second
   /// [noteOn] with the same [id] ends the first; [notePitch] glides a held one without a new attack.
   /// Each returns false only when the command queue stayed full (no such layer or held note is not a failure).

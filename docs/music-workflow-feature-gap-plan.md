@@ -35,6 +35,7 @@ This note records what C.A.W.'s music-production workflows can do today, area by
 ### Mixer and signal flow
 
 - **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale; volume faders in dB on a REAPER-like taper up to +12 dB (track and master gain up to +12 dB since 2026-11-10), stereo meters on stereo tracks; every track's meter read in one engine call per 30 Hz poll (API 25, 2026-11-12), which also tells device motion whether the engine sounds (`AppState.sounding`). Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
+- **[Partial]** VCA groups (owner, 2026-11-27, REAPER-style): the engine scales members' levels and applies the group's mute and solo without summing audio (API 47), and the project model saves and edits them undoably ([app](app.md)); no screen yet (the owner decides the look, Hub #35).
 - **[Partial]** General mixer routing (owner, 2026-11-18): the app's project model holds output overrides (to a bus or `@master`), sends into buses or tracks, feedback sends with a limiter and sidechain keys from any playing layer, loop-checked by `RoutingPlan` ([app](app.md)); no screen offers the new routes yet, and module-level signal and modulation connections are not integrated as a general mixer workflow.
 
 ### Export and file workflow

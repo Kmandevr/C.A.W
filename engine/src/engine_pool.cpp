@@ -263,6 +263,7 @@ Engine::~Engine() {
         delete c.delay;
         delete c.sends;
         delete c.song;
+        delete c.vca;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -275,6 +276,7 @@ Engine::~Engine() {
         delete r.delay;
         delete r.sends;
         delete r.song;
+        delete r.vca;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].pattern;
@@ -286,8 +288,10 @@ Engine::~Engine() {
         delete pending_[i].delay;
         delete pending_[i].sends;
         delete pending_[i].song;
+        delete pending_[i].vca;
     }
     delete song_;
+    delete vca_;
     delete masterChain_;
     masterChain_ = nullptr;
     delete masterFading_;

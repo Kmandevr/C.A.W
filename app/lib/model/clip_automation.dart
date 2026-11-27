@@ -7,13 +7,23 @@ import 'instance_ids.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
 
+/// How a clip lane meets the track's or project's lane on its target inside the clip (owner, 1.1.0): [override]
+/// plays the clip lane instead (the only mode before 1.1.4); [add] plays the base plus the clip lane's offset from the
+/// target's neutral value ([ClipAddRule]). JSON `mode`: absent (override) or `add`; anything else reads override.
+enum ClipLaneMode {
+  override,
+  add;
+
+  static ClipLaneMode parse(Object? name) => name == 'add' ? add : override;
+}
+
 /// One automation lane on a clip: the track's volume or pan (`track`), its instrument's parameter (`instrument`) or
 /// one of its effects' (`component`, [component] its index in the track's chain). Points are in the clip's own time:
 /// steps from its pattern's start, within its loop ([ClipDoc.loopLength]), joined as track lanes are (each point's
 /// curve to the next, holding before the first and after the last).
 class ClipAutomationLaneDoc {
   ClipAutomationLaneDoc({required this.targetType, required this.target, this.component, List<AutomationPointDoc>? points,
-      this._uid, this.device})
+      this._uid, this.device, this.mode = ClipLaneMode.override})
       : points = points ?? [];
   String targetType;
   String target;
@@ -29,6 +39,9 @@ class ClipAutomationLaneDoc {
   String? device;
   List<AutomationPointDoc> points;
 
+  /// Whether it replaces the base lane inside the clip or adds to it ([ClipLaneMode]).
+  ClipLaneMode mode;
+
   /// The key of the track or project lane on the same target ([automationKey]) on track [layerId].
   String keyOn(String layerId) => automationKey(targetType, target, layerId: layerId, component: component);
 
@@ -42,6 +55,8 @@ class ClipAutomationLaneDoc {
         'points': [for (final p in points) p.toJson(withIds: withIds)],
         if (withIds) 'uid': uid,
         if (withIds && device != null) 'device': device,
+        // Written only for add, so a file without it (every file before 1.1.4) saves byte for byte as it was.
+        if (mode == ClipLaneMode.add) 'mode': 'add',
       };
 
   /// Null for a lane that names nothing a clip can automate.
@@ -54,6 +69,7 @@ class ClipAutomationLaneDoc {
     return ClipAutomationLaneDoc(targetType: type, target: target, component: type == 'component' ? component : null,
         uid: InstanceIds.read(j['uid'], InstanceIds.lane),
         device: type == 'component' ? InstanceIds.read(j['device'], InstanceIds.device) : null,
+        mode: ClipLaneMode.parse(j['mode']),
         points: [
           for (final p in (j['points'] as List?) ?? const [])
             if (p is Map<String, dynamic>) AutomationPointDoc.fromJson(p),
@@ -110,8 +126,16 @@ double _right(List<_P> pts, double x) {
 double _left(List<_P> pts, double x) {
   if (x <= pts.first.step) return pts.first.value;
   if (x > pts.last.step) return pts.last.value;
-  final j = pts.indexWhere((p) => p.step >= x);
-  return _seg(pts[j - 1], pts[j], x);
+  var lo = 0, hi = pts.length; // the first point at or after x
+  while (lo < hi) {
+    final mid = (lo + hi) >> 1;
+    if (pts[mid].step < x) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return _seg(pts[lo - 1], pts[lo], x);
 }
 
 /// How many straight pieces stand in for a bent segment cut by a clip's edge: a part of a curve isn't the same curve.
@@ -162,18 +186,40 @@ double pointsValueAt(List<AutomationPointDoc> points, double at, {bool left = fa
   return left ? _left(pts, at) : _right(pts, at);
 }
 
-/// Where a clip's lane plays on the song timeline: [start] to [end], as points with times on the timeline.
-typedef ClipLaneSpan = ({double start, double end, List<_P> points});
+/// Where a clip's lane plays on the song timeline: [start] to [end], as points with times on the timeline, and
+/// whether it overrides the base lane there or adds to it.
+typedef ClipLaneSpan = ({double start, double end, List<_P> points, ClipLaneMode mode});
+
+/// How an add-mode clip lane ([ClipLaneMode.add]) combines with the base on its target: inside the clip the target
+/// plays base(t) + (clip(t) - [centre]), clamped to [min]..[max], so a clip lane flat at the centre changes nothing.
+/// The clip lane's points stay in the target's own units, as an override lane's are.
+/// - Track volume: lane points are linear gain (0..[kMaxMixGain], the fader's own value, `LayerDoc.volume`), so the
+///   sum is taken in decibels: base_dB + (clip_dB - 0 dB), which is base x clip in linear gain ([gain]). The neutral
+///   is 0 dB (a gain of 1): a clip lane at unity leaves the base as it is, at 0.5 it is 6 dB down from it.
+/// - Track pan: -1..1, the neutral is centre (0).
+/// - An instrument's or effect's parameter: the project holds no descriptors (toEngineJson runs without them, for an
+///   export too), so the neutral is the base's value where the clip starts ([centre] null) — the value a new clip
+///   lane is drawn at ([ClipLoopEdit.addClipLane]), so a new lane switched to add changes nothing. The model clamps to
+///   the edit range only (±1e6); the engine clamps a parameter to its own range.
+typedef ClipAddRule = ({bool gain, double? centre, double min, double max});
+
+/// The [ClipAddRule] for a clip lane's target.
+ClipAddRule clipAddRuleFor(String targetType, String target) => switch ((targetType, target)) {
+      ('track', 'volume') => (gain: true, centre: 1.0, min: 0.0, max: kMaxMixGain),
+      ('track', 'pan') => (gain: false, centre: 0.0, min: -1.0, max: 1.0),
+      _ => (gain: false, centre: null, min: -1000000.0, max: 1000000.0),
+    };
 
 /// [clip]'s lane [points] (clip time) on the song timeline: one pass of the loop from the clip's source offset, then
 /// a pass every [loop] steps while the clip loops, to the clip's end. Each pass starts at the lane's value there, so a
 /// repeat jumps back to the loop's first value as the notes do. A clip that doesn't loop plays one pass and then holds.
 /// Curves go with their points; a bent segment cut by a pass's ends is drawn in straight pieces along it.
-ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loop, {int budget = kMaxClipLanePoints}) {
+ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loop,
+    {int budget = kMaxClipLanePoints, ClipLaneMode mode = ClipLaneMode.override}) {
   final start = clip.startSteps.toDouble(), end = (clip.startSteps + clip.lengthSteps).toDouble();
   final local = [for (final p in points) _of(p)]..sort((a, b) => a.step.compareTo(b.step));
   final out = <_P>[];
-  if (local.isEmpty) return (start: start, end: end, points: out);
+  if (local.isEmpty) return (start: start, end: end, points: out, mode: mode);
   final length = math.max(1, loop).toDouble();
   var t = start;
   var u = clip.loop ? clip.sourceOffsetSteps % length : clip.sourceOffsetSteps.toDouble();
@@ -185,14 +231,36 @@ ClipLaneSpan clipLaneSpan(ClipDoc clip, List<AutomationPointDoc> points, int loo
     u = 0;
     if (!clip.loop) break;
   }
-  return (start: start, end: end, points: out);
+  return (start: start, end: end, points: out, mode: mode);
+}
+
+/// At most [limit] of [times] (sorted): the first, the last and evenly spaced ones between, the same each time.
+List<double> _decimate(List<double> times, int limit) {
+  if (times.length <= limit || limit < 2) return times;
+  return [for (var i = 0; i < limit; i++) times[(i * (times.length - 1) / (limit - 1)).round()]];
+}
+
+/// How a lane runs between two of the add-mode sample times [a] and [b] (no point of it strictly between): 0 flat,
+/// 1 a straight line, 2 a bent curve.
+int _shape(List<_P> pts, double a, double b) {
+  final i = _at(pts, (a + b) / 2);
+  if (i < 0 || i + 1 >= pts.length) return 0;
+  final p = pts[i];
+  if (p.curve == AutomationCurve.step || p.value == pts[i + 1].value) return 0;
+  return p.curve.bends ? 2 : 1;
 }
 
 /// The lane the engine plays for one target on one track: [base] (the track's or project's own lane, time order;
 /// empty when there is none, then the control's [baseValue]) everywhere except inside each clip's span, where that
 /// clip's lane plays instead. Where clips with lanes on the target overlap, the one that starts later wins (the later
-/// one in [spans] on a tie); after it ends, the one under it plays again.
-List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double baseValue, List<ClipLaneSpan> spans) {
+/// one in [spans] on a tie); after it ends, the one under it plays again. An add-mode clip ([ClipLaneMode.add]) plays
+/// the base plus its offset by [rule] (default: a parameter's), sampled at every point of either lane inside it so the
+/// sum is exact at both lanes' breakpoints; it adds to the base, never to another clip. The merged lane holds at most
+/// [cap] points: when the add-mode parts would take it past that, they share what the rest leaves, each in proportion
+/// to what it needed, and thin their sample times evenly to fit ([_decimate]); the base and override parts are never
+/// cut for them (only those parts alone past [cap] are cut at its end, as before add mode).
+List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double baseValue, List<ClipLaneSpan> spans,
+    {ClipAddRule? rule, int cap = kMaxClipLanePoints * 2}) {
   final baseP = base.isEmpty
       ? <_P>[_flat(0, baseValue)]
       : [for (final p in base) _of(p)]..sort((a, b) => a.step.compareTo(b.step));
@@ -212,19 +280,105 @@ List<AutomationPointDoc> mergeClipLanes(List<AutomationPointDoc> base, double ba
     }
   }
 
-  _range(baseP, null, bounds.first, add);
-  for (var i = 0; i + 1 < bounds.length; i++) {
-    final x = bounds[i], y = bounds[i + 1];
-    ClipLaneSpan? winner;
-    for (final (_, s) in ranked) {
-      if (s.start <= x && s.end >= y) winner = s;
+  final r = rule ?? clipAddRuleFor('instrument', '');
+  // base(t) + (clip(t) - centre) between x and y of [s], in its rule's terms: at most [share] points (at least 4).
+  List<_P> addOver(ClipLaneSpan s, double x, double y, int share) {
+    final c = s.points;
+    final centre = r.centre ?? _right(baseP, s.start);
+    double raw(double b, double v) => r.gain ? (centre == 0 ? 0 : b * v / centre) : b + (v - centre);
+    double sum(double b, double v) => raw(b, v).clamp(r.min, r.max).toDouble();
+    final set = <double>{x, y};
+    for (final src in [c, baseP]) {
+      for (var j = math.max(0, _at(src, x)); j < src.length && src[j].step < y; j++) {
+        if (src[j].step > x) set.add(src[j].step);
+      }
     }
-    _range(winner?.points ?? baseP, x, y, add);
+    final times = set.toList()..sort();
+
+    List<_P> at(List<double> ts) {
+      final pts = <_P>[];
+      var flatBefore = false; // the piece arriving at this time is flat: one point with a step curve stands for it
+      for (var k = 0; k < ts.length; k++) {
+        final t = ts[k];
+        final last = k + 1 == ts.length;
+        final arrive = k > 0 ? sum(_left(baseP, t), _left(c, t)) : null;
+        final leave = last ? null : raw(_right(baseP, t), _right(c, t));
+        final leaving = leave?.clamp(r.min, r.max).toDouble();
+        if (arrive != null && (leaving == null || arrive != leaving)) {
+          if (flatBefore && leaving != null && pts.isNotEmpty && pts.last.value == arrive) {
+            pts[pts.length - 1] = (step: pts.last.step, value: arrive, curve: AutomationCurve.step, tension: 0.0); // a jump
+          } else {
+            pts.add(_flat(t, arrive));
+          }
+        }
+        if (last) break;
+        final next = ts[k + 1];
+        final u1 = raw(_left(baseP, next), _left(c, next));
+        pts.add(_flat(t, leaving!));
+        final sb = _shape(baseP, t, next), sc = _shape(c, t, next);
+        flatBefore = false;
+        // A curve, or two moving gains multiplied (not a straight line): straight pieces along the sum, while they fit.
+        if (sb == 2 || sc == 2 || (r.gain && sb == 1 && sc == 1)) {
+          if (pts.length + _cutPieces + 2 * (ts.length - k) <= share) {
+            for (var j = 1; j < _cutPieces; j++) {
+              final a = t + (next - t) * j / _cutPieces;
+              pts.add(_flat(a, sum(_right(baseP, a), _right(c, a))));
+            }
+          }
+        } else {
+          // A straight sum meeting the range's edge bends there: a point where it does.
+          final cuts = <(double, double)>[
+            for (final edge in [r.min, r.max])
+              if ((leave! - edge) * (u1 - edge) < 0) ((edge - leave) / (u1 - leave), edge),
+          ]..sort((a, b) => a.$1.compareTo(b.$1));
+          for (final (f, edge) in cuts) {
+            pts.add(_flat(t + (next - t) * f, edge));
+          }
+          flatBefore = cuts.isEmpty && sb == 0 && sc == 0;
+        }
+      }
+      return pts;
+    }
+
+    // Fewer sample times until it fits: each costs at most 4 points without pieces, so two (the ends) always do.
+    var n = math.min(times.length, math.max(2, share));
+    while (true) {
+      final pts = at(_decimate(times, n));
+      if (pts.length <= share || n <= 2) return pts;
+      n = math.max(2, math.min(n - 1, n * share ~/ pts.length));
+    }
   }
-  _range(baseP, bounds.last, null, add);
+
+  final addNeed = <int, int>{}; // add-mode interval -> the points it made
+  void build(Map<int, int>? shares) {
+    out.clear();
+    _range(baseP, null, bounds.first, add);
+    for (var i = 0; i + 1 < bounds.length; i++) {
+      final x = bounds[i], y = bounds[i + 1];
+      ClipLaneSpan? winner;
+      for (final (_, s) in ranked) {
+        if (s.start <= x && s.end >= y) winner = s;
+      }
+      if (winner != null && winner.mode == ClipLaneMode.add) {
+        final pts = addOver(winner, x, y, shares?[i] ?? 1 << 40);
+        addNeed[i] = pts.length;
+        pts.forEach(add);
+      } else {
+        _range(winner?.points ?? baseP, x, y, add);
+      }
+    }
+    _range(baseP, bounds.last, null, add);
+  }
+
+  build(null);
+  if (out.length > cap && addNeed.isNotEmpty) {
+    // The add parts share what the base and override parts leave (less a little for joins merged at the bounds).
+    final need = addNeed.values.fold(0, (a, b) => a + b);
+    final budget = math.max(0, cap - (out.length - need) - 2 * addNeed.length);
+    build({for (final MapEntry(:key, :value) in addNeed.entries) key: math.max(4, budget * value ~/ need)});
+  }
   return [
-    for (final p in out.take(kMaxClipLanePoints * 2))
-      AutomationPointDoc(step: p.step, value: p.value, curve: p.curve, tension: p.tension),
+    for (final p in out.take(cap)) AutomationPointDoc(step: p.step, value: p.value, curve: p.curve, tension: p.tension),
   ];
 }
 
@@ -251,7 +405,7 @@ extension ClipAutomationProject on ProjectDoc {
       };
 
   /// Every clip lane unrolled onto the timeline and merged with the track's or project's lane on its target (the
-  /// clip's lane plays inside the clip, the other lane elsewhere), keyed by [automationKey]. Muted clips add nothing.
+  /// clip's lane plays inside the clip, or adds to the other there ([ClipLaneMode]), the other lane elsewhere), keyed by [automationKey]. Muted clips add nothing.
   Map<String, UnrolledLane> unrollClipAutomation() {
     final out = <String, UnrolledLane>{};
     for (final layer in layers) {
@@ -271,14 +425,15 @@ extension ClipAutomationProject on ProjectDoc {
         var budget = kMaxClipLanePoints;
         final spans = <ClipLaneSpan>[];
         for (final (clip, lane) in lanes) {
-          final span = clipLaneSpan(clip, lane.points, loops[clip.id] ??= clipLoopSteps(clip), budget: math.max(0, budget));
+          final span = clipLaneSpan(clip, lane.points, loops[clip.id] ??= clipLoopSteps(clip),
+              budget: math.max(0, budget), mode: lane.mode);
           budget -= span.points.length;
           spans.add(span);
         }
         final value = controlValue(layer, first.targetType, first.target, first.component) ??
             (spans.firstWhere((s) => s.points.isNotEmpty, orElse: () => spans.first).points.firstOrNull?.value ?? 0);
         out[key] = (layerId: layer.id, targetType: first.targetType, target: first.target, component: first.component,
-            points: mergeClipLanes(base ?? const [], value, spans));
+            points: mergeClipLanes(base ?? const [], value, spans, rule: clipAddRuleFor(first.targetType, first.target)));
       }
     }
     return out;

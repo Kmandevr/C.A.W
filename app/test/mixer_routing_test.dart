@@ -112,7 +112,7 @@ void main() {
       expect(p.toJson()['caw_app_project'], 5);
     });
 
-    test('this build reads v5, v6 and v7 and refuses v8', () {
+    test('this build reads v5 to v8 and refuses v9', () {
       final p = _project();
       _l(p, 'kick').output = 'verb';
       final v6 = p.toJson();

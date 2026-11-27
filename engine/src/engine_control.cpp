@@ -215,6 +215,14 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     writeMix(ls.slot, ls.volume, ls.pan, mute, solo);
 }
 
+bool Engine::setVca(const std::string& groupId, double volume, bool mute, bool solo) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    const int group = ctlVca_ ? ctlVca_->find(groupId) : -1;
+    if (group < 0) return false;
+    ctlVca_->set(group, volume, mute, solo);  // read by the audio thread from its next callback
+    return true;
+}
+
 int Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
     std::lock_guard<std::mutex> lock(ctl_);
     if (!layerId.empty() && layerId[0] == '\x01') return -1;  // the audition's internal layer: its slot moves on a grow

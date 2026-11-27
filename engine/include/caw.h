@@ -204,9 +204,14 @@ extern "C" {
    the same bits. Playback (1.1.2, same functions): caw_audio_tune_buffer grows a fixed size on underruns; caw_audio_set_thermal acts on nothing; the
    load stabilizer is off unless CAW_LOAD_STABILIZER=1; overload shedding never sheds the last layer still
    sounding.
-   47 (2026-11-27, 1.1.4): MIDI out and the MIDI clock. A layer's "midiOut" {"port", "channel", "program",
-   "bend_range"} sends its notes to external MIDI instead of an instrument; caw_engine_midi_out_drain hands a platform
-   sender the timed messages (CawMidiOutEvent), caw_engine_set_midi_out_port its offset; caw_engine_set_midi_clock_out
+   47 (2026-11-27, 1.1.4): VCA groups and MIDI out with the MIDI clock. VCA groups (docs/engine.md "VCA groups"): a
+   project's optional "vca_groups" (absent: none, so older projects play the same bits): at most 32 groups {"id","name",
+   "volume","mute","solo","members":[layer ids, at most 256],"automation":[a volume lane]}, each a fader that scales its
+   members' levels (after their own fader and volume lane) and a mute and solo that act on them beside their own,
+   without summing their audio; caw_engine_set_vca moves a group live. MIDI out and clock (docs/engine.md "MIDI out and
+   clock (API 47)"): a layer's "midiOut" {"port", "channel", "program", "bend_range"} sends its notes to external MIDI
+   instead of an instrument; caw_engine_set_midi_out_active attaches a sender, caw_engine_midi_out_drain hands it the
+   timed messages (CawMidiOutEvent), caw_engine_set_midi_out_port sets a port's offset; caw_engine_set_midi_clock_out
    sends 24 ppqn clock with Start/Continue/Stop/Song Position; caw_engine_midi_clock_in and
    caw_engine_set_midi_clock_follow follow an incoming clock. Projects without "midiOut" play the same bits. */
 #define CAW_API_VERSION 47
@@ -469,6 +474,10 @@ CAW_API int32_t caw_engine_note_fx_stats(CawEngine* e, const char* layer_id, Caw
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
 CAW_API int32_t caw_engine_set_master(CawEngine* e, double volume);
+/* A VCA group's fader (linear gain 0..3.981, +12 dB; more is held there), mute and solo while it plays (API version
+   47): 1 when set (the audio thread reads it from its next callback), 0 when the project has no group `group_id`. A
+   later project update sets the values it names again. */
+CAW_API int32_t caw_engine_set_vca(CawEngine* e, const char* group_id, double volume, int32_t mute, int32_t solo);
 /* Note previews: a held note on a layer's instrument, heard through the layer's effects and mix (mute and solo
    apply), while playing or stopped; stopped, the transport stays where it is. `id` is the caller's handle: a second
    note on with the same id ends the first. Pitch is a MIDI note number (fractions allowed), velocity 0..1. Only a

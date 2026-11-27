@@ -21,5 +21,5 @@ clock #211).
 
 ## Next
 1. 1.1.4: automation choices and VCA groups #210, receives/parallel/multi-out #217, MIDI out and clock #211; two
-   playing modes (#11) and the main panel (#10). UI work: ask the owner how it should look first.
+   two playing modes and the main panel (Hub roadmap 1.1.4; looks: Hub #35 questions 8 and 9). UI work: ask the owner how it should look first.
 2. Issue #271 (close after green Windows runs), #268.
