@@ -56,5 +56,5 @@ They answer different questions, so don't use both for the same one.
 
 - Push after every commit, and push an agent's worktree branch to `caw-backup-<name>` now and then: worker restarts and usage limits have ended sessions mid-task. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
 - Scratch builds are about 2 GB each and the disk fills: delete old ones before a new build.
-- Parallel branches collide in `docs/app.md`, both CHANGELOGs, `docs/decisions.md`, `cawApiVersion` and the bench mode numbers: expect to resolve these when merging.
+- Parallel branches collide in `docs/app.md`, `docs/decisions.md`, `cawApiVersion` and the bench mode numbers: expect to resolve these when merging.
 - Narrowing or removing a test needs the owner's explicit OK first; the permission check blocks it otherwise.
