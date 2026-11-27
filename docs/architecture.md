@@ -9,7 +9,7 @@ covers: [app/pubspec.yaml, app/packages/caw_services/pubspec.yaml, app/packages/
 
 The technical plan for the owner's brief (the vision is tracked privately). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). The build order is planned privately. Why each choice was made: [decisions](decisions.md).
 
-**[Fact, 2026-11-26]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.1.3-alpha.6 (build 22) now. Each change adds its own file to `changes/`, and the version pull request joins them into the release's entry in the repository's `CHANGELOG.md` (`node scripts/changelog-join.js`, [how](../changes/README.md)), bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
+**[Fact, 2026-11-26]** The app's version is set in `app/pubspec.yaml` and mirrored in `app/lib/version.dart` (a test keeps them equal): 1.1.3-alpha.7 (build 23) now. Each change adds its own file to `changes/`, and the version pull request joins them into the release's entry in the repository's `CHANGELOG.md` (`node scripts/changelog-join.js`, [how](../changes/README.md)), bundled in the app as What's new and placed at the top of the release's notes ([README](../README.md)). Versions keep the `-alpha.N` suffix until the owner calls the official release ([decisions](decisions.md)).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
