@@ -2,6 +2,7 @@
 #include "builtin_flagship.h"
 #include "params.h"
 #include "quality.h"
+#include "simd4.h"
 #include "stereo_pair.h"
 
 #include <algorithm>
