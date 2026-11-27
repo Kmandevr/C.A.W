@@ -3,6 +3,13 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.7 (2026-11-27)
+
+Under the hood for this one: every device now has a lasting identity, so its history and automation follow it when you move it.
+
+### Changed
+- **A device's history follows it:** move an effect up or down its chain, or to another track, and its page's undo steps and its automation lanes stay with it, instead of stopping at the move. Older projects load as before.
+
 ## 1.1.3-alpha.6 (2026-11-26)
 
 Curlew gets three new winds, and the piano's top notes ring as long as the real one.
