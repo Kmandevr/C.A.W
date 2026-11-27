@@ -6,6 +6,7 @@ updated: 2026-11-27
 
 # Log
 
+- 2026-11-27: Rook's 1.1.1 kits are bit-checked on every build: the Compat tables workflow (run 45972372056) recorded their Arm64, Windows and x64 Debug tables from 2a9934c; its Linux x64 job reproduced the committed table 32 of 32 ([engine](engine.md)).
 - 2026-11-27: CI no longer fails when the runner's `packages.microsoft.com` apt mirror answers 403 (it failed a Linux test job twice today): every workflow drops that source before `apt-get update`, since nothing installed comes from it.
 - 2026-11-27: a hand-started *Compat tables* workflow (`compat-tables.yml`, 1.1.3 maintenance) records a per-build drums compat table from an old commit on Linux x64, Linux Arm64, Windows x64 clang-cl and the Debug sanitizer build, built as `engine.yml` builds them, and uploads each (`scripts/compat-table.js`); `drums_presets_from_before_1_1_2_render_bit_identically` now runs on every build, checking Rook's 1.1.1 kits wherever a table is committed and printing that it is missing elsewhere ([engine](engine.md#compat-tables)). The Arm64, Windows and Debug tables await a run; the piano has no such gap.
 - 2026-11-27: `use_like_owner_test.dart` (458 s) split with no test changed or lost: its every-control group runs in `use_like_owner_1_test.dart` to `_4_test.dart` (150, 108, 102 and 101 s; devices assigned by measured time, Drums alone), with the harness in `test/use_like_owner/harness.dart` and a guard that every device runs once; each *Dart tests* job now gets about 520 s of file time and no file over 150 s ([decisions](decisions.md)).
