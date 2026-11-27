@@ -6,6 +6,19 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: `caw_collab` gains a session host core (not yet used by the app)
+
+- **Chosen:** `app/packages/caw_collab/lib/host/`, a transport-agnostic `HostCore`.
+  - **Admission:** a member is admitted only when the project format (`fileVersion` and the schema hash) and the protocol's major version match; a refusal names what to update.
+  - **Lobbies:** public, or private with a password stored as PBKDF2-HMAC-SHA256 (600,000 iterations, a 100,000 floor, a 16-byte salt from `Random.secure`, compared in constant time).
+  - **Invites:** single use by default, 24-hour expiry, capped.
+  - **Op pipeline:** dedupe by `(device, clientSeq)`; size, rate, structure, permission, schema and cycle checks; a write-ahead log with length and CRC-32 framing, synced before every ack; resume from the log or a snapshot.
+  - **Host migration:** epochs, with successors ranked by role and then a clamped capability score; fencing only on an HMAC proof under a per-session migration secret, replaced whenever anyone stops being eligible and at every new epoch.
+  - **Storage:** memory and file versions of the log, snapshots and blobs, with separate frame limits and a 64 MiB cap on the project tree, enforced when an op is admitted.
+- **Identity until device keys (G14):** each member id is bound to a token on its first join (the member proposes a random token of at least 32 characters, or the host issues one), stored only as a hash. The owner's token is given when the session is created. Access can be granted only to ids that have joined; ids that never did anything are forgotten after an hour.
+- **[Assumption]** PBKDF2 rather than scrypt or Argon2id, because no permissive memory-hard implementation is in the dependency set; a check costs seconds on a phone, so checks run one at a time on another isolate, with a queue cap.
+- **Checked:** 162 collab tests (admission, the pipeline with a crash at each step, storage and torn logs, seeded storms with drops, duplicates, reordering and crashes, and security regressions). Two security reviews found ownership and fencing takeovers, invite reuse, successor escalation, permanent denial of service through snapshot size, and unbounded rates; all are fixed. Open until G14: tokens travel in the clear inside the session channel (TLS comes with the transport), and a public lobby admits anyone under a new id within its caps.
+
 ## 2026-11-27: Clip automation lanes can add to the track lane (model; the look waits for the owner)
 
 - **Chosen:** `ClipAutomationLaneDoc.mode` is `override` (as before, the default) or `add`, saved as `"mode": "add"` only when add, so old files keep their bytes. An add lane plays base + clip − neutral over the clip's span: volume adds in dB (a gain of 1.0 is neutral, so it multiplies the linear gain), pan adds around centre, and a device parameter adds relative to the base's value at the clip's start (`ProjectDoc` has no descriptors, and an export without app state must sound like playback). The result is clamped to the target's range. "Later start wins" between overlapping clips is unchanged across modes, and an add clip adds to the base, never to another clip. The engine still receives merged song-time points; it needs no change.
