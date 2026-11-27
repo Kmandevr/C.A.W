@@ -672,6 +672,7 @@ class LayerDoc {
     this.input,
     this.frozenAsset,
     this.frozenContext,
+    this.midiOut,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
         noteComponents = noteComponents ?? [], sends = sends ?? [], audioClips = audioClips ?? [];
 
@@ -756,6 +757,13 @@ class LayerDoc {
 
   bool get frozen => frozenAsset != null;
 
+  /// MIDI out (engine API 47): the track's notes go to external MIDI on this port and channel instead of an
+  /// instrument; null (the default, and absent from the file) for none. Model only: no screen sets it yet.
+  MidiOutDoc? midiOut;
+
+  /// A MIDI-out track as the engine plays it: not a folder or an audio track.
+  bool get sendsMidi => midiOut != null && !isFolder && !isAudio;
+
   /// An audio track: the engine plays its clips and input instead of an instrument (it can't have both).
   bool get isAudio => !isFolder && (audioClips.isNotEmpty || input != null);
   /// The folder the track sits in on screen (and, without an [output], the bus it plays into).
@@ -838,6 +846,7 @@ class LayerDoc {
           'frozen': true, 'frozen_asset': frozenAsset,
           if (frozenContext != null) 'frozen_context': frozenContext,
         },
+        if (midiOut != null) 'midi_out': midiOut!.toJson(),
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j, {int Function(String assetId)? rateOf}) => LayerDoc(
@@ -882,7 +891,52 @@ class LayerDoc {
         frozenAsset: j['folder'] != true && j['frozen'] == true
             ? switch (_boundedProjectText(j['frozen_asset'], 64)) { '' => null, final id => id } : null,
         frozenContext: switch (j['frozen_context']) { final String c when c.length <= 4096 => c, _ => null },
+        midiOut: j['folder'] == true ? null : MidiOutDoc.fromJson(j['midi_out']),
       );
+}
+
+/// A track's MIDI out (engine API 47, the project JSON's "midiOut"): [port] 0..15 (the platform sender maps it to a
+/// device), [channel] 1..16, an optional [program] 0..127 sent at each Play, and the receiver's pitch-bend range
+/// [bendRange] in semitones (1..48) a note's own pitch is sent over.
+class MidiOutDoc {
+  MidiOutDoc({this.port = 0, this.channel = 1, this.program, this.bendRange = defaultBendRange});
+  static const defaultBendRange = 2.0;
+  int port;
+  int channel;
+  int? program;
+  double bendRange;
+
+  Map<String, dynamic> toJson() => {
+        'port': port,
+        'channel': channel,
+        if (program != null) 'program': program,
+        if (bendRange != defaultBendRange) 'bend_range': bendRange,
+      };
+
+  /// The engine's form (its "midiOut" object).
+  Map<String, dynamic> toEngineJson() => {
+        'port': port.clamp(0, 15),
+        'channel': channel.clamp(1, 16),
+        if (program != null) 'program': program!.clamp(0, 127),
+        if (bendRange != defaultBendRange) 'bend_range': bendRange.clamp(1.0, 48.0),
+      };
+
+  /// Untrusted file input: out-of-range values are clamped, anything else that is not a map reads as none.
+  static MidiOutDoc? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    int whole(Object? v, int lo, int hi, int fallback) => v is num && v.isFinite ? v.round().clamp(lo, hi) : fallback;
+    return MidiOutDoc(
+      port: whole(raw['port'], 0, 15, 0),
+      channel: whole(raw['channel'], 1, 16, 1),
+      program: raw['program'] is num && (raw['program'] as num).isFinite ? whole(raw['program'], 0, 127, 0) : null,
+      bendRange: switch (raw['bend_range']) {
+        final num v when v.isFinite => v.toDouble().clamp(1.0, 48.0),
+        _ => defaultBendRange,
+      },
+    );
+  }
+
+  MidiOutDoc copy() => MidiOutDoc(port: port, channel: channel, program: program, bendRange: bendRange);
 }
 
 String _boundedProjectText(Object? raw, int maxLength) {
@@ -1331,20 +1385,24 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               // A bus folder runs its own effects (a reverb bus); a folder without a bus has none.
-              if (playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled) && !frozenIds.contains(l.id))
+              // MIDI out (API 47): the notes go to external MIDI; such a layer makes no audio, so the engine takes no
+              // instrument, effects or sends with it.
+              if (l.sendsMidi) 'midiOut': l.midiOut!.toEngineJson(),
+              if (!l.sendsMidi && playable(l.components).isNotEmpty && (!l.isFolder || l.busEnabled) && !frozenIds.contains(l.id))
                 'components': [for (final c in playable(l.components)) c.toJson(withKey: routing.keyPlays(l, c))],
-              if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
+              if (!l.sendsMidi)
+                if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
-              if (instrumentPlays(l) && !l.isAudio) 'instrument': l.instrument!.toJson(),
+              if (!l.sendsMidi && instrumentPlays(l) && !l.isAudio) 'instrument': l.instrument!.toJson(),
               // Per-note FX (#127) run inside the instrument, so only with it.
-              if (instrumentPlays(l) && !l.isAudio && playable(l.noteComponents).isNotEmpty) ...{
+              if (!l.sendsMidi && instrumentPlays(l) && !l.isAudio && playable(l.noteComponents).isNotEmpty) ...{
                 'noteComponents': [for (final c in playable(l.noteComponents)) c.toJson()],
                 'noteVoices': l.noteVoices,
               },
               // A frozen track: its frozen audio from the song's start at the file's own speed, the whole file (the
               // tail past the song's end too, which doesn't lengthen the song). Its notes still go, for keys and
               // modulators that hear them (the clip player ignores them).
-              if (frozenIds.contains(l.id)) 'audio_clips': [frozenClipJson(l)]
+              if (!l.sendsMidi && frozenIds.contains(l.id)) 'audio_clips': [frozenClipJson(l)]
               // An audio track (API 18): its clips (those whose file the project lists) and its input.
               else if (l.isAudio) ...{
                 'audio_clips': [

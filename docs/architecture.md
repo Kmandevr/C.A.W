@@ -125,7 +125,7 @@ The owner wants code-defined sounds to become playable instruments and exportabl
 
 ### Current synthesis and MIDI implementation; C++ target
 
-**[Fact, checked 2026-11-05]** The current engine has a synth patch compiler/playback path, built-in wavetable playback and frame morphing, LFO/modulation primitives, MIDI pattern file import/export and a MIDI 2.0 UMP decoder/input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented. See [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
+**[Fact, checked 2026-11-05]** The current engine has a synth patch compiler/playback path, built-in wavetable playback and frame morphing, LFO/modulation primitives, MIDI pattern file import/export and a MIDI 2.0 UMP decoder/input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented. **[Fact, 2026-11-27]** Since then device MIDI input (API 15), and MIDI out and the MIDI clock in the engine (API 47; their platform senders not yet), are built: [Engine implementation status](engine-build-status.md). See [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
 ### Patterns and parameters
 

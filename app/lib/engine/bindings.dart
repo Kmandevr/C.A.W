@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 46;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
+const int cawApiVersion = 47;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -54,6 +54,20 @@ final class CawTimeSigStruct extends Struct {
 }
 
 /// CawPosition (API 31): where the transport is in samples, beats, seconds and bars.
+/// One timed outbound MIDI message (caw.h CawMidiOutEvent, API 47): 16 bytes.
+final class CawMidiOutEventStruct extends Struct {
+  @Int64()
+  external int timeNs;
+  @Uint8()
+  external int port;
+  @Uint8()
+  external int size;
+  @Array(3)
+  external Array<Uint8> data;
+  @Array(3)
+  external Array<Uint8> reserved;
+}
+
 final class CawPositionStruct extends Struct {
   @Uint32()
   external int structSize;
@@ -523,6 +537,24 @@ class Bindings {
   late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>) noteFxStats = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>),
       int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>)>('caw_engine_note_fx_stats');
+
+  // MIDI out and the MIDI clock (API 47; caw.h).
+  late final int Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, int) midiOutDrain = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, Int32),
+      int Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, int)>('caw_engine_midi_out_drain');
+  late final int Function(Pointer<Void>) midiOutDropped = _lib.lookupFunction<Int64 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('caw_engine_midi_out_dropped');
+  late final void Function(Pointer<Void>, int, int) setMidiOutPort = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Int32, Int64), void Function(Pointer<Void>, int, int)>('caw_engine_set_midi_out_port');
+  late final void Function(Pointer<Void>, int) setMidiClockOut = _lib.lookupFunction<Void Function(Pointer<Void>, Int32),
+      void Function(Pointer<Void>, int)>('caw_engine_set_midi_clock_out');
+  late final void Function(Pointer<Void>, int) setMidiClockFollow = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>('caw_engine_set_midi_clock_follow');
+  late final int Function(Pointer<Void>, Pointer<Uint8>, int, int) midiClockIn = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32, Int64),
+      int Function(Pointer<Void>, Pointer<Uint8>, int, int)>('caw_engine_midi_clock_in');
+  late final double Function(Pointer<Void>) midiClockInBpm = _lib.lookupFunction<Double Function(Pointer<Void>),
+      double Function(Pointer<Void>)>('caw_engine_midi_clock_in_bpm');
 
   // The tempo map and time signatures (API 31, #207; caw.h).
   late final int Function(Pointer<Void>, Pointer<CawTempoPointStruct>, int) setTempoMap = _lib.lookupFunction<

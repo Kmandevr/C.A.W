@@ -19,9 +19,11 @@ The portable C++ core is the single source of processing behavior. Hosts must no
 
 - **CAW app:** authors projects, browses the library, edits module parameters, previews (modules and single notes) and exports.
 - **Project runtime:** resolves dependencies, instantiates modules and stores user-visible state.
-- **Add-ons:** call the versioned C ABI (`caw.h`, `CAW_API_VERSION` 46; compiled components use the component interface v3 in `caw_component.h`) and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
+- **Add-ons:** call the versioned C ABI (`caw.h`, `CAW_API_VERSION` 47; compiled components use the component interface v3 in `caw_component.h`) and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
 - **CLI and CI:** validate, render, package and test the same project/module formats without launching the UI; `caw test-component` (and `caw_component_test` for add-ons) measures a C++ effect offline ([engine](engine.md#component-testing)).
 - **Future plugin wrappers:** adapt host audio/MIDI buffers to the engine's documented processing contract. They are generated/packaged products, not a requirement to run CAW itself.
+
+**MIDI out and clock (API 47, built in the engine):** a host drains the engine's timed MIDI-out messages (`caw_engine_midi_out_drain`: port, bytes and the time they should reach the port on `caw_midi_clock_ns`'s clock, latency already added) and sends each at its time; it feeds an incoming clock to `caw_engine_midi_clock_in` ([engine](engine.md#midi-out-and-clock-api-47)).
 
 **Song time (API 31, #207, built):** a host gives the engine positions in beats (quarter notes) and a tempo map with time signatures, in the project JSON (`tempo_map`, `time_signatures`) or live (`caw_engine_set_tempo_map`, `caw_engine_set_time_signatures`, `caw_engine_set_bpm`), and reads the transport back with `caw_engine_position` (sample, beats, seconds, tempo, bar). The engine owns the beat↔time maths (`src/tempo_map.h`; [engine](engine.md#playback)); a host that shows times works them out with the same closed forms and checks itself against `engine/tests/references/tempo_vectors.json`. Compiled components see the tempo and song position at each block's first frame through `CawTransport`, unchanged in shape.
 

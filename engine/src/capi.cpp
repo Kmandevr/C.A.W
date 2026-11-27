@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -657,6 +658,57 @@ extern "C" int64_t caw_engine_midi_dropped(CawEngine* e) {
 
 extern "C" int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns) {
     return e && e->engine ? e->engine->positionAt(time_ns) : -1;
+}
+
+// ---- API 47: MIDI out and the MIDI clock ----
+static_assert(sizeof(CawMidiOutEvent) == sizeof(caw::MidiOutMessage), "CawMidiOutEvent is MidiOutMessage");
+static_assert(offsetof(CawMidiOutEvent, port) == offsetof(caw::MidiOutMessage, port) &&
+              offsetof(CawMidiOutEvent, data) == offsetof(caw::MidiOutMessage, data), "same layout");
+
+extern "C" int32_t caw_engine_midi_out_drain(CawEngine* e, CawMidiOutEvent* out, int32_t capacity) {
+    if (!e || !e->engine || !out || capacity <= 0) return 0;
+    caw::MidiOutMessage buf[64];
+    int32_t total = 0;
+    while (total < capacity) {
+        const int32_t n = e->engine->midiOutDrain(buf, std::min<int32_t>(64, capacity - total));
+        for (int32_t k = 0; k < n; ++k) {
+            CawMidiOutEvent& o = out[total + k];
+            o.time_ns = buf[k].timeNs;
+            o.port = buf[k].port;
+            o.size = buf[k].size;
+            for (int j = 0; j < 3; ++j) o.data[j] = buf[k].data[j], o.reserved[j] = 0;
+        }
+        total += n;
+        if (n < 64) break;
+    }
+    return total;
+}
+
+extern "C" int64_t caw_engine_midi_out_dropped(CawEngine* e) {
+    return e && e->engine ? static_cast<int64_t>(e->engine->midiOutDropped()) : 0;
+}
+
+extern "C" void caw_engine_set_midi_out_port(CawEngine* e, int32_t port, int64_t offset_ns) {
+    if (e && e->engine) e->engine->setMidiOutPortOffset(port, offset_ns);
+}
+
+extern "C" void caw_engine_set_midi_clock_out(CawEngine* e, int32_t port_mask) {
+    if (e && e->engine) e->engine->setMidiClockOut(static_cast<uint32_t>(port_mask));
+}
+
+extern "C" void caw_engine_set_midi_clock_follow(CawEngine* e, int32_t on) try {
+    if (e && e->engine) e->engine->setMidiClockFollow(on != 0);
+} catch (...) {
+}
+
+extern "C" int32_t caw_engine_midi_clock_in(CawEngine* e, const uint8_t* bytes, int32_t count, int64_t time_ns) try {
+    return e && e->engine ? e->engine->midiClockIn(bytes, count, time_ns) : 0;
+} catch (...) {
+    return 0;
+}
+
+extern "C" double caw_engine_midi_clock_in_bpm(CawEngine* e) {
+    return e && e->engine && e->engine->midiClockFollowing() ? e->engine->midiClockInBpm() : 0.0;
 }
 
 extern "C" char* caw_render_song(const char* project_json, const char* request_json, int32_t* progress,

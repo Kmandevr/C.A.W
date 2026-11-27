@@ -158,6 +158,9 @@ struct Engine::Slot {
     const Pattern* pat = nullptr;
     bool previewing = false;    // audio thread: the track holds a preview note, or its sound is still dying away
     DeviceNotes deviceNotes;    // audio thread: the device MIDI channels' bend and pedal (API 15)
+    // A MIDI-out layer (API 47): its notes and their bytes (owned by the Engine, never freed while it lives; null:
+    // not one). Set by SetMidiOut; such a slot runs as a track whose instrument output is silence.
+    MidiOutLane* midiOut = nullptr;
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
@@ -288,7 +291,7 @@ static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "comp
 
 struct Engine::Cmd {
     // Install: the slot becomes a track (steps, order); its instrument and inserts come by their own commands.
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, SetMidiOut, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
@@ -319,6 +322,9 @@ struct Engine::Cmd {
     int previewOp = 0;
     int32_t previewId = 0;
     double pitch = 60, vel = 1;
+    // SetMidiOut: the slot's MIDI-out lane (null: the slot no longer sends MIDI) and its configuration.
+    MidiOutLane* midiLane = nullptr;
+    MidiOutSpec midiSpec;
 };
 
 // Helpers and state more than one of the engine's .cpp files use.

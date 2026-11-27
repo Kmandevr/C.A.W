@@ -13,7 +13,9 @@
 
 #include "audio_input.h"
 #include "component_chain.h"
+#include "midi_clock.h"
 #include "midi_device.h"
+#include "midi_out.h"
 #include "modulation_links.h"
 #include "note_fx_host.h"
 #include "execution.h"
@@ -183,6 +185,32 @@ public:
     // Tests only: the MIDI clock the audio thread reads (-1: the real one).
     void setCommandRetriesForTest(int retries) noexcept { sendRetries_ = retries; }  // control thread
     void setMidiClockForTest(int64_t ns) noexcept { midiClockTest_.store(ns, std::memory_order_relaxed); }
+    // ---- MIDI out and the MIDI clock (caw.h API 47; midi_out.h, midi_clock.h) ----
+    // The platform sender's side: up to `cap` timed messages the audio thread queued (one thread at a time), and
+    // how many a full queue (or a callback past its share) dropped. Offline renders never queue any.
+    int32_t midiOutDrain(MidiOutMessage* out, int32_t cap) noexcept;
+    uint64_t midiOutDropped() const noexcept;
+    // A port's own offset (a cable, a synth's or Bluetooth's delay), added to every message's time: -1..+1 s.
+    void setMidiOutPortOffset(int port, int64_t offsetNs) noexcept;
+    // The output latency (a sample leaving the engine to the speaker), which every MIDI-out time adds so external
+    // gear sounds with the engine's audio; the platform sets it from what caw_audio_latency measures.
+    void setOutputLatencyNs(int64_t ns) noexcept;
+    int64_t outputLatencyNs() const noexcept { return midiOutLatencyNs_.load(std::memory_order_relaxed); }
+    // The frames the mix delays a track with no latency of its own (latency compensation plus the master chain's),
+    // which MIDI-out times add too (control thread sets it at each project update).
+    int64_t midiOutDelayFrames() const noexcept { return midiOutDelayFrames_.load(std::memory_order_relaxed); }
+    // MIDI clock out: 24 ppqn on the ports in `portMask` (bit k: port k; 0: off) while playing, from the tempo map,
+    // with Start, Continue, Stop and Song Position Pointer. A port added while playing starts at the next Play.
+    void setMidiClockOut(uint32_t portMask) noexcept { clockOutMask_.store(portMask & 0xFFFFu, std::memory_order_relaxed); }
+    // Following an incoming clock: Start, Continue, Stop and Song Position play and stop the transport, and the
+    // ticks' tempo becomes the live tempo (the project's tempo map is not changed; it comes back when following
+    // stops). Off by default. Any thread but the audio thread.
+    void setMidiClockFollow(bool on);
+    // Incoming clock bytes, all at `timeNs` on the MIDI clock (0 or less: now): 0xF8, 0xFA, 0xFB, 0xFC and 0xF2 with
+    // its two data bytes; anything else is skipped. Returns the bytes the follower acted on. Not the audio thread.
+    int midiClockIn(const uint8_t* bytes, int count, int64_t timeNs);
+    double midiClockInBpm() const noexcept { return clockInBpm_.load(std::memory_order_relaxed); }
+    bool midiClockFollowing() const noexcept { return follow_.load(std::memory_order_relaxed); }
     bool setMaster(double volume);  // false: the command queue stayed full (API 40), as for the controls below
     // play, playCountIn and stop return whether the command reached the audio thread's queue (false: it stayed
     // full, as when audio stalled; nothing changed).
@@ -486,7 +514,7 @@ private:
     void rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
     // The tempo map (audio thread): a new one swapped in, the song step at a sample, and a step of the slot's pass
     // as a sample into the pass (sampletime::roundFrames(step, stepLen_) with one tempo) and samples per step there.
-    void takeSong(SongTime* next) noexcept;
+    void takeSong(SongTime* next, bool follow = false) noexcept;  // follow: keep the beat and the notes
     void keepInRange() noexcept;     // after takeSong and updateTiming: a kept beat inside the loop range stays inside
     void publishSongPos() noexcept;  // callback end: the position on the playing map, for position()
     double songStep(int64_t frame) const noexcept;
@@ -719,6 +747,8 @@ private:
         ComponentChain* instrument = nullptr;  // the native instrument last sent to the slot (alive while it plays)
         std::string instrumentAutomationKey;
         int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
+        bool midiOut = false;               // a MIDI-out layer (SetMidiOut sent with midiSpec)
+        MidiOutSpec midiSpec;
         // Sends (the project's, in order) then sidechain keys this layer feeds; set by setProject, sent by
         // updateCompensation with their delays.
         struct Route {
@@ -751,6 +781,34 @@ private:
     std::atomic<double> midiBendRange_{2}, midiNoteBendRange_{48};
     std::atomic<int64_t> midiDelayNs_{0};
     std::atomic<int64_t> midiClockTest_{-1};
+    // MIDI out and clock (API 47). The queue and settings are shared; the rest is the audio thread's.
+    std::unique_ptr<MidiOutQueue> midiOutQ_ = std::make_unique<MidiOutQueue>();
+    std::mutex midiOutDrainLock_;  // the drain's consumers, one at a time (never the audio thread)
+    std::atomic<int64_t> midiOutLatencyNs_{0}, midiOutDelayFrames_{0};
+    std::atomic<int64_t> midiOutOffsetNs_[kMidiOutPorts] = {};
+    std::atomic<uint32_t> clockOutMask_{0};
+    int64_t midiOutAnchorNs_ = 0;  // audio thread: this callback's frame 0 as heard (start + latency + delay)
+    int midiFrame_ = 0;            // audio thread: the callback frame control-time messages go out at
+    uint32_t clockPorts_ = 0;      // audio thread: the ports the clock runs on (0: not running)
+    int64_t clockTick_ = 0;        // audio thread: the next tick, 24 a beat (tick k at step k / 6)
+    void midiOutEmit(int port, double frame, const uint8_t* data, int size) noexcept;
+    void flushLane(MidiOutLane& lane, int baseFrame) noexcept;
+    void lanesOff(int frame, bool program) noexcept;  // every MIDI-out layer's sounding notes end at `frame`
+    void clockSend(uint32_t ports, double frame, uint8_t a, int pos = -1) noexcept;  // pos >= 0: F2 with it
+    void clockStart(int frame) noexcept;
+    void clockChunk(int frame, int m) noexcept;
+    void clockLoop(int frame) noexcept;
+    static NoteEvents* notesOf(Slot& s) noexcept;
+    std::map<int, std::unique_ptr<MidiOutLane>> ctlMidiLanes_;  // control thread: each slot's lane, once made
+    std::mutex clockInLock_;
+    ClockFollower follower_;     // under clockInLock_
+    int followTicks_ = 0;        // under clockInLock_: ticks since the live tempo was last set
+    double followApplied_ = 0;   // under clockInLock_: the tempo last set
+    std::atomic<bool> follow_{false};
+    std::atomic<double> clockInBpm_{0};
+    double ctlFollowBpm_ = 0;    // under ctl_: the live tempo following set (0: none)
+    std::vector<TempoPointSpec> ctlProjectTempo_;  // under ctl_: the project's map while following overrides it
+    void followTempo(double bpm);  // ctl_ not held
     std::atomic<int64_t> cbTimeNs_{0}, cbPos_{-1};  // the last callback's start on the MIDI clock, and g_ then (-1: stopped)
     std::vector<std::string> order_;  // layer ids in project order, for meters
     uint64_t playCount_ = 0;     // Play commands sent (control thread)
@@ -768,7 +826,7 @@ private:
     int ctlLoopSteps_ = 64;
     SongTime ctlSong_;          // what the last Transport or SetSong sent (control thread, under ctl_)
     uint64_t songSerial_ = 0;
-    std::string sendSong(SongTime next);
+    std::string sendSong(SongTime next, bool follow = false);
 
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();

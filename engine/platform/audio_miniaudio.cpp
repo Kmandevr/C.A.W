@@ -1428,6 +1428,8 @@ std::string latencyJson(CawEngine* e, Audio* a) {
     // at the engine's rate already (callback frames are).
     if (input) in.frames += a->duplexBufferFrames;
     out.frames += a->fifoMeanHold;
+    // MIDI out (API 47): every message's time adds the output latency, so external gear sounds with the speaker.
+    if (rate > 0 && out.frames > 0) e->engine->setOutputLatencyNs(static_cast<int64_t>(out.frames) * 1000000000LL / rate);
     return "{\"running\":true,\"sample_rate\":" + std::to_string(rate) + ",\"output\":" + sideJson(out, rate, true) +
            ",\"input\":" + sideJson(in, rate, input) + "}";
 }

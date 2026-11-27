@@ -482,10 +482,11 @@ int64_t Engine::loopLength() {
 }
 
 // ctl_ held: sends a new tempo map and signatures to the audio thread (SetSong).
-std::string Engine::sendSong(SongTime next) {
+std::string Engine::sendSong(SongTime next, bool follow) {
     next.serial = ++songSerial_;
     Cmd c;
     c.type = Cmd::SetSong;
+    c.flag = follow;
     c.song = new SongTime(next);
     if (!send(c)) return "audio command queue is not accepting updates";
     ctlSong_ = std::move(next);
@@ -499,6 +500,10 @@ std::string Engine::setTempoMap(std::vector<TempoPointSpec> points) {
     if (!checkTempoPoints(points, error)) return error;
     if (audioIn_->recordingNow()) return "the tempo map can't change while recording";
     std::lock_guard<std::mutex> lock(ctl_);
+    if (ctlFollowBpm_ > 0) {  // following a MIDI clock (API 47): kept for when following stops
+        ctlProjectTempo_ = std::move(points);
+        return "";
+    }
     SongTime next = ctlSong_;
     next.tempo.build(points, ctlSr_);
     return sendSong(std::move(next));

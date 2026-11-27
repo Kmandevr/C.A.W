@@ -203,8 +203,13 @@ extern "C" {
    caw_drums_kit_build and caw_drums_kit_tool build and finish kits; caw_drums_info gains "builders". Old kits render
    the same bits. Playback (1.1.2, same functions): caw_audio_tune_buffer grows a fixed size on underruns; caw_audio_set_thermal acts on nothing; the
    load stabilizer is off unless CAW_LOAD_STABILIZER=1; overload shedding never sheds the last layer still
-   sounding. */
-#define CAW_API_VERSION 46
+   sounding.
+   47 (2026-11-27, 1.1.4): MIDI out and the MIDI clock. A layer's "midiOut" {"port", "channel", "program",
+   "bend_range"} sends its notes to external MIDI instead of an instrument; caw_engine_midi_out_drain hands a platform
+   sender the timed messages (CawMidiOutEvent), caw_engine_set_midi_out_port its offset; caw_engine_set_midi_clock_out
+   sends 24 ppqn clock with Start/Continue/Stop/Song Position; caw_engine_midi_clock_in and
+   caw_engine_set_midi_clock_follow follow an incoming clock. Projects without "midiOut" play the same bits. */
+#define CAW_API_VERSION 47
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -872,6 +877,58 @@ CAW_API int64_t caw_engine_midi_dropped(CawEngine* e);
    [time_ns] on the MIDI clock, worked out from the last callback's start; -1 while stopped. Recording places a
    played note with it. */
 CAW_API int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns);
+
+/* ---- API version 47: MIDI out and the MIDI clock (docs/engine.md "MIDI out and clock"). ----
+   A MIDI-out layer ("midiOut" in the project JSON: "port" 0..15, "channel" 1..16, optional "program" 0..127 sent at
+   each Play and when it changes, optional "bend_range" 1..48 semitones, default 2; no instrument, components,
+   noteComponents, midiComponents or sends with it) plays its pattern notes, clips, previews and device MIDI as MIDI
+   1.0: note on/off (velocity's top 7 bits), a note's own pitch as the channel's pitch bend over bend_range (the last
+   note's wins), poly pressure, timbre as CC 74, and device CCs, program changes (with bank select), channel pressure
+   and pitch bend on its channel. Every sounding key gets its note-off on Stop, Play (a locate), a loop restart of the
+   pattern, mute, removal and a port or channel change. Offline renders send nothing.
+   The audio thread queues each message with the time it should reach its port, on caw_midi_clock_ns's clock:
+   the callback's start + its frame / sample rate + the output latency (caw_audio_latency's output, which the
+   platform updates at each read) + the mix's latency compensation and master chain delay + the port's offset.
+   A platform sender (one thread at a time; never the audio thread) drains them and sends each at its time: Android's
+   MidiReceiver.send(msg, offset, count, timestamp) takes the time as is; a sender without timestamps waits for it.
+   The queue holds 4,096 messages and takes at most 1,024 a callback; more are dropped and counted. */
+typedef struct CawMidiOutEvent {
+    int64_t time_ns;      /* when it should reach the port, on caw_midi_clock_ns's clock */
+    uint8_t port;         /* 0..15 */
+    uint8_t size;         /* 1..3 bytes in data */
+    uint8_t data[3];      /* a MIDI 1.0 channel or system message (never SysEx) */
+    uint8_t reserved[3];
+} CawMidiOutEvent;
+/* Up to [capacity] queued messages, oldest first, into [out]; returns the count (0: none, or bad arguments). */
+CAW_API int32_t caw_engine_midi_out_drain(CawEngine* e, CawMidiOutEvent* out, int32_t capacity);
+/* Messages dropped since the engine was made (a full queue, or more than a callback's share). */
+CAW_API int64_t caw_engine_midi_out_dropped(CawEngine* e);
+/* A port's own offset in nanoseconds (-1 s..+1 s; a cable, a synth's or a wireless link's delay), added to every
+   message for it, clock included. 0 by default. */
+CAW_API void caw_engine_set_midi_out_port(CawEngine* e, int32_t port, int64_t offset_ns);
+/* MIDI clock out on the ports whose bits are set in [port_mask] (bit k: port k; 0: off): while playing, 24 ticks a
+   quarter note at their exact times on the tempo map (tempo changes and ramps followed); Play from the song start
+   sends Start; Play from elsewhere sends Song Position Pointer (the next whole sixteenth, at most 16,383) and
+   Continue, then no tick until that sixteenth (per MIDI 1.0 the first tick after them is that position); a Play
+   while running (a locate) sends Stop first; Stop sends Stop; the song or loop range wrapping sends Stop and Start
+   (or the loop start's position and Continue). A port added while playing starts at the next Play. */
+CAW_API void caw_engine_set_midi_clock_out(CawEngine* e, int32_t port_mask);
+/* Following an incoming MIDI clock (on != 0). While on, caw_engine_midi_clock_in's Start plays from the start,
+   Continue from the last Song Position Pointer, Stop stops, a Song Position Pointer while running plays from there,
+   and the ticks' tempo becomes the live tempo: a constant tempo, set every sixteenth while it moves by more than
+   0.01 BPM, keeping the beat and the held notes. The project's tempo map is not changed: project updates and
+   caw_engine_set_tempo_map keep it for when following stops, which puts it back. The engine has no play-at-a-time:
+   a Start begins at the next audio callback, up to one callback (plus the output latency) after the byte came. */
+CAW_API void caw_engine_set_midi_clock_follow(CawEngine* e, int32_t on);
+/* [count] incoming bytes, all at [time_ns] on caw_midi_clock_ns's clock (0 or less: now): 0xF8 tick, 0xFA, 0xFB, 0xFC
+   and 0xF2 with its two data bytes (real-time bytes may come between them); everything else is skipped. Separate from
+   caw_engine_midi_bytes (which skips real-time bytes). Returns the messages recognised. Any thread but the audio
+   callback's. */
+CAW_API int32_t caw_engine_midi_clock_in(CawEngine* e, const uint8_t* bytes, int32_t count, int64_t time_ns);
+/* The incoming clock's tempo (a least-squares fit over its last 48 ticks, robust to jitter), 0 until 12 ticks have
+   come, after a gap of a second, or while following is off. */
+CAW_API double caw_engine_midi_clock_in_bpm(CawEngine* e);
+/* ---- end of API version 47's MIDI out and clock ---- */
 
 /* Song renders for the Export sheet (API version 15, roadmap 0.3, 6.4, 6.5): the mix and aligned stems (a file per
    track and per folder bus: what it sends to its parent or the master, after its effects, volume and pan) over the
