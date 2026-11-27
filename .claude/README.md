@@ -54,7 +54,7 @@ They answer different questions, so don't use both for the same one.
 
 ## Session quirks (cloud container, 2026-11-24)
 
-- Push after every commit, and push an agent's worktree branch to `caw-backup-<name>` now and then: worker restarts and usage limits have ended sessions mid-task. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
-- Scratch builds are about 2 GB each and the disk fills: delete old ones before a new build.
+- Push after every commit. Worker restarts and usage limits have ended sessions mid-task, so when an agent finishes, read what `node scripts/worktree-tidy.js backup --dry-run` would push, then run it without `--dry-run`: it pushes each agent worktree with commits Main lacks to `caw-backup-<name>`, refusing secret-like files and the private plans' paths. The remote is public, so it never runs from a hook. The proxy refuses branch deletes (403): the owner deletes branches on GitHub.
+- Scratch builds are about 2 GB each and the disk fills: `node scripts/worktree-tidy.js clean` lists old builds and backed-up worktrees, and `--apply` removes them, before a new build.
 - Parallel branches collide in `docs/app.md`, `docs/decisions.md`, `cawApiVersion` and the bench mode numbers: expect to resolve these when merging.
 - Narrowing or removing a test needs the owner's explicit OK first; the permission check blocks it otherwise.
