@@ -27,7 +27,7 @@ clock #211).
    then inaudible shortcuts (null below -120 dB or the existing tolerance tests), on Android, Windows and Linux; plus
    the scheduling side (consider play-ahead early). A profiling agent writes the hot-spot report to the session
    scratchpad (perf-report.md); optimizers follow by component group.
-2. **Paused, saved as local WIP commits in worktrees (resume after the performance pass):** G5 op undo
+2. **Paused (resume after the performance pass), saved for good as patches in AutoStacc-Hub `main`, `caw-wip/` (its README names each base commit; also local WIP commits in worktrees):** G5 op undo
    (`.claude/worktrees/collab-g5`, the review's seven fixes half done on 3ea0c4f), receives/@none/Split rack
    (`routing-receives-split`, started), drum multi-out (`drum-multi-out`, not started). #217 design: receives are a
    view over sends, `output: "@none"`, an `org.caw.rack.split` rack, drum out2..9 as route taps with a child layer
