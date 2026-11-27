@@ -2,12 +2,16 @@
 // replaced, lanes and links aimed at their device by id, and never in the engine's copy.
 import 'dart:convert';
 
+import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_edit.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/clip_automation.dart';
 import 'package:caw/model/instance_ids.dart';
 import 'package:caw/model/modulation.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/model/note_fx.dart';
 import 'package:caw/model/routing.dart';
+import 'package:caw/model/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ProjectDoc _project() {
@@ -144,7 +148,7 @@ void main() {
       expect(read.automation.single.device, eqUid, reason: 'the lane stays on the EQ');
     });
 
-    test('a lane\'s and link\'s device id decides over a stale index; one naming nothing leaves the index', () {
+    test('a lane\'s and link\'s device id decides over a stale index; one naming a removed device goes', () {
       final json = _project().toJson();
       final lane = (json['automation'] as List).single as Map<String, dynamic>;
       final link = (json['modulation'] as List).single as Map<String, dynamic>;
@@ -153,10 +157,46 @@ void main() {
       var read = ProjectDoc.fromJson(jsonDecode(jsonEncode(json)) as Map<String, dynamic>);
       expect(read.automation.single.component, 0);
       expect(read.modLinks.single.target.index, 1);
+      // Regression: an id naming no device of the chain is never re-aimed at whatever sits at its index.
       lane['device'] = 'dzzzzzzzz';
+      (link['target'] as Map)['device'] = 'dyyyyyyyy';
       read = ProjectDoc.fromJson(jsonDecode(jsonEncode(json)) as Map<String, dynamic>);
-      expect(read.automation.single.component, 1, reason: 'no device has that id: the index decides');
-      expect(read.automation.single.device, read.layers.first.components[1].uid);
+      expect(read.automation, isEmpty, reason: 'its device is gone: the lane goes, as a removed device\'s lanes do');
+      expect(read.modLinks, isEmpty);
+    });
+
+    test('the engine\'s copy never re-aims a lane or link whose device is gone (regression)', () {
+      final p = _project()..settleIds();
+      p.automation.single.device = 'dzzzzzzzz';  // index 0 still names the EQ
+      p.modLinks.single.target = p.modLinks.single.target.at(1, device: 'dyyyyyyyy');
+      final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+      expect([for (final l in engine['automation'] as List) if (l['target'] == 'gain') l], isEmpty,
+          reason: 'the clip lane on the delay still plays; the EQ lane does not');
+      expect(engine['modulation'] ?? const [], isEmpty);
+    });
+
+    test('per-note effect lanes follow their effect by id, to the engine and through the note edits (regression)', () {
+      final p = _project();
+      final a = p.layers.first;
+      final x = ComponentUseDoc('org.caw.filter'), y = ComponentUseDoc('org.caw.drive');
+      a.noteComponents = [x, y];
+      p.automation.add(ProjectAutomationLaneDoc(targetType: 'noteComponent', target: 'drive', layerId: 'a', component: 1,
+          points: [AutomationPointDoc(step: 0, value: 0.3)]));
+      p.settleIds();
+      final lane = p.automation.last;
+      expect(lane.device, y.uid);
+      // The note chain reordered in place (stale index): the engine gets the device's index.
+      a.noteComponents = [y, x];
+      List<Object?> noteLanes() => [
+            for (final l in (jsonDecode(p.toEngineJson()) as Map)['automation'] as List)
+              if (l['target_type'] == 'noteComponent') l['component'],
+          ];
+      expect(noteLanes(), [0]);
+      // Its device removed: the lane goes everywhere, never moving onto the effect left at its index.
+      final before = List.of(a.noteComponents);
+      a.noteComponents.remove(y);
+      followNoteLanes(p, a, before);
+      expect(p.automation.where((l) => l.targetType == 'noteComponent'), isEmpty);
     });
 
     test('a reorder keeps lanes, clip lanes and links on their device, by id', () {
@@ -200,6 +240,60 @@ void main() {
       final ids = _ids(p);
       expect(ids.toSet(), hasLength(ids.length));
       expect(lane.points.first.uid, isNot(lane.points.last.uid));
+    });
+  });
+
+  group('instance ids in app edits (regressions)', () {
+    late AppState s;
+    setUp(() {
+      s = AppState(settings: Settings());
+      s.project = _project()
+        ..layers.first.noteComponents = [ComponentUseDoc('org.caw.filter'), ComponentUseDoc('org.caw.drive')]
+        ..settleIds();
+    });
+    tearDown(() => s.dispose());
+
+    LayerDoc a() => s.project.layers.first;
+    ClipDoc c1() => a().clips.firstWhere((c) => c.id == 'c1');
+    Set<String> laneIds(ClipDoc c) => {for (final l in c.automation) ...[l.uid, for (final q in l.points) q.uid]};
+
+    test('a duplicated or copied clip\'s lanes and points are new ones', () {
+      final mine = laneIds(c1());
+      s.duplicateClip(a(), c1());
+      final dup = a().clips.last;
+      expect(dup.automation, hasLength(1));
+      expect(laneIds(dup).intersection(mine), isEmpty);
+      late ClipDoc copied;
+      s.editProject((_) => copied = s.copyClipAt(c1(), 64)!);
+      expect(laneIds(copied).intersection(mine), isEmpty);
+      expect(laneIds(c1()), mine, reason: 'the original keeps its ids');
+    });
+
+    test('a split\'s right part gets new lane and point ids; the left part keeps its own', () {
+      // A pattern that doesn't read: the right part shares it and copies the clip's lanes.
+      s.editProject((p) => p.modules.single.runSource = 'not a pattern');
+      final mine = laneIds(c1());
+      expect(s.splitClips(at: 8), isTrue);
+      final right = a().clips.firstWhere((c) => c.startSteps == 8);
+      expect(right.automation, hasLength(1), reason: 'the copied-lanes path');
+      expect(laneIds(right).intersection(mine), isEmpty);
+      expect(laneIds(c1()), mine);
+    });
+
+    test('removing a per-note effect, or sending it back to the track, takes its lanes; the others follow', () {
+      final x = a().noteComponents[0], y = a().noteComponents[1];
+      s.project.automation.addAll([
+        ProjectAutomationLaneDoc(targetType: 'noteComponent', target: 'cutoff', layerId: 'a', component: 0),
+        ProjectAutomationLaneDoc(targetType: 'noteComponent', target: 'drive', layerId: 'a', component: 1),
+      ]);
+      s.project.settleIds();
+      List<(String, int?)> lanes() =>
+          [for (final l in s.project.automation) if (l.targetType == 'noteComponent') (l.device!, l.component)];
+      s.runOnTrack(a(), 0);  // x back to the track's chain
+      expect(lanes(), [(y.uid, 0)], reason: 'y\'s lane follows it to 0; x\'s goes with it');
+      s.removeNoteEffect(a(), 0);
+      expect(lanes(), isEmpty, reason: 'never re-aimed at another per-note effect');
+      expect(a().components.first.uid, x.uid);
     });
   });
 }

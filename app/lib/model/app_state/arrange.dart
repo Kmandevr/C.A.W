@@ -462,7 +462,7 @@ extension AppStateArrange on AppState {
     final next = ClipDoc(id: newId('c'), patternId: patternId,
         startSteps: start, lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
         sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked, loopSteps: clip.loopSteps,
-        automation: [for (final a in clip.automation) a.copy()]);
+        automation: [for (final a in clip.automation) a.copy(fresh: true)]);
     editLayer(layer, (l) => l.clips.add(next));
     selectClip(layer, next);
   }

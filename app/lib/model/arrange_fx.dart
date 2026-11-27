@@ -95,7 +95,8 @@ void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> b
   for (final clip in p.layers.where((l) => l.id == layerId).firstOrNull?.clips ?? const <ClipDoc>[]) {
     clip.automation.removeWhere((lane) {
       if (lane.targetType != 'component') return false;
-      final now = follow(lane.device, lane.component);
+      // A clip moved here from another track names a device of that one: its index decides, as before ids.
+      final now = follow(_ownDevice(p, before, lane.device), lane.component);
       if (now < 0) return true;
       lane.component = now;
       lane.device = after![now].uid;
@@ -103,6 +104,29 @@ void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> b
     });
   }
   p.followComponentLinks(layerId, before);  // modulation links address an effect by index too (#161)
+}
+
+/// A clip lane's device id, or null when it names a device of another track (its clip moved here; its index decides).
+String? _ownDevice(ProjectDoc p, List<ComponentUseDoc> before, String? device) =>
+    device == null || deviceIndexIn(before, device) >= 0 ||
+            !p.layers.any((l) => deviceIndexIn(l.components, device) >= 0)
+        ? device
+        : null;
+
+/// Keeps per-note effect lanes of track [layer] on their effects after its per-note chain changed from [before] to
+/// its current order (an effect moved to or from the track's chain, or removed): a lane follows its effect by id (one
+/// with none yet by its index in [before]), and goes with it when it leaves the per-note chain.
+void followNoteLanes(ProjectDoc p, LayerDoc layer, List<ComponentUseDoc> before) {
+  final after = layer.noteComponents;
+  p.automation.removeWhere((lane) {
+    if (lane.targetType != 'noteComponent' || lane.layerId != layer.id) return false;
+    final use = aimedDevice(before, lane.device, lane.component ?? -1);
+    final now = use == null ? -1 : deviceIndexIn(after, use.uid);
+    if (now < 0) return true;
+    lane.component = now;
+    lane.device = use!.uid;
+    return false;
+  });
 }
 
 extension ArrangeFx on AppState {
@@ -142,12 +166,6 @@ extension ArrangeFx on AppState {
   int? engineComponentIndex(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.components.length || !componentPlayable(layer.components[index].id)) return null;
     return layer.components.take(index).where((c) => componentPlayable(c.id)).length;
-  }
-
-  /// Where device [uid] (`ComponentUseDoc.uid`) of [layer]'s effects sits in the engine's chain now, or null.
-  int? engineDeviceIndex(LayerDoc layer, String uid) {
-    final i = deviceIndexIn(layer.components, uid);
-    return i < 0 ? null : engineComponentIndex(layer, i);
   }
 
   /// Adds native effect [componentId] to [layer]'s inserts (at [at], or the end). A folder has inserts only while

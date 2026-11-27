@@ -173,7 +173,7 @@ extension ArrangeEdit on AppState {
       right = ClipDoc(id: newId('c'), patternId: clip.patternId, startSteps: step, lengthSteps: end - step,
           sourceOffsetSteps: clip.sourceOffsetSteps + step - clip.startSteps, loop: clip.loop, linked: true,
           name: clip.name, color: clip.color, mute: clip.mute, loopSteps: clip.loopSteps,
-          automation: [for (final a in clip.automation) a.copy()]);
+          automation: [for (final a in clip.automation) a.copy(fresh: true)]);
     } else {
       final module = _patternModule(_uniqueName('${original!.name} part'), end - step, notes);
       project.modules.add(module);
@@ -470,7 +470,7 @@ extension ArrangeEdit on AppState {
     return ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
         lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
         sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, name: clip.name, color: clip.color, mute: clip.mute,
-        loopSteps: clip.loopSteps, automation: [for (final a in clip.automation) a.copy()]);
+        loopSteps: clip.loopSteps, automation: [for (final a in clip.automation) a.copy(fresh: true)]);
   }
 
   ModuleDoc _patternModule(String name, int lengthSteps, List<PatternNote> notes) {

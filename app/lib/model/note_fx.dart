@@ -28,10 +28,11 @@ extension NoteFxEdits on AppState {
   bool runPerNote(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.components.length) return false;
     if (perNoteBlocker(layer, layer.components[index].id) != null) return false;
-    final before = List.of(layer.components);
+    final before = List.of(layer.components), notesBefore = List.of(layer.noteComponents);
     editProject((p) {
       layer.noteComponents.add(layer.components.removeAt(index));
       followComponentLanes(p, engineLayerId(layer), before);
+      followNoteLanes(p, layer, notesBefore);
     });
     return true;
   }
@@ -39,16 +40,21 @@ extension NoteFxEdits on AppState {
   /// Moves per-note effect [index] back to the front of the track's effects (it then runs on the whole track).
   void runOnTrack(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    final before = List.of(layer.components);
+    final before = List.of(layer.components), notesBefore = List.of(layer.noteComponents);
     editProject((p) {
       layer.components.insert(0, layer.noteComponents.removeAt(index));
       followComponentLanes(p, engineLayerId(layer), before);
+      followNoteLanes(p, layer, notesBefore);  // its per-note lanes go, as a moved effect's lanes do
     });
   }
 
   void removeNoteEffect(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.noteComponents.length) return;
-    editLayer(layer, (l) => l.noteComponents.removeAt(index));
+    final before = List.of(layer.noteComponents);
+    editProject((p) {
+      layer.noteComponents.removeAt(index);
+      followNoteLanes(p, layer, before);
+    });
   }
 
   /// How many notes get their own slot (1..16).

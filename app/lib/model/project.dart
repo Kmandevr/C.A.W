@@ -1262,16 +1262,18 @@ class ProjectDoc {
         (playableComponents == null || playableComponents.contains(l.instrument!.id));
     int? engineIndex(String? layerId, int index) =>
         layerId != null && frozenIds.contains(layerId) ? null : playableIndex(chainOf(layerId), index);
-    // A lane or link follows its device by id; its saved index is the fallback (lib/model/instance_ids.dart).
-    int deviceAt(String? layerId, String? device, int index) =>
-        switch (deviceIndexIn(chainOf(layerId), device)) { -1 => index, final at => at };
+    // A lane or link follows its device by id, the index only without one; an id naming no device of the chain (a
+    // removed one) plays nowhere (lib/model/instance_ids.dart).
+    int? deviceAt(String? layerId, String? device, int index, {bool notes = false}) => aimedIndex(
+        notes ? layers.where((l) => l.id == layerId).firstOrNull?.noteComponents ?? const [] : chainOf(layerId),
+        device, index);
     // Clip automation (owner, 2026-11-11) is unrolled onto the timeline: inside a clip its lane plays, elsewhere the
     // track's or project's lane on the same target (lib/model/clip_automation.dart).
     final unrolled = unrollClipAutomation();
     final projectLanes = [
       for (final lane in automation)
         if (unrolled[lane.key] case final u?)
-          (ProjectAutomationLaneDoc.fromJson(lane.toJson())..points = u.points)
+          (ProjectAutomationLaneDoc.fromJson(lane.toJson())..points = u.points..device = lane.device)
         else
           lane,
       for (final MapEntry(key: key, value: u) in unrolled.entries)
@@ -1287,10 +1289,15 @@ class ProjectDoc {
         else if (lane.targetType == 'instrument') ...[
           if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l))
             lane.toJson()..remove('height'),
+        ] else if (lane.targetType == 'noteComponent') ...[
+          // A per-note effect's lane: its index in the note chain, from its device id.
+          if (deviceAt(lane.layerId, lane.device, lane.component ?? -1, notes: true) case final int index)
+            lane.toJson()..['component'] = index..remove('height'),
         ] else if (lane.targetType != 'component')
           lane.toJson()..remove('height')
-        else if (engineIndex(lane.layerId, deviceAt(lane.layerId, lane.device, lane.component ?? -1)) case final int index)
-          lane.toJson()..['component'] = index..remove('height'),
+        else if (deviceAt(lane.layerId, lane.device, lane.component ?? -1) case final int at)
+          if (engineIndex(lane.layerId, at) case final int index)
+            lane.toJson()..['component'] = index..remove('height'),
     ];
     final result = jsonEncode({
         'caw_project': 1,
@@ -1390,7 +1397,8 @@ class ProjectDoc {
         'audition_only': auditionOnly && auditionInstrument != null,
         // Project modulation (#161): what can play of it (modulation.dart).
         ...engineModulationFields(routing, playableComponents: playableComponents,
-            engineIndex: (layerId, index, device) => engineIndex(layerId, deviceAt(layerId, device, index)),
+            engineIndex: (layerId, index, device) =>
+                switch (deviceAt(layerId, device, index)) { null => null, final at => engineIndex(layerId, at) },
             instrumentPlays: instrumentPlays),
       });
     return result;
