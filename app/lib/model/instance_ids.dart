@@ -43,8 +43,8 @@ extension ProjectInstanceIds on ProjectDoc {
     return layer == null ? null : (notes ? layer.noteComponents : layer.components);
   }
 
-  /// Gives every device, send, lane, point and sample an id used once in the project (the first in project order
-  /// keeps a repeated one, the later ones get new ids), then aims each effect lane and modulation link at its device
+  /// Gives every device, send, lane, point and sample an id used once in the project, and every clip its own id
+  /// (the first in project order keeps a repeated one, the later ones get new ids), then aims each effect lane and modulation link at its device
   /// by id, its index kept in step: one without a device id yet (an older file) gets the id of the device at its
   /// index; one whose id names no device of its chain (a removed one) goes, as a removed device's lanes do. A clip
   /// lane naming a device of another track (its clip moved there) goes by its index on the new track, as before ids. Run when a project is read and each time it is written (a save, an undo snapshot).
@@ -79,6 +79,21 @@ extension ProjectInstanceIds on ProjectDoc {
     }
     // Every track's effect ids, for clip lanes whose clip moved to another track.
     final elsewhere = {for (final l in layers) for (final c in l.components) c.uid};
+    // Clips are edited by id too (lib/model/collab/project_ops.dart): a repeated clip id, which only an untrusted
+    // file has, goes to its first holder, and the others get new ones.
+    final clipIds = <String>{};
+    for (final l in layers) {
+      for (final clip in l.clips) {
+        while (!clipIds.add(clip.id)) {
+          clip.id = newId('c');
+        }
+      }
+      for (final clip in l.audioClips) {
+        while (!clipIds.add(clip.id)) {
+          clip.id = newId('ac');
+        }
+      }
+    }
     for (final l in layers) {
       for (final s in l.sends) {
         s.uid = once(s.uid, InstanceIds.send);

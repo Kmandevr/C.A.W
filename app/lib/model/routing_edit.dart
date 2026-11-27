@@ -2,6 +2,7 @@
 // "New reverb bus" in one tap, a track's output, and a device's sidechain key, each one undo step and loop-free
 // unless a feedback send breaks the loop (RoutingPlan).
 import 'app_state.dart';
+import 'collab/project_ops.dart';
 import 'arrange_fx.dart';
 import 'merged_devices.dart';
 import 'project.dart';
@@ -155,18 +156,10 @@ extension RoutingEdit on AppState {
     return n;
   }
 
-  void _pushSend(LayerDoc layer, int index) {
-    final s = layer.sends[index];
-    final e = engineSendIndex(layer, index);
-    if (e != null) engine?.setSend(layer.id, e, s.level, pre: s.pre, mute: s.mute);
-  }
-
   /// A send knob's move: live in the engine, kept in the project; [commitSend] when the gesture ends.
   void setSendLevelLive(LayerDoc layer, int index, double level) {
     if (index < 0 || index >= layer.sends.length) return;
-    layer.sends[index].level = level.isFinite ? level.clamp(0.0, kMaxMixGain).toDouble() : 0;
-    _pushSend(layer, index);
-    layerValueTick(layer.id).value++;
+    apply(ProjectSet(layer.sends[index].uid, OpField.level, level.isFinite ? level.clamp(0.0, kMaxMixGain).toDouble() : 0.0));
   }
 
   void commitSend(LayerDoc layer) => editLayer(layer, (_) {});
@@ -175,10 +168,7 @@ extension RoutingEdit on AppState {
   void setSendFlags(LayerDoc layer, int index, {bool? pre, bool? mute}) {
     if (index < 0 || index >= layer.sends.length) return;
     final s = layer.sends[index];
-    if (pre != null) s.pre = pre;
-    if (mute != null) s.mute = mute;
-    _pushSend(layer, index);
-    editLayer(layer, (_) {});
+    applyAll([if (pre != null) ProjectSet(s.uid, OpField.pre, pre), if (mute != null) ProjectSet(s.uid, OpField.mute, mute)]);
   }
 
   void removeSend(LayerDoc layer, int index) {

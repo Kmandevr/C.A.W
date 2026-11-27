@@ -300,17 +300,4 @@ extension AutomationEdits on AppState {
     if (made) automationReveal.value = t.key;
     return made;
   }
-
-  /// Clips on [layer] moved from [spans] (each from, to) by [shift] steps along the track: with "Automation follows
-  /// clips" on, the points of the track's lanes over them (volume, pan, its instrument's and effects') go along.
-  /// Call it inside the move's edit.
-  void followClipAutomation(LayerDoc layer, List<(double, double)> spans, double shift) {
-    if (!project.automationFollowsClips || shift == 0 || spans.isEmpty) return;
-    for (final lane in layer.automation) {
-      lane.points = shiftSpans(lane.points, spans, shift);
-    }
-    for (final lane in project.automation) {
-      if (lane.layerId == layer.id) lane.points = shiftSpans(lane.points, spans, shift);
-    }
-  }
 }

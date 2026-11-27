@@ -6,7 +6,7 @@ import 'dart:math' as math;
 import 'app_state.dart';
 import 'audio_clips.dart';
 import 'audio_edit.dart';
-import 'automation_edit.dart';
+import 'collab/project_ops.dart';
 import 'freeze.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -406,32 +406,33 @@ extension ArrangeEdit on AppState {
     if (shift == 0 && down == 0 && !copy) return;
     final placed = <PlacedClip>[];
     endUndoStep();
-    editProject((p) {
-      // "Automation follows clips" (#230): clips that stay on their track take the points over them along.
-      if (!copy && down == 0) {
-        for (final layer in {for (final c in chosen) c.layer}) {
-          followClipAutomation(layer, [
-            for (final c in chosen)
-              if (identical(c.layer, layer)) (c.clip.startSteps.toDouble(), (c.clip.startSteps + c.clip.lengthSteps).toDouble()),
-          ], shift.toDouble());
-        }
-      }
-      for (final c in chosen) {
-        final target = down == 0 ? c.layer : tracks[tracks.indexOf(c.layer) + down];
-        final start = c.clip.startSteps + shift;
-        if (copy) {
-          final made = _copyOf(c.clip, start);
+    LayerDoc targetOf(PlacedClip c) => down == 0 ? c.layer : tracks[tracks.indexOf(c.layer) + down];
+    if (copy) {
+      editProject((p) {
+        for (final c in chosen) {
+          final made = _copyOf(c.clip, c.clip.startSteps + shift);
           if (made == null) continue;
-          target.clips.add(made);
-          placed.add((layer: target, clip: made));
-        } else {
-          c.layer.clips.remove(c.clip);
-          c.clip.startSteps = start;
-          target.clips.add(c.clip);
-          placed.add((layer: target, clip: c.clip));
+          targetOf(c).clips.add(made);
+          placed.add((layer: targetOf(c), clip: made));
         }
-      }
-    });
+      });
+    } else {
+      applyAll([
+        // "Automation follows clips" (#230): clips that stay on their track take the points over them along.
+        if (down == 0)
+          for (final layer in {for (final c in chosen) c.layer})
+            ...clipFollowOps(project, layer, [
+              for (final c in chosen)
+                if (identical(c.layer, layer)) (c.clip.startSteps.toDouble(), (c.clip.startSteps + c.clip.lengthSteps).toDouble()),
+            ], shift.toDouble()),
+        // Each goes to the end of its track's clips (moved or not), as it always did.
+        for (final c in chosen) ...[
+          ProjectMove(c.clip.id, targetOf(c).id, OpList.clips, kAtEnd),
+          ProjectSet(c.clip.id, OpField.start, c.clip.startSteps + shift),
+        ],
+      ]);
+      placed.addAll([for (final c in chosen) (layer: targetOf(c), clip: c.clip)]);
+    }
     selectClipsInBox(placed);
     endUndoStep();
   }
@@ -444,15 +445,19 @@ extension ArrangeEdit on AppState {
       {String? name, int? color, int? lengthSteps, bool? loop, int? sourceOffsetSteps, bool? mute, bool? lock}) {
     if ((lengthSteps != null || loop != null || sourceOffsetSteps != null || mute != null) && guardFrozen(layer)) return;
     endUndoStep();
-    editLayer(layer, (_) {
+    void others() {
       if (name != null) clip.name = name.trim().isEmpty ? null : name.trim().substring(0, math.min(128, name.trim().length));
       if (color != null) clip.color = color < 0 ? null : color % LayerDoc.trackColors;
-      if (lengthSteps != null) clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt();
       if (loop != null) clip.loop = loop;
       if (sourceOffsetSteps != null) clip.sourceOffsetSteps = sourceOffsetSteps.clamp(0, project.maxArrangementSteps).toInt();
       if (mute != null) clip.mute = mute;
       if (lock != null) clip.lock = lock;
-    });
+    }
+    // The length is a resize (one op); the rest of the sheet's fields change with it, in the same edit.
+    final resized = lengthSteps != null &&
+        apply(ProjectSet(clip.id, OpField.length, lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt()),
+            andThen: others) != null;
+    if (!resized) editLayer(layer, (_) => others());
     endUndoStep();
   }
 
