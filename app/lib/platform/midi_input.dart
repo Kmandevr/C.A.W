@@ -149,6 +149,31 @@ abstract class MidiInput {
   BluetoothMidi? get bluetooth;
 }
 
+/// Incoming MIDI clock bytes from a device (0xF8 tick, 0xFA Start, 0xFB Continue, 0xFC Stop, 0xF2 Song Position with
+/// its two data bytes), all at [timeNs] on the engine's MIDI clock (0: now).
+class MidiClockBytes {
+  const MidiClockBytes(this.bytes, this.timeNs, [this.source = '']);
+  final List<int> bytes;
+  final int timeNs;
+  final String source;
+}
+
+/// An input that can pass on its devices' clock (Android, Windows): only while [setClockFollow] is on, since a
+/// clock is 24 ticks a beat from every device that sends one.
+abstract class MidiClockSource {
+  Stream<MidiClockBytes> get clock;
+  void setClockFollow(bool on);
+}
+
+/// The clock bytes in a short message as WinMM packs it (status in the low byte, then the data bytes), or null when
+/// it is no clock message (Active Sensing, Reset, channel and other system messages).
+List<int>? clockBytesOfShortMessage(int packed) {
+  final status = packed & 0xFF;
+  if (status == 0xF8 || status == 0xFA || status == 0xFB || status == 0xFC) return [status];
+  if (status == 0xF2) return [0xF2, (packed >> 8) & 0x7F, (packed >> 16) & 0x7F];
+  return null;
+}
+
 /// The device's MIDI input, or null where the app reads no MIDI. [clock] is the engine's MIDI clock (Windows
 /// timestamps are milliseconds from the port's start, put on it).
 MidiInput? platformMidiInput({int Function()? clock}) {
@@ -157,7 +182,7 @@ MidiInput? platformMidiInput({int Function()? clock}) {
   return null;
 }
 
-class _AndroidMidiInput implements MidiInput {
+class _AndroidMidiInput implements MidiInput, MidiClockSource {
   static const _events = EventChannel('caw/midi');
   static const _control = MethodChannel('caw/midi/control');
   late final Stream<Object?> _raw = _events.receiveBroadcastStream();
@@ -203,6 +228,18 @@ class _AndroidMidiInput implements MidiInput {
 
   @override
   late final BluetoothMidi bluetooth = _AndroidBluetoothMidi();
+
+  /// MidiInput.kt posts {"clock": bytes, "t": time, "name"} while following.
+  @override
+  Stream<MidiClockBytes> get clock => _raw.where((e) => e is Map && e['clock'] is List).map((e) {
+        final m = e as Map;
+        return MidiClockBytes([for (final b in m['clock'] as List) (b as int) & 0xFF], (m['t'] as int?) ?? 0, '${m['name'] ?? ''}');
+      });
+
+  @override
+  void setClockFollow(bool on) {
+    _control.invokeMethod<void>('setClockFollow', {'on': on}).catchError((_) {});
+  }
 }
 
 class _AndroidBluetoothMidi implements BluetoothMidi {

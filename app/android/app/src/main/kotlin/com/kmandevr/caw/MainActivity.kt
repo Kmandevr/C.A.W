@@ -188,6 +188,10 @@ class MainActivity : FlutterActivity() {
         val midi = MidiInput(applicationContext)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL).setStreamHandler(midi)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_METHOD_CHANNEL).setMethodCallHandler(midi)
+        // MIDI out (MidiOutput.kt, engine API 48): the devices' input ports and the sender thread.
+        val midiOut = MidiOutput(applicationContext)
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/midi/out/devices").setStreamHandler(midiOut)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/midi/out").setMethodCallHandler(midiOut)
         // The routed audio devices and their changes, for output latency compensation (AudioRoute.kt).
         val route = AudioRoute(applicationContext)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_EVENT_CHANNEL).setStreamHandler(route)

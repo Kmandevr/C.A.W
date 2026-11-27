@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 47;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
+const int cawApiVersion = 48;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -559,6 +559,19 @@ class Bindings {
       int Function(Pointer<Void>, Pointer<Uint8>, int, int)>('caw_engine_midi_clock_in');
   late final double Function(Pointer<Void>) midiClockInBpm = _lib.lookupFunction<Double Function(Pointer<Void>),
       double Function(Pointer<Void>)>('caw_engine_midi_clock_in_bpm');
+
+  // The platform MIDI-out sender (API 48; caw.h): one per process, attached to one engine.
+  late final int Function(Pointer<Void>) midiOutStart =
+      _lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>('caw_midi_out_start');
+  late final void Function() midiOutStop = _lib.lookupFunction<Void Function(), void Function()>('caw_midi_out_stop');
+  late final Pointer<Utf8> Function() midiOutDevices =
+      _lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_midi_out_devices');
+  late final int Function(int, int) midiOutOpen =
+      _lib.lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>('caw_midi_out_open');
+  late final void Function(int) midiOutClose =
+      _lib.lookupFunction<Void Function(Int32), void Function(int)>('caw_midi_out_close');
+  late final int Function() midiSenderDropped =
+      _lib.lookupFunction<Int64 Function(), int Function()>('caw_midi_out_dropped');
 
   // The tempo map and time signatures (API 31, #207; caw.h).
   late final int Function(Pointer<Void>, Pointer<CawTempoPointStruct>, int) setTempoMap = _lib.lookupFunction<

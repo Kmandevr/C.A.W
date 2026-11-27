@@ -9,7 +9,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import '../model/tempo_map.dart' show TempoEngine, TempoPoint, TimeSignature;
-import '../platform/midi_output.dart' show MidiOutEvent;
+import '../model/midi_clock_follow.dart' show MidiClockEngine;
+import '../platform/midi_output.dart' show MidiOutEvent, MidiSenderHost;
 import 'audio_bindings.dart';
 import 'bindings.dart';
 import 'component_info.dart';
@@ -340,7 +341,7 @@ class AudioStatus {
 enum AudioConfigured { ok, fallback, closed }
 
 /// Live engine plus its audio device. One per app.
-class Engine implements TempoEngine {
+class Engine implements TempoEngine, MidiSenderHost, MidiClockEngine {
   Engine._(this._b, this._handle, this.sampleRate);
 
   /// The rate the engine runs at unless Settings › Sound chose another (it is fixed when the engine is made).
@@ -933,10 +934,22 @@ class Engine implements TempoEngine {
   void setMidiClockOut(int portMask) => _b.setMidiClockOut(_handle, portMask);
 
   /// Following an incoming MIDI clock: its transport and tempo drive the engine's (the project's map stays).
+  @override
   void setMidiClockFollow(bool on) => _b.setMidiClockFollow(_handle, on ? 1 : 0);
+
+  /// [MidiSenderHost] (API 48): attaches the process's MIDI-out sender to this engine (Windows starts its thread;
+  /// Android's Kotlin thread then drains it); false where there is no sender or another engine has it. Disposing the
+  /// engine detaches it.
+  @override
+  bool startMidiSender() => _b.midiOutStart(_handle) == 1;
+
+  /// Detaches the sender: CC 123 on every channel each port used.
+  @override
+  void stopMidiSender() => _b.midiOutStop();
 
   /// Incoming clock bytes (0xF8, 0xFA, 0xFB, 0xFC, 0xF2 and its data) at [timeNs] on [midiClockNs] (0: now); returns
   /// the messages recognised.
+  @override
   int midiClockIn(List<int> bytes, int timeNs) {
     if (bytes.isEmpty) return 0;
     final p = calloc<Uint8>(bytes.length);
