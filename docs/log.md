@@ -6,6 +6,7 @@ updated: 2026-11-26
 
 # Log
 
+- 2026-11-26: `engine/src/engine.cpp` (6,023 lines) split by thread with no change to its code or bits (1.1.3 maintenance, the owner's "break down the big files"): the audio thread stays in `engine.cpp`, the control side moves to `engine_project.cpp`, `engine_control.cpp` and `engine_pool.cpp`, the shared structs to `engine_impl.h` ([how it works](how-it-works.md)).
 - 2026-11-26: Curlew gains the piccolo, oboe and tuba ([engine](engine.md#curlew-the-winds-113)), its cards in two rows on its page (woodwinds over brass; [app](app.md)); the tuba's release step fixed (its lips close with the breath, its bore loses highs each round trip). The bassoon is not built (its low notes spoke too slowly; [decisions](decisions.md)).
 - 2026-11-26: the Windows mix-pool timing test's root cause fixed (Issue #271): under a test hold the callback now waits up to 50 ms (was 2 ms) for a worker to claim first; a Windows worker woken from sleep could take longer, the callback then ran every node itself and the hold tested nothing.
 - 2026-11-26: Starling's treble rings as long as the Salamander recordings ([engine](engine.md#starling-the-hybrid-piano-113)): the decay table's top points, never measured before, now come from the full samples (C7–C8, 2.2–3.0 s at the fundamental, was 1.3–2.0), with a test.
