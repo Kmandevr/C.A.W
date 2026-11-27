@@ -311,9 +311,15 @@
             for (int c = 0; c < 2; ++c) v.filter[f].comb[c] = &combs_[index][f * 2 + c];
     }
 
-    // The voice section a parameter belongs to (a bit of moved_), kMovedGlobal for the instrument-wide ones.
+    // The voice section a parameter belongs to (a bit of moved_), kMovedGlobal for the instrument-wide ones. An
+    // oscillator's tuning (octave, semitones, fine) is every oscillator's: Osc FM's ratio is its modulator's tuning
+    // against its own (configureOscillator), so it moves the oscillators an Osc FM may hear it from too (audio
+    // review, 2026-11-27: a ramp or a slot on the modulator's tuning left the carrier's ratio stale).
     static uint32_t sectionOf(uint32_t k) noexcept {
-        if (k < kFltBase) return 1u << (k / kOscCount);                    // osc 1..3: bits 0..2
+        if (k < kFltBase) {
+            const uint32_t p = k % kOscCount;
+            return p == kOscOctave || p == kOscSemi || p == kOscFine ? 7u : 1u << (k / kOscCount);  // osc 1..3: bits 0..2
+        }
         if (k < kFltRouting) return 1u << (3 + (k - kFltBase) / kFltCount);  // filter 1, 2: bits 3, 4
         if (k == kFltRouting) return kMovedRouting;
         if (k < kLfoBase) return kMovedEnvs;
