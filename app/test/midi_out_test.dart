@@ -30,6 +30,11 @@ void main() {
     final wild = MidiOutDoc.fromJson({'port': 99, 'channel': -4, 'program': 300, 'bend_range': 0.1})!;
     expect([wild.port, wild.channel, wild.program, wild.bendRange], [15, 1, 127, 1.0]);
     expect(MidiOutDoc.fromJson('junk'), isNull);
+    // A project with a MIDI-out track saves as v8 (an older build would drop midi_out); one without stays as it was.
+    final p8 = ProjectDoc(id: 'p', name: 'P', bpm: 120, modules: [], layers: [l]);
+    expect(p8.toJson()['caw_app_project'], 8);
+    final p5 = ProjectDoc(id: 'p', name: 'P', bpm: 120, modules: [], layers: [plain]);
+    expect(p5.toJson()['caw_app_project'], ProjectDoc.baseFileVersion);
     expect(LayerDoc.fromJson({'id': 'f', 'folder': true, 'midi_out': {'port': 1}}).midiOut, isNull);
   });
 
@@ -68,6 +73,7 @@ void main() {
     await e.setProject(p.toEngineJson());
     e.setMidiClockOut(1);
     e.setMidiOutPortOffset(1, 0);
+    e.setMidiOutActive(true);
     e.play();
     e.pullForTest(480);
     final got = e.midiOutDrain();

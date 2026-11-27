@@ -35,14 +35,28 @@ ClockFollower::Action ClockFollower::feed(uint8_t b, int64_t ns) noexcept {
 }
 
 void ClockFollower::tick(int64_t ns) noexcept {
-    if (count_ > 0 && (ns - last_ > kGapNs || ns < last_)) count_ = head_ = 0;  // a gap or time going back
+    if (count_ > 0 && (ns - last_ > kGapNs || ns < last_)) {  // a gap or time going back
+        count_ = head_ = 0;
+        skipped_ = false;
+    }
     int64_t idx = 0;
     if (count_ > 0) {
         // A tick that took about twice the expected time is a dropped one: its number skips, so the fit holds.
         const double period = bpm_ > 0 ? 60e9 / (24.0 * bpm_) : 0.0;
         const double gap = static_cast<double>(ns - last_);
-        const int64_t step = period > 0 ? std::max<int64_t>(1, std::llround(gap / period)) : 1;
-        idx = lastIdx_ + (step > 4 ? 1 : step);
+        int64_t step = period > 0 ? std::max<int64_t>(1, std::llround(gap / period)) : 1;
+        if (step > 4) step = 1;
+        if (step > 1 && skipped_) {
+            // Two long gaps in a row are not lost ticks but a slower clock: the fit starts again from the last tick.
+            const int64_t prev = last_;
+            idx_[0] = 0;
+            t_[0] = prev;
+            count_ = head_ = 1;
+            lastIdx_ = 0;
+            step = 1;
+        }
+        skipped_ = step > 1;
+        idx = lastIdx_ + step;
     }
     idx_[head_] = idx;
     t_[head_] = ns;

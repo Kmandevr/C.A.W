@@ -684,6 +684,10 @@ extern "C" int32_t caw_engine_midi_out_drain(CawEngine* e, CawMidiOutEvent* out,
     return total;
 }
 
+extern "C" void caw_engine_set_midi_out_active(CawEngine* e, int32_t on) {
+    if (e && e->engine) e->engine->setMidiOutActive(on != 0);
+}
+
 extern "C" int64_t caw_engine_midi_out_dropped(CawEngine* e) {
     return e && e->engine ? static_cast<int64_t>(e->engine->midiOutDropped()) : 0;
 }

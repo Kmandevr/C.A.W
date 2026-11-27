@@ -21,6 +21,7 @@ TEST(midi_out_and_clock_never_allocate_on_the_audio_thread) {
     };
     CHECK(e.setProjectJson(project(0)).find("\"ok\":true") != std::string::npos);
     e.setMidiClockOut(3);
+    e.setMidiOutActive(true);
     std::vector<float> l(256), r(256);
     std::vector<MidiOutMessage> buf(4096);
     e.play();

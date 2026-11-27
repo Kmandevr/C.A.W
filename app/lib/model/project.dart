@@ -1028,7 +1028,11 @@ class ProjectDoc {
   /// variant 0 included: an older engine refuses the parameter), or a rack (always saved with `rack_layout`, which
   /// an older engine refuses). A project using none of v7's is written as v6 or v5 as before, byte for byte
   /// ([baseFileVersion], [savedFileVersion]), so older builds open it; this build reads them all and refuses newer.
-  static const int fileVersion = 7;
+  /// v8 (MIDI out, engine API 47): a track's `midi_out`, which an older build would drop on save.
+  static const int fileVersion = 8;
+
+  /// The format a project with v7's merged devices and nothing of v8's is written as.
+  static const int mergedFileVersion = 7;
 
   /// The format a project with v6's routing and nothing of v7's is written as.
   static const int routingFileVersion = 6;
@@ -1056,9 +1060,14 @@ class ProjectDoc {
         layers.any((l) => l.components.any(merged) || l.noteComponents.any(merged));
   }
 
-  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesMergedDevicesV7], else [routingFileVersion] when
-  /// [usesRoutingV6], else [baseFileVersion].
-  int get savedFileVersion => usesMergedDevicesV7 ? fileVersion : usesRoutingV6 ? routingFileVersion : baseFileVersion;
+  /// Whether the project holds anything v8 added: a track's MIDI out ([LayerDoc.midiOut]).
+  bool get usesMidiOutV8 => layers.any((l) => l.midiOut != null);
+
+  /// The `caw_app_project` [toJson] writes: [fileVersion] when [usesMidiOutV8], else [mergedFileVersion] when
+  /// [usesMergedDevicesV7], else [routingFileVersion] when [usesRoutingV6], else [baseFileVersion].
+  int get savedFileVersion => usesMidiOutV8
+      ? fileVersion
+      : usesMergedDevicesV7 ? mergedFileVersion : usesRoutingV6 ? routingFileVersion : baseFileVersion;
 
   final String id;
   String name;

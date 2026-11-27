@@ -121,8 +121,10 @@ void main() {
       expect(v5['caw_app_project'], 5);
       expect(ProjectDoc.fromJson(v5).layers, hasLength(7));
       expect(ProjectDoc.fromJson({...v6, 'caw_app_project': 7}).layers, hasLength(7));
-      expect(() => ProjectDoc.fromJson({...v6, 'caw_app_project': 8}), throwsA(isA<NewerProjectFormat>()));
-      expect(ProjectDoc.fileVersion, 7);
+      expect(ProjectDoc.fromJson({...v6, 'caw_app_project': 8}).layers, hasLength(7));
+      expect(() => ProjectDoc.fromJson({...v6, 'caw_app_project': 9}), throwsA(isA<NewerProjectFormat>()));
+      expect(ProjectDoc.fileVersion, 8);
+      expect(ProjectDoc.mergedFileVersion, 7);
       expect(ProjectDoc.routingFileVersion, 6);
       expect(ProjectDoc.baseFileVersion, 5);
     });

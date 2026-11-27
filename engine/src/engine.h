@@ -190,6 +190,10 @@ public:
     // how many a full queue (or a callback past its share) dropped. Offline renders never queue any.
     int32_t midiOutDrain(MidiOutMessage* out, int32_t cap) noexcept;
     uint64_t midiOutDropped() const noexcept;
+    // A platform sender attaches (true) or goes (false). Messages are queued only while one is attached, and an
+    // attach starts from an empty queue, so a sender never gets a backlog of stale notes. Off by default.
+    void setMidiOutActive(bool on) noexcept;
+    bool midiOutActive() const noexcept { return midiOutActive_.load(std::memory_order_relaxed); }
     // A port's own offset (a cable, a synth's or Bluetooth's delay), added to every message's time: -1..+1 s.
     void setMidiOutPortOffset(int port, int64_t offsetNs) noexcept;
     // The output latency (a sample leaving the engine to the speaker), which every MIDI-out time adds so external
@@ -791,7 +795,9 @@ private:
     int midiFrame_ = 0;            // audio thread: the callback frame control-time messages go out at
     uint32_t clockPorts_ = 0;      // audio thread: the ports the clock runs on (0: not running)
     int64_t clockTick_ = 0;        // audio thread: the next tick, 24 a beat (tick k at step k / 6)
-    void midiOutEmit(int port, double frame, const uint8_t* data, int size) noexcept;
+    void midiOutEmit(int port, double frame, const uint8_t* data, int size, bool essential = false) noexcept;
+    std::atomic<bool> midiOutActive_{false};  // a sender drains the queue (setMidiOutActive)
+    CallbackClock midiOutClock_;              // audio thread: the callbacks' frame 0 times, smoothed
     void flushLane(MidiOutLane& lane, int baseFrame) noexcept;
     void lanesOff(int frame, bool program) noexcept;  // every MIDI-out layer's sounding notes end at `frame`
     void clockSend(uint32_t ports, double frame, uint8_t a, int pos = -1) noexcept;  // pos >= 0: F2 with it
@@ -803,12 +809,17 @@ private:
     std::mutex clockInLock_;
     ClockFollower follower_;     // under clockInLock_
     int followTicks_ = 0;        // under clockInLock_: ticks since the live tempo was last set
-    double followApplied_ = 0;   // under clockInLock_: the tempo last set
     std::atomic<bool> follow_{false};
     std::atomic<double> clockInBpm_{0};
     double ctlFollowBpm_ = 0;    // under ctl_: the live tempo following set (0: none)
     std::vector<TempoPointSpec> ctlProjectTempo_;  // under ctl_: the project's map while following overrides it
-    void followTempo(double bpm);  // ctl_ not held
+    // ctl_ not held. bpm 0: the project's map back; masterStep < 0: no position to nudge toward.
+    void followTempo(double bpm, double masterStep, int64_t tickNs);
+    static constexpr double kFollowLeadSteps = 0.5;       // a new tempo starts this far past the playhead
+    static constexpr double kFollowCatchSeconds = 2.0;    // a position error closes over about this long
+    static constexpr double kFollowMaxNudge = 0.03;       // ... by at most 3 % of the tempo
+    static constexpr double kFollowHysteresisBpm = 0.01;  // a smaller move isn't sent
+    static constexpr double kFollowSmoothing = 0.5;       // each update goes this share of the way
     std::atomic<int64_t> cbTimeNs_{0}, cbPos_{-1};  // the last callback's start on the MIDI clock, and g_ then (-1: stopped)
     std::vector<std::string> order_;  // layer ids in project order, for meters
     uint64_t playCount_ = 0;     // Play commands sent (control thread)

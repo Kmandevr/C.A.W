@@ -542,6 +542,8 @@ class Bindings {
   late final int Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, int) midiOutDrain = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, Int32),
       int Function(Pointer<Void>, Pointer<CawMidiOutEventStruct>, int)>('caw_engine_midi_out_drain');
+  late final void Function(Pointer<Void>, int) setMidiOutActive = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>('caw_engine_set_midi_out_active');
   late final int Function(Pointer<Void>) midiOutDropped = _lib.lookupFunction<Int64 Function(Pointer<Void>),
       int Function(Pointer<Void>)>('caw_engine_midi_out_dropped');
   late final void Function(Pointer<Void>, int, int) setMidiOutPort = _lib.lookupFunction<

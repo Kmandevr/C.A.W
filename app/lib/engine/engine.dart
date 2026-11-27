@@ -909,7 +909,10 @@ class Engine implements TempoEngine {
     }
   }
 
-  /// Outbound MIDI messages dropped (a full queue) since the engine was made.
+  /// A MIDI-out sender attaches (true: messages are queued from now, from an empty queue) or goes (false).
+  void setMidiOutActive(bool on) => _b.setMidiOutActive(_handle, on ? 1 : 0);
+
+  /// Outbound MIDI messages dropped (a full queue, or a starting one too late) since the engine was made.
   int get midiOutDropped => _b.midiOutDropped(_handle);
 
   /// A MIDI-out port's own delay offset in nanoseconds (-1 s..+1 s), added to each of its messages.

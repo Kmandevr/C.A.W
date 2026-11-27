@@ -27,6 +27,7 @@ std::string project(const std::string& layers, const std::string& extra = "", in
 const std::string kMidiLayer = "{\"id\":\"m\",\"pattern\":\"p\",\"midiOut\":{\"port\":2,\"channel\":3,\"program\":5}}";
 
 struct Run {
+    Run() { e.setMidiOutActive(true); }  // a sender is attached
     Engine e{48000};
     std::vector<float> l = std::vector<float>(kCb), r = std::vector<float>(kCb);
     int callbacks = 0;
@@ -49,6 +50,15 @@ struct Run {
 };
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
+
+// A deterministic jitter source: uniform in [-1, 1).
+struct Lcg {
+    uint32_t s = 12345;
+    double next() {
+        s = s * 1664525u + 1013904223u;
+        return static_cast<double>(s >> 8) / 8388608.0 - 1.0;
+    }
+};
 
 }  // namespace
 
@@ -198,35 +208,130 @@ TEST(midi_out_retriggered_key_and_controllers) {
     CHECK(!lane.sounding());
 }
 
-TEST(midi_out_queue_drops_and_counts_past_its_limits) {
+TEST(midi_out_queue_keeps_room_for_ending_messages_and_drops_stale_starts) {
     MidiOutQueue q;
-    MidiOutMessage m;
-    m.size = 1;
-    m.data[0] = 0xF8;
+    MidiOutMessage tick;
+    tick.size = 1;
+    tick.data[0] = 0xF8;
+    tick.timeNs = 1'000'000'000;
+    MidiOutMessage off = tick;
+    off.size = 3;
+    off.data[0] = 0x80;
+    off.reserved[0] = kMidiEssential;
     q.beginCallback();
     int pushed = 0;
-    for (uint32_t k = 0; k < MidiOutQueue::kPerCallback + 10; ++k) pushed += q.push(m);
-    CHECK_EQ(pushed, static_cast<int>(MidiOutQueue::kPerCallback));
+    for (uint32_t k = 0; k < MidiOutQueue::kPerCallback + 10; ++k) pushed += q.push(tick);
+    CHECK_EQ(pushed, static_cast<int>(MidiOutQueue::kPerCallback));  // a callback's share of starting messages
     CHECK_EQ(q.dropped(), 10u);
-    for (int c = 0; c < 4; ++c) {  // nobody drains: the queue fills at its capacity
+    CHECK(q.push(off));  // an ending one goes past the share
+    for (int c = 0; c < 10; ++c) {  // nobody drains: starting messages stop short of the reserve
         q.beginCallback();
-        for (uint32_t k = 0; k < MidiOutQueue::kPerCallback; ++k) q.push(m);
+        for (uint32_t k = 0; k < MidiOutQueue::kPerCallback; ++k) q.push(tick);
     }
-    CHECK_EQ(q.dropped(), 10u + MidiOutQueue::kPerCallback);
-    std::vector<MidiOutMessage> out(MidiOutQueue::kCapacity + 5);
-    CHECK_EQ(q.drain(out.data(), static_cast<int32_t>(out.size())), static_cast<int32_t>(MidiOutQueue::kCapacity));
-    // A lane's chunk past its room drops and counts too (the engine adds it to the queue's count).
+    int offs = 0;
+    for (size_t k = 0; k < MidiOutQueue::kReserve; ++k) offs += q.push(off);  // the reserve is for ending ones
+    CHECK_EQ(offs, static_cast<int>(MidiOutQueue::kReserve));
+    // Drained 250 ms past their time, the starting ones are left out and counted; every ending one comes.
+    std::vector<MidiOutMessage> out(MidiOutQueue::kCapacity);
+    const int32_t n = q.drain(out.data(), static_cast<int32_t>(out.size()), tick.timeNs + MidiOutQueue::kMaxAgeNs + 1);
+    CHECK_EQ(n, offs + 1);
+    for (int32_t k = 0; k < n; ++k) CHECK_EQ(out[k].data[0], 0x80);
+    CHECK(q.dropped() > MidiOutQueue::kCapacity - MidiOutQueue::kReserve);
+}
+
+TEST(midi_out_lane_never_drops_a_note_off_past_its_room) {
     MidiOutLane lane;
     std::vector<Event> evs;
-    for (uint32_t k = 0; k < MidiOutLane::kStaged + 3; ++k) {
+    for (int k = 0; k < 128; ++k) evs.push_back(notes::noteOn(0, static_cast<uint32_t>(k + 1), k, 1.0));
+    for (uint32_t k = 0; k < MidiOutLane::kStaged; ++k) {  // a flood of controllers after them
         Event e;
         e.kind = EventKind::Midi;
+        e.frame = 1;
         e.data[0] = 0x40D00000u;  // channel pressure
         evs.push_back(e);
     }
     lane.convert(evs.data(), static_cast<uint32_t>(evs.size()), true);
-    CHECK_EQ(lane.stagedCount(), MidiOutLane::kStaged);
-    CHECK_EQ(lane.takeOverflow(), 3u);
+    CHECK(lane.takeOverflow() > 0);
+    lane.allOff(2);  // in the same chunk: every key that sounds gets its off
+    int ons = 0, offs = 0;
+    for (uint32_t k = 0; k < lane.stagedCount(); ++k) {
+        ons += lane.staged()[k].data[0] == 0x90;
+        offs += lane.staged()[k].data[0] == 0x80;
+    }
+    CHECK_EQ(ons, 128);
+    CHECK_EQ(offs, ons);
+    CHECK_EQ(lane.takeOverflow(), 0u);
+    CHECK(!lane.sounding());
+}
+
+TEST(midi_out_port_change_ends_notes_on_the_old_port) {
+    MidiOutLane lane;
+    MidiOutSpec spec;
+    spec.port = 3;
+    lane.configure(spec);
+    const Event on = notes::noteOn(0, 1, 60, 1.0);
+    lane.convert(&on, 1, true);
+    spec.port = 7;
+    lane.configure(spec);  // before the chunk is flushed
+    CHECK_EQ(lane.stagedCount(), 2u);
+    if (lane.stagedCount() == 2) {
+        CHECK_EQ(lane.staged()[0].port, 3);
+        CHECK_EQ(lane.staged()[1].data[0], 0x80);
+        CHECK_EQ(lane.staged()[1].port, 3);  // the off goes where the note is
+        CHECK(lane.staged()[1].essential);
+    }
+    // Through the engine: the off is queued for the old port.
+    Run t;
+    CHECK(ok(t.e.setProjectJson(project(kMidiLayer))));
+    CHECK(t.e.play(4));
+    t.cb(2);
+    std::string moved = kMidiLayer;
+    moved.replace(moved.find("\"port\":2"), 8, "\"port\":9");
+    CHECK(ok(t.e.setProjectJson(project(moved))));
+    t.cb(1);
+    const auto off = t.with(0x82);
+    CHECK_EQ(off.size(), 1u);
+    if (!off.empty()) CHECK_EQ(off[0].port, 2);
+}
+
+TEST(midi_out_queues_nothing_until_a_sender_attaches) {
+    Run t;
+    t.e.setMidiOutActive(false);
+    CHECK(ok(t.e.setProjectJson(project(kMidiLayer))));
+    t.e.setMidiClockOut(1);
+    CHECK(t.e.play());
+    t.cb(20);
+    CHECK(t.got.empty());
+    CHECK_EQ(t.e.midiOutDropped(), 0u);
+    t.e.setMidiOutActive(true);  // attached mid-song: from now on, nothing from before
+    t.cb(1);
+    CHECK(!t.with(0xF8).empty());
+    for (const MidiOutMessage& m : t.got) CHECK(m.timeNs >= kT0 + 200'000'000);
+}
+
+TEST(midi_out_callback_clock_smooths_jittered_wakeups) {
+    CallbackClock c;
+    Lcg rng;
+    const double period = 480.0 / 48000.0 * 1e9;
+    double worst = 0, worstLate = 0, square = 0;
+    for (int k = 0; k < 3000; ++k) {  // 30 s of 10 ms callbacks woken up to 2 ms late or early
+        const double ideal = 1e9 + k * period;
+        const int64_t wake = static_cast<int64_t>(ideal + rng.next() * 2e6);
+        const double err = std::fabs(static_cast<double>(c.anchor(wake, 480, 48000)) - ideal);
+        worst = std::max(worst, err);
+        if (k >= 1000) {  // after it settles
+            worstLate = std::max(worstLate, err);
+            square += err * err;
+        }
+    }
+    CHECK(worst < 2.5e6);
+    CHECK(worstLate < 0.5e6);                     // a quarter of the jitter at worst
+    CHECK(std::sqrt(square / 2000) < 0.2e6);     // the jitter's own spread is 1.15 ms
+    // A device restart (a wake-up far from the prediction) starts it again there.
+    CHECK_EQ(c.anchor(9'000'000'000, 480, 48000), 9'000'000'000);
+    // Steady wake-ups come out as they are.
+    CallbackClock d;
+    for (int k = 0; k < 100; ++k) CHECK(std::llabs(d.anchor(kT0 + k * 10'000'000LL, 480, 48000) - (kT0 + k * 10'000'000LL)) <= 1);
 }
 
 TEST(midi_clock_out_ticks_follow_the_tempo_map) {
@@ -297,17 +402,6 @@ TEST(midi_clock_out_sequences_start_continue_position_and_stop) {
     CHECK(t.with(0xF8).empty());
 }
 
-namespace {
-// A deterministic jitter source: uniform in [-1, 1).
-struct Lcg {
-    uint32_t s = 12345;
-    double next() {
-        s = s * 1664525u + 1013904223u;
-        return static_cast<double>(s >> 8) / 8388608.0 - 1.0;
-    }
-};
-}  // namespace
-
 TEST(midi_clock_follower_tempo_rides_over_jitter_drift_and_dropped_ticks) {
     ClockFollower f;
     Lcg rng;
@@ -364,37 +458,101 @@ TEST(midi_clock_follower_transport_messages) {
     CHECK_EQ(f.songPosition(), 133);
 }
 
+namespace {
+// A master clock at `bpm` (24 ticks a beat, each up to `jitterNs` early or late) started at `startNs`, fed to the
+// engine in time with its callbacks (Run's 10 ms), whose first starts `lateNs` after the master's Start.
+struct Master {
+    Run& t;
+    double bpm;
+    double jitterNs;
+    int64_t startNs;
+    Lcg rng;
+    int64_t tick = 0;
+    double tickTime(int64_t k) const { return static_cast<double>(startNs) + k * 60e9 / (24.0 * bpm); }
+    void until(int64_t ns) {
+        const uint8_t f8 = 0xF8;
+        while (tickTime(tick) < static_cast<double>(ns)) {
+            t.e.midiClockIn(&f8, 1, static_cast<int64_t>(tickTime(tick) + rng.next() * jitterNs));
+            ++tick;
+        }
+    }
+    // Where the master is at `ns`, in steps (tick 0 is step 0).
+    double stepsAt(int64_t ns) const { return (static_cast<double>(ns) - startNs) * bpm / 15e9; }
+};
+}  // namespace
+
 TEST(midi_clock_follow_drives_the_transport_and_the_live_tempo_only) {
     Run t;
     CHECK(ok(t.e.setProjectJson(project(kMidiLayer))));
     t.e.setMidiClockFollow(true);
-    const uint8_t start = 0xFA, tick = 0xF8, stop = 0xFC;
+    const uint8_t start = 0xFA, stop = 0xFC;
     CHECK_EQ(t.e.midiClockIn(&start, 1, kT0), 1);
-    t.cb(1);
-    CHECK(t.e.position().playing);
-    // Two beats of ticks at 100 BPM: the live tempo follows.
-    int64_t at = kT0;
-    for (int k = 0; k < 48; ++k) {
-        at += 25'000'000;  // 60 s / (24 * 100)
-        CHECK_EQ(t.e.midiClockIn(&tick, 1, at), 1);
+    Master m{t, 100, 0, kT0};
+    for (int k = 0; k < 600; ++k) {  // 6 s at 100 BPM, in time with the callbacks
+        m.until(kT0 + (k + 1) * 10'000'000LL);
+        t.cb(1);
     }
+    CHECK(t.e.position().playing);
     CHECK_NEAR(t.e.midiClockInBpm(), 100.0, 1e-6);
-    t.cb(2);
-    CHECK_NEAR(t.e.position().bpm, 100.0, 0.02);
-    CHECK_NEAR(t.e.songTime().tempo.points().front().bpm, 100.0, 0.02);
+    // The tempo, give or take the position's nudge (the engine ran at the project's 120 until the estimate locked).
+    CHECK_NEAR(t.e.position().bpm, 100.0, 0.5);
     // A project update while following keeps the followed tempo.
     CHECK(ok(t.e.setProjectJson(project(kMidiLayer))));
     t.cb(1);
-    CHECK_NEAR(t.e.position().bpm, 100.0, 0.02);
-    CHECK_EQ(t.e.midiClockIn(&stop, 1, at + 1), 1);
+    CHECK_NEAR(t.e.position().bpm, 100.0, 0.5);
+    CHECK_EQ(t.e.midiClockIn(&stop, 1, kT0 + 6'020'000'000), 1);
     t.cb(30);
     CHECK(!t.e.position().playing);
     CHECK_EQ(t.with(0x92).size(), t.with(0x82).size());  // every note sent was ended
-    // Following off: the project's tempo is back.
+    // Following off: the project's tempo is back, and a late estimate doesn't bring the follower's back.
     t.e.setMidiClockFollow(false);
     t.cb(1);
     CHECK_NEAR(t.e.position().bpm, 120.0, 1e-9);
+    m.until(kT0 + 7'000'000'000);
+    t.cb(1);
+    CHECK_NEAR(t.e.position().bpm, 120.0, 1e-9);
     CHECK_EQ(caw_engine_midi_clock_in_bpm(nullptr), 0.0);
+}
+
+TEST(midi_clock_follow_keeps_the_playhead_continuous_and_locked_to_the_master) {
+    Run t;
+    CHECK(ok(t.e.setProjectJson(project(kMidiLayer, "", 64))));  // 128 s: no wrap
+    t.e.setMidiClockFollow(true);
+    const uint8_t start = 0xFA;
+    // The master starts 50 ms before the engine's next callback (2.5 ticks at 125 BPM): the nudge takes it out.
+    const int64_t masterStart = kT0 - 50'000'000;
+    t.e.midiClockIn(&start, 1, masterStart);
+    Master m{t, 125, 1e6, masterStart};  // +-1 ms of jitter on every tick
+    int64_t last = -1;
+    int jumps = 0;
+    double worstLate = 0;
+    for (int k = 0; k < 6000; ++k) {  // 60 s
+        const int64_t now = kT0 + k * 10'000'000LL;
+        m.until(now);
+        t.cb(1);
+        const int64_t frame = t.e.position().frame;
+        if (last >= 0 && frame - last != kCb) ++jumps;  // each callback moves the playhead by its frames, exactly
+        last = frame;
+        if (k >= 1000) {  // after 10 s: within a tick of the master (a tick is a sixth of a step)
+            const int64_t heardAt = now + 10'000'000;  // the callback's end, where position() is
+            const double engineSteps = t.e.songTime().tempo.stepAt(static_cast<double>(t.e.positionAt(heardAt)));
+            worstLate = std::max(worstLate, std::fabs(engineSteps - m.stepsAt(heardAt)));
+        }
+    }
+    CHECK_EQ(jumps, 0);
+    CHECK(worstLate < 1.0 / 6.0);
+    CHECK_NEAR(t.e.position().bpm, 125.0, 125 * 0.031);
+}
+
+TEST(midi_clock_follower_follows_sudden_tempo_steps) {
+    for (const auto& [from, to] : {std::pair{140.0, 90.0}, std::pair{90.0, 140.0}, std::pair{120.0, 60.0}}) {
+        ClockFollower f;
+        double t = 1e9;
+        for (int k = 0; k < 96; ++k) f.feed(0xF8, static_cast<int64_t>(t += 60e9 / (24 * from)));
+        CHECK_NEAR(f.bpm(), from, 1e-6);
+        for (int k = 0; k < 72; ++k) f.feed(0xF8, static_cast<int64_t>(t += 60e9 / (24 * to)));  // three beats
+        CHECK_NEAR(f.bpm(), to, 1e-6);
+    }
 }
 
 TEST(midi_out_project_fields_are_checked) {
@@ -412,6 +570,10 @@ TEST(midi_out_project_fields_are_checked) {
     CHECK(parse("{\"program\":128}").find("program must be") != std::string::npos);
     CHECK(parse("{\"bend_range\":0.5}").find("bend_range") != std::string::npos);
     CHECK(parse("5").find("must be {") != std::string::npos);
+    CHECK(parse("{\"port\":\"2\"}").find("port must be a number") != std::string::npos);
+    CHECK(parse("{\"channel\":[1]}").find("channel must be a number") != std::string::npos);
+    CHECK(parse("{\"program\":true}").find("program must be a number") != std::string::npos);
+    CHECK(parse("{\"bend_range\":{}}").find("bend_range must be a number") != std::string::npos);
     CHECK(parse("{}", ",\"instrument\":\"org.caw.test.osc\"").find("can't also have an instrument") != std::string::npos);
     CHECK(parse("{}", ",\"sends\":[{\"to\":\"x\"}]").find("can't also have sends") != std::string::npos);
     CHECK(parse("{}", ",\"midiComponents\":[\"org.caw.midi.arp\"]").find("midiComponents") != std::string::npos);
@@ -451,6 +613,7 @@ TEST(midi_out_c_api_drains_the_queue) {
     if (!e) return;
     CHECK_EQ(caw_engine_midi_out_drain(e, nullptr, 4), 0);
     caw_engine_set_midi_clock_out(e, 1);
+    caw_engine_set_midi_out_active(e, 1);
     CHECK_EQ(caw_engine_play(e), 1);
     std::vector<float> l(kCb), r(kCb);
     caw_engine_process(e, l.data(), r.data(), kCb);

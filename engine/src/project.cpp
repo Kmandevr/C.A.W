@@ -465,6 +465,12 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     error = what + " must be {\"port\": 0..15, \"channel\": 1..16, \"program\", \"bend_range\"}";
                     return false;
                 }
+                // A field that is there must be a number (a string or a list is refused, not read as the default).
+                for (const char* field : {"port", "channel", "program", "bend_range"})
+                    if (const Json* v = mo->get(field); v && v->type != Json::Type::Null && v->type != Json::Type::Number) {
+                        error = what + ": " + field + " must be a number";
+                        return false;
+                    }
                 if (!wholeIn(mo->number("port", 0), 0, 15, spec.midiOut.port)) {
                     error = what + ": port must be a whole number from 0 to 15";
                     return false;

@@ -25,27 +25,34 @@ void MidiOutLane::configure(const MidiOutConfig& c) noexcept {
     channel_ = static_cast<uint8_t>(next.channel - 1);
 }
 
-void MidiOutLane::stage(uint32_t frame, uint8_t a, uint8_t b, uint8_t c, uint8_t size) noexcept {
+void MidiOutLane::stage(uint32_t frame, uint8_t a, uint8_t b, uint8_t c, uint8_t size, bool essential) noexcept {
+    // Starting messages are only staged where room() said so, so an ending one always fits (the check is a guard).
     if (stagedCount_ >= kStaged) {
         ++overflow_;
         return;
     }
     MidiOutStaged& s = staged_[stagedCount_++];
     s.frame = frame;
+    s.port = static_cast<uint8_t>(config_.port);  // the port it was made for, even if the lane moves before the flush
+    s.essential = essential;
     s.size = size;
     s.data[0] = a;
     s.data[1] = b;
     s.data[2] = c;
 }
 
-void MidiOutLane::bendTo(uint32_t frame, double semitones) noexcept {
+void MidiOutLane::bendTo(uint32_t frame, double semitones, bool essential) noexcept {
     double v = 8192.0 + semitones / config_.bendRange * 8192.0;
     if (!std::isfinite(v)) v = 8192.0;
     const uint16_t bend = static_cast<uint16_t>(std::clamp(std::lround(v), 0L, 16383L));
     if (bend == bend_) return;
+    if (!essential && !room(1)) {  // dropped: bend_ stays what the receiver has, so a later reset still goes
+        ++overflow_;
+        return;
+    }
     bend_ = bend;
     stage(frame, static_cast<uint8_t>(0xE0 | channel_), static_cast<uint8_t>(bend & 0x7F),
-          static_cast<uint8_t>(bend >> 7), 3);
+          static_cast<uint8_t>(bend >> 7), 3, essential);
 }
 
 void MidiOutLane::convert(const Event* events, uint32_t count, bool notesOn) noexcept {
@@ -62,7 +69,8 @@ void MidiOutLane::convert(const Event* events, uint32_t count, bool notesOn) noe
                 const uint8_t status = b[k];
                 const int len = (status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0 ? 2 : 3;
                 if (k + len > n) break;
-                stage(e.frame, b[k], b[k + 1], len == 3 ? b[k + 2] : 0, static_cast<uint8_t>(len));
+                if (room(1)) stage(e.frame, b[k], b[k + 1], len == 3 ? b[k + 2] : 0, static_cast<uint8_t>(len));
+                else ++overflow_;
                 k += len;
             }
             continue;
@@ -73,12 +81,16 @@ void MidiOutLane::convert(const Event* events, uint32_t count, bool notesOn) noe
         switch (status) {
             case kStatusNoteOn: {
                 if (!notesOn) break;
+                if (!room(3)) {  // its bend, a retrigger's off and the on, with its own off still to come
+                    ++overflow_;
+                    break;
+                }
                 const double pitch = index == kPitch79 ? static_cast<double>(w1 & 0xFFFF) / 512.0 : key;
                 bendTo(e.frame, pitch - key);
                 uint8_t vel = static_cast<uint8_t>((w1 >> 16) >> 9);
                 if (vel == 0) vel = 1;  // 0 would be an off
                 if (keyCount_[key] > 0) {  // a retrigger: the key's sounding note ends first
-                    stage(e.frame, static_cast<uint8_t>(0x80 | ch), key, 0, 3);
+                    stage(e.frame, static_cast<uint8_t>(0x80 | ch), key, 0, 3, true);
                 } else {
                     ++soundingKeys_;
                 }
@@ -90,16 +102,16 @@ void MidiOutLane::convert(const Event* events, uint32_t count, bool notesOn) noe
                 if (keyCount_[key] == 0) break;  // not sounding here (already ended by allOff, or never sent)
                 if (--keyCount_[key] > 0) break;
                 --soundingKeys_;
-                stage(e.frame, static_cast<uint8_t>(0x80 | ch), key, static_cast<uint8_t>((w1 >> 16) >> 9), 3);
+                stage(e.frame, static_cast<uint8_t>(0x80 | ch), key, static_cast<uint8_t>((w1 >> 16) >> 9), 3, true);
                 break;
             }
             case kStatusPerNoteReg:
                 if (keyCount_[key] == 0) break;
                 if (index == kPitch725) bendTo(e.frame, static_cast<double>(w1) / 33554432.0 - key);
-                else if (index == kTimbre) stage(e.frame, static_cast<uint8_t>(0xB0 | ch), 74, top7(w1), 3);
+                else if (index == kTimbre && room(1)) stage(e.frame, static_cast<uint8_t>(0xB0 | ch), 74, top7(w1), 3);
                 break;
             case kStatusPolyPressure:
-                if (keyCount_[key] > 0) stage(e.frame, static_cast<uint8_t>(0xA0 | ch), key, top7(w1), 3);
+                if (keyCount_[key] > 0 && room(1)) stage(e.frame, static_cast<uint8_t>(0xA0 | ch), key, top7(w1), 3);
                 break;
             default: break;
         }
@@ -111,14 +123,41 @@ void MidiOutLane::allOff(uint32_t frame) noexcept {
         if (keyCount_[k] == 0) continue;
         keyCount_[k] = 0;
         --soundingKeys_;
-        stage(frame, static_cast<uint8_t>(0x80 | channel_), static_cast<uint8_t>(k), 0, 3);
+        stage(frame, static_cast<uint8_t>(0x80 | channel_), static_cast<uint8_t>(k), 0, 3, true);
     }
     soundingKeys_ = 0;
-    bendTo(frame, 0.0);
+    bendTo(frame, 0.0, true);
 }
 
 void MidiOutLane::sendProgram(uint32_t frame) noexcept {
-    if (config_.program >= 0) stage(frame, static_cast<uint8_t>(0xC0 | channel_), static_cast<uint8_t>(config_.program), 0, 2);
+    if (config_.program >= 0 && room(1)) stage(frame, static_cast<uint8_t>(0xC0 | channel_), static_cast<uint8_t>(config_.program), 0, 2);
+}
+
+int64_t CallbackClock::anchor(int64_t wakeNs, int frames, double sampleRate) noexcept {
+    const double wake = static_cast<double>(wakeNs);
+    if (frames <= 0 || !(sampleRate > 0)) return wakeNs;
+    if (started_) {
+        const double e = wake - pred_;
+        if (std::fabs(e) > static_cast<double>(kResetNs)) {
+            started_ = false;
+        } else {
+            // A second-order loop, its gains from the bandwidth and the last callback's length.
+            const double w = 2.0 * 3.14159265358979323846 * kBandwidthHz * (lastFrames_ * nsPerFrame_ * 1e-9);
+            pred_ += std::sqrt(2.0) * w * e;
+            nsPerFrame_ += w * w * e / lastFrames_;
+            nsPerFrame_ = std::clamp(nsPerFrame_, nominal_ * 0.99, nominal_ * 1.01);  // a clock within 1 %
+        }
+    }
+    if (!started_) {
+        started_ = true;
+        nominal_ = 1e9 / sampleRate;
+        nsPerFrame_ = nominal_;
+        pred_ = wake;
+    }
+    const int64_t at = static_cast<int64_t>(std::llround(pred_));
+    pred_ += frames * nsPerFrame_;  // the next callback's frame 0
+    lastFrames_ = frames;
+    return at;
 }
 
 int MidiOutLane::umpToMidi1(const uint32_t* words, uint8_t channel, uint8_t* out) noexcept {

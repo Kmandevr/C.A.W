@@ -1085,6 +1085,8 @@ int32_t startOnce(CawEngine* e, char* error, int32_t error_len);
 // no real-time callback; the owner's S22+ Low-latency rows, 960-frame bursts at callback_policy 0) is closed and
 // opened once more, as a route still settling can refuse the fast path to the first open; what the second open got
 // is kept for the status ("fast_path_retry").
+std::string latencyJson(CawEngine* e, Audio* a);  // below; it also stores the output latency in the engine
+
 int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     const bool wasOpen = e->audio != nullptr;
     const int32_t r = startOnce(e, error, error_len);
@@ -1149,6 +1151,7 @@ int32_t startOnce(CawEngine* e, char* error, int32_t error_len) {
     e->audio = a;
     gActive = e;
     if (e->inputEnabled) openCapture(e, a);  // after the output, which plays whether or not this opens
+    latencyJson(e, a);  // MIDI out (API 47): the output latency reaches the engine at every open and reopen
     return 0;
 }
 
@@ -1761,6 +1764,8 @@ char* caw_audio_status(CawEngine* e) {
     if (!e) return dup("{\"running\":false}");
     reopenAfterReroute(e);
     std::lock_guard<std::mutex> lock(gDeviceLock);
+    // A reroute or a new figure since the last read: the MIDI-out times follow it (each status poll).
+    if (auto* running = static_cast<Audio*>(e->audio)) latencyJson(e, running);
     const std::string request = ",\"requested_device\":" + quoted(e->deviceName.c_str()) +
                                 ",\"requested_device_id\":" + quoted(e->deviceId.c_str()) +
                                 ",\"requested_frames\":" + std::to_string(e->periodFrames) +

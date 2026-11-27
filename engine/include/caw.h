@@ -887,11 +887,16 @@ CAW_API int64_t caw_engine_position_at(CawEngine* e, int64_t time_ns);
    and pitch bend on its channel. Every sounding key gets its note-off on Stop, Play (a locate), a loop restart of the
    pattern, mute, removal and a port or channel change. Offline renders send nothing.
    The audio thread queues each message with the time it should reach its port, on caw_midi_clock_ns's clock:
-   the callback's start + its frame / sample rate + the output latency (caw_audio_latency's output, which the
-   platform updates at each read) + the mix's latency compensation and master chain delay + the port's offset.
-   A platform sender (one thread at a time; never the audio thread) drains them and sends each at its time: Android's
-   MidiReceiver.send(msg, offset, count, timestamp) takes the time as is; a sender without timestamps waits for it.
-   The queue holds 4,096 messages and takes at most 1,024 a callback; more are dropped and counted. */
+   the callback's start, smoothed over the callbacks by a delay-locked loop on the frames played (so a wake-up's
+   jitter stays out) + its frame / sample rate + the output latency (the platform stores it at every device open
+   and reopen, status poll and caw_audio_latency read) + the mix's latency compensation and master chain delay + the
+   port's offset. Nothing is queued until a sender attaches (caw_engine_set_midi_out_active); a platform sender (one
+   thread at a time; never the audio thread) drains them and sends each at its time: Android's MidiReceiver.send(msg,
+   offset, count, timestamp) takes the time as is; a sender without timestamps waits for it. The queue holds 8,192
+   messages. A message that starts something (note-on, controller, program, tick, Start, Continue, Song Position)
+   takes at most 1,024 places a callback, never the last 2,048, and is left out of a drain once more than 250 ms
+   late; one that ends something (note-off, the bend back to the centre, Stop) may use the reserve and is always
+   handed out. A layer's chunk keeps room for every sounding key's off the same way. Dropped ones are counted. */
 typedef struct CawMidiOutEvent {
     int64_t time_ns;      /* when it should reach the port, on caw_midi_clock_ns's clock */
     uint8_t port;         /* 0..15 */
@@ -899,6 +904,9 @@ typedef struct CawMidiOutEvent {
     uint8_t data[3];      /* a MIDI 1.0 channel or system message (never SysEx) */
     uint8_t reserved[3];
 } CawMidiOutEvent;
+/* A sender attaches (on != 0: from now on messages are queued, starting from an empty queue) or goes (0: nothing is
+   queued; ending a port's notes on detach is the sender's). Off on a new engine. */
+CAW_API void caw_engine_set_midi_out_active(CawEngine* e, int32_t on);
 /* Up to [capacity] queued messages, oldest first, into [out]; returns the count (0: none, or bad arguments). */
 CAW_API int32_t caw_engine_midi_out_drain(CawEngine* e, CawMidiOutEvent* out, int32_t capacity);
 /* Messages dropped since the engine was made (a full queue, or more than a callback's share). */

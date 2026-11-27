@@ -349,7 +349,13 @@ void Engine::takeSong(SongTime* next, bool follow) noexcept {
     song_ = next;
     bpm_ = next->tempo.points().front().bpm;
     audioIn_->setSongTime(next);
-    if (keepBeat) g_ = std::max<int64_t>(0, static_cast<int64_t>(std::floor(next->tempo.frameAt(beat))));
+    if (keepBeat) {
+        const double at = next->tempo.frameAt(beat);
+        // Following a clock (API 47) the new map keeps the timing up to past the playhead: the sample stays (a
+        // round trip through beats may land a hair under it, which floor would turn into a one-sample jump).
+        if (!(follow && std::fabs(at - static_cast<double>(g_)) < 1.0))
+            g_ = std::max<int64_t>(0, static_cast<int64_t>(std::floor(at)));
+    }
     Retired r;
     r.song = old;
     retireEntry(r);
@@ -2889,7 +2895,8 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     {
         const int64_t test = midiClockTest_.load(std::memory_order_relaxed);
         const int64_t now = test >= 0 ? test : midiClockNs();
-        midiOutAnchorNs_ = now + midiOutLatencyNs_.load(std::memory_order_relaxed) +
+        // Smoothed over the callbacks (CallbackClock), so the wake-up's own jitter isn't in the messages' times.
+        midiOutAnchorNs_ = midiOutClock_.anchor(now, frames, sr_) + midiOutLatencyNs_.load(std::memory_order_relaxed) +
             static_cast<int64_t>(std::llround(static_cast<double>(midiOutDelayFrames_.load(std::memory_order_relaxed)) * 1e9 / sr_));
         midiOutQ_->beginCallback();
         midiFrame_ = 0;

@@ -44,6 +44,7 @@ private:
     bool running_ = false;
     int spp_ = 0;
     int64_t ticksRun_ = 0;
+    bool skipped_ = false;  // the last tick was taken as coming after dropped ones
     int sppWant_ = 0;  // data bytes a Song Position Pointer still needs (2, 1, 0)
     uint8_t sppLsb_ = 0;
 };
