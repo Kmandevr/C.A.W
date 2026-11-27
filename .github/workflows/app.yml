@@ -27,6 +27,7 @@ on:
       - "scripts/update-delta*.js"  # the small-update assets the release jobs publish
       - "CHANGELOG.md"  # bundled in the app (What's new) and the top of each release's notes
       - "scripts/changelog-notes*.js"
+      - "scripts/dart-test-summary*.js"  # names the failing Dart tests
       - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
     paths:
@@ -44,6 +45,7 @@ on:
       - "scripts/update-delta*.js"
       - "CHANGELOG.md"
       - "scripts/changelog-notes*.js"
+      - "scripts/dart-test-summary*.js"  # names the failing Dart tests
   workflow_dispatch:
     inputs:
       installables:
@@ -118,10 +120,17 @@ jobs:
           flutter pub get
           flutter analyze
 
-  tests:
-    name: Dart tests
+  # The Dart tests in four jobs, each a quarter of the test files (every 4th of the sorted list), so a failure names its
+  # quarter and each job's summary names the failing tests. Split by file, not with `flutter test --total-shards`:
+  # that splits each file's tests, so every job would still compile and load all of the files.
+  test-shards:
+    name: Dart tests (${{ matrix.shard }}/4)
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - name: Restore Flutter SDK
@@ -163,14 +172,40 @@ jobs:
           cmake --build engine/build --parallel 4  # bounded: unlimited with Makefiles ran the runner out of memory (cc1plus killed, 2026-11-25)
           ccache --show-stats
       - name: Test
+        id: test
         working-directory: app
         env:
           CAW_LIB: ${{ github.workspace }}/engine/build/libcaw.so
+          SHARD: ${{ matrix.shard }}
+          SHARDS: 4
         run: |
           flutter pub get
-          flutter test --concurrency=4
-      - name: Test the small-update builder and the release-notes extraction
-        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js
+          mapfile -t files < <(find test -name '*_test.dart' | LC_ALL=C sort | awk -v n="$SHARDS" -v i="$SHARD" '(NR - 1) % n == i - 1')
+          if [ "${#files[@]}" -eq 0 ]; then echo "::error::No test files in shard $SHARD/$SHARDS"; exit 1; fi
+          echo "${#files[@]} test files in shard $SHARD/$SHARDS"
+          flutter test --concurrency=4 --file-reporter "json:$RUNNER_TEMP/dart-tests.json" "${files[@]}"
+      - name: Name the failing tests
+        if: always() && steps.test.outcome != 'skipped'
+        run: node scripts/dart-test-summary.js "$RUNNER_TEMP/dart-tests.json" "Dart tests (${{ matrix.shard }}/4)"
+
+  # The check the GitHub Release (and anyone reading the run) waits on: it fails unless every Dart test shard passed.
+  tests:
+    name: Dart tests
+    needs: test-shards
+    if: ${{ !cancelled() && github.event_name != 'workflow_run' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test the small-update builder, the release-notes extraction and the CI test summaries
+        run: node --test scripts/update-delta.test.js scripts/changelog-notes.test.js scripts/dart-test-summary.test.js scripts/ctest-summary.test.js
+      - name: Every Dart test shard passed
+        env:
+          SHARDS_RESULT: ${{ needs.test-shards.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != success ]; then
+            echo "::error::A Dart test shard did not pass ($SHARDS_RESULT): its job's summary names the failing tests."
+            exit 1
+          fi
 
   android:
     name: Android APK
