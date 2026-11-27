@@ -673,7 +673,7 @@ void main() {
       expect(deviceHistory(rack), isEmpty);
     });
 
-    test('two of the same device swapped: the list stops at the move, not showing the other one\'s steps', () {
+    test('two of the same device swapped: each keeps its own steps from before the move, never the other one\'s', () {
       chorus(0).set('depth', 0.2);
       s.endUndoStep();
       chorus(1).set('depth', 0.8);
@@ -681,12 +681,20 @@ void main() {
       s.moveNativeEffect(layer(), 1, 0);
       s.endUndoStep();
       expect(chorus(0).value('depth'), closeTo(0.8, 1e-9));
-      expect(deviceHistory(chorus(0)), isEmpty, reason: 'its steps before the move are at the other slot');
+      // The device now first was second: its one step is the 0.8 (two steps back), followed by its id.
+      var steps = deviceHistory(chorus(0));
+      expect(steps, hasLength(1));
+      expect(steps.single.stepsBack, 2);
+      expect(steps.single.changed, ['depth']);
+      expect(steps.single.values['depth'], isNot(closeTo(0.8, 1e-9)), reason: 'its value before the 0.8');
+      final other = deviceHistory(chorus(1));
+      expect(other, hasLength(1));
+      expect(other.single.stepsBack, 3, reason: 'the 0.2, now at the other slot');
       chorus(0).set('depth', 0.5);
       s.endUndoStep();
-      final steps = deviceHistory(chorus(0));
-      expect(steps, hasLength(1));
-      expect(steps.single.values['depth'], closeTo(0.8, 1e-9));
+      steps = deviceHistory(chorus(0));
+      expect(steps, hasLength(2));
+      expect(steps.first.values['depth'], closeTo(0.8, 1e-9));
     });
   });
 

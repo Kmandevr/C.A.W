@@ -18,9 +18,9 @@ class _LibrarySnapshot {
 class _AutomationSnapshot {
   _AutomationSnapshot(ProjectDoc project)
       : projectLanes = [for (final lane in project.automation)
-          ProjectAutomationLaneDoc.fromJson(lane.toJson())],
+          ProjectAutomationLaneDoc.fromJson(lane.toJson(withIds: true))],
         trackLanes = {for (final layer in project.layers) layer.id: [
-          for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson()),
+          for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson(withIds: true)),
         ]},
         clipLanes = {for (final layer in project.layers) for (final clip in layer.clips) clip.id: [
           for (final lane in clip.automation) lane.copy(),

@@ -6,6 +6,7 @@ updated: 2026-11-27
 
 # Log
 
+- 2026-11-27: Devices, sends, automation lanes and points, and samples have stable ids: device history survives a reorder, lanes and links follow their device by id, and old projects get ids on load ([decisions](decisions.md)).
 - 2026-11-27: `caw_collab` added: a pure-Dart shared-document model (ids, fractional keys, ops with JSON and binary codecs, a schema and a tree with tombstones), not yet used by the app; 34 tests ([decisions](decisions.md)).
 - 2026-11-27: per-build reference sets for chaotic devices (1.1.3 maintenance; [engine](engine.md), [decisions](decisions.md)): a build reads its own `<suite>.<build>.cawref` (`arm64`, `win64`, `x64_debug`) where it exists, else the common x86-64 file, and records only its own; the hand-started *Reference sets* workflow records them on CI's runners. None recorded yet, so no tolerance changed.
 - 2026-11-27: Agent worktrees can be backed up in one step and old scratch builds cleared (1.1.3 maintenance): `scripts/worktree-tidy.js backup`, run by hand after a dry run, pushes each worktree whose commits Main lacks to `caw-backup-<name>`, refusing secret-like files and private-plan paths; `clean` lists, and with `--apply` removes, clean worktrees that Main or their backup already hold and CMake build folders untouched for a day.

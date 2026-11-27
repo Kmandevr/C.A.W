@@ -6,6 +6,15 @@ updated: 2026-11-27
 
 # Decisions
 
+## 2026-11-27: Stable instance ids for devices, sends, automation lanes and points, and samples
+
+- **[Fact] The problem:** devices, sends and lanes were known only by their place in a list, so a device's history stopped at a reorder and lanes and modulation links had to be re-pointed by hand at every chain edit.
+- **Chosen:** each gets an id (`newId`: a prefix, `d` device, `s` send, `al` lane, `ap` point, `cs` sample, and 8 base-36 characters from `Random.secure`), made the first time it is asked for. Device and send ids are saved in lists beside their entries (`component_uids`, `note_component_uids`, `instrument_uid`, `master_component_uids`, `send_uids`), so the entries stay byte-identical and an older build ignores them; lanes, points and samples carry a `uid`. Lanes and links save `device` beside the index they always had. Ids are written only by `ProjectDoc.toJson`; the engine's JSON and track templates never carry them, and the file version is unchanged.
+- **Untrusted ids:** `settleIds()` (load and every save) replaces a malformed id, gives a duplicated one to its first holder only, and drops a lane or link whose device id names nothing in its chain, rather than re-aiming it by index. A file without ids gets them on load and reads as before.
+- **Copies are new, moves keep:** a duplicated, copied or split-off clip, a duplicated effect and a track template get new ids; a moved device, an edited point and an undo snapshot keep theirs. A clip moved to another track keeps its effect lanes by index there, as before ids (dropping them would lose the automation).
+- **Still by index:** links to sends, MIDI mappings, folded FX rows and the instrument's lanes; live engine calls take the slot's index, and only `toEngineJson` resolves ids.
+- **Checked:** `app/test/instance_ids_test.dart` (14 tests) and a stronger `device_shell_test` (two swapped devices each keep their own history, where it used to stop); full `flutter test` 2805 pass; a code review's five findings are fixed.
+
 ## 2026-11-27: `caw_collab`, a shared-document model package (not yet used by the app)
 
 - **Chosen:** a pure-Dart package `app/packages/caw_collab` (depends only on `caw_services`; no Flutter, so `flutter analyze` keeps it pure): ids, fractional ordering keys, a sealed `Op` with ten op types, a JSON and a binary codec, a schema, and `CollabTree`, a tree with tombstones whose `apply(op)` returns the inverse op or refuses with a reason and changes nothing. Decoded input is untrusted: decoders throw only `CollabDecodeError` and check every count and length against the bytes left, nesting depth (64) and size caps (8 MiB per op or batch) before allocating.

@@ -6,6 +6,7 @@ import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'device_names.dart';
 import 'device_target.dart';
+import 'instance_ids.dart';
 import 'mixer_fx.dart';
 import 'project.dart';
 import 'routing.dart';
@@ -111,8 +112,9 @@ class ModulatorDoc {
 /// of another modulator ([layerId] is its id), or a track's volume, pan or send [index].
 @immutable
 class ModTarget {
-  const ModTarget._(this.type, this.layerId, this.index, this.param);
-  const ModTarget.component(String? layerId, int index, String param) : this._('component', layerId, index, param);
+  const ModTarget._(this.type, this.layerId, this.index, this.param, [this.device]);
+  const ModTarget.component(String? layerId, int index, String param, {String? device})
+      : this._('component', layerId, index, param, device);
   const ModTarget.instrument(String layerId, String param) : this._('instrument', layerId, -1, param);
   const ModTarget.modulator(String modulatorId, String param) : this._('modulator', modulatorId, -1, param);
   const ModTarget.volume(String layerId) : this._('volume', layerId, -1, '');
@@ -124,6 +126,14 @@ class ModTarget {
   final int index;
   final String param;
 
+  /// A component target's device by its instance id (`d…`, lib/model/instance_ids.dart): what the link follows,
+  /// [index] being its place in the chain now (kept in step; saved too, so an older build reads it by index). Null:
+  /// none known yet. Not part of equality: a target is the knob at [index], whichever way it was reached.
+  final String? device;
+
+  /// This component target at [index] (its device [device]).
+  ModTarget at(int index, {required String? device}) => ModTarget._(type, layerId, index, param, device);
+
   bool get isMix => type == 'volume' || type == 'pan' || type == 'send';
 
   /// The knob a device editor shows for [paramId] of [t] (a component, an instrument or a modulator).
@@ -133,7 +143,8 @@ class ModTarget {
     return ModTarget.component(t.layerId == masterLayerId ? null : t.layerId, t.slot, paramId);
   }
 
-  Map<String, dynamic> toJson() => {'type': type, 'layer': ?layerId, if (index >= 0) 'index': index, if (param.isNotEmpty) 'param': param};
+  Map<String, dynamic> toJson({bool withIds = false}) => {'type': type, 'layer': ?layerId, if (index >= 0) 'index': index,
+        if (param.isNotEmpty) 'param': param, if (withIds && device != null) 'device': device};
 
   static ModTarget? fromJson(Object? j) {
     if (j is! Map || j['type'] is! String) return null;
@@ -141,7 +152,8 @@ class ModTarget {
     final index = j['index'] is num ? (j['index'] as num).toInt() : -1;
     final param = j['param'] is String ? j['param'] as String : '';
     return switch (j['type']) {
-      'component' when index >= 0 && param.isNotEmpty => ModTarget.component(layer, index, param),
+      'component' when index >= 0 && param.isNotEmpty =>
+        ModTarget.component(layer, index, param, device: InstanceIds.read(j['device'], InstanceIds.device)),
       'instrument' when layer != null && param.isNotEmpty => ModTarget.instrument(layer, param),
       'modulator' when layer != null && param.isNotEmpty => ModTarget.modulator(layer, param),
       'volume' when layer != null => ModTarget.volume(layer),
@@ -198,11 +210,12 @@ class ModLinkDoc {
     return (lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0));
   }
 
-  Map<String, dynamic> toJson() => {
+  /// [withIds]: with its target's device id (the project file; never the engine's copy).
+  Map<String, dynamic> toJson({bool withIds = false}) => {
         'id': id,
         'source': source,
         if (output != 0) 'output': output,
-        'target': target.toJson(),
+        'target': target.toJson(withIds: withIds),
         'amount': amount,
         if (bipolar) 'bipolar': true,
         if (curve != 0) 'curve': curve,
@@ -318,7 +331,7 @@ extension ProjectModulation on ProjectDoc {
   /// modulator whose component isn't loaded, a link to a track that is gone or a component that isn't playing (its
   /// index renumbered as the chain the engine gets), a send the engine doesn't get, and a link that would make a loop.
   Map<String, Object> engineModulationFields(RoutingPlan plan,
-      {Set<String>? playableComponents, required int? Function(String? layerId, int index) engineIndex,
+      {Set<String>? playableComponents, required int? Function(String? layerId, int index, String? device) engineIndex,
       required bool Function(LayerDoc layer) instrumentPlays}) {
     if (modulators.isEmpty) return const {};
     bool plays(String id) => playableComponents == null || playableComponents.contains(id);
@@ -336,7 +349,7 @@ extension ProjectModulation on ProjectDoc {
           if (ids.contains(t.layerId)) target = t.toJson();
         case 'component':
           if (t.layerId == null || layerIds.contains(t.layerId)) {
-            final i = engineIndex(t.layerId, t.index);
+            final i = engineIndex(t.layerId, t.index, t.device);
             if (i != null) target = t.toJson()..['index'] = i;
           }
         case 'instrument':
@@ -384,10 +397,12 @@ extension ProjectModulation on ProjectDoc {
     modLinks.removeWhere((link) {
       final t = link.target;
       if (t.type != 'component' || t.layerId != layerId) return false;
-      if (t.index < 0 || t.index >= before.length) return true;
-      final now = after == null ? -1 : after.indexWhere((c) => identical(c, before[t.index]));
+      // By the device's id (lib/model/instance_ids.dart); a link with none yet by its index.
+      final use = aimedDevice(before, t.device, t.index);
+      if (use == null) return true;
+      final now = after == null ? -1 : deviceIndexIn(after, use.uid);
       if (now < 0) return true;
-      link.target = ModTarget.component(layerId, now, t.param);
+      link.target = t.at(now, device: use.uid);
       return false;
     });
   }

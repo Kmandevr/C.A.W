@@ -3,6 +3,7 @@
 import 'project.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
+import 'instance_ids.dart';
 
 /// The id the master's stand-in track goes by ([masterLayerOf]); no real track can have it (ids are made by
 /// `newId`, never with a NUL).
@@ -57,11 +58,13 @@ extension MixerFx on AppState {
     editProject((p) {
       if (move) {
         from.components.removeAt(drag.index);
-        // Its lanes go with it (lanes address an effect by chain index; the master's lanes have no layer).
+        // Its lanes go with it (they follow its device id, lib/model/instance_ids.dart; the master's have no layer).
         for (final lane in p.automation) {
-          if (lane.targetType == 'component' && lane.layerId == engineLayerId(from) && lane.component == drag.index) {
+          if (lane.targetType == 'component' && lane.layerId == engineLayerId(from) &&
+              identical(aimedDevice(before, lane.device, lane.component ?? -1), use)) {
             lane.layerId = engineLayerId(to);
             lane.component = to.components.length;
+            lane.device = use.uid;
           }
         }
       }
