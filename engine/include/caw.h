@@ -221,8 +221,12 @@ extern "C" {
    thread opens the devices and takes the due messages through JNI; elsewhere no sender). Nothing else changes.
    49 (2026-11-28): play-ahead (docs/engine.md "Play-ahead"): caw_engine_set_play_ahead turns it on or off (off on a
    new engine), caw_engine_play_ahead reads it, caw_engine_play_ahead_stats fills a CawAheadStats, CawStressRequest gains
-   play_ahead and the stress result ahead_tracks, ahead_underruns and ahead_load. Off, nothing changes; on, an untouched track renders up to a second ahead on its own thread with the same bits. */
-#define CAW_API_VERSION 49
+   play_ahead and the stress result ahead_tracks, ahead_underruns and ahead_load. Off, nothing changes; on, an untouched track renders up to a second ahead on its own thread with the same bits.
+   50 (2026-11-28): play-ahead intent (docs/engine.md "Play-ahead"): caw_engine_play_ahead_intent tells the engine a
+   layer is about to change (CAW_AHEAD_HOLD while a finger is down on one of its controls or its page is open,
+   CAW_AHEAD_RELEASE to end that hold, CAW_AHEAD_EDIT before a one-off edit), so it comes back live before the value
+   does. Nothing else changes; the app turns play-ahead on. */
+#define CAW_API_VERSION 50
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -752,6 +756,14 @@ typedef struct CawAheadStats {
 CAW_API void caw_engine_set_play_ahead(CawEngine* e, int32_t on);
 CAW_API int32_t caw_engine_play_ahead(CawEngine* e);
 CAW_API int32_t caw_engine_play_ahead_stats(CawEngine* e, CawAheadStats* out);  /* 0 for a null engine or out */
+/* API 50: the app's intent on a layer. HOLD brings it back live (its ring plays out, then it is live with the same
+   bits) and keeps it live while held; holds are counted, and each RELEASE ends one (the 3 s before it may go ahead
+   again count from the last release). EDIT is a one-shot touch, for an edit about to be sent. 1 if the layer exists,
+   else 0. Any thread; recorded with play-ahead off too. */
+#define CAW_AHEAD_RELEASE 0
+#define CAW_AHEAD_HOLD 1
+#define CAW_AHEAD_EDIT 2
+CAW_API int32_t caw_engine_play_ahead_intent(CawEngine* e, const char* layer_id, int32_t intent);
 
 /* The device buffer: Auto uses a larger one (about 21 ms) while not recording and the smallest the device
    gives while recording; Low latency always the smallest; Battery

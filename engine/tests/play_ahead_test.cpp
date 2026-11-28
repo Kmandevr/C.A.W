@@ -1,5 +1,6 @@
 // Play-ahead (play_ahead.h, engine_ahead.cpp): ahead renders match live bit for bit at any buffer, underruns fade and
-// stay live, a drain mid-note, a seek's drop and a parked edit at the ring's end each equal the live render.
+// stay live, a drain mid-note, a seek's drop and a parked edit at the ring's end each equal the live render; the app's
+// intent (API 50) brings a track live before its edit.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "caw.h"
 #include "engine.h"
 #include "engine_test_harness.h"
 #include "project.h"
@@ -393,4 +395,62 @@ TEST(play_ahead_lead_renders_the_live_bits) {
         }
         Engine::setPlayAheadLeadForTest(false);
     }
+}
+
+// (h) The app's intent (API 50): a hold before an edit brings the track back live by the drain, so the edit lands on
+// time with the live render's bits; without it the edit waits for the ring's end. Holds are counted, keep the track
+// live while held, and an unknown layer is refused.
+TEST(play_ahead_intent_brings_the_track_live_before_an_edit) {
+    const ProjectSpec p = heavyProject();
+    auto renderWith = [&](int extra, bool intent) {
+        AheadScope scope(extra);
+        Engine e(48000);
+        CHECK(ok(e.setProject(p)));
+        CHECK(!e.playAheadIntent("nope", Engine::AheadIntent::Hold));
+        e.play();
+        std::vector<float> out, l(1000), r(1000);
+        for (int i = 0; i < 120; ++i) {
+            if (intent && i == 30) {
+                CHECK(e.playAheadIntent("pad", Engine::AheadIntent::Hold));  // the device page opens
+                CHECK(e.playAheadIntent("pad", Engine::AheadIntent::Hold));  // a finger down on a knob
+            }
+            if (extra >= 0 && i == 29) CHECK(e.aheadStats().tracks >= 1);  // the pad was ahead
+            if (intent && extra >= 0 && i == 38) CHECK(e.aheadStats().tracks == 2);  // drums, sig; the pad is held live
+            if (i == 40) {
+                if (intent) CHECK(e.playAheadIntent("pad", Engine::AheadIntent::Edit));
+                CHECK(e.setComponentParam("pad", 2, "threshold", -36.0));
+                CHECK(e.setComponentParam("pad", Engine::kInstrumentIndex, "osc1_unison", 1));
+            }
+            if (intent && i == 50) CHECK(e.playAheadIntent("pad", Engine::AheadIntent::Release));  // the finger lifts
+            if (intent && extra >= 0 && i == 60) CHECK(e.aheadStats().tracks == 2);  // still held by the page
+            if (intent && i == 70) CHECK(e.playAheadIntent("pad", Engine::AheadIntent::Release));  // the page closes
+            e.process(l.data(), r.data(), 1000);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        if (intent && extra >= 0) CHECK(e.aheadStats().tracks == 3);  // released: it goes ahead again (tests: no quiet)
+        return out;
+    };
+    const std::vector<float> live = renderWith(-1, false), ahead = renderWith(3000, true), late = renderWith(3000, false);
+    CHECK(firstDiff(live, ahead) == SIZE_MAX);  // on time, with the live bits
+    CHECK(firstDiff(live, late) != SIZE_MAX);   // without the intent it lands at the ring's end
+}
+
+// The C call (API 50): known layers only, the three intents, nothing for a null engine, layer or unknown intent.
+TEST(play_ahead_intent_c_api) {
+    CHECK_EQ(caw_engine_play_ahead_intent(nullptr, "t", CAW_AHEAD_HOLD), 0);
+    CawEngine* e = caw_engine_create(48000);
+    CHECK(e != nullptr);
+    if (!e) return;
+    char* r = caw_engine_set_project(
+        e, R"({"caw_project":1,"bpm":120,"layers":[{"id":"t","instrument":{"id":"org.caw.test.osc","params":{"level":0.5}}}]})");
+    CHECK(r && std::string(r).find("\"ok\":true") != std::string::npos);
+    caw_free(r);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "t", CAW_AHEAD_HOLD), 1);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "t", CAW_AHEAD_EDIT), 1);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "t", CAW_AHEAD_RELEASE), 1);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "t", CAW_AHEAD_RELEASE), 1);  // one too many: nothing held, still a touch
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "x", CAW_AHEAD_HOLD), 0);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, nullptr, CAW_AHEAD_HOLD), 0);
+    CHECK_EQ(caw_engine_play_ahead_intent(e, "t", 3), 0);
+    caw_engine_destroy(e);
 }

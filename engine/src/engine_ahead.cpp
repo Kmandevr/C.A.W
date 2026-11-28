@@ -236,7 +236,8 @@ void Engine::aheadBegin(int frames) noexcept {
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
         const uint32_t touch = s.aheadTouch.load(std::memory_order_relaxed);
-        if (touch != s.aheadTouchSeen) {
+        // The app's held intent (a finger down, a device page open) keeps it live: a touch every callback.
+        if (touch != s.aheadTouchSeen || s.aheadHeld.load(std::memory_order_relaxed)) {
             s.aheadTouchSeen = touch;
             s.aheadQuiet = 0;
             if (s.ahead >= 0) aheadRequestDrain(a->track(s.ahead), false);  // an edit is intent
@@ -266,7 +267,9 @@ void Engine::aheadBegin(int frames) noexcept {
     int free = 0;
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
-        if (s.ahead >= 0 || s.aheadBanLeft > 0 || s.mode != Slot::Mode::Play || s.aheadQuiet < quiet || !aheadKeep(s)) continue;
+        if (s.ahead >= 0 || s.aheadBanLeft > 0 || s.mode != Slot::Mode::Play || s.aheadQuiet < quiet ||
+            s.aheadHeld.load(std::memory_order_relaxed) || !aheadKeep(s))
+            continue;
         while (free < PlayAhead::kTracks && (a->track(free).state.load(std::memory_order_acquire) != AheadTrack::Free ||
                                              a->track(free).parked > 0))
             ++free;

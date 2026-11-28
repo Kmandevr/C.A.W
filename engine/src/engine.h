@@ -132,6 +132,12 @@ public:
         uint64_t workFrames = 0; // ... for this many frames, summed over the tracks
     };
     AheadStats aheadStats() const noexcept;
+    // The app's intent on a layer (API 50): Hold while a finger is down on one of its controls or its device page is
+    // open (it comes back live, by the drain, and stays live; holds are counted), Release ends one hold (the 3 s quiet
+    // time starts then), Edit is a one-shot touch before an edit. False if there is no such layer. Any thread; play-ahead
+    // on or off (a hold set while off still counts when it is turned on).
+    enum class AheadIntent { Release = 0, Hold = 1, Edit = 2 };
+    bool playAheadIntent(const std::string& layerId, AheadIntent intent);
     // Tests: every Engine made after this renders ahead with no thread: its rings are filled on the callback, each
     // chunk, to `extraFrames` past what the chunk plays (-1: off, as made).
     static void setPlayAheadForTest(int extraFrames) noexcept;
@@ -841,6 +847,7 @@ private:
         std::vector<Route> routes, routesSent;
         int userSends = 0;          // routes[0..userSends) are the project's sends
         std::string routesSig;      // destinations and delays last sent
+        int aheadHolds = 0;         // the app's held intents (playAheadIntent): the slot's aheadHeld while > 0
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
