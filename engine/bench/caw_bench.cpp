@@ -616,7 +616,9 @@ void graphPlanarBench(double secs) {
 // MixPool::defaultWorkers(), the count a live device gets on this machine, speed phase 5d), --mode auto (with
 // --threads N: the pool on Engine::MixParallel::Auto, as a live device runs it, each callback's measured time
 // reported through Engine::reportLoad so Auto decides when to use it; the default, always, is the above),
-// --json PATH and --md PATH (machine-readable results and a markdown table). Each run plays every scenario in turn
+// --json PATH and --md PATH (machine-readable results and a markdown table), --play-ahead on (Engine::setPlayAhead:
+// 4 s untimed after Play so untouched tracks go ahead, then each scenario's ahead_tracks, ahead_underruns and
+// ahead_load on stderr). Each run plays every scenario in turn
 // (a fresh Engine each: set up, 0.25 s stopped to apply the project, then Play); a scenario's result is the median
 // of its runs' means and p99s and the largest worst case of any run. docs/engine-performance.md has the numbers.
 // The scenarios themselves are in engine/src/stress_scenarios.cpp, shared with the app's Benchmark.
@@ -654,7 +656,7 @@ const char* targetName() {
 
 int runSuite(double secs, int argc, char** argv) {
     int frames = 256, runs = 3, threads = 0;
-    bool autoMode = false;
+    bool autoMode = false, playAhead = false;
     std::string only, label = targetName(), jsonPath, mdPath;
     for (int a = 3; a < argc; ++a) {
         const std::string k = argv[a];
@@ -668,6 +670,7 @@ int runSuite(double secs, int argc, char** argv) {
         else if (k == "--label") label = v;
         else if (k == "--json") jsonPath = v;
         else if (k == "--md") mdPath = v;
+        else if (k == "--play-ahead") playAhead = std::string(v) == "on";
         else { std::fprintf(stderr, "unknown option %s\n", k.c_str()); return 2; }
         ++a;
     }
@@ -705,6 +708,7 @@ int runSuite(double secs, int argc, char** argv) {
             } else {
                 e.setMixParallel(Engine::MixParallel::Never);
             }
+            if (playAhead) e.setPlayAhead(true);
             const std::string warn = e.setProject(sc.make(dir));
             if (warn.find("\"ok\":true") == std::string::npos) {
                 std::fprintf(stderr, "%s: setProject: %s\n", sc.id, warn.c_str());
@@ -712,6 +716,10 @@ int runSuite(double secs, int argc, char** argv) {
             }
             for (int c = 0; c < kRate / 4 / frames; ++c) e.process(l.data(), r.data(), frames);  // apply the project
             e.play();
+            // Play-ahead: untouched tracks go ahead after 3 s and a lead; time from 4 s on.
+            if (playAhead)
+                for (int c = 0; c < 4 * kRate / frames; ++c) e.process(l.data(), r.data(), frames);
+            const Engine::AheadStats aheadFrom = e.aheadStats();
             const int calls = static_cast<int>((sc.tail ? kTailSeconds : secs) * kRate / frames);
             std::vector<double> us(static_cast<size_t>(calls));
             std::vector<float> peak(static_cast<size_t>(calls));
@@ -723,6 +731,13 @@ int runSuite(double secs, int argc, char** argv) {
                 float m = 0;
                 for (int i = 0; i < frames; ++i) m = std::max(m, std::max(std::fabs(l[static_cast<size_t>(i)]), std::fabs(r[static_cast<size_t>(i)])));
                 peak[static_cast<size_t>(c)] = m;
+            }
+            if (playAhead) {
+                const Engine::AheadStats st = e.aheadStats();
+                const double rendered = static_cast<double>(st.workFrames - aheadFrom.workFrames) / kRate;
+                std::fprintf(stderr, "%s: ahead_tracks %d ahead_underruns %llu ahead_load %.1f us/s\n", sc.id, st.tracks,
+                             static_cast<unsigned long long>(st.underruns - aheadFrom.underruns),
+                             rendered > 0 ? static_cast<double>(st.workNs - aheadFrom.workNs) / 1000.0 / rendered : 0.0);
             }
             if (autoMode && e.mixTailFallbacks() > 0)  // the pool's late callbacks outnumbered serial's
                 std::fprintf(stderr, "%s: Auto's tail guard went serial %u times\n", sc.id, e.mixTailFallbacks());

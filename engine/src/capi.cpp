@@ -632,6 +632,24 @@ extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
 
 extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }
 
+extern "C" void caw_engine_set_play_ahead(CawEngine* e, int32_t on) try {
+    if (e && e->engine) e->engine->setPlayAhead(on != 0);
+} catch (...) {
+}
+
+extern "C" int32_t caw_engine_play_ahead(CawEngine* e) { return e && e->engine && e->engine->playAhead() ? 1 : 0; }
+
+extern "C" int32_t caw_engine_play_ahead_stats(CawEngine* e, CawAheadStats* out) {
+    if (!e || !e->engine || !out) return 0;
+    const caw::Engine::AheadStats st = e->engine->aheadStats();
+    out->tracks = st.tracks;
+    out->underruns = st.underruns;
+    out->drops = st.drops;
+    out->work_ns = st.workNs;
+    out->work_frames = st.workFrames;
+    return 1;
+}
+
 // ---- Device MIDI (API 15) ----
 
 extern "C" int64_t caw_midi_clock_ns(void) { return caw::Engine::midiClockNs(); }

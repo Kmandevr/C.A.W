@@ -29,6 +29,7 @@ struct RunRequest {
     int quality = 1;          // the engine's quality (0 Eco, 1 Normal, 2 High)
     int rate = 48000;
     std::string workDir;      // an existing folder for typicalSong's WAVs ("" : scenarios that need one fail)
+    bool playAhead = false;   // play-ahead on (Engine::setPlayAhead): untouched tracks render on its own thread
 };
 
 // Read by any thread while the run goes (caw_stress_progress).
@@ -100,6 +101,11 @@ struct RunResult {
     std::string cappedBy;    // ramps: why the engine refused the next count (its component cap or memory), "" none
     std::string audioThreads;  // live: caw_audio_threads' JSON at the timed span's end (the hint, the callback's policy)
     double seconds = 0;      // audio timed
+    // Play-ahead (RunRequest::playAhead): tracks ahead at the end, underruns in the timed span, and the ahead thread's
+    // render time per second of audio it rendered (µs), in the timed span.
+    int32_t aheadTracks = 0;
+    uint64_t aheadUnderruns = 0;
+    double aheadLoadUs = 0;
     std::vector<CostRow> costs;  // profile: sorted by time, the host row among them
     std::vector<PartRow> parts;  // profile (and live: device_io): every part in Part's order, adding up to 100%
 };
@@ -128,6 +134,12 @@ constexpr int kRampCapped = 2;
 // Whether a project the ramp's step could not load was refused by the engine's own budget (its native component
 // cap or a memory budget), which caps the ramp; any other refusal is an error (#234, the audio review).
 bool rampCapRefusal(const std::string& why);
+// Play-ahead's stats over a timed span (from: aheadMark at its start).
+struct AheadMark {
+    uint64_t underruns = 0, workNs = 0, workFrames = 0;
+};
+AheadMark aheadMark(const Engine& e) noexcept;
+void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, int rate) noexcept;
 struct RampOutcome {
     int32_t limit = 0;
     int32_t firstFailed = -1;
