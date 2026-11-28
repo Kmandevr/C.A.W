@@ -119,7 +119,7 @@ void PlayAhead::run() noexcept {
             windowNs = ns;
         }
         // Nothing to do: a short sleep. The callback never wakes this thread (no system call on the audio thread);
-        // a ring has its lead, a depth of 1 s, so 1 ms is far inside it.
+        // a ring has at least its lead (up to 85 ms) and a 300 ms depth, so 1 ms is far inside it.
         if (!did) std::this_thread::sleep_for(milliseconds(active > 0 ? 1 : 5));
     }
     tuning::untuneWorker(tuning);

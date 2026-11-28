@@ -195,6 +195,9 @@ struct Engine::Slot {
     // its inbox) or stops it going ahead.
     std::atomic<uint32_t> aheadTouch{0};
     std::atomic<bool> aheadOwned{false};
+    // The app's held intent (Engine::playAheadIntent): while set, the slot stays live and its quiet time stays 0.
+    // Written on the control thread (its layer's hold count, under ctl_), read by the audio thread.
+    std::atomic<bool> aheadHeld{false};
 };
 
 constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper

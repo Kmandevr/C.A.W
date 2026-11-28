@@ -534,7 +534,8 @@ void Engine::applyCommands() noexcept {
                 }
                 if (!cmds_->pop(c)) break;
                 aheadInbox_[static_cast<size_t>(slotAt(c.slot).ahead) * kAheadInbox + static_cast<size_t>(t.parked++)] = c;
-                aheadRequestDrain(t, false);
+                // A preview (an on-screen key or pad) is a note aimed at the track: back fast, as a device note.
+                aheadRequestDrain(t, c.type == Cmd::Preview);
                 continue;
             }
         }

@@ -157,7 +157,8 @@ class EngineStressJob implements StressJob {
         ..frames = r.frames
         ..threads = 0
         ..quality = r.quality
-        ..workDir = r.workDir == null ? nullptr : dir;
+        ..workDir = r.workDir == null ? nullptr : dir
+        ..playAhead = 1;  // as the app plays (play-ahead on); the result reports ahead_tracks, _underruns, _load
       final handle = NativeEngineWorkPool.shared.submitStressRaw(req);
       if (handle == nullptr) return _RefusedJob();
       return EngineStressJob._(b, handle);

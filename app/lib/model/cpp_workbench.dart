@@ -698,6 +698,7 @@ class CppWorkbench extends ChangeNotifier {
         u.use.params[p.id] = p.defaultValue;
         changed = true;
         final index = engineIndex(u);
+        state.aheadIntent.edit(u.layer?.id);
         if (index != null) state.engine?.setComponentParam(u.layer?.id, index, p.id, p.defaultValue);
       }
     }
@@ -762,6 +763,7 @@ class CppWorkbench extends ChangeNotifier {
   /// Turns a knob on one use: to the audio thread now, into the project on [commit] (the end of a drag).
   void setKnob(CppEffectUse u, String parameterId, double value, {bool commit = false}) {
     final index = engineIndex(u);
+    state.aheadIntent.edit(u.layer?.id);
     if (index != null) state.engine?.setComponentParam(u.layer?.id, index, parameterId, value);
     u.use.params[parameterId] = value;
     if (commit) {

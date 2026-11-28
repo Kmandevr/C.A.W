@@ -36,6 +36,7 @@ import 'knob.dart';
 import 'long_press_menu.dart';
 import 'note_fx_section.dart';
 import '../crow.dart';
+import '../intent_touch.dart';
 
 /// Opens the Build tab for a C++ component (nothing without sections: tests).
 void openSource(BuildContext context, BuildTab tab) => SectionController.maybeOf(context)?.openBuild(tab);
@@ -225,8 +226,9 @@ class _FxStackState extends State<FxStack> {
         'This folder only groups its tracks. Turn its bus on (Mixer) to give it effects of its own.',
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
-    // A frozen track's devices dim and ask to unfreeze when touched (freeze, 1.0.5).
-    return FrozenDevices(state: s, layer: layer, child: DragTarget<AssetDrag>(
+    // A frozen track's devices dim and ask to unfreeze when touched (freeze, 1.0.5). A finger down on its controls
+    // holds the track live in play-ahead.
+    return IntentTouch(intent: s.aheadIntent, layerId: layer.id, child: FrozenDevices(state: s, layer: layer, child: DragTarget<AssetDrag>(
       onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile && d.data.kind != AssetKind.audioFile,
       onAcceptWithDetails: (d) => dropOnTrack(context, s, layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
@@ -247,7 +249,7 @@ class _FxStackState extends State<FxStack> {
           ),
         ),
       ),
-    ));
+    )));
   }
 
   Widget _toolbar(BuildContext context) => SizedBox(height: 40, child: Row(children: [

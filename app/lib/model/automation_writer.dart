@@ -69,6 +69,13 @@ class AutomationWriter extends ChangeNotifier {
   /// True while some control is being written into its lane.
   bool get writing => _segments.isNotEmpty;
 
+  /// Every change it shows also says which tracks are being written: those stay live in play-ahead.
+  @override
+  void notifyListeners() {
+    state.aheadIntent.holdSet(this, {for (final s in _segments.values) ?s.target.layerId});
+    super.notifyListeners();
+  }
+
   final Map<String, _Segment> _segments = {};
 
   /// The (step, value) samples being written into the lane [key] names ([automationKey]) in this take, before they
@@ -450,6 +457,7 @@ class AutomationWriter extends ChangeNotifier {
   void dispose() {
     setArmed(false);
     _idle?.cancel();
+    state.aheadIntent.release(this);
     if (state.onParamMove == _moved) state.onParamMove = null;
     state.removeListener(_onState);
     state.tick.removeListener(_onTick);

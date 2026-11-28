@@ -1162,6 +1162,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
     layers_ = std::move(nextLayers);
+    // Play-ahead: the app's held intents follow their layers (a slot freed or reused here drops its old owner's).
+    for (auto& slot : slotStore_) slot->aheadHeld.store(false, std::memory_order_relaxed);
+    for (const auto& [id, ls] : layers_)
+        if (ls.slot >= 0 && ls.aheadHolds > 0) ctlSlot(ls.slot).aheadHeld.store(true, std::memory_order_relaxed);
 
     // Routes: each layer's sends (in project order, so a send's index stays its index), then the sidechain keys
     // it feeds. updateCompensation sends them with their delays.

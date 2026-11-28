@@ -1,0 +1,2 @@
+### Changed
+- **Heavy songs play smoother:** tracks you aren't touching are prepared ahead on a separate thread, so a song full of big instruments and effects stutters less on a busy phone. A track plays live again before you change it: opening its device or code, putting a finger on its controls, playing it from the keys or pads, arming or monitoring it and writing its automation all bring it back first, and it sounds exactly the same either way.

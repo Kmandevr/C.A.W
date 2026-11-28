@@ -127,7 +127,11 @@ class CppEditorState extends State<CppEditor> {
     _target = _EditorTarget(this);
     w.addListener(_onWorkbench);
     _refreshMarks();
+    _holdUses();
   }
+
+  /// Play-ahead: the editor open holds live every track its component plays on.
+  void _holdUses() => w.state.aheadIntent.holdSet(this, {for (final u in w.uses) ?u.layer?.id});
 
   @override
   void didUpdateWidget(CppEditor oldWidget) {
@@ -141,6 +145,7 @@ class CppEditorState extends State<CppEditor> {
       w.addListener(_onWorkbench);
       _closeCompletion();
       _refreshMarks();
+      _holdUses();
     }
   }
 
@@ -151,6 +156,7 @@ class CppEditorState extends State<CppEditor> {
     }
     _completionTimer?.cancel();
     w.removeListener(_onWorkbench);
+    w.state.aheadIntent.release(this);
     _boundIndicator?.removeListener(_mirrorIndicator);
     _paragraphs.dispose();
     _focus.dispose();
@@ -158,6 +164,7 @@ class CppEditorState extends State<CppEditor> {
   }
 
   void _onWorkbench() {
+    _holdUses();
     _refreshMarks();
     _rebuild();
   }

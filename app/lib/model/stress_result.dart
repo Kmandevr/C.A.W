@@ -64,6 +64,9 @@ class ScenarioResult {
     this.warmupXruns,
     this.deviceSizes = false,
     this.spikes = 0,
+    this.aheadTracks = 0,
+    this.aheadUnderruns = 0,
+    this.aheadLoadUs = 0,
     this.thermalStart = const {},
     this.thermalEnd = const {},
     this.startedAtS,
@@ -133,6 +136,11 @@ class ScenarioResult {
   /// Callbacks over twice the p99: one-off stalls (a preemption, an interrupt), apart from the steady load the p99
   /// describes. Local JSON only.
   final int spikes;
+
+  /// Play-ahead (on, as the app plays): the tracks rendered ahead at the end, the underruns, and the ahead thread's
+  /// microseconds per second of audio (every ahead track together). Local JSON only.
+  final int aheadTracks, aheadUnderruns;
+  final double aheadLoadUs;
 
   /// The platform's thermal status and headroom just before and after this step ({'status', 'headroom'}; empty:
   /// unknown), and when the step started, in seconds from the run's start: how warm the phone was for it. Local only.
@@ -207,6 +215,9 @@ class ScenarioResult {
       warmupXruns: wx >= 0 ? wx : null,
       deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
       spikes: i('spikes'),
+      aheadTracks: i('ahead_tracks'),
+      aheadUnderruns: i('ahead_underruns'),
+      aheadLoadUs: d('ahead_load'),
       thermalStart: thermalStart,
       thermalEnd: thermalEnd,
       startedAtS: startedAtS,
@@ -265,6 +276,9 @@ class ScenarioResult {
             'p99_pct_at_top_clock': _r1(scaledToTopClock(p99Pct)!),
           },
           'spikes': spikes,
+          'ahead_tracks': aheadTracks,
+          'ahead_underruns': aheadUnderruns,
+          'ahead_load': _r1(aheadLoadUs),
           if (thermalStart.isNotEmpty) 'thermal_start': thermalStart,
           if (thermalEnd.isNotEmpty) 'thermal_end': thermalEnd,
           if (startedAtS != null) 'started_at_s': _r1(startedAtS!),

@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 49;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
+const int cawApiVersion = 50;  // must equal CAW_API_VERSION in engine/include/caw.h (checked by scripts/number-lists.js and a test)
 
 /// caw_engine_load_component_ex and caw_engine_scan_component flags (caw.h, API 37).
 const int cawLoadLegacyGrace = 1;
@@ -150,6 +150,8 @@ final class CawStressRequestStruct extends Struct {
   @Int32()
   external int quality;
   external Pointer<Utf8> workDir;
+  @Int32()
+  external int playAhead;  // API 49
 }
 
 /// CawComponentBenchRequest (API 30, #197): one plug-in benchmark (caw_worker_pool_submit_component_bench).
@@ -315,6 +317,10 @@ class Bindings {
             'caw_engine_components'),
         setComponentParam = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Utf8>, Double),
             int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double)>('caw_engine_set_component_param'),
+        setPlayAhead = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+            'caw_engine_set_play_ahead'),
+        playAheadIntent = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32),
+            int Function(Pointer<Void>, Pointer<Utf8>, int)>('caw_engine_play_ahead_intent'),
         setSend = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Double, Int32, Int32),
             int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int)>('caw_engine_set_send'),
         setComponentBypass = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Int32),
@@ -638,6 +644,9 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final Pointer<Utf8> Function(Pointer<Void>) components;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double) setComponentParam;
+  /// caw_engine_set_play_ahead (API 49) and caw_engine_play_ahead_intent (API 50, CAW_AHEAD_RELEASE/HOLD/EDIT).
+  final void Function(Pointer<Void>, int) setPlayAhead;
+  final int Function(Pointer<Void>, Pointer<Utf8>, int) playAheadIntent;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, double, int, int) setSend;
   final int Function(Pointer<Void>, Pointer<Utf8>, int, int) setComponentBypass;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) componentStates;
