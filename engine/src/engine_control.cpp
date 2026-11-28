@@ -5,6 +5,37 @@ namespace caw {
 
 // ===================== control thread =====================
 
+// Play-ahead: an edit is intent. It marks the layer's slot touched (so it does not go ahead), and if the slot is
+// ahead now the edit travels as a command parked in its inbox until the ring's end: -1 not ahead (apply it here),
+// 1 sent, 0 the queue was full. Under ctl_.
+int Engine::aheadEdit(const std::string& layerId, ComponentChain* chain, uint32_t at, int kind, int param, double value,
+                      bool flag, const std::string& paramId) {
+    if (layerId.empty() || !ahead_ || !ctlTable_) return -1;
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0 || it->second.slot >= ctlTable_->capacity) return -1;
+    Slot& s = *ctlTable_->slots[it->second.slot];
+    s.aheadTouch.fetch_add(1, std::memory_order_seq_cst);
+    if (!s.aheadOwned.load(std::memory_order_seq_cst)) return -1;
+    // A bypass or an auto-gain switch goes the direct way (an atomic the renderer reads at its next chunk, so it lands
+    // within a chunk of the ring's end, and reads back at once); the touch sends the track live.
+    if (kind != 0) return -1;
+    // What the direct call would refuse is refused here too (a merged device's variant goes the direct way: a new
+    // one is a rebuild there, never a value).
+    if (at >= chain->size() || (kind == 2 && !chain->effects())) return 0;
+    if (kind == 0 && (param < 0 || !std::isfinite(value))) return 0;
+    if (kind == 0 && paramId == fx::kVariantParam) return -1;
+    Cmd c;
+    c.type = Cmd::SetValue;
+    c.slot = it->second.slot;
+    c.valueChain = chain;
+    c.order = static_cast<int>(at);
+    c.valueKind = kind;
+    c.param = param;
+    c.master = value;
+    c.flag = flag;
+    return send(c) ? 1 : 0;
+}
+
 bool Engine::setSend(const std::string& layerId, uint32_t index, double level, bool pre, bool mute) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = layers_.find(layerId);
@@ -33,6 +64,8 @@ bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const
         return noteFx_->setParam(layerId, index & ~kNoteComponentFlag, param, value);
     ComponentChain* chain = ctlComponentChain(layerId, index);
     if (!chain) return false;
+    if (int parked = aheadEdit(layerId, chain, index, 0, chain->parameterIndexOf(index, param), value, false, param); parked >= 0)
+        return parked > 0;
     const uint64_t before = chain->latencyFrames();
     if (!chain->setValue(index, param, value)) return false;
     if (chain->latencyFrames() != before) {  // a look-ahead turned on or off: everything else moves to stay in time
@@ -51,7 +84,15 @@ bool Engine::setComponentBypass(const std::string& layerId, uint32_t index, bool
         return true;
     }
     ComponentChain* chain = ctlComponentChain(layerId, index);
-    if (!chain || !chain->setBypass(index, bypass)) return false;
+    if (!chain) return false;
+    if (int parked = aheadEdit(layerId, chain, index, 1, -1, 0.0, bypass, std::string()); parked > 0) {
+        std::map<std::string, std::vector<std::string>> warnings;
+        updateCompensation(warnings);
+        return true;
+    } else if (parked == 0) {
+        return false;
+    }
+    if (!chain->setBypass(index, bypass)) return false;
     std::map<std::string, std::vector<std::string>> warnings;
     updateCompensation(warnings);  // a bypassed effect adds no latency
     return true;
@@ -142,7 +183,9 @@ bool Engine::setComponentAutoGain(const std::string& layerId, uint32_t index, bo
     std::lock_guard<std::mutex> lock(ctl_);
     if (index == kInstrumentIndex || (index & kNoteComponentFlag)) return false;
     ComponentChain* chain = ctlComponentChain(layerId, index);
-    return chain && chain->setAutoGain(index, on);
+    if (!chain) return false;
+    if (int parked = aheadEdit(layerId, chain, index, 2, -1, 0.0, on, std::string()); parked >= 0) return parked > 0;
+    return chain->setAutoGain(index, on);
 }
 
 int32_t Engine::componentAutoGain(const std::string& layerId, uint32_t index, float& db) {

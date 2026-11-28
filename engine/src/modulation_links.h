@@ -135,6 +135,9 @@ public:
     const float* send(int slot, int index) const noexcept;
     // Whether anything listens to `slot` (cheap: call before tapping).
     bool listens(int slot) const noexcept;
+    // Whether the plan modulates a parameter of `slot`'s instrument, inserts or per-note FX (play-ahead: such a
+    // track stays live, its modulation runs once a chunk with every target).
+    bool modulatesChains(int slot) const noexcept;
     // What a layer played this chunk: its audio after its effects (pre) and after volume and pan (post).
     void tapAudio(int slot, const float* preL, const float* preR, const float* postL, const float* postR,
                   uint32_t m) noexcept;

@@ -960,6 +960,18 @@ const float* ModulationHost::send(int slot, int index) const noexcept {
     return mixOffset(cur_, slot, ModulationPlan::Type::Send, index);
 }
 
+bool ModulationHost::modulatesChains(int slot) const noexcept {
+    if (!cur_ || cur_->chainDests.empty()) return false;
+    const ModulationPlan& p = *cur_;
+    if (slot < 0 || static_cast<size_t>(slot) >= p.slotOut.size() || p.slotOut[static_cast<size_t>(slot)] < 0) return false;
+    const ModulationPlan::ChainOut& o = p.chainOuts[static_cast<size_t>(p.slotOut[static_cast<size_t>(slot)])];
+    for (uint32_t di : o.dests) {
+        const ModChainKind k = p.dests[di].kind;
+        if (k == ModChainKind::Instrument || k == ModChainKind::Inserts || k == ModChainKind::NoteFx) return true;
+    }
+    return false;
+}
+
 bool ModulationHost::listens(int slot) const noexcept {
     if (!cur_) return false;
     for (const ModulationRuntime::Input& in : cur_->rt->inputs)

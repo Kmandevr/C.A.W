@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "audio_clips.h"
+#include "audio_input.h"
 #include "builtin_fx_racks.h"
 #include "fx_merged.h"
 #include "json.h"
@@ -354,6 +355,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
             return nullptr;
         }
+        chain->liveInput_ = chain->liveInput_ || dynamic_cast<const LiveInputUser*>(e->processor.get()) != nullptr;
         if (midiEffect) {
             if (!e->processor->usesProcessPorts()) {
                 error = "native component " + quoted(spec.id) + " has event ports but does not process ports";
@@ -517,6 +519,17 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
         return false;
     e.held[k].store(toBits(v), std::memory_order_relaxed);
     e.touches[k].fetch_add(1, std::memory_order_release);  // after the value: the audio thread reads it after this
+    e.generation.fetch_add(1, std::memory_order_release);
+    return true;
+}
+
+bool ComponentChain::setValueAt(std::size_t index, int parameter, double value) noexcept {
+    if (index >= entries_.size() || !std::isfinite(value)) return false;
+    Entry& e = *entries_[index];
+    if (parameter < 0 || static_cast<std::size_t>(parameter) >= e.processor->descriptor().parameterCount) return false;
+    const double v = constrainParameter(e.processor->descriptor().parameters[parameter], value);
+    e.held[parameter].store(toBits(v), std::memory_order_relaxed);
+    e.touches[parameter].fetch_add(1, std::memory_order_release);
     e.generation.fetch_add(1, std::memory_order_release);
     return true;
 }

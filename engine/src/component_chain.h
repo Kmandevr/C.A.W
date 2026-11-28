@@ -237,6 +237,8 @@ public:
     // Whether it holds a third-party native component (one loaded from a library, not a built-in): the mixer runs
     // its node in a serial lane, on the callback thread (speed phase 5c, docs/decisions.md).
     bool foreign() const noexcept { return foreign_; }
+    bool liveInput() const noexcept { return liveInput_; }  // plays the device input (an audio track: LiveInputUser)
+    bool effects() const noexcept { return effectChain(); }
     // Audio thread: an audio track monitoring its input wants to run while the transport is stopped.
     bool monitorsStopped() const noexcept;
     // The instrument's notes and this block's events (null for an effect chain). Audio thread.
@@ -253,6 +255,8 @@ public:
     // Control thread: a knob move. It overrides the parameter's automation lane until the next Play.
     // False for an index or parameter id the chain does not have, or a non-finite value.
     bool setValue(std::size_t index, const std::string& parameterId, double value) noexcept;
+    // As setValue, by the parameter's index (parameterIndexOf): any thread, atomics only (play-ahead's parked edits).
+    bool setValueAt(std::size_t index, int parameter, double value) noexcept;
     bool setBypass(std::size_t index, bool bypass) noexcept;
     // Per-slot auto gain (1.0.8, auto_gain.h): a trim after component `index` matching its output's short-term
     // loudness to its input's, applied before its bypass crossfade (so a bypassed slot plays its input untrimmed).
@@ -410,6 +414,7 @@ private:
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
     bool noteFx_ = false;       // built by buildNoteEffects
     bool foreign_ = false;      // holds a loaded (third-party) component
+    bool liveInput_ = false;    // holds a component that plays the device input (play-ahead keeps its track live)
     const VoiceBus* voices_ = nullptr;   // audio thread: an instrument's voice bus for the next process()
     const Event* noteEvents_ = nullptr;  // audio thread: per-note FX events for the next process()
     uint32_t noteEventCount_ = 0;

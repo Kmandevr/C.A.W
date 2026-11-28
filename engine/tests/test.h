@@ -22,6 +22,7 @@ extern bool updateGolden;  // --update-references: re-record the reference rende
 // --mix-threads N: every Engine the tests make runs its mix graph with a pool of N workers (0: on one thread).
 // Set by the binary that links the engine (mix_pool_test.cpp); null in the others, which then refuse the flag.
 extern void (*mixThreadsHook)(int workers);
+extern void (*playAheadHook)(int extraFrames);  // --play-ahead N (play-ahead tests)
 
 struct Reg {
     Reg(const char* n, std::function<void()> f) { cases().push_back({n, std::move(f)}); }

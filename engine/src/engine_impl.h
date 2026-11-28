@@ -166,7 +166,8 @@ struct Engine::Slot {
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
     // boundary of a playing track, so one plan covers the whole chunk.
-    enum class Mode : uint8_t { Idle, Bus, Silent, Play };
+    // Ahead: the track plays from its play-ahead ring (planAhead): only its mix (fader on) runs here.
+    enum class Mode : uint8_t { Idle, Bus, Silent, Play, Ahead };
     Mode mode = Mode::Idle;
     double target = 0;          // mix target (0 while muted or soloed out)
     int64_t n0 = 0, repeat = 0; // sample in the layer's loop, and the pattern repeat
@@ -181,6 +182,18 @@ struct Engine::Slot {
     int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
     int64_t previewTail = 0;    // samples since its last preview voice ended
     int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
+    // Play-ahead (play_ahead.h). Audio thread: the AheadTrack rendering it (-1: live); live for good after an
+    // underrun (until installed again); the frames of a fade back in; frames since the last edit or note aimed at it.
+    int ahead = -1;
+    bool aheadBanned = false;
+    int aheadFadeIn = 0, aheadFadeLen = 0;
+    int64_t aheadQuiet = 0;
+    uint32_t aheadTouchSeen = 0;
+    // A value edit on the control thread bumps aheadTouch and then reads aheadOwned; the audio thread sets aheadOwned
+    // and then reads aheadTouch (both sequentially consistent), so an edit either sees the track ahead (and goes to
+    // its inbox) or stops it going ahead.
+    std::atomic<uint32_t> aheadTouch{0};
+    std::atomic<bool> aheadOwned{false};
 };
 
 constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper
@@ -309,7 +322,11 @@ static_assert(VcaTable::kFrames == kBlock, "VCA groups work out a chunk's gains 
 
 struct Engine::Cmd {
     // Install: the slot becomes a track (steps, order); its instrument and inserts come by their own commands.
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, SetMidiOut, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches, SetVca } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetSong, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, SetMidiOut, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches, SetVca, SetValue } type = Play;
+    // SetValue (play-ahead): component `order` of chain `valueChain` (the slot's) gets parameter `param` = `master`
+    // (valueKind 0), its bypass (1) or its auto gain (2) = `flag`, once the slot's ahead ring has played out.
+    int valueKind = 0, param = -1;
+    ComponentChain* valueChain = nullptr;  // not owned: the chain the slot holds when it applies
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
