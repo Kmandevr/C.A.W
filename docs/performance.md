@@ -200,7 +200,7 @@ The owner (2026-11-27): the DAW is too heavy (every_effect 327 % worst on the S2
 - **Resonator:** the 24-mode bank (three `detPow` a mode) is not rebuilt while the knobs hold still and the pitch is where the bank was built.
 - **Vocoder:** the unison ratios and each voice's pitch only when they change.
 - **Trance gate:** the step's place in the pattern (two integer divisions) only when the step changes; its decay and release coefficients only when a time moves; `floor` as above.
-- **Chorus/Flanger · Chorus:** silence into a line that holds only zeros moves only the sweep and the write position (`lib::Chorus::stepSilent`): the same state and output bits, without the reads. It still runs (it never reported quiet, and sleeping would freeze its LFO, a change of sound after the gap).
+- **Chorus/Flanger · Chorus:** not changed. A silent-input shortcut (moving only the sweep and write position) was dropped on 2026-11-28: under the fast-math flags clang-cl orders the sweep's additions differently in the shortcut and in `step()`, so the bits after a silence depended on the block size (Windows CI).
 - **Drive · Distortion:** clip, fold and crush read their knobs once a block when none ramps (drive already did).
 - **Oversampler (`lib::Oversampler2x`, Rook, Kestrel, the drives, filters, ring mod):** the per-sample path's stage count as a template (unrolled, the same arithmetic).
 - **Rook:** the kit effects read the quality once a chunk instead of twice a frame.

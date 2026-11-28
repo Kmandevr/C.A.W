@@ -142,21 +142,6 @@ public:
         r = static_cast<float>(inR + (dr - inR) * mix);
     }
 
-    // `frames` step()s of +0 input through a line that holds only +0 (it was given at least lineFrames() of them):
-    // what step() does to the state, without its reads (each output would be +0). For a host that keeps a silent
-    // chorus cheap without changing a bit of what it plays next.
-    void stepSilent(uint32_t frames) noexcept {
-        const size_t n = left_.size();
-        if (n < 3) return;
-        for (uint32_t i = 0; i < frames; ++i) {
-            delayL_ += stepL_;
-            delayR_ += stepR_;
-            pos_ = pos_ + 1 == n ? 0 : pos_ + 1;
-        }
-    }
-    // Frames of the delay line (after that many frames of silence it holds only zeros).
-    size_t lineFrames() const noexcept { return left_.size(); }
-
 private:
     double read(const std::vector<float>& line, double samplesBack) const noexcept {
         const size_t n = line.size();
