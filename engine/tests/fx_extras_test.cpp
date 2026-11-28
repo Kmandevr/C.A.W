@@ -496,3 +496,34 @@ TEST(c_api_component_cost_fills_only_the_size_the_caller_gives) {
     CHECK_EQ(caw_engine_component_cost(nullptr, "t", 0, &c), -1);
     caw_engine_destroy(e);
 }
+
+// The 2026-11-27 effects pass keeps designs while the knobs hold still: an instance activated again at another rate
+// must work them out for the new rate (the same bits as a fresh instance there).
+TEST(effects_activated_again_at_another_rate_render_as_a_fresh_instance_there) {
+    const std::pair<const char*, Values> cases[] = {
+        {"org.caw.multiband", {}},
+        {"org.caw.multiband", {{"mode", 0}}},
+        {"org.caw.resonator", {}},
+        {"org.caw.limiter", {{"gain", 12}}},
+        {"org.caw.tremolo", {{"variant", 2}}},
+        {"org.caw.trancegate", {}},
+        {"org.caw.phaser", {}},
+        {"org.caw.utility", {{"variant", 3}}},
+        {"org.caw.chorus", {{"variant", 0}}},
+        {"org.caw.eq", {{"b2_gain", 6}, {"b5_gain", -4}}},
+    };
+    const Stereo in = music(48000);
+    for (const auto& [id, values] : cases) {
+        auto p = make(id, values, 48000);
+        if (!p) continue;
+        (void)run(*p, in, values, 256, 48000);
+        CHECK(p->activate(96000, 512));
+        const Stereo again = run(*p, in, values, 256, 96000);
+        auto fresh = make(id, values, 96000);
+        if (!fresh) continue;
+        const Stereo want = run(*fresh, in, values, 256, 96000);
+        if (std::memcmp(want.l.data(), again.l.data(), want.l.size() * 4) != 0 ||
+            std::memcmp(want.r.data(), again.r.data(), want.r.size() * 4) != 0)
+            cawtest::fail(__FILE__, __LINE__, std::string(id) + ": activated again at 96 kHz differs from a fresh instance");
+    }
+}
