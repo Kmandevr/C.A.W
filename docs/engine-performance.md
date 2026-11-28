@@ -1,6 +1,6 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A6).
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A8).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
 updated: 2026-11-27
 ---
@@ -561,3 +561,7 @@ The Benchmark's profile runs split `Engine::process` by engine part ([engine](en
 What it says: instruments and effects are where a real song's time goes (four fifths and more); the engine's own work shows only in projects built to stress it. A track's fader moved per sample (project modulation of volume) makes `mix` the largest part of `modulation_dense`, since the fader then runs its per-sample path; the meters (peaks, scopes, correlation) are the next largest engine part in small projects. These are this VM's shares, not a phone's.
 
 Per-device costs and ceilings are in [engine](engine.md) and [performance](performance.md) (Timber's Simulated piano added 2026-11-20).
+
+### A8. Effects pass (2026-11-27)
+
+Every built-in effect and Rook's effect path made cheaper without changing their bits on x86-64 (one class-B change in the EQ, below −379 dBFS), in two-lane vectors where a stereo pair's channels run the same arithmetic (`engine/src/simd_fx.h`). Medusa unfrozen: the effects' time −28 % per callback, the callback's mean −11 %; frozen −17 % and −11 %; instructions inside `Engine::process` −9.0 % and −8.1 %, every_effect −2.5 %, song8 −2.6 %. The changes, the null depths (x86-64 and Arm64 at 44.1, 48 and 96 kHz), the per-effect table and the new ceilings (`caw_bench 0.5 324`) are in [performance](performance.md#effects-pass-2026-11-27).
