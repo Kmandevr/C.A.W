@@ -13,4 +13,8 @@ void registerFlagshipSynth(ModuleRegistry& registry);
 // The index of Flagship's parameter `id` (a mod slot's destination is this + 1), or -1.
 int flagshipParameterIndex(std::string_view id) noexcept;
 
+// Tests only: whether a released voice may end at -96 dB (the default) or only at its envelope's own end, -120 dB
+// (render.inc, endTail), for the tests that need the voices' sum to be exactly each voice's.
+void setFlagshipTailEndForTest(bool on) noexcept;
+
 }  // namespace caw

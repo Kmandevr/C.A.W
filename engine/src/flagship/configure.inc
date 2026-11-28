@@ -357,6 +357,9 @@
             eqL_.set(low, mid, high, freq, sr_);
             eqR_.set(low, mid, high, freq, sr_);
             eqMix_ = clampd(g(kEqMix), 0.0, 1.0);
+            // The most its three bands can raise anything (their boosts in dB added): for the tail end (endTail).
+            const double boost = std::max(0.0, finiteOr0(low)) + std::max(0.0, finiteOr0(mid)) + std::max(0.0, finiteOr0(high));
+            eqBoost_ = detExp(boost * (2.302585092994046 / 20.0));
         }
         if (chorus) chorusMix_ = clampd(g(kChorusMix), 0.0, 1.0);  // its sweep moves on in control(), every period
         if (delay) {
@@ -376,7 +379,9 @@
             s.mix = g(kReverbMix);
             const lib::ReverbSettings& was = reverb_.settings();
             if (s.size != was.size || s.decay != was.decay || s.damping != was.damping || s.mix != was.mix) reverb_.set(s);
+            reverbMix_ = clampd(s.mix, 0.0, 1.0);
         }
+        tailRaise_ = raiseOfEffects();
     }
 
     // The delay and reverb hold seconds of memory (a 4 s delay line is 1.5 MB): a clear (every Play, every rest)

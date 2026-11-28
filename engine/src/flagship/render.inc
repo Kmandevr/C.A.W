@@ -95,6 +95,7 @@
                     sharedR_[i] += f1R[i] * amp[i];
                 }
                 sharedUsed_ = true;
+                if (v.env[0].releasing()) v.tailPeak = std::max(v.tailPeak, tailPeak(f1L, f1R, amp, n));
                 if (!v.env[0].active()) v.active = false;
                 return false;
             }
@@ -109,6 +110,62 @@
             if (centred) w.kind = VoiceWork::kMono;
         }
         return true;
+    }
+
+    // A released voice ends once it is 96 dB down, not at the envelope's own -120 dB (owner, 2026-11-28: a long
+    // release lives 1.6 times its time, not 2), and only while what that leaves out stays under -96 dBFS at the
+    // instrument's output. tailGain is the most the releasing voice has given per unit of envelope (a period's peak,
+    // tailPeak, over the envelope's level at its end), so level x tailGain bounds what it would still give, and its
+    // tail falls with the release from there. tailDebt_ is the sum of those bounds for the voices ended early,
+    // falling with the slowest of their releases (tailCoef_ a frame), times the most the shared stage can raise a
+    // quiet signal (tailRaise_: the distortion's slope at 0, the EQ's boosts, the delay's feedback, the chorus and
+    // the reverb added to the dry signal). A voice ends early only while the debt with it stays within kTailEnd, so
+    // the whole difference stays below -96 dBFS (docs/engine-performance.md, A10). Decided in settle(), at each
+    // period's end, so the same frames whatever the block sizes. Not for a mono voice: its next note goes on from
+    // the tail it is in (monoOn), so ending it early would restart the oscillators.
+    static constexpr double kTailEnd = 1.5848931924611134e-5;  // -96 dB
+    static float tailPeak(const float* L, const float* R, const float* amp, uint32_t n) noexcept {
+        float m = 0.0f;
+        for (uint32_t i = 0; i < n; ++i) m = std::max(m, std::max(std::fabs(L[i]), std::fabs(R[i])) * amp[i]);
+        return m;
+    }
+    // Whether the releasing voice v ends now (its envelope cleared).
+    bool endTail(Voice& v) noexcept {
+        const double level = v.env[0].level();
+        const float peak = v.tailPeak;
+        v.tailPeak = 0.0f;
+        if (!(level > 0.0)) return false;
+        v.tailGain = std::max(v.tailGain, static_cast<double>(peak) / level);
+        if (level >= kTailEnd) return false;
+        const double left = level * v.tailGain * tailRaise_;
+        if (tailDebt_ + left > kTailEnd) return false;
+        tailDebt_ += left;
+        tailCoef_ = std::max(tailCoef_, v.env[0].releaseCoefficient());
+        v.env[0].clear();
+        return true;
+    }
+    // The early-ended tails' bound n frames on.
+    void decayTailDebt(uint32_t n) noexcept {
+        if (tailDebt_ == 0.0) return;
+        double c = tailCoef_, r = 1.0;
+        for (; n > 0; n >>= 1, c *= c)
+            if (n & 1) r *= c;
+        tailDebt_ *= r;
+        if (tailDebt_ < 1e-12) tailDebt_ = 0.0, tailCoef_ = 0.0;
+    }
+    // tailRaise_ from the shared stage's settings (configureEffects).
+    double raiseOfEffects() const noexcept {
+        double g = 1.0;
+        if (distOn_) {
+            const double d = distDrive_;
+            const double slope = distType_ == 0 ? d / detTanh(d) : distType_ == 1 ? d : distType_ == 2 ? 1.5707963267948966 * d : 1.0;
+            g *= 1.0 + distMix_ * std::fabs(slope - 1.0);
+        }
+        if (eqOn_) g *= 1.0 + eqMix_ * (eqBoost_ - 1.0);
+        if (chorusOn_) g *= 1.0 + chorusMix_;
+        if (delayOn_) g *= 1.0 + delayMix_ / (1.0 - delayFeedback_);
+        if (reverbOn_) g *= 1.0 + reverbMix_;
+        return g;
     }
 
     // The level ramp times envelope 1 over the piece.
@@ -147,6 +204,7 @@
                     w.outL[k] += y;
                     w.outR[k] += y;
                 }
+                if (v.env[0].releasing()) v.tailPeak = std::max(v.tailPeak, tailPeak(w.f1L, w.f1L, amp, n));
             } else {
                 // The voice's output: filter 1's, through or beside filter 2's, plus the bypass.
                 const bool through = w.second && !v.parallel;
@@ -158,6 +216,7 @@
                     w.outL[k] += yL[k] * amp[k];
                     w.outR[k] += yR[k] * amp[k];
                 }
+                if (v.env[0].releasing()) v.tailPeak = std::max(v.tailPeak, tailPeak(yL, yR, amp, n));
             }
             if (!v.env[0].active()) v.active = false;
         }

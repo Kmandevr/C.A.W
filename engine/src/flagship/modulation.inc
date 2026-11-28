@@ -42,6 +42,12 @@
             if (uses(kSrcRandom)) v.random.advance(static_cast<int>(n));
             v.gain0 += (v.gain1 - v.gain0) * done;
         });
+        // The released tails' end (render.inc, endTail): the debt falls over the frames, then each voice is decided.
+        decayTailDebt(n);
+        if (gTailEnd.load(std::memory_order_relaxed))
+            voices_.forEachActive([&](Voice& v) noexcept {  // (it drops a voice ended here from the pool's list)
+                if (!v.mono && v.env[0].releasing() && endTail(v)) v.active = false;
+            });
         for (lib::Lfo& l : lfo_) l.advance(static_cast<int>(n));
         volume0_ += (volume1_ - volume0_) * done;
         delayTime0_ += (delayTime1_ - delayTime0_) * done;

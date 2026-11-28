@@ -18,6 +18,7 @@
 #include "caw/library/unison.hpp"
 #include "caw/library/wavetable.hpp"
 #include "analysis.h"
+#include "builtin_flagship.h"
 #include "filter_pairs.h"
 #include "presets.h"
 #include "simd4.h"
@@ -753,6 +754,12 @@ TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {
     // period after a reset and restarts its ramp at each note-on: a primer voice (filter off) starts at frame 0 in
     // every run and the notes from frame 40, when the volume has settled. The reference is each note played with
     // only the primer, less the primer's share: by the tolerance tests' null (below -120 dBFS; rounding only).
+    // A released voice ends here only at its envelope's end: the -96 dB tail end weighs each voice's tail against
+    // the others' (the next test), so with it the sum is each voice's only to -96 dBFS.
+    setFlagshipTailEndForTest(false);
+    struct Restore {
+        ~Restore() { setFlagshipTailEndForTest(true); }
+    } restore;
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e);
     if (!p) return;
@@ -816,6 +823,56 @@ TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {
     bool silent = true;
     for (uint32_t i = frames - 600; i < frames; ++i) silent = silent && now.l[i] == 0.0f && now.r[i] == 0.0f;
     CHECK(silent);
+}
+
+TEST(the_flagship_ends_released_tails_at_minus_96_db_with_what_it_leaves_out_below_minus_96_dbfs) {
+    // The tail end (2026-11-28, owner): each render against the same with voices ending only at their envelopes'
+    // -120 dB. The difference stays below -96 dBFS (the tails' bound, endTail): 24 loud voices (three 16-copy
+    // stacks, a resonant driven ladder, a driven distortion) released together, so their tails would all end at
+    // once; and four plain voices released half a second apart, whose voices end sooner (exactly 0 earlier).
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    const auto run = [&](const Values& patch, const std::vector<Event>& ev, uint32_t frames, double& db, uint32_t& lastEarly,
+                         uint32_t& lastFull) {
+        p->reset();
+        const Stereo early = play(*p, ev, frames, patch);
+        setFlagshipTailEndForTest(false);
+        p->reset();
+        const Stereo full = play(*p, ev, frames, patch);
+        setFlagshipTailEndForTest(true);
+        double worst = 0.0;
+        lastEarly = lastFull = 0;
+        for (uint32_t i = 0; i < frames; ++i) {
+            worst = std::max({worst, std::fabs(static_cast<double>(early.left[i]) - full.left[i]),
+                              std::fabs(static_cast<double>(early.right[i]) - full.right[i])});
+            if (early.left[i] != 0.0f || early.right[i] != 0.0f) lastEarly = i;
+            if (full.left[i] != 0.0f || full.right[i] != 0.0f) lastFull = i;
+        }
+        db = worst > 0.0 ? 20.0 * std::log10(worst) : -400.0;
+        return analysis::levels(full.left.data(), frames).peak;
+    };
+    const Values loud = {{"osc1_unison", 16}, {"osc1_level", 1}, {"osc2_on", 1}, {"osc2_unison", 16}, {"osc2_level", 1},
+                         {"osc3_on", 1}, {"osc3_unison", 16}, {"osc3_level", 1}, {"flt1_resonance", 0.9}, {"flt1_drive", 4},
+                         {"fx_dist_on", 1}, {"fx_dist_drive", 3}, {"env1_release", 2.0}, {"volume", 1.0}};
+    std::vector<Event> ev;
+    for (uint32_t i = 0; i < 24; ++i) ev.push_back(notes::noteOn(i * 97, i + 1, static_cast<uint8_t>(36 + 2 * i), 1.0));
+    for (uint32_t i = 0; i < 24; ++i) ev.push_back(notes::noteOff(24000 + i * 31, i + 1, static_cast<uint8_t>(36 + 2 * i)));
+    std::stable_sort(ev.begin(), ev.end(), [](const Event& a, const Event& b) { return a.frame < b.frame; });
+    double db = 0.0;
+    uint32_t lastEarly = 0, lastFull = 0;
+    CHECK(run(loud, ev, 48000 * 11 / 2, db, lastEarly, lastFull) > 1.0);  // louder than full scale
+    if (!(db < -96.0)) cawtest::fail(__FILE__, __LINE__, "24 loud voices: " + std::to_string(db) + " dBFS from the full tails");
+    CHECK(lastEarly <= lastFull);
+    ev.clear();
+    for (uint32_t i = 0; i < 4; ++i) {
+        ev.push_back(notes::noteOn(i * 24000, i + 1, static_cast<uint8_t>(48 + 4 * i), 1.0));
+        ev.push_back(notes::noteOff(i * 24000 + 12000, i + 1, static_cast<uint8_t>(48 + 4 * i)));
+    }
+    run({{"env1_release", 2.0}}, ev, 48000 * 6, db, lastEarly, lastFull);
+    if (!(db < -96.0)) cawtest::fail(__FILE__, __LINE__, "four voices: " + std::to_string(db) + " dBFS from the full tails");
+    CHECK(db > -200.0);  // it did end them early
+    CHECK(lastEarly + 24000 < lastFull);  // half a second sooner (of 0.8 s: -96 dB of a 2 s release is at 3.2 s, -120 at 4)
 }
 
 TEST(the_flagship_falls_silent_after_release_and_says_so) {
