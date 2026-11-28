@@ -71,6 +71,8 @@ std::string resultJson(const Job& j) {
                     ",\"core_khz_start\":" + std::to_string(r.khzStart) + ",\"core_khz_end\":" + std::to_string(r.khzEnd) +
                     ",\"core_max_khz\":" + std::to_string(r.maxKHz) + ",\"mix_workers\":" + std::to_string(r.mixWorkers) +
                     ",\"mix_active_workers\":" + std::to_string(r.mixActive) +
+                    // The timed callbacks that ran a level on the pool (Auto on, and a level with two busy nodes).
+                    ",\"mix_pooled_pct\":" + num(r.mixPooledPct) +
                     ",\"warmup_xruns\":" + std::to_string(live ? j.warmupXruns : -1) +
                     // Live: the device called back with its own sizes, not the size asked (AAudio given none, or
                     // Android 11 and older, where a size never reaches the stream): a 1024 run is then not 1024.
@@ -176,6 +178,7 @@ RunResult runLive(Job& j) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     const int32_t xrunsFrom = cawAudioXruns(e);
     const int64_t from = meter->written.load(std::memory_order_acquire);
+    const uint64_t pooledFrom = e->engine->mixPooledCallbacks();
     int64_t usedFrom = meter->usedNs.load(std::memory_order_relaxed), budgetFrom = meter->budgetNs.load(std::memory_order_relaxed);
     const int64_t overFrom = meter->overBudget.load(std::memory_order_relaxed);
     const int64_t budgetStart = budgetFrom, framesStart = meter->framesSum.load(std::memory_order_relaxed);
@@ -257,6 +260,10 @@ RunResult runLive(Job& j) {
     }
     out.mixWorkers = e->engine->mixWorkers();
     out.mixActive = e->engine->mixActiveWorkers();
+    {
+        const int64_t timed = meter->written.load(std::memory_order_acquire) - from;
+        out.mixPooledPct = timed > 0 ? 100.0 * static_cast<double>(e->engine->mixPooledCallbacks() - pooledFrom) / static_cast<double>(timed) : 0.0;
+    }
     // Live: the callback's scheduling and the performance hint as they were at the timed span's end (#234).
     out.audioThreads = e->engine->audioThreadsJson();
     caw_audio_stop(e);  // the callback has stopped once this returns

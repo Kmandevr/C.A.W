@@ -186,6 +186,53 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
     return rel.us();
 }
 
+// `caw_bench SECONDS 324`: the effects the 2026-11-27 effects pass made faster (docs/performance.md), each against
+// a ceiling about 1.4 times its figure after the pass (x86-64, this machine's runs, µs per second of audio against
+// the reference workload), so a regression of the pass fails CI. The number of cases over their ceiling.
+// Linux x64's ceilings are measured; Arm64's and Windows clang-cl's are provisional until a CI run on that runner
+// measures them (their paths differ: Arm64 fuses and converts in NEON, clang-cl runs Pair as a scalar struct): about
+// 2.5 times Linux x64's figure, to be tightened from each runner's first run (docs/engine-performance.md, A8).
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(_MSC_VER)
+constexpr bool kFxPassProvisional = true;
+#else
+constexpr bool kFxPassProvisional = false;
+#endif
+int fxPassCost(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    struct Case {
+        const char* name;
+        const char* id;
+        Values values;
+        double measured;     // Linux x64: about 1.4 times its figure
+        double provisional;  // Arm64 and Windows clang-cl, until CI measures them
+        double ceiling() const noexcept { return kFxPassProvisional ? provisional : measured; }
+    };
+    const Case cases[] = {
+        {"Multiband dynamics (default: OTT)", "org.caw.multiband", {}, 8700, 15700},
+        {"Multiband dynamics, Multiband mode", "org.caw.multiband", {{"mode", 0}}, 8400, 15100},
+        {"Limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}, 3000, 5400},
+        {"Tremolo/Pan: Shape", "org.caw.tremolo", {{"variant", 2}}, 1800, 3200},
+        {"Phaser (default: 6 stages)", "org.caw.phaser", {}, 2550, 4600},
+        {"Phaser, 12 stages", "org.caw.phaser", {{"stages", 5}}, 3700, 6700},
+        {"Utility: Imager", "org.caw.utility", {{"variant", 3}}, 2800, 5000},
+        {"EQ: 8 stereo bands with gain", "org.caw.eq",
+         {{"b1_on", 1}, {"b1_type", 5}, {"b8_on", 1}, {"b8_type", 8}, {"b2_gain", 3}, {"b3_gain", -3}, {"b4_gain", 4},
+          {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}, 6300, 11300},
+        {"Trance gate", "org.caw.trancegate", {}, 720, 1300},
+        {"Chorus/Flanger: Chorus", "org.caw.chorus", {{"variant", 0}}, 1020, 1800},
+        {"Drive: Distortion, fold", "org.caw.drive", {{"variant", 0}, {"shape", 2}}, 1700, 3100},
+    };
+    int over = 0;
+    std::printf("2026-11-27 effects pass (µs of CPU per second of audio; ceiling µs/s):\n");
+    for (const Case& c : cases) {
+        const double us = effectCost(c.id, c.values, seconds);
+        const bool bad = us <= 0.0 || us > c.ceiling();
+        over += bad;
+        std::printf("  %-48s %8.0f  %6.0f%s%s\n", c.name, us, c.ceiling(), kFxPassProvisional ? " (provisional)" : "", bad ? "  OVER" : "");
+    }
+    return over;
+}
+
 // False when a case with a ceiling (microseconds per second, the x86 figure: the phone budget / 2.5, an
 // assumption) went over it, so CI fails a regression.
 bool effectsCost(double seconds) {
@@ -1162,6 +1209,7 @@ int main(int argc, char** argv) {
     }
     if (only == bench::mode("lark")) return larkCost(secs) ? 1 : 0;  // `caw_bench SECONDS 306`: only Lark (a CI test)
     if (only == bench::mode("raven")) return ravenCost(secs) ? 1 : 0;  // `caw_bench SECONDS 320`: only Flagship's 1.1.0 modes (a CI test)
+    if (only == bench::mode("fx_pass")) return fxPassCost(secs) ? 1 : 0;  // `caw_bench SECONDS 324`: the 2026-11-27 effects pass's ceilings (a CI test)
     if (only == bench::mode("rook")) return rookCost(secs) ? 1 : 0;  // `caw_bench SECONDS 323`: only the drums' 1.1.0 additions (a CI test)
     if (only == bench::mode("voice")) return voiceCost(secs) ? 1 : 0;  // `caw_bench SECONDS 303`: only 1.1.0's voice devices (a CI test)
     if (only == bench::mode("dynsplit")) return dynsplitCost(secs) ? 1 : 0;  // `caw_bench SECONDS 302`: only 1.1.0's dynamics split (a CI test)
@@ -1179,7 +1227,8 @@ int main(int argc, char** argv) {
         const bool timberOver = timberCost(secs) != 0;  // and the modelled instruments (bench/instrument_cost.cpp)
         const bool rookOver = rookCost(secs) != 0;  // and the drums' 1.1.0 additions (bench/rook_cost.cpp)
         const bool flockOver = flockCost(secs) != 0;  // and Flock (bench/flock_cost.cpp)
-        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver || rookOver || flockOver) ? 1 : 0;
+        const bool passOver = fxPassCost(secs) != 0;  // and the 2026-11-27 effects pass (above)
+        return (suiteOver || modesOver || toolsOver || dynsplitOver || voiceOver || cleanOver || packOver || larkOver || ravenOver || samplerOver || timberOver || rookOver || flockOver || passOver) ? 1 : 0;
     }
     if (only == bench::mode("flagship_voices")) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);

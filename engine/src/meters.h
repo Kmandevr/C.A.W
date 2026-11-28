@@ -56,12 +56,15 @@ public:
     // Any thread: the integrated loudness, the maxima and the true-peak maximum start again (the audio thread
     // clears them at its next block).
     void requestReset() noexcept { resetAsked_.fetch_add(1, std::memory_order_relaxed); }
-    // Before the audio thread runs it: from now on the meter measures only while something reads it, from the start
-    // until kUnreadSeconds pass with no read(), and again from the next read() (which starts it over, as a reset
-    // does). The Engine's master meter does this: nothing in the app reads it yet, and it costs about as much as
-    // a light effect (2026-11-11 performance pass).
+    // Before the audio thread runs it: from now on the meter measures only while something reads it. It starts
+    // asleep (2026-11-27: nothing in the app reads it yet, and its true peak cost 14-16 us a callback on x86, a
+    // light project's largest host cost); a read() wakes it, and it measures from the audio thread's next block
+    // on, as after a reset, until kUnreadSeconds pass with no read(), when it sleeps again with its readings
+    // cleared. So the read that wakes it reports nothing measured (every value CAW_METER_NONE, integrated_seconds
+    // 0), and the integrated loudness covers the audio since that first read (or a later Play or reset), not
+    // before it. The Engine's master meter does this; the audio it meters is the same either way.
     static constexpr double kUnreadSeconds = 30.0;
-    void sleepWhenUnread(bool on) noexcept { sleepWhenUnread_ = on; }
+    void sleepWhenUnread(bool on) noexcept;
     // Before the audio thread runs it: off, the true peaks are not measured (they read as 0, -inf dBTP), which saves
     // the 4x interpolation on every sample (the Limiter's loudness target reads only the loudness). On by default.
     void measureTruePeak(bool on) noexcept { truePeakOn_ = on; }
@@ -90,6 +93,7 @@ private:
         }
     };
     void clearAudioState() noexcept;
+    void clearReadings() noexcept;  // clearAudioState and the histogram (a reset)
     bool atRest() const noexcept;
     void endSubBlock() noexcept;
     double truePeak(int side, double x) noexcept;

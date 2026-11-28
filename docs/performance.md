@@ -1,13 +1,63 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, and fixes with before/after numbers; what remains is kept privately.
-covers: [engine/bench/, engine/src/meters.cpp, engine/src/load_stabilizer.h, engine/src/buffer_tuner.h, app/lib/model/freeze_hint.dart, app/lib/ui/capped_ticker.dart, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
+covers: [engine/bench/, engine/src/simd_fx.h, engine/src/meters.cpp, engine/src/load_stabilizer.h, engine/src/buffer_tuner.h, app/lib/model/freeze_hint.dart, app/lib/ui/capped_ticker.dart, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/lib/ui/devices/kit/param_watch.dart, app/lib/ui/devices/kit/repaint.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*, app/test/music_video_profile_test.dart]
 updated: 2026-11-27
 ---
 
 # Performance
 
 The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The first native runtime slice now processes zero-parameter stereo effects on the live master path. The host uses fixed preallocated stereo stages, performs no host allocation/locking in the callback, sanitizes component output and keeps the safety limiter after native code; old chains are reclaimed off-thread. This path has not yet been benchmarked on low-end Android, and plugin-internal allocations/CPU remain the component author's responsibility and are not yet reported by ABI v1.
+
+## Host and scheduling pass (2026-11-27)
+
+The owner (2026-11-27): the S22+ cannot run a typical song live (song8 p99 134 % at 192 frames, the callback on little cores at about 43 % clock, ADPF refused); cut the cost without changing the output. This pass is the host's share; the private profiling report of the same day ranked the opportunities. Bits: unchanged (below).
+
+**Method.** x86-64 VM (4 vCPU Xeon, shared and noisy), Release with the engine's flags, a scratch harness (not in the repo) linking `libcaw_core.a`: 48 kHz, 1 s of warm-up, then 20 s (song8, song16, every_effect, single_synth, single_audio) or 60 s (the owner's Medusa project, converted by the app's own `toEngineJson`; frozen as the app sends it, with a stand-in WAV, and live with Track 2 unfrozen), each callback's fastest of 5 runs. "Before" is `origin/Main` at `d7d3587`, "after" this branch; each pair ran back to back. Means and p99 are µs per callback (% of the budget: 4,000 µs at 192 frames, 5,333 µs at 256).
+
+**Serial (pool off), before → after: the sleeping master meter.**
+
+| Project | 192 frames: mean / p99 / worst | 256 frames: mean / p99 / worst |
+|---|---|---|
+| song8 | 547.9 / 628.2 / 688.3 → 536.5 / 617.1 / 680.8 | 730.4 / 831.9 / 894.5 → 714.7 / 814.2 / 880.4 |
+| song16 | 981.3 / 1,140.8 / 1,287.9 → 971.5 / 1,125.2 / 1,238.8 | 1,304.1 / 1,500.0 / 1,580.6 → 1,291.6 / 1,500.8 / 1,584.1 |
+| every_effect | 1,963.0 / 2,570.6 / 2,808.5 → 1,929.6 / 2,517.2 / 2,726.9 | 2,612.1 / 3,271.8 / 3,698.5 → 2,588.6 / 3,244.9 / 3,456.8 |
+| single_synth | 74.2 / 92.1 / 100.5 → 63.3 / 79.6 / 95.3 | 99.3 / 122.6 / 143.2 → 84.4 / 105.7 / 115.8 |
+| single_audio | 18.8 / 19.2 / 26.1 → 7.7 / 8.0 / 9.0 | 25.0 / 25.7 / 32.9 → 10.2 / 10.6 / 14.6 |
+| Medusa frozen | 62.8 / 186.0 / 239.2 → 57.5 / 186.5 / 255.8 | 83.4 / 246.8 / 315.3 → 76.8 / 249.5 / 310.9 |
+| Medusa live | 350.0 / 606.6 / 669.9 → 344.0 / 607.3 / 661.8 | 468.5 / 812.7 / 917.1 → 461.6 / 813.4 / 914.1 |
+
+- **The meter** (asleep until read, [engine](engine.md)): 11 µs a callback at 192 frames, 15 at 256, on every project that sounds; 59 % of single_audio, 15 % of single_synth, about 8 % of Medusa frozen's mean, 2 % of song8. The rest of each row is noise (±2 %). A Benchmark DSP row's "host" share drops by the same.
+- **Bits:** the full Release `ctest` passes unchanged (every shard serial and on three pool workers, `caw_parallel_identity`'s digest compare, the reference and golden renders, the rt no-allocation tests, the cost tests; no `--update-*`); the harness's output hash of Medusa frozen (the one project here that is deterministic run to run; the others build Kestrel's tables on a worker) is the same before and after, serial and on the pool (`f4f52e2d3958f64c` at 192 frames, 60 s); and `the_masters_loudness_meter_sleeps_until_read_and_measures_from_that_read` compares an unread engine's output with a measuring one's, sample for sample.
+
+**The mix pool's Auto rule (by peaks too, [decisions](decisions.md)).** The VM's loads are about an eighth of the phone's live ones (the report's ×8), so the rule was run twice: as measured ("×1", a desktop), and with each callback's load reported ×8 ("×8", a phone at its live clocks); "pooled" is the share of timed callbacks that ran a mix level on the pool (before: the old rule; not counted then).
+
+Auto, before → after, mean / p99 / worst µs (pooled after):
+
+| Project | ×1, 192 frames | ×1, 256 frames | ×8, 192 frames | ×8, 256 frames |
+|---|---|---|---|---|
+| song8 | 542 / 617 / 683 → 419 / 602 / 648 (34 %) | 727 / 829 / 878 → 719 / 816 / 885 (0 %) | 291 / 563 / 638 → 282 / 526 / 621 (60 %) | 364 / 422 / 453 → 347 / 400 / 425 (97 %) |
+| song16 | 975 / 1,120 / 1,234 → 843 / 1,101 / 1,222 (19 %) | 1,304 / 1,503 / 1,616 → 907 / 1,433 / 1,624 (40 %) | 416 / 910 / 1,110 → 410 / 932 / 1,127 (80 %) | 457 / 641 / 789 → 460 / 655 / 967 (55 %) |
+| every_effect | 1,176 / 1,969 / 2,618 → 1,125 / 1,836 / 2,378 (80 %) | 1,664 / 2,810 / 3,408 → 1,541 / 2,467 / 3,073 (93 %) | 507 / 1,634 / 2,226 → 552 / 2,038 / 2,641 (0 %) | 659 / 2,389 / 2,934 → 777 / 2,704 / 3,194 (0 %) |
+| single_synth | 74 / 92 / 102 → 64 / 81 / 91 (0 %) | 99 / 120 / 132 → 85 / 106 / 119 (0 %) | 75 / 91 / 100 → 64 / 82 / 94 (0 %) | 99 / 121 / 132 → 84 / 105 / 110 (0 %) |
+| Medusa frozen | 63 / 186 / 246 → 58 / 186 / 249 (0 %) | 84 / 248 / 303 → 77 / 248 / 308 (0 %) | 63 / 185 / 248 → 45 / 134 / 254 (46 %) | 84 / 248 / 315 → 61 / 189 / 310 (30 %) |
+| Medusa live | 350 / 608 / 668 → 340 / 607 / 681 (4 %) | 468 / 815 / 858 → 461 / 811 / 867 (0 %) | 205 / 339 / 442 → 178 / 438 / 564 (64 %) | 326 / 572 / 745 → 342 / 613 / 805 (74 %) |
+
+- **What it shows:** light projects stay serial at both scales (single_synth, and Medusa at ×1: 0 % pooled), as asked. At ×8 Medusa frozen, a 1.6 % mean on the VM that the old rule never pooled, now runs its kick bursts on the pool: mean −28 %, p99 −27 % at 192 frames (−27 % and −24 % at 256), worst unchanged. Medusa live and the multi-track songs at ×8 move within the VM's noise (Medusa live's p99 +29 % at 192 frames and its mean −13 %); song8 and song16 were already pooled by the old rule at ×8 (their mean ×8 is over 0.4). every_effect at ×8 ran serial after the pool's own wait rule turned it off (0 % pooled).
+- **Measured before the audio review's changes (2026-11-28):** peaks now also need 15 ms over the threshold, none count for 0.25 s after Play, and a peak-only pool holds off 1 s after it goes off; not re-measured.
+- **At ×1 (a desktop)** a burst after Play or real peaks (every_effect's p99 is 64 % of the budget) turn the pool on; a pool that only the burst turned on goes off again after about 5–7 s (song8 34 %, song16 19–40 % of a 20 s run), as the follow-up fix intends.
+
+- **Pool against serial (Always against Never, 192 frames, the same VM, an earlier quieter run):** song8 351 / 572 / 601 → 262 / 319 / 367, song16 557 / 1,047 / 1,099 → 373 / 615 / 840, every_effect 479 / 1,758 / 2,325 → 385 / 1,110 / 1,637; Medusa frozen 57 / 186 / 249 → 54 / 184 / 249, Medusa live 214 / 449 / 623 → 181 / 410 / 575. So the pool cuts multi-track songs' peaks by 40 % here, and does little for Medusa, whose one heavy track (Track 2: Kestrel, then trancegate, Shape, EQ, multiband) is the critical path.
+- **Not measured:** the phone. Whether its workers land on big cores, and what `mix_pooled_pct` its Benchmark shows, is for the next Benchmark file; the VM's ±20–30 % noise between runs hides the rule's effect on the means.
+
+**One heavy track on several threads (the owner's question about Medusa live, 2026-11-27; reported, not built).**
+- **Its instrument against its inserts:** within a 64-frame chunk the inserts need the instrument's output, so they cannot run beside it. Across chunks they can: the instrument renders chunk k+1 on a worker while the inserts run chunk k (a pipeline, three chunks per 192-frame callback). The bits stay the same when nothing the instrument reads for chunk k+1 depends on chunk k's output elsewhere: notes, automation and LFOs do not, but an audio follower modulator (React to Loudness), a sidechain key or send into the track, and a feedback send do, and those tracks would stay serial. [Inference] With the instrument and the chain costing about the same, a 192-frame callback's critical path drops from 6 to about 4 chunk-stages (1.5×); at 64 frames (one chunk) it gains nothing. It is a change to the mix graph's chunk loop (`engine.cpp`), medium size.
+- **Voices across workers:** bit-identical if each voice renders into its own buffer and the buffers are summed in the voice order the instrument sums them now (floating-point sums keep their order), and voices share no state within a chunk (Kestrel's voice-stealing and shared LFOs decided before the voices run). It needs a new hook between the host's pool and an instrument (a "render these voices" task), and Kestrel's voice loop split into per-voice tasks (its files, the Kestrel pass's); memory is a voice buffer per voice per chunk. [Inference] Up to the worker count on a many-voice patch (Medusa's Kestrel holds 8–20 voices with its 10 s release).
+- **Play-ahead** (#191, the private plan): renders untouched tracks ahead in larger batches on the workers; the structural answer to the clock problem, and it needs no split of a track.
+
+**Idle sleep.** Bittern does sleep: after one short chord at its default registration and hall, its output is −116 dB at 4 s, −148 dB at 6 s, then exact zeros, and its slot stops running at about 6.2 s (scratch probe, 2026-11-27). The report's 4–5.5 s idle window caught a real tail; sleeping sooner would change the sound (class C), so nothing changed. Chorus variant 0 belongs to the effects pass.
+
+**Utilization clamp (probe).** Built, Android only ([engine](engine.md); after the audio review of 2026-11-28 set by a worker, never on the callback, and reset on a thread that turns real-time): this VM's kernel has no uclamp (`sched_setattr` answers `EOPNOTSUPP`, reported `unsupported`), so its effect is unmeasured until the phone's Benchmark reports `audio_threads.util_clamp`.
 
 ## The owner's Benchmark on the S22+, 1.1.3-alpha.1 (2026-11-25)
 
@@ -134,6 +184,80 @@ The legacy `light_mode` setting is still read for migration: true maps to Lightw
 **Important correction:** performance profiles do not lower meter polling to 15 Hz. Meter cadence stays at 30 Hz in every profile; visual simplification is preferred over slower feedback. Balanced only scales decorative glow, while Lightweight/Minimal apply the existing smaller voice budget. Minimal hides the Engine Lab master scope, whose data is a mono sum; independent left/right peak meters remain visible.
 
 No phone frame-time, battery or thermal measurements have been made for these profiles yet. Verify them on physical Android hardware before claiming a quantified performance improvement.
+
+## Effects pass (2026-11-27)
+
+The owner (2026-11-27): the DAW is too heavy (every_effect 327 % worst on the S22+; the 3-track Medusa project spiking on each kick when Rook and its drive, three EQs, compressor and limiter wake). Every built-in effect and Rook's effect path were to get faster **without changing what they sound like**: bit-identical first (class A), then inaudible vectorization (class B, below −120 dBFS against the old build), no algorithmic shortcuts (class C) without the owner ([decisions](decisions.md)). The hot spots came from a profiling report of the same day (perf and callgrind on song8, every_effect and Medusa; scratch, not kept).
+
+**What changed** (all class A unless marked):
+
+- **Multiband dynamics:** one dB conversion per band for both its detectors (`DbDetector::processDb`); the two channels' Linkwitz-Riley splits as one two-lane vector (`fxsimd::SvfLanes`, `engine/src/simd_fx.h`: each lane `lib::Svf::process`'s arithmetic); the low and mid bands' log (`fastLogNormalPair`, pinned) and exp (`fxsimd::dbToGainPair`, fastExp's steps lane by lane) as pairs; no redesign, time coefficients or gains worked out while the knobs hold still, also on a wake from sleep (`knobsUnchanged`; the ramps and the state flush still run every 16 frames).
+- **Limiter:** both channels' 4× true-peak estimate in one pair (`fxsimd::TruePeakPair`, `lib::TruePeak`'s taps and sums in its order); the shown gain reduction's dB once a run instead of every sample (display only: gainToDb rises with its gain, so the run's smallest gain gives the same most-reduction).
+- **Tremolo/Pan · Shape and the Ducker** (one class): the release and attack curves' denominators (a `detExp`) once per tension instead of every sample; the band split's four filters as pairs; `floor` without a library call where `floorSmall` is exact; the shown reduction once a run.
+- **Phaser:** both channels as one pair, the stage count a template.
+- **EQ (Bands), class B:** a stereo band's filter states settle to 0 below 1e-20 at each control point (every 16 frames, on the grid) instead of at every sample: a third fewer operations per stage. A first try that ran consecutive stereo bands sample by sample through all their stages was faster on this x86 VM's out-of-order core but executed more instructions, the wrong trade for the phone's in-order little cores, and was taken out.
+- **Utility · Imager:** both channels' nine crossover filters as pairs.
+- **Resonator:** the 24-mode bank (three `detPow` a mode) is not rebuilt while the knobs hold still and the pitch is where the bank was built.
+- **Vocoder:** the unison ratios and each voice's pitch only when they change.
+- **Trance gate:** the step's place in the pattern (two integer divisions) only when the step changes; its decay and release coefficients only when a time moves; `floor` as above.
+- **Chorus/Flanger · Chorus:** not changed. A silent-input shortcut (moving only the sweep and write position) was dropped on 2026-11-28: under the fast-math flags clang-cl orders the sweep's additions differently in the shortcut and in `step()`, so the bits after a silence depended on the block size (Windows CI).
+- **Drive · Distortion:** clip, fold and crush read their knobs once a block when none ramps (drive already did).
+- **Oversampler (`lib::Oversampler2x`, Rook, Kestrel, the drives, filters, ring mod):** the per-sample path's stage count as a template (unrolled, the same arithmetic).
+- **Rook:** the kit effects read the quality once a chunk instead of twice a frame.
+- **Looked at and left as they were:** the compressor, delays, transient shaper, Utility, Tremolo and Pan (already paired or control-rate; nothing exact left), the reverbs' FDN (already two-wide; float lanes would null at about −110 to −120 dBFS, over the bar), the oversampler's per-stage flush (Rook shares it, so its bits would move) and the wake from sleep beyond the redesigns above (the suite's wake costs one control; Medusa's EQs, compressor and limiter already cache their designs).
+
+**[Fact] Null depth** (scratch harness: every built-in effect's every variant at its defaults, a knob-moving run of each and every preset, 847 cases, 3 s of tones, noise bursts, loud and quiet passages and a 0.8 s silence each, 256-frame blocks, new build against `origin/Main` d7d3587, GCC 13.3 Release, the two builds rendered back to back: the same build rendered an hour apart differed in 383 of 847 cases, even pass-through meters, so the VM had moved to a host where libm chose another variant for the test signal; back to back, each build repeats itself bit for bit):
+
+| Build | 44.1 kHz | 48 kHz | 96 kHz |
+|---|---|---|---|
+| x86-64 | 845 of 847 bit-identical, worst −394.8 dBFS (EQ preset "Guitar mud tamer") | 844 identical, worst −384.9 (EQ, knobs moving) | 842 identical, worst −379.7 (EQ, knobs moving) |
+| Arm64 (aarch64-linux-gnu-g++ 13.3, static, qemu-aarch64 8.2) | 845 identical, worst −394.8 (the same EQ preset) | 843 identical, worst −186.6 (Phaser preset "Crow flyby") | 842 identical, worst −379.7 (EQ, knobs moving) |
+
+Only the EQ's class-B change differs on x86-64. On Arm64 the scalar and pair forms of the phaser fuse a multiply-add differently in one preset at 48 kHz (−186.6 dBFS); everything else is the x86-64 result. The worst over every build and rate is −186.6 dBFS, far below the −120 dBFS bar, and the stable reference renders pass unchanged, so no reference set was re-recorded and none needs the Reference sets workflow. **Rook:** every preset and the default kit (118) through the engine at 44.1, 48 and 96 kHz hash the same on x86-64 and on Arm64, and `drums_presets_from_before_1_1_render_bit_identically` passes unchanged.
+
+**[Fact] Cost per effect** (the report's harness: each effect on the Flagship chord track, 1 s warm-up, 1.5 s timed, 256 frames at 48 kHz, µs per block, the better of two interleaved runs of each build on a shared 4-vCPU VM loaded by other builds, so ±15 % noise):
+
+| Effect · variant | Before | After |
+|---|---:|---:|
+| Multiband dynamics | 67.4 | 37.3 (−45 %) |
+| Resonator | 51.5 | 14.3 (−72 %) |
+| Phaser | 20.9 | 11.0 (−47 %) |
+| Utility/Stereo · Imager | 22.6 | 12.3 (−46 %) |
+| Limiter (true peak) | 14.5 | 8.3 (−43 %) |
+| Tremolo/Pan · Shape | 22.9 | 13.1 (−43 %) |
+| Filter · Ladder (2× oversampled) | 31.2 | 23.9 (−23 %) |
+| Vocoder | 35.2 | 30.7 (−13 %) |
+| Trance gate | 5.3 | 4.6 (−13 %) |
+| Drive · Distortion / Amp | 4.4 / 18.1 | 4.0 / 16.5 |
+| EQ · Bands (defaults: nothing to run) | 4.1 | 3.9 |
+| Chorus/Flanger · Chorus, idle 4 s after one short note | 4.7 (the report); 33.1 (this run) | 1.8 |
+| Every effect variant, summed (97 rows) | 1,718 | 1,596 (−7 %) |
+
+`caw_bench 0.5 324` (ctest `caw_fx_pass_cost`, new) times the pass's effects against the reference workload and fails over a ceiling about 1.4 times this machine's figure (µs per second of audio): Multiband 6,200 (ceiling 8,700), its Multiband mode 6,000 (8,400), Limiter 2,150 (3,000), Shape 1,260 (1,800), Phaser 1,820 (2,550) and at 12 stages 2,650 (3,700), Imager 1,980 (2,800), EQ with 8 stereo bands 4,500 (6,300), Trance gate 510 (720), Chorus 730 (1,020), Drive's fold 1,200 (1,700). Shape's dynamics-split ceiling went from 8,000 to 3,000 (about 2,100 now). These are Linux x64's; Arm64's and Windows clang-cl's are provisional until CI measures them ([engine performance](engine-performance.md#a8-effects-pass-2026-11-27)).
+
+**[Fact] Instructions inside `Engine::process`** (callgrind 3.22, x86-64, the harness, 256-frame callbacks; every suite effect's `EffectBase::process` inclusive in brackets):
+
+| Render | Before | After |
+|---|---:|---:|
+| Medusa unfrozen, 4 s from 16 s | 1,653.7 M (effects 527.6 M) | 1,504.5 M (−9.0 %; effects 378.3 M, −28 %) |
+| Medusa frozen, 4 s from 32 s | 944.8 M (437.4 M) | 868.6 M (−8.1 %; 371.8 M, −15 %) |
+| every_effect, 1 s | 7,356.3 M (5,141.6 M) | 7,171.2 M (−2.5 %; 4,956.7 M, −3.6 %) |
+| song8 and song8_extras, 1 s each | 2,002.3 M (905.0 M) | 1,949.5 M (−2.6 %; 852.0 M, −5.9 %) |
+
+Within Medusa unfrozen: Multiband's run 266 M → 175 M and its control 15.4 M → 4.2 M, the Shape tremolos' run 103 M → 66 M, the EQs' run 80 M → 66 M; frozen: the limiter 46 M → 32 M. Kestrel (unchanged here) is most of what remains in the unfrozen render; Rook's own path costs what it did (its time is its voices).
+
+**[Fact] Medusa per callback** (the harness's json mode, 256 frames, each callback's fastest of 3 runs; slot means in µs per callback, 2026-11-27): the effect slots' means summed, the callback's mean and p99 (worst callbacks are this VM's preemption and are not compared):
+
+| Render | Effects (µs) | Mean | p99 |
+|---|---:|---:|---:|
+| Unfrozen (as the owner wants it), 32 s from 16 s, before | 173.1 | 447.9 | 728.5 |
+| Unfrozen, after | 124.2 (−28 %) | 400.8 (−11 %) | 672.6 (−8 %) |
+| Frozen, 32 s from 32 s, before | 109.9 | 173.5 | 289.4 |
+| Frozen, after | 91.2 (−17 %) | 154.0 (−11 %) | 261.8 (−10 %) |
+
+Unfrozen per slot, before → after: Track 2's multiband 63.7 → 34.4, its Shape tremolo 23.0 → 15.8, EQ 17.9 → 14.7, trance gate 8.5 → 7.8; Track 3's Shape 12.0 → 8.0, EQ 6.3 → 5.2; Layer 1's limiter 4.2 → 2.6 and EQs 11.3 → 9.1 together. **The kick's wake:** Layer 1's inserts (drive, three EQs, compressor, limiter), which wake on every kick, cost 34.9 → 26.7 µs per callback on the frozen render's mean (−24 %); Rook itself (25.4 → 25.9, noise) is its voices and keeps its bits.
+
+**Still open:** every_effect's heaviest rows are devices this pass did not touch (Shimmer, the convolver, Preen, the reverse reverb, the doubler); Kestrel and the scheduling side (the mix pool's Auto rule, play-ahead) are other work. **[Assumption]** Arm64 gains about as x86-64 does in instructions (the same loops, NEON); the phone's Benchmark will show it.
 
 ## DSP pass for 1.0.8-alpha.2 (2026-11-19)
 
@@ -263,6 +387,13 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 - So 8 voices of the default patch take about 2 % of one server core, a 16-copy voice about 0.3 %. The Morph synth's busy pattern (seven copies, a shared filter) costs 59 M instructions a second of audio, the flagship's default 158 M (callgrind, the instrument alone); a voice of seven copies without a filter about the same as Morph's.
 - [Assumption] On the owner's Galaxy S22+ these scale like the instruction counts (not measured on the phone).
 - The ladder is a long chain of dependent operations per sample; running a voice's two sides in one loop let the CPU overlap them (1.7× faster), and several voices' filters now run side by side the same way (speed A2, [engine performance](engine-performance.md#a2-flagship-voices-side-by-side)). The reverb (the Library's, unchanged) is why the flagship's starts off.
+
+### Kestrel speed pass (2026-11-27)
+
+The owner (2026-11-27): Kestrel is 34 % of a typical song on the S22+ and the Medusa project ran badly unfrozen. Bit-identical changes only (details, numbers and null depths in [engine performance](engine-performance.md#a8-kestrels-oscillator-reads-and-ramping-knobs-2026-11-27)):
+- **The oscillators' table reads four at a time** (a small SSE2/NEON wrapper, `engine/src/simd4.h`), the warped stacks' phases vectorized, the decimators without register spills, and **a ramping knob reworking only its own voice section**.
+- **[Fact, x86-64 VM, 2026-11-27]** Medusa unfrozen: Track 2's Kestrel 293.5 → 189.2 µs per 256-frame callback (−36 %), the project's mean 490.9 → 383.7 µs and p99 826 → 654 µs; `flagship_heavy` −10 % instructions; the default patch unchanged (its time is the ladder's). All 655 null renders are bit-identical on x86-64 GCC and Clang and on Arm64, so the pass changed no reference render. The audio review's fixes (pair loads through `memcpy`, Osc FM's ratio following a ramped or slotted modulator tuning, warped indices held to the table) keep 670 of 675 renders bit-identical to Main (the 5 are a slot case Main rendered with a stale ratio), and Kestrel's chorus now sweeps with its knobs still, an intended change ([engine performance](engine-performance.md#a8-kestrels-oscillator-reads-and-ramping-knobs-2026-11-27)).
+- **Not kept:** the ladder in float lanes (worst null −113.4 dBFS, over the −120 dBFS rule). The class-C options (voice end at −96 dB, FM at 1x below a crossover, an inaudibility end) are measured there for the owner: −10 %, −30 % and −4 % of Medusa's Kestrel.
 
 ## Effects suite (2026-11-10)
 

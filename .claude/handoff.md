@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 04f02cc on Main. 1.1.3 maintenance and groundwork merged on 2026-11-27: #288 changelog per change, #289
+Commit: d7d3587 on Main. 1.1.3 maintenance and groundwork merged on 2026-11-27: #288 changelog per change, #289
 `scripts/worktree-tidy.js`, #290 and #293 per-build reference suites (`nightingale_overlap`, `curlew_tails`,
 `stress_chaotic`; `x64_clang` for the ThreadSanitizer job), #291 `caw_collab` (G3), #292 stable instance ids (G1, G2);
 Hub #34 marks G1-G3 built. 1.1.3-alpha.7 released 2026-11-27 (#294; app.yml run 46013321866). This branch: the release's log line. The owner (2026-11-26): Claude merges and
@@ -20,6 +20,16 @@ clock #211).
 - Owner: Hub #33 (rear Antiphonal stops, where the rock organ lives); otherwise my recommendations stand.
 
 ## Next
-1. 1.1.4: automation choices and VCA groups #210, receives/parallel/multi-out #217, MIDI out and clock #211; two
-   two playing modes and the main panel (Hub roadmap 1.1.4; looks: Hub #35 questions 8 and 9). UI work: ask the owner how it should look first.
-2. Issue #271 (close after green Windows runs), #268.
+1. **Performance first (owner, 2026-11-27: "the DAW has gotten too heavy to worry about other features"; every other
+   feature is paused).** The owner's S22+ benchmark: live song8 at 192 frames p99 134 %, every_effect worst 327 %,
+   Kestrel 64 voices 122 %; the callback runs on little cores at ~43 % clock and the performance hint is unsupported.
+   Optimize every instrument and effect, quality unchanged: bit-identical speedups first (render digests unchanged),
+   then inaudible shortcuts (null below -120 dB or the existing tolerance tests), on Android, Windows and Linux; plus
+   the scheduling side (consider play-ahead early). A profiling agent writes the hot-spot report to the session
+   scratchpad (perf-report.md); optimizers follow by component group.
+2. **Paused (resume after the performance pass), saved for good as patches in AutoStacc-Hub `main`, `caw-wip/` (its README names each base commit; also local WIP commits in worktrees):** G5 op undo
+   (`.claude/worktrees/collab-g5`, the review's seven fixes half done on 3ea0c4f), receives/@none/Split rack
+   (`routing-receives-split`, started), drum multi-out (`drum-multi-out`, not started). #217 design: receives are a
+   view over sends, `output: "@none"`, an `org.caw.rack.split` rack, drum out2..9 as route taps with a child layer
+   `source`; choices taken: split modes full/LR/MS, children pre the drum fader, child latency compensated.
+3. 1.1.4 screens wait on Hub #35 questions 1-9. Then G6, #217, 1.1.4 release.

@@ -124,22 +124,15 @@ private:
     // Each lane: y = a (x - y1) + x1 per stage, flushed below 1e-25, into the next stage (AllpassChain::process).
     void run(State& s, const double in[2], double out[2]) noexcept {
 #if defined(__GNUC__)
-        typedef double Pair __attribute__((vector_size(16)));
-        const Pair tiny = {1e-25, 1e-25}, zero = {0.0, 0.0};
-        Pair x = {in[0], in[1]};
-        for (int i = 0; i < n_; ++i) {
-            Pair a, x1, y1;
-            __builtin_memcpy(&a, a_[i], sizeof a);
-            __builtin_memcpy(&x1, s.x[i], sizeof x1);
-            __builtin_memcpy(&y1, s.y[i], sizeof y1);
-            Pair y = a * (x - y1) + x1;
-            __builtin_memcpy(s.x[i], &x, sizeof x);
-            y = ((y < tiny) & (y > -tiny)) ? zero : y;
-            __builtin_memcpy(s.y[i], &y, sizeof y);
-            x = y;
+        // The stage count as a template (2026-11-27): the same arithmetic per stage, unrolled.
+        switch (n_) {
+            case 1: return runN<1>(s, in, out);
+            case 2: return runN<2>(s, in, out);
+            case 3: return runN<3>(s, in, out);
+            case 4: return runN<4>(s, in, out);
+            case 5: return runN<5>(s, in, out);
+            default: return runN<kStages>(s, in, out);
         }
-        out[0] = x[0];
-        out[1] = x[1];
 #else
         for (int lane = 0; lane < 2; ++lane) {
             double x = in[lane];
@@ -153,6 +146,27 @@ private:
         }
 #endif
     }
+#if defined(__GNUC__)
+    template <int N>
+    void runN(State& s, const double in[2], double out[2]) noexcept {
+        typedef double Pair __attribute__((vector_size(16)));
+        const Pair tiny = {1e-25, 1e-25}, zero = {0.0, 0.0};
+        Pair x = {in[0], in[1]};
+        for (int i = 0; i < N; ++i) {
+            Pair a, x1, y1;
+            __builtin_memcpy(&a, a_[i], sizeof a);
+            __builtin_memcpy(&x1, s.x[i], sizeof x1);
+            __builtin_memcpy(&y1, s.y[i], sizeof y1);
+            Pair y = a * (x - y1) + x1;
+            __builtin_memcpy(s.x[i], &x, sizeof x);
+            y = ((y < tiny) & (y > -tiny)) ? zero : y;
+            __builtin_memcpy(s.y[i], &y, sizeof y);
+            x = y;
+        }
+        out[0] = x[0];
+        out[1] = x[1];
+    }
+#endif
     template <bool Down>
     void block(const double* in, double* out, int n) noexcept {
 #if defined(__GNUC__)

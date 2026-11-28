@@ -15,9 +15,9 @@
         const bool all = v.starting || knobsChanged_;
         const bool pitch = v.pitch != v.configuredPitch;
         v.configuredPitch = v.pitch;
-        uint32_t changed = 0, frameOnly = 0;
+        uint32_t changed = rampMoved_, frameOnly = 0;
         if (!all) {
-            uint32_t frame = 0, other = 0;
+            uint32_t frame = 0, other = rampMoved_;
             for (uint32_t t = 0; t < targetCount_; ++t) {
                 if (moving[t] == v.moving[t]) continue;
                 const uint32_t k = targetParam_[t], section = sectionOf(k);
@@ -358,10 +358,7 @@
             eqR_.set(low, mid, high, freq, sr_);
             eqMix_ = clampd(g(kEqMix), 0.0, 1.0);
         }
-        if (chorus) {
-            chorus_.control(g(kChorusRate), clampd(g(kChorusDepth), 0.0, 1.0), kControlFrames);
-            chorusMix_ = clampd(g(kChorusMix), 0.0, 1.0);
-        }
+        if (chorus) chorusMix_ = clampd(g(kChorusMix), 0.0, 1.0);  // its sweep moves on in control(), every period
         if (delay) {
             const int sync = clampi(g(kDelaySync), 0, 7);
             const double seconds = sync > 0 ? lib::noteSeconds(tempo_, kDelaySyncWholes[sync]) : g(kDelayTime);

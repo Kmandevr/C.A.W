@@ -120,6 +120,12 @@ struct Case {
 
 // Prints each case and returns how many went over their ceilings. Ceilings: the owner's budgets (light 0.5 %,
 // medium 2 %, heavy 6 % of an S22+ core) over an assumed 2.5x slower phone core: 2000, 8000 and 24000 µs/s here.
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(_MSC_VER)
+constexpr double kShapeCeiling = 8000;  // provisional (above)
+#else
+constexpr double kShapeCeiling = 3000;  // measured
+#endif
+
 int dynsplitCost(double seconds) {
     const Values talon{{"talon_layout", 1}};
     auto with = [&](Values v) {
@@ -151,7 +157,9 @@ int dynsplitCost(double seconds) {
         {"Duck: Carve, 16 bands, linked", "org.caw.duck", {{"variant", 2}}, fx::duckCarveBytes(), 8000},
         // 24 bands is the High setting: the heavy budget.
         {"Duck: Carve, 24 bands, Mid/Side", "org.caw.duck", {{"variant", 2}, {"bands", 1}, {"stereo", 2}}, fx::duckCarveBytes(), 24000},
-        {"Tremolo/Pan: Shape (the old ducker, for scale)", "org.caw.tremolo", {{"variant", 2}}, 0, 8000},
+        // 2026-11-27 effects pass: about 2,100 on Linux x64 (3,000, measured); Arm64 and Windows clang-cl keep Main's
+        // 8,000 (provisional, until a CI run on each runner measures it: docs/engine-performance.md, A8).
+        {"Tremolo/Pan: Shape (the old ducker, for scale)", "org.caw.tremolo", {{"variant", 2}}, 0, kShapeCeiling},
     };
     int over = 0;
     std::printf("1.1.0 dynamics split (µs of CPU per second of audio; bytes per instance; ceiling µs/s):\n");

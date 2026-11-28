@@ -115,18 +115,30 @@ double scenario(const char* id, const Values& extra, double seconds) {
     return rel.us();
 }
 
+// Linux x64's ceilings are measured (below); Arm64's and Windows clang-cl's are provisional until a CI run on
+// that runner measures them: Main's ceilings before the 2026-11-27 speed pass, which passed there, since nothing
+// in the pass is slower on either (clang-cl's decimators take the scalar path, unchanged; Arm64's reads are NEON).
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(_MSC_VER)
+constexpr bool kProvisionalCeilings = true;
+#else
+constexpr bool kProvisionalCeilings = false;
+#endif
+
 struct Case {
     const char* name;
     Values values;
-    double ceilingUs;  // for the eight voices, µs per second of audio on the x86 CI machine; over it fails
+    double ceilingUs;      // Linux x64: for the eight voices, µs per second of audio; over it fails
+    double provisionalUs;  // Arm64 and Windows clang-cl, until CI measures them (Main's pre-pass ceiling)
+    double ceiling() const noexcept { return kProvisionalCeilings ? provisionalUs : ceilingUs; }
 };
 
 }  // namespace
 
 // Prints each case (the eight voices' cost and a voice's share) and returns how many went over their ceilings.
-// Ceilings: about twice what each measured on the x86 box (2026-11-19, a busy machine), so the noise of a shared CI
-// runner passes and a real regression (a mode's path costing double) fails. The default patch's ceiling is the
-// 1.0.9 figure's: Raven must not make it dearer (song8's Flagship share, 31 %).
+// Ceilings (Linux x64): about 1.4 times the highest of four runs on the local x86 box after the 2026-11-27 speed
+// pass (Kestrel's oscillator reads four at a time; docs/engine-performance.md), rounded up to 500, per the rule for
+// cost tests (CI's runners read 10-20 % slower than this box), so a regression of a third fails. Arm64 and Windows
+// clang-cl: provisional (kProvisionalCeilings), to be tightened from the first CI run on each runner.
 int ravenCost(double seconds) {
     const Values one = {{"osc1_unison", 1}, {"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0},
                         {"osc2_on", 1}, {"osc2_unison", 1}, {"osc2_semi", 7}};
@@ -136,47 +148,48 @@ int ravenCost(double seconds) {
         return x;
     };
     const Case cases[] = {
-        {"default patch (x7, ladder)", {}, 26000},
-        {"two oscs, one copy each", with({}), 12000},
-        {"Osc RM from osc 2", with({{"osc1_warp", 8}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 2}}), 14000},
-        {"Osc AM from noise", with({{"osc1_warp", 9}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 4}}), 14000},
-        {"Osc sync to osc 2 (polyBLEP)", with({{"osc1_warp", 10}, {"osc1_warp_amt", 0.4}, {"osc1_mod_src", 2}}), 16000},
-        {"Stretch, on a bank level", with({{"osc1_warp", 11}, {"osc1_warp_amt", 3.0 / 7.0}}), 12000},
-        {"Formant, between levels, frame moving", with({{"osc1_warp", 14}, {"osc1_warp_amt", 0.5}, {"osc1_frame", 0.5}}), 14000},
-        {"Formant x7 between levels", with({{"osc1_unison", 7}, {"osc1_warp", 14}, {"osc1_warp_amt", 0.5}}), 30000},
-        {"Diode LP", with({{"flt1_on", 1}, {"flt1_type", 9}, {"flt1_resonance", 0.6}}), 26000},
-        {"Sallen-Key", with({{"flt1_on", 1}, {"flt1_type", 10}, {"flt1_resonance", 0.6}}), 20000},
-        {"Phaser (8 stages)", with({{"flt1_on", 1}, {"flt1_type", 11}, {"flt1_morph", 1}}), 36000},
-        {"Neg comb", with({{"flt1_on", 1}, {"flt1_type", 12}}), 18000},
-        {"Vowel", with({{"flt1_on", 1}, {"flt1_type", 13}}), 20000},
+        {"default patch (x7, ladder)", {}, 17000, 26000},
+        {"two oscs, one copy each", with({}), 4500, 12000},
+        {"Osc RM from osc 2", with({{"osc1_warp", 8}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 2}}), 6500, 14000},
+        {"Osc AM from noise", with({{"osc1_warp", 9}, {"osc1_warp_amt", 0.7}, {"osc1_mod_src", 4}}), 6000, 14000},
+        {"Osc sync to osc 2 (polyBLEP)", with({{"osc1_warp", 10}, {"osc1_warp_amt", 0.4}, {"osc1_mod_src", 2}}), 7500, 16000},
+        {"Stretch, on a bank level", with({{"osc1_warp", 11}, {"osc1_warp_amt", 3.0 / 7.0}}), 5000, 12000},
+        {"Formant, between levels, frame moving", with({{"osc1_warp", 14}, {"osc1_warp_amt", 0.5}, {"osc1_frame", 0.5}}), 6000, 14000},
+        {"Formant x7 between levels", with({{"osc1_unison", 7}, {"osc1_warp", 14}, {"osc1_warp_amt", 0.5}}), 11500, 30000},
+        {"Diode LP", with({{"flt1_on", 1}, {"flt1_type", 9}, {"flt1_resonance", 0.6}}), 26000, 26000},
+        {"Sallen-Key", with({{"flt1_on", 1}, {"flt1_type", 10}, {"flt1_resonance", 0.6}}), 16000, 20000},
+        {"Phaser (8 stages)", with({{"flt1_on", 1}, {"flt1_type", 11}, {"flt1_morph", 1}}), 35500, 36000},
+        {"Neg comb", with({{"flt1_on", 1}, {"flt1_type", 12}}), 17000, 18000},
+        {"Vowel", with({{"flt1_on", 1}, {"flt1_type", 13}}), 13000, 20000},
         {"LFO 4 and a macro on slots", with({{"mod2_src", 15}, {"mod2_dst", 3}, {"mod2_amt", 0.3}, {"lfo4_mode", 1},
                                              {"mod3_src", 16}, {"mod3_dst", 4}, {"mod3_amt", -0.3}, {"macro1", 0.5}}),
-         14000},
+         8000, 14000},
     };
     int over = 0;
     std::printf("Flagship 1.1.0 (Raven), 8 held notes (µs of CPU per second of audio; a voice's share; ceiling µs/s):\n");
     for (const Case& c : cases) {
         const double us = held(c.values, seconds);
-        const bool bad = us > c.ceilingUs || us <= 0.0;
+        const bool bad = us > c.ceiling() || us <= 0.0;
         over += bad ? 1 : 0;
-        std::printf("  %-44s %8.0f  a voice %6.0f  (ceiling %5.0f)%s\n", c.name, us, us / kNotes, c.ceilingUs, bad ? "  OVER" : "");
+        std::printf("  %-44s %8.0f  a voice %6.0f  (ceiling %5.0f)%s\n", c.name, us, us / kNotes, c.ceiling(), bad ? "  OVER" : "");
     }
     // flagship_heavy16 (16 voices of 48 copies, every filter and effect) as it is, and with Raven's modes on its
     // oscillators and filter 2; µs per second of audio through the whole engine.
     struct Heavy {
         const char* name;
         Values extra;
-        double ceilingUs;
+        double ceilingUs, provisionalUs;  // as Case's
+        double ceiling() const noexcept { return kProvisionalCeilings ? provisionalUs : ceilingUs; }
     } heavy[] = {
-        {"flagship_heavy16", {}, 600000},
+        {"flagship_heavy16", {}, 185000, 600000},
         {"flagship_heavy16, Raven modes", {{"osc2_warp", 14}, {"osc2_warp_amt", 0.5}, {"osc3_warp", 10}, {"osc3_warp_amt", 0.3},
-                                           {"osc3_mod_src", 1}, {"flt2_type", 9}}, 800000},
+                                           {"osc3_mod_src", 1}, {"flt2_type", 9}}, 315000, 800000},
     };
     for (const Heavy& h : heavy) {
         const double us = scenario("flagship_heavy16", h.extra, seconds);
-        const bool bad = us > h.ceilingUs || us <= 0.0;
+        const bool bad = us > h.ceiling() || us <= 0.0;
         over += bad ? 1 : 0;
-        std::printf("  %-44s %8.0f                 (ceiling %6.0f)%s\n", h.name, us, h.ceilingUs, bad ? "  OVER" : "");
+        std::printf("  %-44s %8.0f                 (ceiling %6.0f)%s\n", h.name, us, h.ceiling(), bad ? "  OVER" : "");
     }
     return over;
 }

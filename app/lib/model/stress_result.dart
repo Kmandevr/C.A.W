@@ -60,6 +60,7 @@ class ScenarioResult {
     this.coreMaxKhz = -1,
     this.mixWorkers = 0,
     this.mixActiveWorkers = 0,
+    this.mixPooledPct = 0,
     this.warmupXruns,
     this.deviceSizes = false,
     this.spikes = 0,
@@ -118,6 +119,10 @@ class ScenarioResult {
   /// end (kHz, -1 unknown), the mix pool's workers and those Auto had working at the end, and live underruns during
   /// the warm-up.
   final int requestedFrames, callbackCore, coreKhzStart, coreKhzEnd, coreMaxKhz, mixWorkers, mixActiveWorkers;
+
+  /// Local only: the timed callbacks that ran a mix level on the pool (Auto had it on, and a level had two busy
+  /// nodes), a percentage (`mix_pooled_pct`).
+  final double mixPooledPct;
   final double firstCallbackUs, worstAtS, warmupS, slopePctPerMin;
   final int? warmupXruns;
 
@@ -198,6 +203,7 @@ class ScenarioResult {
       coreMaxKhz: k('core_max_khz'),
       mixWorkers: i('mix_workers'),
       mixActiveWorkers: i('mix_active_workers'),
+      mixPooledPct: d('mix_pooled_pct'),
       warmupXruns: wx >= 0 ? wx : null,
       deviceSizes: j['mode'] == 'live' && j['device_sizes'] == true,
       spikes: i('spikes'),
@@ -247,6 +253,7 @@ class ScenarioResult {
           'slope_pct_per_min': _r2(slopePctPerMin),
           'mix_workers': mixWorkers,
           'mix_active_workers': mixActiveWorkers,
+          'mix_pooled_pct': _r2(mixPooledPct),
           'core_khz_start': coreKhzStart,
           'core_khz_end': coreKhzEnd,
           'core_max_khz': coreMaxKhz,

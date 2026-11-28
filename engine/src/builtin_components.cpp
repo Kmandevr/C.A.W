@@ -157,7 +157,15 @@ public:
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
-        if (steadyKnobs(b, 5) && static_cast<int>(paramAt(b, 0, 0, 0.0)) == 0) return processDrive(b);
+        if (steadyKnobs(b, 5)) {
+            switch (static_cast<int>(paramAt(b, 0, 0, 0.0))) {
+                case 0: return processDrive(b);
+                case 1: return processSteady<1>(b);
+                case 2: return processSteady<2>(b);
+                case 3: return processSteady<3>(b);
+                default: break;
+            }
+        }
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
@@ -211,6 +219,33 @@ private:
             const float yl = shape(l, saturator_.processApprox(l));
             outL[i] = yl;
             outR[i] = r == l ? yl : shape(r, saturator_.processApprox(r));
+        }
+        return true;
+    }
+
+    // Clip, fold or crush with every knob holding still: the knobs read once and the shape chosen once for the
+    // block (2026-11-27: the loop above's arithmetic sample by sample, so the same bits).
+    template <int Shape>
+    bool processSteady(const AudioProcessBlock& b) noexcept {
+        const double amount = paramAt(b, 1, 0, 4.0), bits = paramAt(b, 2, 0, 8.0);
+        const double mix = paramAt(b, 3, 0, 1.0), out = paramAt(b, 4, 0, 1.0);
+        if (Shape == 3 && bits != bits_) {
+            bits_ = bits;
+            const double whole = bits < 1.0 ? 1.0 : (bits > 24.0 ? 24.0 : bits);
+            steps_ = detPow(2.0, std::floor(whole) - 1.0);
+        }
+        const double steps = steps_;
+        for (uint32_t c = 0; c < 2; ++c) {
+            const float* in = b.input.channels[c];
+            float* o = b.output.channels[c];
+            for (uint32_t i = 0; i < b.frames; ++i) {
+                const double x = in[i];
+                double y;
+                if (Shape == 1) y = lib::hardClip(x, amount);
+                else if (Shape == 2) y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25);
+                else y = std::floor(finiteOr0(x) * steps + 0.5) / steps;
+                o[i] = static_cast<float>((x + (y - x) * mix) * out);
+            }
         }
         return true;
     }

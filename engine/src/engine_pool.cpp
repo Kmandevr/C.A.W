@@ -78,6 +78,21 @@ std::string Engine::audioThreadsJson() const {
          ",\"callback_nice\":" + std::to_string(pool_ ? pool_->callbackNice() : 0);
     j += ",\"callback_tuning\":" + flags(cbTuned) + ",\"worker_tuning\":" + flags(tuned);
     j += ",\"workers\":" + std::to_string(mixWorkers()) + ",\"active_workers\":" + std::to_string(mixActiveWorkers());
+    // The pool in use now (Auto's choice, or Always) and the callbacks so far that ran a level on it.
+    j += ",\"mix_on\":" + std::string(mixOn_.load(std::memory_order_relaxed) ? "true" : "false") +
+         ",\"mix_pooled_callbacks\":" + std::to_string(mixPooledCallbacks());
+    // The utilization clamp (thread_tuning.h; Android): a floor of kUtilMinRequest (of 1024) asked for the callback
+    // and each worker; what the system said ("none" where it is not asked), its errno, and the floor read back.
+    {
+        const tuning::UtilClamp cb = pool_ ? pool_->callbackClamp() : tuning::UtilClamp{};
+        const tuning::UtilClamp wk = pool_ ? pool_->workerClamp() : tuning::UtilClamp{};
+        j += ",\"util_clamp\":{\"request\":" + std::to_string(tuning::kUtilMinRequest) + ",\"callback\":\"" +
+             tuning::clampStateName(cb.state) + "\",\"callback_errno\":" + std::to_string(cb.error) +
+             ",\"callback_util_min\":" + std::to_string(cb.utilMin) + ",\"workers\":\"" +
+             tuning::clampStateName(wk.state) + "\",\"workers_clamped\":" +
+             std::to_string(pool_ ? pool_->workersClamped() : 0) + ",\"workers_errno\":" + std::to_string(wk.error) +
+             ",\"workers_util_min\":" + std::to_string(wk.utilMin) + "}";
+    }
     j += ",\"wait_share\":" + std::to_string(waitShare_.load(std::memory_order_relaxed));
     // The callback's synthetic load (load_stabilizer.h; Android, no hint session): "off", "idle" or "on", and the
     // smoothed share of each period it kept the core busy beyond the callback's own work, and the smoothed share
@@ -168,7 +183,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     masterRetires_ = std::make_unique<RetireList>();
     loudness_->prepare(sampleRate);
-    loudness_->sleepWhenUnread(true);  // it measures while something reads it (meters.h)
+    loudness_->sleepWhenUnread(true);  // asleep until read, then measures while something reads it (meters.h)
     audioIn_ = std::make_unique<LiveAudio>(sampleRate);
     masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain

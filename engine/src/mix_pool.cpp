@@ -170,6 +170,9 @@ void MixPool::noteCallbackThread() noexcept {
     cbNice_.store(t.nice, std::memory_order_relaxed);
     callbackApplied_.store(t.applied, std::memory_order_relaxed);
     callbackGen_.fetch_add(1, std::memory_order_release);
+    // Sleeping workers wake to retune (and the first sets the callback's utilization clamp: thread_tuning.h), even
+    // while Auto runs serial and hands them nothing.
+    if (kind_ == Kind::Live && count_ > 0) publishWake();
     if (hint_) {
         int32_t tids[1 + kMaxWorkers];
         size_t n = 0;
@@ -262,6 +265,9 @@ void MixPool::loop(uint32_t lane) noexcept {
     tidsReady_.fetch_add(1, std::memory_order_release);
     tuning::WorkerState tuning;
     uint32_t tunedGen = 0;
+    bool selfClamped = false;          // this worker's floor was raised (probeUtilMin)
+    int32_t callbackClampTid = 0;      // lane 1: the callback thread it last set a floor on
+    bool callbackClamped = false;
     uint64_t rng = 0x9E3779B97F4A7C15ull * (lane + 1);
     uint32_t seen = wake_.load(std::memory_order_acquire);
     while (!stop_.load(std::memory_order_acquire)) {
@@ -289,6 +295,28 @@ void MixPool::loop(uint32_t lane) noexcept {
                 cb.nice = cbNice_.load(std::memory_order_relaxed);
                 cb.mmcss = mmcss_.load(std::memory_order_relaxed);
                 tuned_.fetch_or(tuning::tuneWorker(cb, tuning), std::memory_order_relaxed);
+                // The utilization clamp (Android; thread_tuning.h), outside any task, never on the callback: its
+                // own (a worker made real-time loses a floor it was given), and the first worker the callback's,
+                // by its id, again whenever the callback describes itself anew (its real-time grant can come late).
+                const bool selfRealtime = (tuning.applied & tuning::kAppliedRealtime) != 0;
+                const tuning::UtilClamp own = tuning::probeUtilMin(0, selfRealtime, selfClamped);
+                if (own.state != tuning::ClampState::None) {
+                    const bool was = selfClamped;
+                    selfClamped = own.state == tuning::ClampState::Applied || own.state == tuning::ClampState::Kept;
+                    if (selfClamped != was) wkClamped_.fetch_add(selfClamped ? 1u : ~0u, std::memory_order_relaxed);
+                    storeClamp(wkClamp_, own);
+                }
+                if (lane == 1 && cb.tid > 0) {
+                    const bool cbRealtime = cb.policy == 1 || cb.policy == 2;  // SCHED_FIFO, SCHED_RR (POSIX)
+                    const bool sameThread = cb.tid == callbackClampTid;
+                    const tuning::UtilClamp c =
+                        tuning::probeUtilMin(cb.tid, cbRealtime, sameThread && callbackClamped);
+                    if (c.state != tuning::ClampState::None) {
+                        callbackClampTid = cb.tid;
+                        callbackClamped = c.state == tuning::ClampState::Applied || c.state == tuning::ClampState::Kept;
+                        storeClamp(cbClamp_, c);
+                    }
+                }
             }
         }
         // Idle: spin while a callback runs (and a little after), never longer than kMaxSpinMicros, unless parked
