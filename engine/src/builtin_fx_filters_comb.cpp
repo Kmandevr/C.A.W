@@ -230,6 +230,9 @@ protected:
     bool prepare(double sr, uint32_t) noexcept override {
         release_ = detExp(-1.0 / (0.15 * sr));
         glide_ = 1.0 - detExp(-static_cast<double>(kControlFrames) / (0.03 * sr));
+        builtNote_ = std::numeric_limits<double>::quiet_NaN();  // a new rate: the next control builds the bank again
+        for (auto& side : modes_)
+            for (Mode& m : side) m.hz = m.q = -1.0;  // and each mode's design (Mode::set caches without the rate)
         return true;
     }
     void clearState() noexcept override {

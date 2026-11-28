@@ -311,7 +311,10 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return mbDescriptor(); }
 
 protected:
-    bool prepare(double, uint32_t) noexcept override { return true; }
+    bool prepare(double, uint32_t) noexcept override {
+        knobs_[0] = std::numeric_limits<double>::quiet_NaN();  // a new rate: the next control designs everything again
+        return true;
+    }
     void clearState() noexcept override {
         split_.clear();
         for (auto& d : det_) d.clear();
