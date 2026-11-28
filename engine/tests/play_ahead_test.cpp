@@ -467,6 +467,6 @@ TEST(play_ahead_preview_brings_the_track_back_fast) {
     CHECK_EQ(e.aheadStats().tracks, 3);
     CHECK_EQ(e.noteOn("pad", 7, 64, 0.8), 1);
     for (int i = 0; i < 2; ++i) e.process(l.data(), r.data(), 1000);
-    CHECK_EQ(e.aheadStats().tracks, 2);  // the pad is live after 2 callbacks, though its ring held 30000 frames more
+    CHECK_EQ(e.aheadStats().tracks, 2);  // the pad is live after 2 callbacks, though its ring was full (300 ms)
     CHECK_EQ(e.noteOff(7), 1);
 }

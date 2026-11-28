@@ -10,25 +10,32 @@ static_assert(AheadTrack::kBlock == kBlock, "an ahead track's chunks are the Eng
 namespace {
 std::atomic<int> gTestPlayAhead{-1};  // tests: every new Engine's sync play-ahead (setPlayAheadForTest)
 std::atomic<bool> gTestAheadLead{false};  // ... with a lead first (setPlayAheadLeadForTest)
+std::atomic<double> gTestAheadDepth{0.0};  // tools: every new Engine's ring depth in seconds (0: kAheadDepthSeconds)
 constexpr double kAheadQuietSeconds = 3.0;  // a track goes ahead this long after the last edit or note aimed at it
 constexpr double kAheadFadeSeconds = 0.005; // an underrun's fade out, and the fade back in live
-constexpr int64_t kAheadLead = 4096;        // frames the callback renders ahead itself before the thread takes over
-constexpr double kAheadDepthSeconds = 1.0;  // each ring (fixed in this slice)
+constexpr int64_t kAheadLead = 4096;        // frames the callback renders ahead itself before the thread takes over (at most a quarter of the depth)
+// Each ring: 300 ms, so an edit parked for an ahead track lands within 0.3 s (docs/decisions.md, 2026-11-28; the
+// Medusa runs in docs/engine-performance.md A10 had no underrun at it).
+constexpr double kAheadDepthSeconds = 0.3;
 constexpr double kAheadBanSeconds = 30.0;   // live after an underrun (doubled after a second)
 constexpr float kAheadBusyMost = 0.7f;      // no new track goes ahead while the thread is this busy
 }  // namespace
 
 void Engine::setPlayAheadForTest(int extraFrames) noexcept { gTestPlayAhead.store(extraFrames, std::memory_order_relaxed); }
 int Engine::playAheadForTest() noexcept { return gTestPlayAhead.load(std::memory_order_relaxed); }
+void Engine::setPlayAheadDepthForTest(double seconds) noexcept { gTestAheadDepth.store(seconds, std::memory_order_relaxed); }
 void Engine::setPlayAheadLeadForTest(bool on) noexcept { gTestAheadLead.store(on, std::memory_order_relaxed); }
 bool Engine::playAheadLeadForTest() noexcept { return gTestAheadLead.load(std::memory_order_relaxed); }
 
 // Control thread (or the constructor): the rings and, unless a test fills them on the callback, the thread.
 void Engine::makePlayAhead(bool thread) {
     if (ahead_) return;
-    const int64_t depth = std::max<int64_t>(8 * kBlock, static_cast<int64_t>(std::llround(kAheadDepthSeconds * sr_)));
+    const double seconds = gTestAheadDepth.load(std::memory_order_relaxed) > 0 ? gTestAheadDepth.load(std::memory_order_relaxed)
+                                                                               : kAheadDepthSeconds;
+    const int64_t depth = std::max<int64_t>(8 * kBlock, static_cast<int64_t>(std::llround(seconds * sr_)));
     aheadInbox_.reset(new Cmd[static_cast<size_t>(PlayAhead::kTracks) * kAheadInbox]);
-    ahead_ = std::make_unique<PlayAhead>(depth, kAheadLead, thread, &Engine::aheadRender, this);
+    // The lead (and with it the thread's batch, at most lead / 2) is at most a quarter of the depth.
+    ahead_ = std::make_unique<PlayAhead>(depth, std::min<int64_t>(kAheadLead, depth / 4), thread, &Engine::aheadRender, this);
     aheadPtr_.store(ahead_.get(), std::memory_order_release);
 }
 
@@ -346,7 +353,7 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
         // callback's lead budget (aheadBegin).
         // The lead grows by at most a chunk at a time, and by no more than the callback's budget in all.
         const int64_t grow = std::min<int64_t>(aheadLeadBudget_, kBlock);
-        const int64_t want = m + std::min<int64_t>(kAheadLead, fill + grow);
+        const int64_t want = m + std::min<int64_t>(a.lead(), fill + grow);
         aheadLeadBudget_ -= grow;
         while (fill < want) {
             const int n = aheadRender(this, t, static_cast<int>(std::min<int64_t>(kBlock, want - fill)));
@@ -354,7 +361,7 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
             fill += n;
         }
         if (fill < m) m = static_cast<int>(std::max<int64_t>(1, fill));  // [Assumption] a full ring never starts short
-        if (fill - m >= kAheadLead) t.state.store(AheadTrack::Worker, std::memory_order_release);
+        if (fill - m >= a.lead()) t.state.store(AheadTrack::Worker, std::memory_order_release);
     } else if (!t.underrun) {
         // Short of this chunk plus a fade's worth (a test's ring holds only what it was filled past the chunk).
         int64_t fadeFrames = std::max<int64_t>(1, std::llround(kAheadFadeSeconds * sr_));

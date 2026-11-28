@@ -742,7 +742,7 @@ CAW_API int32_t caw_engine_quality(CawEngine* e);
 
 /* Play-ahead (API 49, docs/engine.md "Play-ahead"): a track nobody touches (no sends or keys into it, no keys out of
    it, built-in components only, no MIDI out, per-note FX or modulation of its components, not previewed, armed or
-   muted) is rendered up to a second ahead on a dedicated thread, and the callback mixes it from a ring with the
+   muted) is rendered up to 300 ms ahead on a dedicated thread, and the callback mixes it from a ring with the
    same bits. An edit or a note aimed at it, a mute or solo, sends it back live once the ring has played out (the
    edit then lands); Play, Stop, a seek, a tempo or loop change drop every ring at once. An underrun (the thread fell
    behind) fades the track out over 5 ms and back in live, and it stays live. Off on a new engine; any thread. */

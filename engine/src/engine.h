@@ -119,8 +119,8 @@ public:
     // empty layer id: the master chain; kInstrumentIndex: the layer's instrument). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
     bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
-    // Play-ahead (play_ahead.h, docs/engine.md): a track nobody touches is rendered up to a second ahead on its own
-    // thread, and the callback plays it from a ring; off by default. Any edit sends it back to live first (it plays
+    // Play-ahead (play_ahead.h, docs/engine.md): a track nobody touches is rendered up to 300 ms ahead on its own
+    // thread, and the callback plays it from a ring; off on a new Engine (the app turns it on). Any edit sends it back to live first (it plays
     // out what was rendered, then takes the edit); an underrun fades it out over 5 ms and it plays live from then on.
     void setPlayAhead(bool on);
     bool playAhead() const noexcept { return aheadOn_.load(std::memory_order_relaxed); }
@@ -142,7 +142,8 @@ public:
     // chunk, to `extraFrames` past what the chunk plays (-1: off, as made).
     static void setPlayAheadForTest(int extraFrames) noexcept;
     static int playAheadForTest() noexcept;
-    static void setPlayAheadLeadForTest(bool on) noexcept;  // ... and each track starts with a lead, as with the thread
+    static void setPlayAheadLeadForTest(bool on) noexcept;
+    static void setPlayAheadDepthForTest(double seconds) noexcept;  // tools: the rings' depth of Engines made after it (0: the default)  // ... and each track starts with a lead, as with the thread
     static bool playAheadLeadForTest() noexcept;
     // Tests: the ahead renderer renders nothing while set (an underrun).
     void stallPlayAheadForTest(bool on) noexcept;

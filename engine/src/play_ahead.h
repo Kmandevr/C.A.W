@@ -171,6 +171,7 @@ public:
     AheadTrack& track(int i) noexcept { return tracks_[i]; }
     bool threaded() const noexcept { return thread_.joinable(); }
     int64_t depth() const noexcept { return depth_; }
+    int64_t lead() const noexcept { return lead_; }
     // Tests (no thread): on the calling thread, a Worker track to `target` frames in its ring, or let go.
     void serviceSync(AheadTrack& t, int64_t target) noexcept;
     // Callback: how it is scheduled (tuning::describeCallbackThread's), for the thread's own priority, which never
