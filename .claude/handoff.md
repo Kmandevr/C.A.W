@@ -21,12 +21,11 @@ clock #211).
 
 ## Next
 1. **Performance first (owner, 2026-11-27: "the DAW has gotten too heavy to worry about other features"; every other
-   feature is paused).** The owner's S22+ benchmark: live song8 at 192 frames p99 134 %, every_effect worst 327 %,
-   Kestrel 64 voices 122 %; the callback runs on little cores at ~43 % clock and the performance hint is unsupported.
-   Optimize every instrument and effect, quality unchanged: bit-identical speedups first (render digests unchanged),
-   then inaudible shortcuts (null below -120 dB or the existing tolerance tests), on Android, Windows and Linux; plus
-   the scheduling side (consider play-ahead early). A profiling agent writes the hot-spot report to the session
-   scratchpad (perf-report.md); optimizers follow by component group.
+   feature is paused).** The speed pass is merged (#302) and goes out as 1.1.3-alpha.8: Kestrel, every effect and the
+   host (meter, pool peaks, Android util_min), bit-identical but the intended fixes; both sound-changing Kestrel
+   shortcuts were measured and dropped (docs/engine-performance.md A8). Next: the owner runs the Benchmark on the S22+
+   with alpha.8 (read mix_pooled_pct, util_clamp and Medusa unfrozen), then **play-ahead (#191), the owner's next pick
+   (2026-11-28)**. Also tighten the provisional Arm64 and Windows cost ceilings from CI's bench numbers.
 2. **Paused (resume after the performance pass), saved for good as patches in AutoStacc-Hub `main`, `caw-wip/` (its README names each base commit; also local WIP commits in worktrees):** G5 op undo
    (`.claude/worktrees/collab-g5`, the review's seven fixes half done on 3ea0c4f), receives/@none/Split rack
    (`routing-receives-split`, started), drum multi-out (`drum-multi-out`, not started). #217 design: receives are a
