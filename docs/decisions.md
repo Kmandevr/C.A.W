@@ -6,9 +6,19 @@ updated: 2026-11-28
 
 # Decisions
 
+## 2026-11-28: Play-ahead's second slice (the app's intent, on by default): the choices left open (Claude, building the owner's 2026-11-28 decisions)
+
+What is intent, the 3 s return and no UI are the owner's (Hub `docs/caw/decisions.md`, 2026-11-28); built as in [engine](engine.md#play-ahead-api-49-50) and [app](app.md). Chosen here:
+
+- **One call, three intents** (`CAW_AHEAD_HOLD`, `_RELEASE`, `_EDIT`), holds counted per layer in the engine, so a page and a finger on it hold independently; the app's `PlayAheadIntent` keeps each owner's set so a release never ends another's hold.
+- **Intent drains** (the live bits), and only notes take the fast drain: the device-note path already did, and a note preview (on-screen keys and pads) now does too, since parked behind a full ring it would sound up to a second late.
+- **A finger down anywhere on a track's FX chain** (`IntentTouch` around `FxStack`) counts as a finger on its controls, scroll swipes included: a swipe only keeps the track live for its 3 s, and it needs no hook in each control.
+- **Clip, pattern and automation-lane edits** send no extra call from the app: they reach the engine as commands or a project update, which the engine already treats as intent at the same moment.
+- **The app's Benchmark runs with play-ahead on** (as the app plays), so its callback numbers drop on heavy scenarios from this release and the ahead thread's work shows as `ahead_load` in each scenario's local JSON; earlier runs measured without it.
+
 ## 2026-11-28: Play-ahead's first slice: the choices the brief left open (Claude, building the owner's 2026-11-28 decisions)
 
-The settled parts (drain only, the 5 ms underrun fade and staying live, edits as intent, parked commands at the ring's end, no UI, off by default) are the owner's (Hub `docs/caw/decisions.md`, 2026-11-28); the engine as built is in [engine](engine.md#play-ahead-api-49). Chosen here, each easy to change:
+The settled parts (drain only, the 5 ms underrun fade and staying live, edits as intent, parked commands at the ring's end, no UI, off by default in the first slice: the second, above, turns it on in the app) are the owner's (Hub `docs/caw/decisions.md`, 2026-11-28); the engine as built is in [engine](engine.md#play-ahead-api-49-50). Chosen here, each easy to change:
 
 - **Getting ahead without a gap:** the ahead thread cannot render a track's next frames while the callback still needs them from the same instances, so the callback renders the lead itself (one 64-frame chunk more than it plays, each chunk, up to 4096 frames, about 85 ms) before handing the track over: about twice that track's cost for that long, once per handover. The alternative, a gap or a fade, was audible.
 - **When:** a track goes ahead after 3 s with no edit or note aimed at it (the plan's proposal), counted from Play and from a drop, one track a callback with one lead at a time and its extra frames at most a quarter of the callback (after the audio review, 2026-11-28: a Play must not start up to 8 leads at once); a fixed depth of 1 s; at most 8 tracks at once (memory: 384 KB a ring at 48 kHz).
