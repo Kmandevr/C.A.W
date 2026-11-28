@@ -144,8 +144,22 @@ class _DeviceEditorState extends State<DeviceEditor> {
   DeviceTarget get t => widget.target;
   AppState get s => t.state;
 
+  // Play-ahead: the page open holds its track live (the master is no track).
+  @override
+  void initState() {
+    super.initState();
+    s.aheadIntent.hold(this, t.layerId);
+  }
+
+  @override
+  void didUpdateWidget(DeviceEditor old) {
+    super.didUpdateWidget(old);
+    if (old.target.layerId != t.layerId) s.aheadIntent.holdSet(this, {t.layerId});
+  }
+
   @override
   void dispose() {
+    s.aheadIntent.release(this);
     _dragging.dispose();
     _focus.dispose();
     _assigning.dispose();

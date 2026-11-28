@@ -45,6 +45,7 @@ import 'templates.dart';
 import 'easter_eggs.dart';
 import 'project_names.dart';
 import 'collab/project_ops.dart';
+import 'play_ahead_intent.dart';
 
 part 'app_state/playback.dart';
 part 'app_state/engine_sync.dart';
@@ -242,6 +243,10 @@ class AppState extends ChangeNotifier implements StressHost {
   Future<EnginePressure> Function() readPressure = ResourceSignals.read;
   @visibleForTesting
   Future<Engine> Function(int sampleRate) createEngine = (rate) => Engine.createOffThread(sampleRate: rate);
+
+  /// Play-ahead intent (play_ahead_intent.dart): the pages, touches, keys, inputs and writes that hold tracks live,
+  /// and the touch before an edit. Always the current [engine].
+  late final PlayAheadIntent aheadIntent = PlayAheadIntent(() => engine);
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
 
@@ -417,6 +422,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final e = engine;
     if (e == null) return;
     if (!e.audioOn) _openAudio(e);
+    aheadIntent.hold(('preview', id), layerId);  // a held key or pad keeps its track live
     e.noteOn(layerId, id, pitch, velocity);
     _heldPreviews.add(id);
     _poller.wake();
@@ -457,6 +463,7 @@ class AppState extends ChangeNotifier implements StressHost {
     final e = engine;
     if (e == null) return;
     e.noteOff(id);
+    aheadIntent.release(('preview', id));
     _heldPreviews.remove(id);
     if (_heldPreviews.isEmpty) {
       e.notesOff(); // a backstop: an off dropped by a full command queue can't leave a note stuck

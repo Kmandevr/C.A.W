@@ -240,8 +240,14 @@ class LiveMidi extends ChangeNotifier {
   /// The connected devices' names.
   List<String> devices = const [];
 
-  /// The track being recorded into, or null.
-  String? armedLayerId;
+  /// The track being recorded into, or null; held live in play-ahead while armed.
+  String? get armedLayerId => _armedLayerId;
+  set armedLayerId(String? id) {
+    _armedLayerId = id;
+    state.aheadIntent.holdSet(this, {?id});
+  }
+
+  String? _armedLayerId;
   bool get recording => armedLayerId != null;
 
   /// Notes still held: MIDI note number -> (preview id, start, velocity); starts are song time unwrapped ([_now]).

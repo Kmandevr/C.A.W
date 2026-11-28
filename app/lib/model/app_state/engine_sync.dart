@@ -51,6 +51,9 @@ extension AppStateEngineSync on AppState {
       }
       try {
         engine = await createEngine(settings.sampleRate);
+        // Play-ahead on (docs/engine.md "Play-ahead"): untouched tracks render ahead on the engine's own thread;
+        // aheadIntent brings a track back before it changes. Exports and offline renders have engines of their own.
+        engine!.setPlayAhead(true);
         DeviceSlotAudio.current = EngineSlotAudio.instance;  // per-slot meters and auto gain (device shell)
         MergedDevices.resolver = Engine.resolveComponent;  // old presets' effects as merged devices (user_presets.dart)
         applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
@@ -326,6 +329,11 @@ extension AppStateEngineSync on AppState {
     final id = project.id;
     try {
       info = await e.setProject(json);
+      // An armed or monitored input keeps its track live (after the update, so a new track's id is known).
+      aheadIntent.holdSet(#input, {
+        for (final l in project.layers)
+          if (l.input case final i? when i.armed || i.monitor == 'on') l.id,
+      });
       engineError = null;
       _engineProjectId = id;
       pushTempo();
