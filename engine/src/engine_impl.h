@@ -185,7 +185,8 @@ struct Engine::Slot {
     // Play-ahead (play_ahead.h). Audio thread: the AheadTrack rendering it (-1: live); live for good after an
     // underrun (until installed again); the frames of a fade back in; frames since the last edit or note aimed at it.
     int ahead = -1;
-    bool aheadBanned = false;
+    int aheadStrikes = 0;     // underruns since installed (play-ahead): each keeps it live for a while
+    int64_t aheadBanLeft = 0; // frames it stays live after an underrun (INT64_MAX: for good, after the third)
     int aheadFadeIn = 0, aheadFadeLen = 0;
     int64_t aheadQuiet = 0;
     uint32_t aheadTouchSeen = 0;

@@ -1,6 +1,7 @@
 // Play-ahead on the Engine's side (play_ahead.h): which tracks go ahead, the chunk plan while one plays from its ring,
 // parked commands, drains, underruns and drops.
 #include "engine_impl.h"
+#include "thread_tuning.h"
 
 namespace caw {
 
@@ -8,21 +9,26 @@ static_assert(AheadTrack::kBlock == kBlock, "an ahead track's chunks are the Eng
 
 namespace {
 std::atomic<int> gTestPlayAhead{-1};  // tests: every new Engine's sync play-ahead (setPlayAheadForTest)
+std::atomic<bool> gTestAheadLead{false};  // ... with a lead first (setPlayAheadLeadForTest)
 constexpr double kAheadQuietSeconds = 3.0;  // a track goes ahead this long after the last edit or note aimed at it
 constexpr double kAheadFadeSeconds = 0.005; // an underrun's fade out, and the fade back in live
 constexpr int64_t kAheadLead = 4096;        // frames the callback renders ahead itself before the thread takes over
 constexpr double kAheadDepthSeconds = 1.0;  // each ring (fixed in this slice)
+constexpr double kAheadBanSeconds = 30.0;   // live after an underrun (doubled after a second)
+constexpr float kAheadBusyMost = 0.7f;      // no new track goes ahead while the thread is this busy
 }  // namespace
 
 void Engine::setPlayAheadForTest(int extraFrames) noexcept { gTestPlayAhead.store(extraFrames, std::memory_order_relaxed); }
 int Engine::playAheadForTest() noexcept { return gTestPlayAhead.load(std::memory_order_relaxed); }
+void Engine::setPlayAheadLeadForTest(bool on) noexcept { gTestAheadLead.store(on, std::memory_order_relaxed); }
+bool Engine::playAheadLeadForTest() noexcept { return gTestAheadLead.load(std::memory_order_relaxed); }
 
 // Control thread (or the constructor): the rings and, unless a test fills them on the callback, the thread.
 void Engine::makePlayAhead(bool thread) {
     if (ahead_) return;
     const int64_t depth = std::max<int64_t>(8 * kBlock, static_cast<int64_t>(std::llround(kAheadDepthSeconds * sr_)));
     aheadInbox_.reset(new Cmd[static_cast<size_t>(PlayAhead::kTracks) * kAheadInbox]);
-    ahead_ = std::make_unique<PlayAhead>(depth, thread, &Engine::aheadRender, this);
+    ahead_ = std::make_unique<PlayAhead>(depth, kAheadLead, thread, &Engine::aheadRender, this);
     aheadPtr_.store(ahead_.get(), std::memory_order_release);
 }
 
@@ -71,7 +77,8 @@ int Engine::aheadRender(void* ctx, AheadTrack& t, int most) noexcept {
 // Whether the slot may stay ahead (or go ahead): the first slice's eligibility (docs/engine.md), and nothing that is
 // intent (muted, soloed out, shed, removed, a preview or device note sounding on it).
 bool Engine::aheadKeep(const Slot& s) noexcept {
-    if (!aheadOn_.load(std::memory_order_relaxed) || chunkProfile_) return false;
+    // Following a MIDI clock: its tempo updates (SetSong) would drop the rings over and over.
+    if (!aheadOn_.load(std::memory_order_relaxed) || chunkProfile_ || midiClockFollowing()) return false;
     if (!s.active || !s.track || s.bus || s.removing || s.overloaded || s.previewing || s.midiOut) return false;
     if (!s.instrument || s.instrument->liveInput() || (s.inserts && s.inserts->liveInput()) || slotForeign(s) || s.instrumentFading || s.insertsFading || s.instrumentFadeLeft > 0 ||
         s.insertsFadeLeft > 0)
@@ -92,7 +99,6 @@ void Engine::aheadRequestDrain(AheadTrack& t, bool fast) noexcept {
         t.fadeLen = t.fadeLeft = static_cast<int>(std::min<int64_t>(
             t.fill(), std::max<int64_t>(1, std::llround(kAheadFadeSeconds * sr_))));
     }
-    ahead_->wake();
 }
 
 // Before a command runs: where it goes while some track is ahead.
@@ -162,17 +168,20 @@ bool Engine::aheadDropAll() noexcept {
         AheadTrack& t = a.track(i);
         int st = t.state.load(std::memory_order_acquire);
         if (st == AheadTrack::Free) continue;
-        if (!t.dropped) {
-            t.dropped = true;
+        if (!t.dropCounted) {
+            t.dropCounted = true;
             aheadDrops_.fetch_add(1, std::memory_order_relaxed);
+            slotAt(t.slot).aheadQuiet = 0;  // it goes ahead again only after a quiet stretch
         }
-        t.drain.store(true, std::memory_order_release);
-        if (!a.threaded() && st == AheadTrack::Worker) {  // tests: no thread runs it now
-            t.state.store(AheadTrack::Released, std::memory_order_relaxed);
+        if (!a.threaded()) {  // tests: no thread runs it now; dropped at once
+            t.dropped = true;
+            t.drain.store(true, std::memory_order_release);
+            if (st == AheadTrack::Worker) t.state.store(AheadTrack::Released, std::memory_order_relaxed);
             st = AheadTrack::Released;
-        }
-        if (st == AheadTrack::Lead) st = AheadTrack::Released;  // the callback was the producer
-        if (st != AheadTrack::Released) {
+        } else if (st == AheadTrack::Lead || st != AheadTrack::Released || (t.fill() > 0 && !(t.underrun && t.fadeLeft == 0))) {
+            // What the ring holds fades out over 5 ms (planAhead), the rest is dropped once the producer has let
+            // go, and the command waits for that: never a cut to silence.
+            aheadRequestDrain(t, true);
             all = false;
             continue;
         }
@@ -181,7 +190,6 @@ bool Engine::aheadDropAll() noexcept {
         t.metaRead.store(std::max<int64_t>(0, t.metaWritten.load(std::memory_order_relaxed) - 1), std::memory_order_relaxed);
         if (!aheadHandBack(slotAt(t.slot), t)) all = false;
     }
-    if (!all) a.wake();
     return all;
 }
 
@@ -194,8 +202,9 @@ bool Engine::aheadHandBack(Slot& s, AheadTrack& t) noexcept {
     for (int k = 0; k < t.parked; ++k) need += retirementNeed(aheadInbox_[base + static_cast<size_t>(k)]);
     if (!canRetire(need)) return false;
     const int64_t written = t.written.load(std::memory_order_acquire);
-    const bool aligned = t.pos == written;
-    const bool fade = t.underrun || !aligned;
+    // Silent (muted and faded out): the live path plans it Silent now; nothing to line up or fade.
+    const bool aligned = t.silentBack || t.pos == written;
+    const bool fade = !t.silentBack && (t.underrun || !aligned);
     t.state.store(AheadTrack::Free, std::memory_order_release);
     s.aheadOwned.store(false, std::memory_order_seq_cst);
     s.ahead = -1;
@@ -234,15 +243,30 @@ void Engine::aheadBegin(int frames) noexcept {
         } else {
             s.aheadQuiet += frames;
         }
+        if (s.aheadBanLeft > 0 && s.aheadBanLeft != INT64_MAX) s.aheadBanLeft = std::max<int64_t>(0, s.aheadBanLeft - frames);
     }
+    // The lead's extra frames this callback (planAhead): at most a quarter of the callback, so a lead is spread over
+    // several callbacks instead of doubling a track's cost in one.
+    aheadLeadBudget_ = std::max(kBlock / 4, frames / 4);
     if (!aheadOn_.load(std::memory_order_relaxed) || !playing_ || countInLeft_ > 0 || stopFade_ > 0 || chunkProfile_ ||
         previewing_)
         return;
+    if (a->threaded()) {
+        // Once per engine: the callback's scheduling, for the thread's priority (cheap calls, as the mix pool's).
+        if (!aheadCallbackNoted_) {
+            aheadCallbackNoted_ = true;
+            const tuning::CallbackThread cb = tuning::describeCallbackThread();
+            a->noteCallback(cb.tid, cb.policy, cb.priority, cb.nice);
+        }
+        if (a->busy() > kAheadBusyMost) return;  // the thread has all it can carry
+        for (int i = 0; i < PlayAhead::kTracks; ++i)
+            if (a->track(i).state.load(std::memory_order_acquire) == AheadTrack::Lead) return;  // one lead at a time
+    }
     const int64_t quiet = a->threaded() ? static_cast<int64_t>(kAheadQuietSeconds * sr_) : 0;
     int free = 0;
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
-        if (s.ahead >= 0 || s.aheadBanned || s.mode != Slot::Mode::Play || s.aheadQuiet < quiet || !aheadKeep(s)) continue;
+        if (s.ahead >= 0 || s.aheadBanLeft > 0 || s.mode != Slot::Mode::Play || s.aheadQuiet < quiet || !aheadKeep(s)) continue;
         while (free < PlayAhead::kTracks && (a->track(free).state.load(std::memory_order_acquire) != AheadTrack::Free ||
                                              a->track(free).parked > 0))
             ++free;
@@ -268,7 +292,9 @@ void Engine::aheadBegin(int frames) noexcept {
         t.clock.steps = t.steps;
         s.ahead = free;
         aheadTracks_.fetch_add(1, std::memory_order_relaxed);
-        t.state.store(a->threaded() ? AheadTrack::Lead : AheadTrack::Worker, std::memory_order_release);
+        const bool lead = a->threaded() || aheadLeadForTest_;
+        t.state.store(lead ? AheadTrack::Lead : AheadTrack::Worker, std::memory_order_release);
+        if (lead) break;  // one track a callback, one lead at a time
     }
 }
 
@@ -279,6 +305,9 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
     AheadTrack& t = a.track(s.ahead);
     s.target = slotTarget(s);
     if (!t.drain.load(std::memory_order_relaxed) && !aheadKeep(s)) aheadRequestDrain(t, false);
+    // Muted (or soloed out, shed, removed) and faded to silence: the live path goes Silent here (its instrument idles,
+    // and an unmute starts it afresh and chases), so the track comes back now with what is left unheard.
+    if (s.target == 0.0 && s.gain == 0.0 && !(s.sends && s.sends->keys)) t.silentBack = true;
     // Tests (no thread): a drain lets go now; the ring is filled in the track's node (aheadPull), so this chunk
     // will find m + aheadSyncExtra_ frames there unless the producer is stalled.
     const bool sync = !a.threaded();
@@ -294,9 +323,15 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
     if (st == AheadTrack::Released) {
         // Dropped, or faded out (an underrun, a full inbox): the rest is never heard, so it is dropped now and the
         // track comes back at the playhead (aheadHandBack lines its notes up), not a ring's depth later.
-        if (t.dropped || (t.underrun && t.fadeLeft == 0)) {
+        if (t.dropped || t.silentBack || (t.underrun && t.fadeLeft == 0)) {
             t.read.store(t.written.load(std::memory_order_relaxed), std::memory_order_relaxed);
             fill = 0;
+        }
+        // A drop waiting on the thread (aheadDropAll): faded out, it stays silent until its command takes it back,
+        // so no live frame plays between the fade and the command.
+        if (t.dropCounted && a.threaded() && fill == 0) {
+            s.mode = Slot::Mode::Ahead;
+            return true;
         }
         if (fill == 0) {
             if (aheadHandBack(s, t)) return false;
@@ -304,18 +339,19 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
             m = static_cast<int>(std::min<int64_t>(m, fill));  // the handover lands on a chunk boundary
         }
     } else if (st == AheadTrack::Lead) {
-        // The callback renders the lead itself: this chunk's frames, and one chunk more while short of the lead.
-        const int64_t want = m + std::min<int64_t>(kAheadLead, fill + kBlock);
+        // The callback renders the lead itself: this chunk's frames, and more while short of the lead, within the
+        // callback's lead budget (aheadBegin).
+        // The lead grows by at most a chunk at a time, and by no more than the callback's budget in all.
+        const int64_t grow = std::min<int64_t>(aheadLeadBudget_, kBlock);
+        const int64_t want = m + std::min<int64_t>(kAheadLead, fill + grow);
+        aheadLeadBudget_ -= grow;
         while (fill < want) {
             const int n = aheadRender(this, t, static_cast<int>(std::min<int64_t>(kBlock, want - fill)));
             if (n <= 0) break;
             fill += n;
         }
         if (fill < m) m = static_cast<int>(std::max<int64_t>(1, fill));  // [Assumption] a full ring never starts short
-        if (fill - m >= kAheadLead) {
-            t.state.store(AheadTrack::Worker, std::memory_order_release);
-            a.wake();
-        }
+        if (fill - m >= kAheadLead) t.state.store(AheadTrack::Worker, std::memory_order_release);
     } else if (!t.underrun) {
         // Short of this chunk plus a fade's worth (a test's ring holds only what it was filled past the chunk).
         int64_t fadeFrames = std::max<int64_t>(1, std::llround(kAheadFadeSeconds * sr_));
@@ -323,7 +359,9 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
         if (fill < m + fadeFrames) {
             // An underrun: the producer fell behind. What is left fades out, and the track plays live from then on.
             aheadUnderruns_.fetch_add(1, std::memory_order_relaxed);
-            s.aheadBanned = true;
+            // Live for a while (30 s, then 60 s), for good after the third (until the slot is installed again).
+            ++s.aheadStrikes;
+            s.aheadBanLeft = s.aheadStrikes >= 3 ? INT64_MAX : static_cast<int64_t>(kAheadBanSeconds * s.aheadStrikes * sr_);
             aheadRequestDrain(t, true);
         }
     }
@@ -364,8 +402,6 @@ void Engine::aheadPull(Slot& s, int m, int64_t& n0Last, double& layerLen) noexce
         std::fill(s.insR + heard, s.insR + m, 0.0f);
     }
     t.pos += m;
-    // The thread sleeps while the ring is nearly full; it is worth waking once there is room for a batch.
-    if (ahead_->threaded() && t.size - (fill - take) >= t.size / 16) ahead_->wake();
 }
 
 }  // namespace caw

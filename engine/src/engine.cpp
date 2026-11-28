@@ -238,6 +238,7 @@ void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp)
         updateSolo();  // the loop changes no slot's activity, removal or solo, so once is enough
         for (int k = 0; k < liveCount_; ++k) {
             Slot& s = slotAt(live_[k]);
+            s.aheadQuiet = 0;  // play-ahead: tracks go ahead a quiet stretch after Play, not all in its first callback
             if (!s.active) continue;
             s.playTailLen = s.playTailAt = 0;
             if (s.midiOut) {  // a MIDI-out layer (API 47): what it played ends, the new pass starts from silence
@@ -583,7 +584,8 @@ void Engine::applyCommand(Cmd& c) noexcept {
                     s.fresh = true;
                     setShed(s, false);
                     s.restoreDelay = 0;
-                    s.aheadBanned = false;  // a new layer here may go ahead again
+                    s.aheadStrikes = 0;  // a new layer here may go ahead again
+                    s.aheadBanLeft = 0;
                     s.bus = false;
                     s.k = -1;
                     s.epoch = -1;
@@ -981,6 +983,7 @@ void Engine::applyCommand(Cmd& c) noexcept {
                 if (c.valueKind == 0) chain->setValueAt(at, c.param, c.master);
                 else if (c.valueKind == 1) chain->setBypass(at, c.flag);
                 else chain->setAutoGain(at, c.flag);
+                aheadLatency_.store(true, std::memory_order_release);  // a look-ahead may have changed: re-align
                 break;
             }
         }
@@ -1101,6 +1104,13 @@ void Engine::takeDeviceMidi(int frames) noexcept {
     for (uint32_t k = 0; k < midiPendingCount_; ++k) {
         PendingMidi& p = midiPending_[k];
         if (p.e.type == Midi2EventType::AllOff) {  // at once, whatever its time
+            // Play-ahead: notes before it still waiting for an ahead track it covers would sound after it: they go.
+            for (uint32_t j = 0; j < k; ++j) {
+                PendingMidi& q = midiPending_[j];
+                if (!q.done && q.e.target >= 0 && q.e.target < slotCount_ && slotAt(q.e.target).ahead >= 0 &&
+                    (p.e.target < 0 || q.e.target == p.e.target))
+                    q.done = true;
+            }
             const DeviceMidiOptions o{};
             for (int i = 0; i < slotCount_; ++i) {
                 if (p.e.target >= 0 && i != p.e.target) continue;
@@ -1139,9 +1149,11 @@ void Engine::takeDeviceMidi(int frames) noexcept {
             p.done = true;
             continue;
         }
-        if (s.ahead >= 0) {  // play-ahead: a note aimed at an ahead track is intent; it waits for the track to be live
+        if (s.ahead >= 0) {
+            // Play-ahead: a note aimed at an ahead track is intent: what its ring holds fades out over 5 ms and it
+            // comes back live at the playhead, where the note (kept until then) plays.
             s.aheadQuiet = 0;
-            aheadRequestDrain(ahead_->track(s.ahead), false);
+            aheadRequestDrain(ahead_->track(s.ahead), true);
             continue;
         }
         s.aheadQuiet = 0;
@@ -1793,9 +1805,11 @@ int Engine::planChunk(int maxFrames) noexcept {
     }
     for (int k = 0; k < liveCount_; ++k) {
         Slot& s = slotAt(live_[k]);
+        // Play-ahead first: it plays from its ring this chunk, or came back live (its parked commands may have made
+        // it a bus or removed it), and is planned below as any slot is.
+        if (s.ahead >= 0 && planAhead(s, m)) continue;
         if (!s.active || (!s.bus && !s.track)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
-        if (s.ahead >= 0 && planAhead(s, m)) continue;  // play-ahead: it plays from its ring this chunk
         s.target = slotTarget(s);
         // A slot keying a component (a kick keying a ducker) keeps running while muted or soloed out, so its key
         // still sounds; its own output is silence.

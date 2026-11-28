@@ -87,6 +87,8 @@ struct AheadTrack {
     bool underrun = false;  // fading out or silent until the producer lets go
     int fadeLeft = 0, fadeLen = 0;
     bool dropped = false;   // a seek, loop, tempo or project change: nothing more from the ring is heard
+    bool dropCounted = false;  // counted in the Engine's drops (a threaded drop first fades what the ring holds)
+    bool silentBack = false;   // muted and faded to 0: back live as a silent slot, with no fade or chase
     int64_t lastN0 = 0;     // the last frame heard's place in the layer's loop, and the loop's length
     double lastLayerLen = 1;
     int parked = 0;         // commands waiting for the ring's end (Engine::aheadInbox_)
@@ -106,7 +108,7 @@ struct AheadTrack {
         metaRead.store(0, std::memory_order_relaxed);
         drain.store(false, std::memory_order_relaxed);
         pos = 0;
-        underrun = dropped = false;
+        underrun = dropped = dropCounted = silentBack = false;
         fadeLeft = fadeLen = 0;
     }
     int64_t fill() const noexcept {
@@ -158,8 +160,10 @@ public:
     static constexpr int kTracks = 8;  // tracks ahead at once at most (their rings are allocated up front)
     // Renders the track's next chunk (at most `most` frames, at most kBlock) into its ring; returns its frames.
     using RenderFn = int (*)(void* ctx, AheadTrack& t, int most) noexcept;
-    // depth: each ring's frames; thread: false for tests, which fill the rings on the callback (serviceSync).
-    PlayAhead(int64_t depth, bool thread, RenderFn render, void* ctx);
+    // depth: each ring's frames; lead: the frames a track's ring holds when the thread takes it over (a batch is at
+    // most lead / (2 × tracks ahead), so no ring is left waiting long); thread: false for tests, which fill the rings
+    // on the callback (serviceSync).
+    PlayAhead(int64_t depth, int64_t lead, bool thread, RenderFn render, void* ctx);
     ~PlayAhead();
     PlayAhead(const PlayAhead&) = delete;
     PlayAhead& operator=(const PlayAhead&) = delete;
@@ -167,27 +171,31 @@ public:
     AheadTrack& track(int i) noexcept { return tracks_[i]; }
     bool threaded() const noexcept { return thread_.joinable(); }
     int64_t depth() const noexcept { return depth_; }
-    // Callback: a track was handed over or frames were played (the thread sleeps while every ring is full).
-    void wake() noexcept;
     // Tests (no thread): on the calling thread, a Worker track to `target` frames in its ring, or let go.
     void serviceSync(AheadTrack& t, int64_t target) noexcept;
+    // Callback: how it is scheduled (tuning::describeCallbackThread's), for the thread's own priority, which never
+    // goes above it (thread_tuning.h, as the mix pool's workers). Atomics only.
+    void noteCallback(int32_t tid, int policy, int priority, int nice) noexcept;
+    // The share of its time the thread spent rendering over the last quarter second or so (0..1).
+    float busy() const noexcept { return busy_.load(std::memory_order_relaxed); }
 
     std::atomic<uint64_t> workNs{0}, workFrames{0};  // the producer's time and the frames it rendered
     std::atomic<bool> stallForTest{false};           // the producer renders nothing while set (underrun tests)
 
 private:
-    // A Worker track: let go if asked, else render up to `target` frames ahead in batches of at most a quarter of
-    // the ring; true if it did anything.
-    bool service(AheadTrack& t, int64_t target, int64_t minBatch) noexcept;
+    // A Worker track: let go if asked, else render up to `target` frames ahead in one batch of at most `batch`
+    // frames; true if it did anything.
+    bool service(AheadTrack& t, int64_t target, int64_t minBatch, int64_t batch) noexcept;
     void run() noexcept;
 
-    const int64_t depth_;
+    const int64_t depth_, lead_;
     RenderFn render_;
     void* ctx_;
     std::unique_ptr<AheadTrack[]> tracks_;
     std::atomic<bool> quit_{false};
-    std::atomic<uint32_t> wakeSeq_{0};
-    std::atomic<bool> sleeping_{false};
+    std::atomic<float> busy_{0};
+    std::atomic<int32_t> cbTid_{0}, cbPolicy_{0}, cbPriority_{0}, cbNice_{0};
+    std::atomic<uint32_t> cbGen_{0};
     std::thread thread_;
 };
 

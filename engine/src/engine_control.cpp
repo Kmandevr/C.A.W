@@ -8,14 +8,20 @@ namespace caw {
 // Play-ahead: an edit is intent. It marks the layer's slot touched (so it does not go ahead), and if the slot is
 // ahead now the edit travels as a command parked in its inbox until the ring's end: -1 not ahead (apply it here),
 // 1 sent, 0 the queue was full. Under ctl_.
+// Control thread: an edit to the slot is intent (it doesn't go ahead, or comes back); true if it is ahead now.
+bool Engine::aheadTouchCtl(int slot) noexcept {
+    if (!ahead_ || !ctlTable_ || slot < 0 || slot >= ctlTable_->capacity) return false;
+    Slot& s = *ctlTable_->slots[slot];
+    s.aheadTouch.fetch_add(1, std::memory_order_seq_cst);
+    return s.aheadOwned.load(std::memory_order_seq_cst);
+}
+
 int Engine::aheadEdit(const std::string& layerId, ComponentChain* chain, uint32_t at, int kind, int param, double value,
                       bool flag, const std::string& paramId) {
     if (layerId.empty() || !ahead_ || !ctlTable_) return -1;
     auto it = layers_.find(layerId);
     if (it == layers_.end() || it->second.slot < 0 || it->second.slot >= ctlTable_->capacity) return -1;
-    Slot& s = *ctlTable_->slots[it->second.slot];
-    s.aheadTouch.fetch_add(1, std::memory_order_seq_cst);
-    if (!s.aheadOwned.load(std::memory_order_seq_cst)) return -1;
+    if (!aheadTouchCtl(it->second.slot)) return -1;
     // A bypass or an auto-gain switch goes the direct way (an atomic the renderer reads at its next chunk, so it lands
     // within a chunk of the ring's end, and reads back at once); the touch sends the track live.
     if (kind != 0) return -1;
@@ -602,6 +608,10 @@ Meters Engine::meters() {
     }
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
+    if (aheadLatency_.exchange(false, std::memory_order_acq_rel)) {  // play-ahead: a parked edit landed (a look-ahead?)
+        std::map<std::string, std::vector<std::string>> warnings;
+        updateCompensation(warnings);
+    }
     Meters m;
     m.cpu = cpu_.load(std::memory_order_relaxed);
     m.peakL = peakL_.exchange(0, std::memory_order_relaxed);

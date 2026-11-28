@@ -136,6 +136,8 @@ public:
     // chunk, to `extraFrames` past what the chunk plays (-1: off, as made).
     static void setPlayAheadForTest(int extraFrames) noexcept;
     static int playAheadForTest() noexcept;
+    static void setPlayAheadLeadForTest(bool on) noexcept;  // ... and each track starts with a lead, as with the thread
+    static bool playAheadLeadForTest() noexcept;
     // Tests: the ahead renderer renders nothing while set (an underrun).
     void stallPlayAheadForTest(bool on) noexcept;
     // Project modulation (#161, modulation_links.h; API 19): a running modulator's knob or bypass, a link's amount
@@ -909,7 +911,12 @@ private:
     std::unique_ptr<Cmd[]> aheadInbox_;
     std::atomic<int> aheadTracks_{0};
     std::atomic<uint64_t> aheadUnderruns_{0}, aheadDrops_{0};
+    int64_t aheadLeadBudget_ = 0;     // audio thread: the lead's extra frames left this callback
+    bool aheadCallbackNoted_ = false; // audio thread: the callback's scheduling went to the ahead thread
+    bool aheadLeadForTest_ = false;   // tests: the rings start with a lead rendered on the callback, as with the thread
+    std::atomic<bool> aheadLatency_{false};  // a parked value edit landed: the control thread re-runs compensation
     void makePlayAhead(bool thread);  // control thread
+    bool aheadTouchCtl(int slot) noexcept;  // control thread (engine_control.cpp)
     int aheadEdit(const std::string& layerId, ComponentChain* chain, uint32_t at, int kind, int param, double value,
                   bool flag, const std::string& paramId);  // control thread: a value edit for an ahead track (engine_control.cpp)
     std::vector<std::unique_ptr<Slot>> slotStore_;
