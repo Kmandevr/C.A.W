@@ -715,6 +715,31 @@ TEST(the_flagship_s_ramping_knobs_rework_only_their_section_with_the_same_bits) 
     same("osc FM, a slot on fine", slot, {}, false);
 }
 
+// Kestrel's chorus sweeps with every knob still (2026-11-27): its LFO moved only when the effects were configured
+// (a knob, the tempo or the quality moving), so with the knobs still its last step ran on and the delay drifted to
+// the line's end. Now it moves on every control period, so a render with the knobs still has the bits of one in
+// which an effect knob that does nothing heard (the delay's mix, the delay off) moves at every control.
+TEST(the_flagship_s_chorus_sweeps_with_its_knobs_still) {
+    Engine e(48000);
+    const Values patch = {{"fx_chorus_on", 1}, {"fx_chorus_mix", 1.0}, {"fx_chorus_rate", 2.0}, {"fx_chorus_depth", 1.0},
+                          {"fx_reverb_on", 0}, {"env1_sustain", 1}};
+    const std::vector<Event> notes = {notes::noteOn(0, 1, 57, 0.9), notes::noteOn(0, 2, 64, 0.8)};
+    const Stereo still = playRamped(e, patch, notes, {}, 72000);
+    const Stereo moving = playRamped(e, patch, notes, {{"fx_delay_mix", 0.1, 0.9, 72000.0}}, 72000);
+    Values off = patch;
+    off.push_back({"fx_chorus_on", 0});
+    const Stereo dry = playRamped(e, off, notes, {}, 72000);
+    CHECK(!still.left.empty() && still.left.size() == moving.left.size() && still.left.size() == dry.left.size());
+    size_t differ = 0;
+    double wet = 0.0;
+    for (size_t i = 0; i < still.left.size() && i < moving.left.size() && i < dry.left.size(); ++i) {
+        differ += still.left[i] != moving.left[i] || still.right[i] != moving.right[i];
+        wet = std::max(wet, static_cast<double>(std::fabs(still.left[i] - dry.left[i])));
+    }
+    if (differ) cawtest::fail(__FILE__, __LINE__, std::to_string(differ) + " samples differ from the chorus configured every control");
+    CHECK(wet > 0.01);
+}
+
 TEST(the_flagship_s_voices_side_by_side_sound_as_each_voice_alone) {
     // Speed A2 (2026-11-12; its audio review): voices whose filters are set alike run side by side, the rest one at
     // a time. Twelve notes, each set apart by its own note expression: timbre picks filter 1's type (0 ladder
