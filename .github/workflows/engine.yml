@@ -152,12 +152,15 @@ jobs:
           set -o pipefail
           if [ "$SHARD" = other ]; then
             ctest --test-dir engine/build --build-config Release --output-on-failure --no-tests=error --parallel 4 \
-              -E '^(caw_tests_(parallel_)?shard_[0-9]+|caw_parallel_identity)$' 2>&1 | tee engine/build/ctest.log
+              -E '^(caw_tests_(parallel_|ahead_)?shard_[0-9]+|caw_parallel_identity|caw_play_ahead_identity)$' 2>&1 | tee engine/build/ctest.log
           else
             ctest --test-dir engine/build --build-config Release --output-on-failure --no-tests=error --parallel 2 \
-              -R "^caw_tests_(parallel_)?shard_${SHARD}\$" 2>&1 | tee engine/build/ctest.log
-            # caw_parallel_identity for this shard: its renders have the same bits on one thread and on the mix pool.
+              -R "^caw_tests_(parallel_|ahead_)?shard_${SHARD}\$" 2>&1 | tee engine/build/ctest.log
+            # caw_parallel_identity for this shard: its renders have the same bits on one thread and on the mix pool,
+            # and caw_play_ahead_identity's: and with play-ahead.
             cmake -DDIGEST_DIR="$PWD/engine/build/render_digests" -DSHARD_COUNT=$SHARDS -DSHARDS=$SHARD \
+              -P engine/cmake/CompareDigests.cmake 2>&1 | tee -a engine/build/ctest.log
+            cmake -DDIGEST_DIR="$PWD/engine/build/render_digests" -DSHARD_COUNT=$SHARDS -DSHARDS=$SHARD -DOTHER=ahead \
               -P engine/cmake/CompareDigests.cmake 2>&1 | tee -a engine/build/ctest.log
           fi
       - name: Name the failing tests
@@ -211,6 +214,7 @@ jobs:
         run: |
           export CAW_TEST_COMPONENT_PATH="$PWD/engine/build-tsan/caw_test_component.so"
           engine/build-tsan/caw_tests mix_pool
+          engine/build-tsan/caw_tests play_ahead  # the ahead thread beside the callback, edits from another thread
           engine/build-tsan/caw_tests input_
           engine/build-tsan/caw_tests fifo
           engine/build-tsan/caw_tests stress_  # the Benchmark: two engines profiling at once, cancel, ramps

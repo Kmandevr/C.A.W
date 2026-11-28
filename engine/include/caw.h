@@ -218,8 +218,11 @@ extern "C" {
    caw_midi_out_stop attach the process's one sender to an engine and detach it (CC 123 on every channel each port
    used); caw_midi_out_devices lists, caw_midi_out_open and caw_midi_out_close open and close, the devices a port sends
    to (Windows: WinMM's output ports, sent from a native thread at each message's time; Android: the app's Kotlin
-   thread opens the devices and takes the due messages through JNI; elsewhere no sender). Nothing else changes. */
-#define CAW_API_VERSION 48
+   thread opens the devices and takes the due messages through JNI; elsewhere no sender). Nothing else changes.
+   49 (2026-11-28): play-ahead (docs/engine.md "Play-ahead"): caw_engine_set_play_ahead turns it on or off (off on a
+   new engine), caw_engine_play_ahead reads it, caw_engine_play_ahead_stats fills a CawAheadStats, CawStressRequest gains
+   play_ahead and the stress result ahead_tracks, ahead_underruns and ahead_load. Off, nothing changes; on, an untouched track renders up to a second ahead on its own thread with the same bits. */
+#define CAW_API_VERSION 49
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 /* A component index with this bit (API version 22) names component (index & ~CAW_NOTE_COMPONENT) of the layer's
@@ -733,6 +736,23 @@ CAW_API char* caw_drums_kit_tool(const char* request_json);
 CAW_API void caw_engine_set_quality(CawEngine* e, int32_t quality);
 CAW_API int32_t caw_engine_quality(CawEngine* e);
 
+/* Play-ahead (API 49, docs/engine.md "Play-ahead"): a track nobody touches (no sends or keys into it, no keys out of
+   it, built-in components only, no MIDI out, per-note FX or modulation of its components, not previewed, armed or
+   muted) is rendered up to a second ahead on a dedicated thread, and the callback mixes it from a ring with the
+   same bits. An edit or a note aimed at it, a mute or solo, sends it back live once the ring has played out (the
+   edit then lands); Play, Stop, a seek, a tempo or loop change drop every ring at once. An underrun (the thread fell
+   behind) fades the track out over 5 ms and back in live, and it stays live. Off on a new engine; any thread. */
+typedef struct CawAheadStats {
+    int32_t tracks;        /* tracks ahead now */
+    uint64_t underruns;    /* since the engine was made */
+    uint64_t drops;        /* rings dropped by Play, Stop, a seek, a tempo or loop change */
+    uint64_t work_ns;      /* the ahead thread's render time ... */
+    uint64_t work_frames;  /* ... for this many frames, summed over the tracks */
+} CawAheadStats;
+CAW_API void caw_engine_set_play_ahead(CawEngine* e, int32_t on);
+CAW_API int32_t caw_engine_play_ahead(CawEngine* e);
+CAW_API int32_t caw_engine_play_ahead_stats(CawEngine* e, CawAheadStats* out);  /* 0 for a null engine or out */
+
 /* The device buffer: Auto uses a larger one (about 21 ms) while not recording and the smallest the device
    gives while recording; Low latency always the smallest; Battery
    always the larger, on the power-saving path. A running device reopens when the size changes (a short gap). */
@@ -1163,6 +1183,7 @@ typedef struct CawStressRequest {
                               a live device does (MixPool::defaultWorkers()); PROFILE runs on one thread */
     int32_t quality;       /* the engine's quality (CAW quality 0 Eco, 1 Normal, 2 High) */
     const char* work_dir;  /* an existing folder the run may write two small WAVs into (song8_extras), or NULL */
+    int32_t play_ahead;    /* API 49: non-zero turns play-ahead on for the run (read only when struct_size covers it) */
 } CawStressRequest;
 /* NULL if the request is refused (struct_size, kind, mode, seconds, frames, threads, quality) or the pool closes.
    caw_job_result is the run's JSON when it succeeds: {"ok", "mode": "dsp"|"live", "kind", "scenario", "frames",
@@ -1170,7 +1191,9 @@ typedef struct CawStressRequest {
    "mean_pct", "p99_pct", "worst_pct", "callbacks", "over_budget", "dropouts", "xruns", "limit", "first_failed",
    "steps", "seconds", "stop_reason": "done"|"over_budget"|"cancelled"|"error", "error", "callback_core",
    "requested_frames", "warmup_s", "first_callback_us", "slope_pct_per_min", "core_start", "core_end",
-   "core_khz_start", "core_khz_end", "core_max_khz", "mix_workers", "mix_active_workers", "mix_pooled_pct" (the timed callbacks that
+   "core_khz_start", "core_khz_end", "core_max_khz", "mix_workers", "mix_active_workers", "ahead_tracks", "ahead_underruns", "ahead_load" (play-ahead, API 49: tracks
+   ahead at the end, underruns while timed, the ahead thread's microseconds per second of audio played),
+   "mix_pooled_pct" (the timed callbacks that
    ran a mix level on the pool, %), "warmup_xruns",
    "device_sizes", "budget_basis", "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. After Play an untimed
    warm-up (0.5 s; 1.7 s with the mix pool, Auto's decision and settle) comes before the timed span; "worst_at_s"

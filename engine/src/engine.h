@@ -22,11 +22,14 @@
 #include "meters.h"
 #include "module_registry.h"
 #include "pattern.h"
+#include "play_ahead.h"
 #include "project.h"
 #include "spsc.h"
 #include "tempo_map.h"
 
 namespace caw {
+
+inline PartProfile* TrackClock::parts() const noexcept { return profile ? &profile->parts : nullptr; }
 
 class SamplePreview;  // sample_preview.h: the sample browser's preview voice (API 33)
 
@@ -116,6 +119,27 @@ public:
     // empty layer id: the master chain; kInstrumentIndex: the layer's instrument). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
     bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
+    // Play-ahead (play_ahead.h, docs/engine.md): a track nobody touches is rendered up to a second ahead on its own
+    // thread, and the callback plays it from a ring; off by default. Any edit sends it back to live first (it plays
+    // out what was rendered, then takes the edit); an underrun fades it out over 5 ms and it plays live from then on.
+    void setPlayAhead(bool on);
+    bool playAhead() const noexcept { return aheadOn_.load(std::memory_order_relaxed); }
+    struct AheadStats {
+        int tracks = 0;          // tracks rendered ahead now
+        uint64_t underruns = 0;  // since the Engine was made
+        uint64_t drops = 0;      // rings dropped by a seek, loop, tempo or project change
+        uint64_t workNs = 0;     // the ahead thread's render time (tests: the callback's fills; not the lead) ...
+        uint64_t workFrames = 0; // ... for this many frames, summed over the tracks
+    };
+    AheadStats aheadStats() const noexcept;
+    // Tests: every Engine made after this renders ahead with no thread: its rings are filled on the callback, each
+    // chunk, to `extraFrames` past what the chunk plays (-1: off, as made).
+    static void setPlayAheadForTest(int extraFrames) noexcept;
+    static int playAheadForTest() noexcept;
+    static void setPlayAheadLeadForTest(bool on) noexcept;  // ... and each track starts with a lead, as with the thread
+    static bool playAheadLeadForTest() noexcept;
+    // Tests: the ahead renderer renders nothing while set (an underrun).
+    void stallPlayAheadForTest(bool on) noexcept;
     // Project modulation (#161, modulation_links.h; API 19): a running modulator's knob or bypass, a link's amount
     // while it plays, and what the audio thread last published (a modulator's outputs, 0..1; a link's target's summed
     // offset in normalized travel). The readers never wait: 0 (outputs) or false while a project update runs.
@@ -497,13 +521,13 @@ private:
     void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
-    void planTrack(Slot& s, int& m) noexcept;
+    void planTrack(Slot& s, int& m, const TrackClock& c) noexcept;
     // Graph nodes (audio thread): a track (its instrument, inserts and mix), a folder bus, and the master stage.
     void runTrackNode(int slot, float* outL, float* outR, int m) noexcept;
     void runDelay(Slot& s, float* outL, float* outR, int m) noexcept;
     void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     // A slot's native inserts over L/R in place, with the crossfade of a chain change (tracks and buses).
-    void runInserts(Slot& s, float* L, float* R, int m) noexcept;
+    void runInserts(Slot& s, float* L, float* R, int m, const TrackClock& c) noexcept;
     // A slot's sends and keys: pre taps after its effects, post taps after volume and pan (before its delay).
     uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
     void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
@@ -512,14 +536,28 @@ private:
     bool pullRoutes(Slot& d, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
+    // Play-ahead (play_ahead.h), audio thread: tracks go ahead at a callback's start (aheadBegin); each chunk an ahead
+    // slot plays from its ring or comes back live at the ring's end (planAhead, aheadPull, aheadHandBack).
+    enum class AheadRoute { Apply, Park, Wait };
+    AheadRoute aheadRoute(const Cmd& c) noexcept;
+    bool aheadDropAll() noexcept;  // false: a producer has not let go yet (the command waits a callback)
+    void aheadRequestDrain(AheadTrack& t, bool fast) noexcept;
+    bool aheadKeep(const Slot& s) noexcept;  // still eligible (and not muted, touched or previewing)
+    void aheadBegin(int frames) noexcept;
+    bool planAhead(Slot& s, int& m) noexcept;   // false: the slot is live again this chunk
+    bool aheadHandBack(Slot& s, AheadTrack& t) noexcept;
+    void aheadPull(Slot& s, int m, int64_t& n0Last, double& layerLen) noexcept;
+    static int aheadRender(void* ctx, AheadTrack& t, int most) noexcept;  // the producer's next chunk
+    static size_t retirementNeed(const Cmd& c) noexcept;
+    void applyCommand(Cmd& c) noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
     void runVca(int m) noexcept;  // audio thread, once a chunk: each member slot's VCA ramp (Slot::vca)
     // A track's instrument, first in its track node: its pattern notes and note motion as events, then
     // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
-    void runInstrument(Slot& s, int m) noexcept;
-    void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
-    void chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0) noexcept;
+    void runInstrument(Slot& s, int m, const TrackClock& c) noexcept;
+    void instrumentNotes(Slot& s, NoteEvents& notes, int m, const TrackClock& c) noexcept;
+    void chaseNotes(Slot& s, NoteEvents& notes, const Pattern* pat, size_t e, int64_t n0, const TrackClock& c) noexcept;
     // A pattern note's pitch as the instruments get it (#226): bends reach 96 semitones, so it stays within
     // kMinNotePitch and the pitch of half the sample rate, where no oscillator aliases or runs away.
     double safePitch(double pitch) const noexcept { return std::clamp(pitch, kMinNotePitch, nyquistPitch_); }
@@ -536,20 +574,23 @@ private:
     int deviceSlot(const std::string& layerId);
     void updatePreviewing(int frames) noexcept;
     void endPlayback() noexcept;
-    bool noteSpan(const Slot& s, const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
-    void rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
+    bool noteSpan(const Slot& s, const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop, const TrackClock& c) const noexcept;
+    void rebindNote(const Slot& s, NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0, const TrackClock& c) noexcept;
     // The tempo map (audio thread): a new one swapped in, the song step at a sample, and a step of the slot's pass
     // as a sample into the pass (sampletime::roundFrames(step, stepLen_) with one tempo) and samples per step there.
     void takeSong(SongTime* next, bool follow = false) noexcept;  // follow: keep the beat and the notes
     void keepInRange() noexcept;     // after takeSong and updateTiming: a kept beat inside the loop range stays inside
     void publishSongPos() noexcept;  // callback end: the position on the playing map, for position()
     double songStep(int64_t frame) const noexcept;
-    int64_t passFrame(const Slot& s, double step) const noexcept;
-    double passStepLen(const Slot& s, double step) const noexcept;
-    int64_t loopStart(const Slot& s, int64_t k) const noexcept;
+    int64_t passFrame(const Slot& s, double step, const TrackClock& c) const noexcept;
+    double passStepLen(const Slot& s, double step, const TrackClock& c) const noexcept;
+    int64_t loopStart(const Slot& s, int64_t k, const TrackClock& c) const noexcept;
     void updateTiming() noexcept;
     // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
     int64_t wrapAt() const noexcept;
+    // The transport as the chunk's track nodes read it (TrackClock): the members below, copied at each chunk.
+    void syncClock() noexcept;
+    TrackClock clock_;
     void pickOverloadVictim() noexcept;
     void restoreOne() noexcept;      // audio thread: the newest shed layer back, if it fits
     void resetShedding() noexcept;   // audio thread: every shed layer back, the load history forgotten
@@ -860,6 +901,24 @@ private:
     uint64_t playCount_ = 0;     // Play commands sent (control thread)
     uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
     // Every slot ever made (the audio thread's tables point into it); it only grows.
+    // Play-ahead: made once on the control thread (setPlayAhead, or with the Engine in tests) and kept; the audio
+    // thread reads aheadPtr_. aheadInbox_: kAheadInbox commands per ahead track, parked until its ring's end.
+    static constexpr int kAheadInbox = 16;
+    std::unique_ptr<PlayAhead> ahead_;
+    std::atomic<PlayAhead*> aheadPtr_{nullptr};
+    std::atomic<bool> aheadOn_{false};
+    int aheadSyncExtra_ = -1;  // tests: no thread (setPlayAheadForTest)
+    std::unique_ptr<Cmd[]> aheadInbox_;
+    std::atomic<int> aheadTracks_{0};
+    std::atomic<uint64_t> aheadUnderruns_{0}, aheadDrops_{0};
+    int64_t aheadLeadBudget_ = 0;     // audio thread: the lead's extra frames left this callback
+    bool aheadCallbackNoted_ = false; // audio thread: the callback's scheduling went to the ahead thread
+    bool aheadLeadForTest_ = false;   // tests: the rings start with a lead rendered on the callback, as with the thread
+    std::atomic<bool> aheadLatency_{false};  // a parked value edit landed: the control thread re-runs compensation
+    void makePlayAhead(bool thread);  // control thread
+    bool aheadTouchCtl(int slot) noexcept;  // control thread (engine_control.cpp)
+    int aheadEdit(const std::string& layerId, ComponentChain* chain, uint32_t at, int kind, int param, double value,
+                  bool flag, const std::string& paramId);  // control thread: a value edit for an ahead track (engine_control.cpp)
     std::vector<std::unique_ptr<Slot>> slotStore_;
     SlotTable* ctlTable_ = nullptr;  // the newest table sent (alive until a newer one replaces it)
     std::atomic<int> ctlCapacity_{0};  // ctlTable_'s layer capacity, for layerCapacity()

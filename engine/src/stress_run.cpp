@@ -38,6 +38,7 @@ bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, bool serial, 
              std::vector<float>& rr, std::string& error) {
     e.setQuality(r.quality);
     e.setShedding(false);
+    if (r.playAhead) e.setPlayAhead(true);
     if (serial) e.setMixParallel(Engine::MixParallel::Never);
     else e.useBenchmarkMixPool();  // offline workers on Auto; serial while a live device runs (engine.h)
     const std::string warn = e.setProject(p);
@@ -55,7 +56,9 @@ bool prepare(Engine& e, const ProjectSpec& p, const RunRequest& r, bool serial, 
 bool warmUp(Engine& e, const RunRequest& r, bool pool, std::vector<float>& l, std::vector<float>& rr, RunResult& out,
             const std::atomic<int32_t>* cancel) {
     const double budgetUs = 1e6 * r.frames / r.rate;
-    const int64_t calls = std::max<int64_t>(1, static_cast<int64_t>(warmupSeconds(pool) * r.rate / r.frames));
+    // Play-ahead: tracks go ahead after 3 s untouched and a lead; the timed span starts once they have.
+    const double warm = r.playAhead ? std::max(warmupSeconds(pool), 4.0) : warmupSeconds(pool);
+    const int64_t calls = std::max<int64_t>(1, static_cast<int64_t>(warm * r.rate / r.frames));
     for (int64_t c = 0; c < calls; ++c) {
         if (cancelled(cancel)) return false;
         const auto t0 = Clock::now();
@@ -413,12 +416,14 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
     if (profile) profile->parts = PartProfile{};  // the warm-up's are not the timed span's
     readCore(out.coreStart, out.khzStart, out.maxKHz);
     const uint64_t pooledFrom = e.mixPooledCallbacks();
+    const AheadMark aheadFrom = aheadMark(e);
     const int64_t n = timeCallbacks(e, r.frames, calls, us.data(), l.data(), rr.data(), &progress, history, cancel,
                                     profile ? &profile->parts : nullptr, profile ? partNs.data() : nullptr);
     readCore(out.coreEnd, out.khzEnd, out.maxKHz);
     out.mixWorkers = e.mixWorkers();
     out.mixActive = e.mixActiveWorkers();
     out.mixPooledPct = n > 0 ? 100.0 * static_cast<double>(e.mixPooledCallbacks() - pooledFrom) / static_cast<double>(n) : 0.0;
+    aheadDelta(e, aheadFrom, out, static_cast<double>(n) * r.frames / r.rate);
     e.setProfile(nullptr);
     if (n > 0) fill(out, us, n, r);
     if (profile && n > 0) {
@@ -431,6 +436,18 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
     out.stopReason = n == calls ? "done" : "cancelled";
     progress.permille.store(1000, std::memory_order_relaxed);
     return out;
+}
+
+AheadMark aheadMark(const Engine& e) noexcept {
+    const Engine::AheadStats st = e.aheadStats();
+    return {st.underruns, st.workNs, st.workFrames};
+}
+
+void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, double playedSeconds) noexcept {
+    const Engine::AheadStats st = e.aheadStats();
+    out.aheadTracks = st.tracks;
+    out.aheadUnderruns = st.underruns - from.underruns;
+    out.aheadLoadUs = playedSeconds > 0 ? (static_cast<double>(st.workNs - from.workNs) / 1000.0) / playedSeconds : 0.0;
 }
 
 }  // namespace caw::stress

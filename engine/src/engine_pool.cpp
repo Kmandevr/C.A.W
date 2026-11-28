@@ -187,6 +187,12 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     audioIn_ = std::make_unique<LiveAudio>(sampleRate);
     masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
+    if (const int extra = playAheadForTest(); extra >= 0) {  // tests: play-ahead on, its rings filled on the callback
+        aheadSyncExtra_ = extra;
+        aheadLeadForTest_ = playAheadLeadForTest();
+        makePlayAhead(false);
+        aheadOn_.store(true, std::memory_order_relaxed);
+    }
     ctlSr_ = sampleRate;
     constexpr int initial = kInitialLayerCapacity;
     auto first = std::make_unique<SlotTable>();
@@ -266,6 +272,21 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
 
 Engine::~Engine() {
     stopLiveMixPool();  // the workers first: they could run nodes that read what is freed below
+    ahead_.reset();  // play-ahead's thread too: it renders tracks' chains
+    if (aheadInbox_)  // commands parked for ahead tracks (play-ahead)
+        for (int i = 0; i < PlayAhead::kTracks * kAheadInbox; ++i) {
+            Cmd& c = aheadInbox_[static_cast<size_t>(i)];
+            delete c.pattern;
+            delete c.automation;
+            delete c.orderList;
+            delete c.table;
+            delete c.masterChain;
+            delete c.componentAutomation;
+            delete c.delay;
+            delete c.sends;
+            delete c.song;
+            delete c.vca;
+        }
     // No audio thread runs any more: free everything directly.
     Cmd c;
     while (cmds_->pop(c)) {

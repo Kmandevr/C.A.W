@@ -73,6 +73,9 @@ std::string resultJson(const Job& j) {
                     ",\"mix_active_workers\":" + std::to_string(r.mixActive) +
                     // The timed callbacks that ran a level on the pool (Auto on, and a level with two busy nodes).
                     ",\"mix_pooled_pct\":" + num(r.mixPooledPct) +
+                    // Play-ahead (API 49): tracks ahead at the end, underruns, the ahead thread's µs per second played.
+                    ",\"ahead_tracks\":" + std::to_string(r.aheadTracks) +
+                    ",\"ahead_underruns\":" + std::to_string(r.aheadUnderruns) + ",\"ahead_load\":" + num(r.aheadLoadUs) +
                     ",\"warmup_xruns\":" + std::to_string(live ? j.warmupXruns : -1) +
                     // Live: the device called back with its own sizes, not the size asked (AAudio given none, or
                     // Android 11 and older, where a size never reaches the stream): a 1024 run is then not 1024.
@@ -155,6 +158,7 @@ RunResult runLive(Job& j) {
     } guard{e};
     e->engine->setQuality(r.quality);
     e->engine->setShedding(false);
+    if (r.playAhead) e->engine->setPlayAhead(true);
     const std::string warn = e->engine->setProject(p);
     if (warn.find("\"ok\":true") == std::string::npos) return failed("the project did not load: " + warn.substr(0, 300));
     // The low-latency profile at the size asked: 1024 frames is Auto while not recording (the app's playing buffer,
@@ -381,6 +385,7 @@ std::shared_ptr<Job> makeJob(const CawStressRequest* q, std::string& error) {
     j->request.frames = q->mode == CAW_STRESS_DSP ? (q->frames ? q->frames : 256) : q->frames;
     j->request.quality = q->quality;
     j->request.workDir = q->work_dir ? std::string(q->work_dir).substr(0, 4096) : std::string();
+    if (q->struct_size >= offsetof(CawStressRequest, play_ahead) + sizeof(int32_t)) j->request.playAhead = q->play_ahead != 0;
     j->mode = q->mode;
     return j;
 }

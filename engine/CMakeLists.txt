@@ -168,7 +168,7 @@ endif()
 
 add_library(caw_core STATIC
   src/pattern.cpp
-  src/engine.cpp src/engine_pool.cpp src/engine_project.cpp src/engine_control.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/drums_acoustic.cpp src/drums_kits.cpp src/component_samples.cpp src/builtin_flagship.cpp src/flagship_banks.cpp src/builtin_flagship_presets.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/midi_out.cpp src/midi_clock.cpp src/engine_midi_out.cpp src/midi_sender.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp src/vca.cpp
+  src/engine.cpp src/engine_ahead.cpp src/play_ahead.cpp src/engine_pool.cpp src/engine_project.cpp src/engine_control.cpp src/component_chain.cpp src/auto_gain.cpp src/builtin_components.cpp src/builtin_instruments.cpp src/builtin_drums.cpp src/builtin_drums_params.cpp src/builtin_drums_sounds.cpp src/drums_acoustic.cpp src/drums_kits.cpp src/component_samples.cpp src/builtin_flagship.cpp src/flagship_banks.cpp src/builtin_flagship_presets.cpp src/builtin_test_signal.cpp src/presets.cpp src/builtin_effects.cpp src/builtin_effects_eq.cpp src/builtin_effects_dynamics.cpp src/builtin_effects_space.cpp src/builtin_effects_saturator.cpp src/builtin_effects_kit.cpp src/builtin_ducker.cpp src/builtin_fx_creative.cpp src/builtin_fx_creative_tapestop.cpp src/builtin_fx_creative_reverser.cpp src/builtin_fx_creative_trancegate.cpp src/builtin_fx_creative_stutter.cpp src/builtin_fx_creative_bitcrush.cpp src/builtin_fx_creative_pitchshift.cpp src/builtin_fx_creative_freqshift.cpp src/builtin_fx_creative_ringmod.cpp src/builtin_fx_creative_presets.cpp src/builtin_fx_space_mod.cpp src/builtin_fx_space_stereo.cpp src/builtin_fx_space_reverb.cpp src/builtin_fx_space_presets.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/midi_device.cpp src/midi_out.cpp src/midi_clock.cpp src/engine_midi_out.cpp src/midi_sender.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp src/vca.cpp
   # fx-filters begin
   src/builtin_fx_filters.cpp src/builtin_fx_filters_comb.cpp src/builtin_fx_filters_formant.cpp src/builtin_fx_filters_eq.cpp src/builtin_fx_filters_presets.cpp
   # fx-filters end
@@ -445,6 +445,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/load_stabilizer_test.cpp)  # the callback's load stabilizer (Android, no hint session)
   target_sources(caw_tests PRIVATE tests/mix_graph_test.cpp)  # speed phase 5a/5b: pulled routes, per-node scratch, graph levels
   target_sources(caw_tests PRIVATE tests/mix_pool_test.cpp)  # speed phase 5c: the mix pool, parallel levels, the serial lane
+  target_sources(caw_tests PRIVATE tests/play_ahead_test.cpp)  # play-ahead: identity, underruns, drains, drops, parked edits
   target_sources(caw_tests PRIVATE tests/component_bench_test.cpp)  # #197: the plug-in benchmark
   target_sources(caw_tests PRIVATE tests/patch_test.cpp)  # the patch model: nulls, block sizes, feedback, latency, limits
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
@@ -525,9 +526,18 @@ target_include_directories(caw_cli PRIVATE src)
       COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
         "CAW_RENDER_DIGEST=${CAW_DIGEST_DIR}/parallel_${shard}.txt"
         "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS} --mix-threads 3)
-    set_tests_properties(caw_tests_shard_${shard} caw_tests_parallel_shard_${shard} PROPERTIES
+    # Play-ahead: every untouched track rendered ahead, its ring filled on the callback (caw_play_ahead_identity).
+    add_test(NAME caw_tests_ahead_shard_${shard}
+      COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
+        "CAW_RENDER_DIGEST=${CAW_DIGEST_DIR}/ahead_${shard}.txt"
+        "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS} --mix-threads 0 --play-ahead 0)
+    set_tests_properties(caw_tests_shard_${shard} caw_tests_parallel_shard_${shard} caw_tests_ahead_shard_${shard} PROPERTIES
       PROCESSORS 1 FIXTURES_SETUP caw_render_digests)
   endforeach()
+  add_test(NAME caw_play_ahead_identity
+    COMMAND ${CMAKE_COMMAND} -DDIGEST_DIR=${CAW_DIGEST_DIR} -DSHARD_COUNT=${CAW_TEST_SHARDS} -DOTHER=ahead
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareDigests.cmake")
+  set_tests_properties(caw_play_ahead_identity PROPERTIES FIXTURES_REQUIRED caw_render_digests)
   add_test(NAME caw_parallel_identity
     COMMAND ${CMAKE_COMMAND} -DDIGEST_DIR=${CAW_DIGEST_DIR} -DSHARD_COUNT=${CAW_TEST_SHARDS}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareDigests.cmake")
@@ -571,6 +581,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_rt_tests PRIVATE tests/output_safety_rt_test.cpp)  # #244: the live output's mono check and safety limiter
   target_sources(caw_rt_tests PRIVATE tests/mixer_routing_rt_test.cpp)  # outputs, sends into tracks, feedback sends
   target_sources(caw_rt_tests PRIVATE tests/vca_rt_test.cpp)  # VCA groups: lanes, live moves and project updates
+  target_sources(caw_rt_tests PRIVATE tests/play_ahead_rt_test.cpp)  # play-ahead: rings, handovers, underruns, drops
   target_sources(caw_rt_tests PRIVATE tests/patch_rt_test.cpp)  # the patch model: a swap allocates nothing
   target_sources(caw_rt_tests PRIVATE tests/starling_piano_rt_test.cpp)  # 1.1.3: Starling's piano
   target_sources(caw_rt_tests PRIVATE tests/nightingale_rt_test.cpp)  # 1.1.3: Nightingale

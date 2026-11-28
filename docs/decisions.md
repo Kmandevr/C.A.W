@@ -1,10 +1,22 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-27
+updated: 2026-11-28
 ---
 
 # Decisions
+
+## 2026-11-28: Play-ahead's first slice: the choices the brief left open (Claude, building the owner's 2026-11-28 decisions)
+
+The settled parts (drain only, the 5 ms underrun fade and staying live, edits as intent, parked commands at the ring's end, no UI, off by default) are the owner's (Hub `docs/caw/decisions.md`, 2026-11-28); the engine as built is in [engine](engine.md#play-ahead-api-49). Chosen here, each easy to change:
+
+- **Getting ahead without a gap:** the ahead thread cannot render a track's next frames while the callback still needs them from the same instances, so the callback renders the lead itself (one 64-frame chunk more than it plays, each chunk, up to 4096 frames, about 85 ms) before handing the track over: about twice that track's cost for that long, once per handover. The alternative, a gap or a fade, was audible.
+- **When:** a track goes ahead after 3 s with no edit or note aimed at it (the plan's proposal), counted from Play and from a drop, one track a callback with one lead at a time and its extra frames at most a quarter of the callback (after the audio review, 2026-11-28: a Play must not start up to 8 leads at once); a fixed depth of 1 s; at most 8 tracks at once (memory: 384 KB a ring at 48 kHz).
+- **Bypass and auto gain** stay atomics the producer reads at its next chunk (they land within a chunk of the ring's end and read back at once, as the C API's tests expect); parameter values are parked commands that land on the ring's end exactly.
+- **Eligibility is conservative:** anything a modulator listens to stays live (the plan allows audio followers; `listens` doesn't tell them apart yet), and so does an audio track (it plays the device input).
+- **An underrun bans for a while, not for good at once** (Claude, 2026-11-28, after the audio review, under the owner's standing rule for non-UI questions; it replaces "stays live" in the private plan's decision): 30 s, then 60 s, then for good, since one stall of an ordinary thread should not end play-ahead for the track.
+- **Overload shedding** passes over tracks the thread renders, but in tests (rings filled on the callback) an ahead track is shed as a live one, since its cost is the callback's; so the shedding tests hold in the `--play-ahead` pass too.
+- **Transport changes wait instead of cutting:** Play, Stop, a seek or a tempo change while the ahead thread is inside a chunk waits one callback for it to let go, never a lock.
 
 ## 2026-11-27: The mix pool's Auto also goes by peaks; the master loudness meter sleeps until read; a utilization-clamp probe on Android (Claude, the owner's "too heavy" brief)
 
