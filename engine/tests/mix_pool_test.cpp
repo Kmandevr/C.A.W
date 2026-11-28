@@ -823,14 +823,64 @@ TEST(mix_pool_engine_auto_goes_parallel_for_bursts_not_for_one_stall) {
     callbacks(0.02, 12 * second);
     e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());
-    // A medium song (0.2: over kMixSerialLoad, under kMixParallelLoad) with a burst at Play only: on for the burst,
-    // back to one thread once it is gone (the mean alone would never have turned it on).
+    // A medium song (0.2: over kMixSerialLoad, under kMixParallelLoad) with one burst, long after the last: on for
+    // the burst, back to one thread once it is gone (the mean alone would never have turned it on).
+    callbacks(0.02, 11 * second);
+    callbacks(0.9, 4);
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    int steps = 0;
+    while (e.mixParallelForTest() && steps++ < 20 * second) {
+        callbacks(0.2, 1);
+        e.process(l, r, 256);
+    }
+    CHECK(!e.mixParallelForTest());
+    CHECK(steps > 5 * second);
+    // Audio review, 2026-11-28: no flapping. Bursts straight after it went off are held off kMixPeakHoldSeconds...
+    callbacks(0.9, 4);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
+    // ...then turn it on again, and back so soon it stays on through a medium mean (only the mean rule ends it).
+    callbacks(0.2, second);
     callbacks(0.9, 4);
     e.process(l, r, 256);
     CHECK(e.mixParallelForTest());
     callbacks(0.2, 12 * second);
     e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    callbacks(0.02, 12 * second);
+    e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());
+}
+
+// Audio review, 2026-11-28: the peaks are time, not only callbacks, and the first after Play don't count.
+TEST(mix_pool_engine_auto_peaks_need_time_and_skip_the_start) {
+    Engine e(48000);
+    CHECK(e.startMixPool(2));
+    e.setMixParallel(Engine::MixParallel::Auto);
+    CHECK(ok(e.setProject(randomMix(3))));
+    float l[256], r[256];
+    auto callbacks = [&](double load, int count, int frames) {
+        for (int k = 0; k < count; ++k) {
+            e.process(l, r, frames);
+            e.reportLoad(load, frames);
+        }
+    };
+    // Right after Play, ten slow callbacks (53 ms): still one thread.
+    e.play();
+    callbacks(0.9, 10, 256);
+    callbacks(0.1, 100, 256);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
+    // At 64-frame callbacks, three slow ones (4 ms in all) are three callbacks but too short a time.
+    callbacks(0.9, 3, 64);
+    callbacks(0.1, 50, 64);
+    e.process(l, r, 64);
+    CHECK(!e.mixParallelForTest());
+    // Twelve (16 ms) are enough.
+    callbacks(0.9, 12, 64);
+    e.process(l, r, 64);
+    CHECK(e.mixParallelForTest());
 }
 
 // The bt-clicks and speed-parallel merge (2026-11-13): while Auto turns the pool on, its first callbacks' cost is
@@ -1095,12 +1145,34 @@ TEST(mix_pool_engine_reports_its_audio_threads) {
 // keeps one already as high, or the system refuses it or has none; it never fails silently, and it never lowers
 // a floor (asking for less than the thread has keeps it).
 TEST(util_clamp_raises_or_reports_why_not) {
-    tuning::UtilClamp first, lower;
+    tuning::UtilClamp first, lower, reset, other;
     std::thread t([&] {
-        first = tuning::raiseUtilMin(256);
-        lower = tuning::raiseUtilMin(64);
+        first = tuning::raiseUtilMin(0, 256);
+        lower = tuning::raiseUtilMin(0, 64);
+        reset = tuning::resetUtilMin(0);
     });
     t.join();
+    // By thread id (how a worker sets the callback's), on a thread that is not the caller.
+    {
+        std::atomic<int32_t> tid{0};
+        std::atomic<bool> done{false};
+        std::thread u([&] {
+            tid.store(tuning::currentThreadId());
+            while (!done.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        });
+        while (tid.load() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        other = tuning::raiseUtilMin(tid.load(), 256);
+        done.store(true);
+        u.join();
+    }
+#if defined(__linux__)
+    CHECK(other.state == first.state);
+    if (first.state == tuning::ClampState::Applied) CHECK(reset.state == tuning::ClampState::Reset);
+#endif
+    // Off Android nothing is asked of the engine's threads.
+#if !defined(__ANDROID__)
+    CHECK(tuning::probeUtilMin(0, false, false).state == tuning::ClampState::None);
+#endif
 #if defined(__linux__)
     CHECK(first.state != tuning::ClampState::None);
     if (first.state == tuning::ClampState::Applied || first.state == tuning::ClampState::Kept) {

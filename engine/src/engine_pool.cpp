@@ -81,8 +81,8 @@ std::string Engine::audioThreadsJson() const {
     // The pool in use now (Auto's choice, or Always) and the callbacks so far that ran a level on it.
     j += ",\"mix_on\":" + std::string(mixOn_.load(std::memory_order_relaxed) ? "true" : "false") +
          ",\"mix_pooled_callbacks\":" + std::to_string(mixPooledCallbacks());
-    // The utilization clamp (thread_tuning.h; Android): asked for kUtilMinRequest of 1024 on the callback and each
-    // worker; what the system said ("none" where it is not asked), its errno, and the floor read back.
+    // The utilization clamp (thread_tuning.h; Android): a floor of kUtilMinRequest (of 1024) asked for the callback
+    // and each worker; what the system said ("none" where it is not asked), its errno, and the floor read back.
     {
         const tuning::UtilClamp cb = pool_ ? pool_->callbackClamp() : tuning::UtilClamp{};
         const tuning::UtilClamp wk = pool_ ? pool_->workerClamp() : tuning::UtilClamp{};

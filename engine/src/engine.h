@@ -355,10 +355,11 @@ public:
     // kMixParallelLoad for kMixParallelSeconds, or its peaks have (2026-11-27: a bursty song's peaks, not its mean,
     // are what miss the deadline): callbacks over kMixPeakLoad, counted with a kMixPeakSeconds decay, above
     // kMixPeakCount (three such callbacks within about a second: two stalled callbacks, a preempted thread's, are not
-    // enough); back to one thread once the load
+    // enough) and lasting over kMixPeakTime in all, with the same decay (so at small buffers three short callbacks
+    // are not enough either); back to one thread once the load
     // less the time the callback spent waiting for workers stays below kMixSerialLoad (or, turned on by the peaks
     // alone and the mean never over kMixParallelLoad since, at any mean) for kMixSerialSeconds with the count of
-    // callbacks over kMixPeakOffLoad under kMixPeakOffCount (the pool cuts the peaks it is on for, so the off
+    // callbacks over kMixPeakOffLoad (less their wait for workers) under kMixPeakOffCount (the pool cuts the peaks it is on for, so the off
     // test's peak is lower): a burst after Play does not keep a medium song on the pool; Always; or Never. Any thread; read at
     // each callback. Auto also sizes the pool from that wait (speed phase 5d): while the callback waits more than
     // kMixWaitShare of the budget and longer than the workers ran tasks (the pool costs more than it gives) for
@@ -368,8 +369,13 @@ public:
     void setMixParallel(MixParallel mode) noexcept { mixMode_.store(static_cast<int>(mode), std::memory_order_relaxed); }
     static constexpr double kMixParallelLoad = 0.4, kMixParallelSeconds = 0.5;
     static constexpr double kMixSerialLoad = 0.08, kMixSerialSeconds = 5.0;
-    static constexpr double kMixPeakLoad = 0.5, kMixPeakSeconds = 2.0, kMixPeakCount = 2.5;
+    static constexpr double kMixPeakLoad = 0.5, kMixPeakSeconds = 2.0, kMixPeakCount = 2.5, kMixPeakTime = 0.015;
     static constexpr double kMixPeakOffLoad = 0.25, kMixPeakOffCount = 0.5;
+    // The peaks are not counted for kMixPeakWarmSeconds after Play (its first callbacks start voices on cold
+    // caches); a pool the peaks alone turned on that goes off holds off kMixPeakHoldSeconds before the peaks may
+    // turn it on again, and one they turn on again within kMixRetrySeconds of that stays on until the mean rule
+    // turns it off (no flapping between a song's bursts).
+    static constexpr double kMixPeakWarmSeconds = 0.25, kMixPeakHoldSeconds = 1.0;
     static constexpr double kMixWaitShare = 0.1, kMixWaitSeconds = 0.5, kMixGrowSeconds = 2.0, kMixRetrySeconds = 10.0;
     // Auto turning the pool on, or a shedding reset or a new device while it is on: for this long its callbacks
     // don't count toward shedding and it adds no worker (the pool starting, not the song). Longer than one of
@@ -679,6 +685,10 @@ private:
     // Auto's peak counts (kMixPeak*): callbacks over kMixPeakLoad and over kMixPeakOffLoad, each decaying with
     // kMixPeakSeconds, and the decay for the last callback's length.
     double peakCount_ = 0, peakOffCount_ = 0, peakKeep_ = 0;
+    double peakTime_ = 0;                // seconds of callbacks over kMixPeakLoad, decaying as the count
+    double playWarm_ = 0;                // after Play, seconds left before the peaks count (kMixPeakWarmSeconds)
+    bool peakPlaying_ = false;           // playing at the last reportLoad (Play is the change to true)
+    double peakOffAgo_ = 1e9;            // seconds since a pool the peaks alone turned on went off
     bool mixByPeaks_ = false;  // Auto turned on by the peaks alone (the mean under kMixParallelLoad)
     // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
     uint32_t mixActive_ = 0;

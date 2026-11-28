@@ -51,6 +51,7 @@ const char* clampStateName(ClampState state) noexcept {
         case ClampState::Kept: return "kept";
         case ClampState::Refused: return "refused";
         case ClampState::Unsupported: return "unsupported";
+        case ClampState::Reset: return "reset";
         case ClampState::None: break;
     }
     return "none";
