@@ -183,7 +183,7 @@ Only the EQ's class-B change differs on x86-64. On Arm64 the scalar and pair for
 | Chorus/Flanger · Chorus, idle 4 s after one short note | 4.7 (the report); 33.1 (this run) | 1.8 |
 | Every effect variant, summed (97 rows) | 1,718 | 1,596 (−7 %) |
 
-`caw_bench 0.5 324` (ctest `caw_fx_pass_cost`, new) times the pass's effects against the reference workload and fails over a ceiling about 1.4 times this machine's figure (µs per second of audio): Multiband 6,200 (ceiling 8,700), its Multiband mode 6,000 (8,400), Limiter 2,150 (3,000), Shape 1,260 (1,800), Phaser 1,820 (2,550) and at 12 stages 2,650 (3,700), Imager 1,980 (2,800), EQ with 8 stereo bands 4,500 (6,300), Trance gate 510 (720), Chorus 730 (1,020), Drive's fold 1,200 (1,700). Shape's dynamics-split ceiling went from 8,000 to 3,000 (about 2,100 now).
+`caw_bench 0.5 324` (ctest `caw_fx_pass_cost`, new) times the pass's effects against the reference workload and fails over a ceiling about 1.4 times this machine's figure (µs per second of audio): Multiband 6,200 (ceiling 8,700), its Multiband mode 6,000 (8,400), Limiter 2,150 (3,000), Shape 1,260 (1,800), Phaser 1,820 (2,550) and at 12 stages 2,650 (3,700), Imager 1,980 (2,800), EQ with 8 stereo bands 4,500 (6,300), Trance gate 510 (720), Chorus 730 (1,020), Drive's fold 1,200 (1,700). Shape's dynamics-split ceiling went from 8,000 to 3,000 (about 2,100 now). These are Linux x64's; Arm64's and Windows clang-cl's are provisional until CI measures them ([engine performance](engine-performance.md#a8-effects-pass-2026-11-27)).
 
 **[Fact] Instructions inside `Engine::process`** (callgrind 3.22, x86-64, the harness, 256-frame callbacks; every suite effect's `EffectBase::process` inclusive in brackets):
 

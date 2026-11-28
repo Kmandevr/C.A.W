@@ -189,36 +189,46 @@ double effectCost(const char* id, const std::vector<std::pair<std::string, doubl
 // `caw_bench SECONDS 324`: the effects the 2026-11-27 effects pass made faster (docs/performance.md), each against
 // a ceiling about 1.4 times its figure after the pass (x86-64, this machine's runs, µs per second of audio against
 // the reference workload), so a regression of the pass fails CI. The number of cases over their ceiling.
+// Linux x64's ceilings are measured; Arm64's and Windows clang-cl's are provisional until a CI run on that runner
+// measures them (their paths differ: Arm64 fuses and converts in NEON, clang-cl runs Pair as a scalar struct): about
+// 2.5 times Linux x64's figure, to be tightened from each runner's first run (docs/engine-performance.md, A8).
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(_MSC_VER)
+constexpr bool kFxPassProvisional = true;
+#else
+constexpr bool kFxPassProvisional = false;
+#endif
 int fxPassCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     struct Case {
         const char* name;
         const char* id;
         Values values;
-        double ceiling;
+        double measured;     // Linux x64: about 1.4 times its figure
+        double provisional;  // Arm64 and Windows clang-cl, until CI measures them
+        double ceiling() const noexcept { return kFxPassProvisional ? provisional : measured; }
     };
     const Case cases[] = {
-        {"Multiband dynamics (default: OTT)", "org.caw.multiband", {}, 8700},
-        {"Multiband dynamics, Multiband mode", "org.caw.multiband", {{"mode", 0}}, 8400},
-        {"Limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}, 3000},
-        {"Tremolo/Pan: Shape", "org.caw.tremolo", {{"variant", 2}}, 1800},
-        {"Phaser (default: 6 stages)", "org.caw.phaser", {}, 2550},
-        {"Phaser, 12 stages", "org.caw.phaser", {{"stages", 5}}, 3700},
-        {"Utility: Imager", "org.caw.utility", {{"variant", 3}}, 2800},
+        {"Multiband dynamics (default: OTT)", "org.caw.multiband", {}, 8700, 15700},
+        {"Multiband dynamics, Multiband mode", "org.caw.multiband", {{"mode", 0}}, 8400, 15100},
+        {"Limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}, 3000, 5400},
+        {"Tremolo/Pan: Shape", "org.caw.tremolo", {{"variant", 2}}, 1800, 3200},
+        {"Phaser (default: 6 stages)", "org.caw.phaser", {}, 2550, 4600},
+        {"Phaser, 12 stages", "org.caw.phaser", {{"stages", 5}}, 3700, 6700},
+        {"Utility: Imager", "org.caw.utility", {{"variant", 3}}, 2800, 5000},
         {"EQ: 8 stereo bands with gain", "org.caw.eq",
          {{"b1_on", 1}, {"b1_type", 5}, {"b8_on", 1}, {"b8_type", 8}, {"b2_gain", 3}, {"b3_gain", -3}, {"b4_gain", 4},
-          {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}, 6300},
-        {"Trance gate", "org.caw.trancegate", {}, 720},
-        {"Chorus/Flanger: Chorus", "org.caw.chorus", {{"variant", 0}}, 1020},
-        {"Drive: Distortion, fold", "org.caw.drive", {{"variant", 0}, {"shape", 2}}, 1700},
+          {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}, 6300, 11300},
+        {"Trance gate", "org.caw.trancegate", {}, 720, 1300},
+        {"Chorus/Flanger: Chorus", "org.caw.chorus", {{"variant", 0}}, 1020, 1800},
+        {"Drive: Distortion, fold", "org.caw.drive", {{"variant", 0}, {"shape", 2}}, 1700, 3100},
     };
     int over = 0;
     std::printf("2026-11-27 effects pass (µs of CPU per second of audio; ceiling µs/s):\n");
     for (const Case& c : cases) {
         const double us = effectCost(c.id, c.values, seconds);
-        const bool bad = us <= 0.0 || us > c.ceiling;
+        const bool bad = us <= 0.0 || us > c.ceiling();
         over += bad;
-        std::printf("  %-48s %8.0f  %6.0f%s\n", c.name, us, c.ceiling, bad ? "  OVER" : "");
+        std::printf("  %-48s %8.0f  %6.0f%s%s\n", c.name, us, c.ceiling(), kFxPassProvisional ? " (provisional)" : "", bad ? "  OVER" : "");
     }
     return over;
 }
