@@ -3,6 +3,20 @@
 What changed in each C.A.W release, newest first. C.A.W is in open alpha: expect rough edges and unexpected issues.
 Versions keep the `-alpha.N` suffix until the official release.
 
+## 1.1.3-alpha.8 (2026-11-28)
+
+A speed pass for phones, Windows and Linux: Kestrel, the effects and the engine do the same work in less time, and everything sounds the same except the chorus fix below.
+
+### Changed
+- **Effects are faster:** both channels of a stereo effect run as one pair, and work that changes nothing is skipped, with no change to the sound. Multiband dynamics and the limiter, phaser and Imager take about half the time, and the Resonator under a third.
+  - An effect moved to a project at another sample rate now rebuilds its filters for that rate.
+- **Heavy songs stutter less:** the master loudness meter does no work until something reads it, the engine also spreads a song across your CPU's cores when single callbacks spike (not only when the average is high), and on Android it asks the system to keep the audio threads off the slowest clock.
+  - The Benchmark reports how often the cores were shared (`mix_pooled_pct`) and whether Android granted the clock request (`util_clamp`).
+- **Kestrel is faster:** its oscillators read their tables four samples at a time and automation reworks only the part of a voice it moves, about a third less CPU on warped and FM patches with no change to the sound.
+  - An Osc FM oscillator now follows its modulator's tuning when that tuning is automated or modulated.
+### Fixed
+- **Kestrel's chorus sweeps again:** with every knob still, its delay drifted to one end instead of following its LFO; patches with the chorus on now shimmer as designed (Tonewheel organ, Additive organ, Comb choir and others).
+
 ## 1.1.3-alpha.7 (2026-11-27)
 
 Under the hood for this one: every device now has a lasting identity, so its history and automation follow it when you move it.
