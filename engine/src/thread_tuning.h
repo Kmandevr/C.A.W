@@ -86,12 +86,14 @@ int32_t currentThreadId() noexcept;  // the kernel's id of the calling thread (L
 // A utilization clamp (Linux 5.3+: sched_setattr with SCHED_FLAG_UTIL_CLAMP_MIN; docs.kernel.org "Utilization
 // Clamping", read 2026-11-27): a floor under the utilization schedutil picks the core's clock from and that EAS
 // places the thread by, without busy work. Asked for on Android only (2026-11-27 probe: the phone's callback runs
-// on a little core at ~43 % clock, its hint session refused), on the callback once per thread and on each worker
-// once; the result is reported in caw_audio_threads' "util_clamp". A thread whose floor is already at or above
-// the request (a real-time thread's default is 1024) is left alone. Applied: raised and read back; Kept: already
-// as high; Refused: the system said no (`error` is its errno); Unsupported: no such call or no uclamp in the
-// kernel; None: not asked (not Android, or not yet).
-enum class ClampState : uint8_t { None = 0, Applied = 1, Kept = 2, Refused = 3, Unsupported = 4 };
+// on a little core at ~43 % clock, its hint session refused), for time-sharing threads only: a real-time thread's
+// default floor is 1024, and the kernel keeps a floor set while time-sharing across a change to real time, so a
+// thread that becomes real-time has its floor reset (audio review, 2026-11-28). Never from the audio callback
+// (sched_setattr can take the kernel's cpuset lock): a worker sets the callback's, by its thread id, outside any
+// task, and each worker its own. Reported in caw_audio_threads' "util_clamp". Applied: raised and read back;
+// Kept: already as high; Reset: back to the system default (a thread now real-time); Refused: the system said no
+// (`error` is its errno); Unsupported: no such call or no uclamp in the kernel; None: not asked.
+enum class ClampState : uint8_t { None = 0, Applied = 1, Kept = 2, Refused = 3, Unsupported = 4, Reset = 5 };
 const char* clampStateName(ClampState state) noexcept;
 struct UtilClamp {
     ClampState state = ClampState::None;
@@ -99,11 +101,14 @@ struct UtilClamp {
     int32_t utilMin = -1; // the thread's util_min as read back afterwards (-1: unknown)
 };
 constexpr uint32_t kUtilMinRequest = 512;  // of 1024: [Assumption] enough to leave the littles' lowest clocks
-// The calling thread's util_min raised to at least `utilMin` (two or three system calls, no allocation: callback-
-// safe). Linux and Android; elsewhere Unsupported.
-UtilClamp raiseUtilMin(uint32_t utilMin) noexcept;
-// What the engine's threads ask for: raiseUtilMin(kUtilMinRequest) on Android, None elsewhere.
-UtilClamp probeUtilMin() noexcept;
+// Thread `tid`'s util_min raised to at least `utilMin` (0: the calling thread; its policy, priority and nice kept).
+// Linux and Android; elsewhere Unsupported. A few system calls: never on the audio callback.
+UtilClamp raiseUtilMin(int32_t tid, uint32_t utilMin) noexcept;
+// Thread `tid`'s floor back to the system default (-1, Linux 5.11+; else the real-time default, 1024).
+UtilClamp resetUtilMin(int32_t tid) noexcept;
+// What the engine's threads do (Android; None elsewhere, nothing changed): a time-sharing thread raised to
+// kUtilMinRequest, a real-time one that `clamped` (this code raised it before) reset; else None.
+UtilClamp probeUtilMin(int32_t tid, bool realtime, bool clamped) noexcept;
 
 // A performance hint session (Android 13+: ADPF APerformanceHint) for the callback and the workers, with the
 // callback period as its target. The system calls (create, set threads, report) run on the hint's own thread,

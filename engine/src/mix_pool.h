@@ -96,8 +96,9 @@ public:
     // The callback's scheduling as it last described itself (SCHED_* on POSIX, 0 elsewhere or before a callback).
     int callbackPolicy() const noexcept { return cbPolicy_.load(std::memory_order_relaxed); }
     int callbackNice() const noexcept { return cbNice_.load(std::memory_order_relaxed); }
-    // The utilization clamp (tuning::probeUtilMin; Live, Android): the callback's, asked once per callback thread,
-    // and the workers' (each asks once; the last answer, and how many workers have it applied or kept).
+    // The utilization clamp (tuning::probeUtilMin; Live, Android): the callback's (set by the first worker, by the
+    // callback's thread id, whenever the callback describes itself anew) and the workers' (the last answer, and how
+    // many workers have a floor now).
     tuning::UtilClamp callbackClamp() const noexcept { return loadClamp(cbClamp_); }
     tuning::UtilClamp workerClamp() const noexcept { return loadClamp(wkClamp_); }
     uint32_t workersClamped() const noexcept { return wkClamped_.load(std::memory_order_relaxed); }
