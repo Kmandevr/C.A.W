@@ -159,6 +159,7 @@ public:
     double level() const noexcept { return level_; }
     bool active() const noexcept { return stage_ != 0; }
     bool releasing() const noexcept { return stage_ == 3; }
+    double releaseCoefficient() const noexcept { return releaseCoef_; }  // the release's factor a sample
     void clear() noexcept {
         level_ = 0.0;
         stage_ = 0;

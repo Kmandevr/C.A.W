@@ -101,6 +101,7 @@ struct Voice {
     // (foldTwiceFor): a bend, a glide or a knob while the note sounds never switches it between the two paths.
     bool foldTwice[kOscs] = {};
     uint32_t seed = 0;
+    double tailGain = 0.0;  // the releasing voice's loudest output per unit of envelope (render.inc, endTail)
     double notePitch = 60.0, pitch = 60.0, velocity = 1.0, pressure = 0.0, timbre = 0.0;
     lib::Adsr env[kEnvs];
     lib::Lfo lfo[kLfos];  // the retriggered LFOs (a free one is the instrument's)
@@ -248,6 +249,8 @@ public:
         idle_ = true;
         quietRun_ = 0;
         periodPeak_ = 0.0f;
+        tailDebt_ = tailCoef_ = 0.0;
+        tailRaise_ = 1.0;
         volume0_ = volume1_ = 0.0;
         delayTime0_ = delayTime1_ = 0.0;
     }
@@ -289,6 +292,7 @@ protected:
                     settle();  // the modulation envelopes release from this frame
                     v->held = false;
                     for (lib::Adsr& e : v->env) e.gateOff();
+                    v->tailGain = 0.0;
                 }
                 break;
             case NoteMessageType::Pitch:
@@ -365,6 +369,7 @@ protected:
         if (held_.empty()) {
             v->held = false;
             for (lib::Adsr& e : v->env) e.gateOff();
+            v->tailGain = 0.0;
             return;
         }
         const HeldNotes::Held& back = *held_.top();  // back to the note held before, gliding, envelopes running on
@@ -473,6 +478,9 @@ private:
     bool idle_ = true;
     uint64_t quietRun_ = 0;
     float periodPeak_ = 0.0f;
+    // The voices ended early: their tails' bound and its slowest fall a frame; the shared stage's most raise of a
+    // quiet signal (render.inc, endTail); the EQ's boosts and the reverb's mix it reads.
+    double tailDebt_ = 0.0, tailCoef_ = 0.0, tailRaise_ = 1.0, eqBoost_ = 1.0, reverbMix_ = 0.0;
 
     double base_[kParamCount] = {};
     uint16_t ramp_[kParamCount] = {};  // the parameters ramping in this block
