@@ -292,7 +292,9 @@ bool Engine::planAhead(Slot& s, int& m) noexcept {
     if (sync && st == AheadTrack::Worker && !a.stallForTest.load(std::memory_order_relaxed))
         fill = std::max<int64_t>(fill, std::min<int64_t>(t.size, m + aheadSyncExtra_));
     if (st == AheadTrack::Released) {
-        if (t.dropped) {
+        // Dropped, or faded out (an underrun, a full inbox): the rest is never heard, so it is dropped now and the
+        // track comes back at the playhead (aheadHandBack lines its notes up), not a ring's depth later.
+        if (t.dropped || (t.underrun && t.fadeLeft == 0)) {
             t.read.store(t.written.load(std::memory_order_relaxed), std::memory_order_relaxed);
             fill = 0;
         }
