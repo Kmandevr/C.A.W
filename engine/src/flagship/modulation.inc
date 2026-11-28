@@ -211,9 +211,13 @@
             }
         });
         volume1_ = clampd(g(kVolume), 0.0, 1.0);
-        // The effects read the knobs, the tempo, the quality and the slots moving the instrument's parameters.
-        // (Every control while a knob ramps, as before: the chorus's sweep moves on at each of its controls.)
-        if (knobsChanged_ || rampCount_ > 0 || (moved_ & kMovedGlobal)) configureEffects(g);
+        // The effects read the knobs, the tempo, the quality and the slots moving the instrument's parameters (a
+        // ramping effect knob that moved has set knobsChanged_ above).
+        if (knobsChanged_ || (moved_ & kMovedGlobal)) configureEffects(g);
+        // The chorus's sweep moves on at every control while it is on, the knobs still or not (2026-11-27: it moved
+        // only when configureEffects ran, so with every knob still its last step ran on, the delay drifting in a
+        // straight line to the line's end and the chorus no longer sweeping; an intended change of sound).
+        if (chorusOn_) chorus_.control(g(kChorusRate), clampd(g(kChorusDepth), 0.0, 1.0), kControlFrames);
 
         knobsChanged_ = false;
         // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest (not while the

@@ -358,10 +358,7 @@
             eqR_.set(low, mid, high, freq, sr_);
             eqMix_ = clampd(g(kEqMix), 0.0, 1.0);
         }
-        if (chorus) {
-            chorus_.control(g(kChorusRate), clampd(g(kChorusDepth), 0.0, 1.0), kControlFrames);
-            chorusMix_ = clampd(g(kChorusMix), 0.0, 1.0);
-        }
+        if (chorus) chorusMix_ = clampd(g(kChorusMix), 0.0, 1.0);  // its sweep moves on in control(), every period
         if (delay) {
             const int sync = clampi(g(kDelaySync), 0, 7);
             const double seconds = sync > 0 ? lib::noteSeconds(tempo_, kDelaySyncWholes[sync]) : g(kDelayTime);
