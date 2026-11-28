@@ -613,7 +613,7 @@ Every built-in effect and Rook's effect path made cheaper without changing their
 
 ### A10. Play-ahead (2026-11-28)
 
-The first slice of play-ahead ([engine](engine.md#play-ahead-api-49-50)): untouched tracks render on their own thread up to 1 s ahead and the callback mixes them from rings. **[Fact, 2026-11-28, x86-64 GCC 13 Release, this 4-vCPU VM]** Measured on the owner's Medusa project as the engine gets it (the app's conversion from the 1.1.3-alpha speed pass; not in the repository), with a scratch harness that plays it in real time: each callback waits for its deadline (`sleep_until`), so the ahead thread has the time between callbacks as on a device; 5 s untimed (3 s untouched, then the lead), 40 s timed from bar 0, one run per row, shedding off, the mix pool off. "2 cores" pins the callback and the ahead thread to two vCPUs (`taskset -c 0,1`), so they compete as on a phone's busy cluster.
+The first slice of play-ahead ([engine](engine.md#play-ahead-api-49-50)): untouched tracks render on their own thread ahead into rings (1 s deep in these first runs, 300 ms since the second slice: below) and the callback mixes them. **[Fact, 2026-11-28, x86-64 GCC 13 Release, this 4-vCPU VM]** Measured on the owner's Medusa project as the engine gets it (the app's conversion from the 1.1.3-alpha speed pass; not in the repository), with a scratch harness that plays it in real time: each callback waits for its deadline (`sleep_until`), so the ahead thread has the time between callbacks as on a device; 5 s untimed (3 s untouched, then the lead), 40 s timed from bar 0, one run per row, shedding off, the mix pool off. "2 cores" pins the callback and the ahead thread to two vCPUs (`taskset -c 0,1`), so they compete as on a phone's busy cluster.
 
 **Unfrozen** (Track 2 is Kestrel with trancegate, Shape, EQ and multiband and its three automation lanes; all three tracks go ahead):
 
@@ -636,6 +636,16 @@ The first slice of play-ahead ([engine](engine.md#play-ahead-api-49-50)): untouc
 - **What moves:** the callback's mean falls 11–14 times unfrozen and about 2 times frozen, and the p99 7–16 times and 4–5 times: with every heavy track ahead the callback only mixes rings, its master and the live tracks. The work does not go away: `ahead_load` (the thread's render time per second played, every ahead track together) is about 62 ms/s unfrozen, close to what the callback spent before (1,462 µs per 21.3 ms is 69 ms/s, the mix tail and master included), but it is spread over the ring's depth instead of each callback's deadline, so a kick's wake or a voice pile-up is absorbed by the ring.
 - **No underrun** in any run (`ahead_underruns` 0), including the two-core runs.
 - **After the audio review's fixes** (the same day: smallest-ring-first batches, the thread polling instead of being woken, one lead at a time spread over callbacks), unfrozen, 4 cores: 1024 frames off 1,402 / p99 3,362 µs, on 93 / p99 215 µs; 256 frames off 379 / p99 1,028 µs, on 32.5 / p99 63 µs; `ahead_load` about 66,000 µs/s, no underrun. The means and p99s are the table's within this VM's noise; the worsts (3–19 ms off and on) are its scheduling.
+- **At 300 ms (the second slice's depth, 2026-11-28, the same VM and harness, `Engine::setPlayAheadDepthForTest(0.3)`; lead 3,600 frames), unfrozen, 40 s each, one run per row** (the 4-core 256-frame pair rerun on an idle VM; the first pair overlapped a Dart test and read 388 / 34.4 µs, p99 955 / 68, also with no underrun):
+
+| Buffer | Cores | Off: mean µs (%) | p99 µs (%) | On: mean µs (%) | p99 µs (%) | ahead_underruns | ahead_load µs/s |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 256 | 4 | 390 (7.31) | 902 (16.9) | 32.8 (0.61) | 62.9 (1.18) | 0 | 71,515 |
+| 256 | 2 | 393 (7.38) | 982 (18.4) | 37.9 (0.71) | 109 (2.05) | 0 | 67,170 |
+| 192 | 4 | 297 (7.41) | 721 (18.0) | 26.8 (0.67) | 43.1 (1.08) | 0 | 66,951 |
+| 192 | 2 | 310 (7.75) | 686 (17.2) | 26.0 (0.65) | 47.4 (1.18) | 0 | 62,581 |
+
+  No underrun at any row, so 300 ms needs no deeper ring; the means and p99s are the 1 s rows' within this VM's noise (the 2-core 256-frame p99 is the highest, 2 % of the budget). Worsts 2.4–9.8 ms off and on, this VM's scheduling as below.
 - **Worst cases:** the worst callbacks off and on (2–9 ms) are this VM's scheduling (a callback woken late or preempted; the same jitter the 1.1.3 pass saw in single runs), not engine work; the method (one real-time run, no fastest-of-N filter, which play-ahead's thread can't be replayed under) cannot separate them. [Inference] On the phone, the gain at the peaks is the larger one: the S22+'s live spikes were the callback's own peaks on a low clock.
 - **Bits:** the same project's live render and its play-ahead render (rings filled on the callback) are bit for bit the same over 30 s at 1024 frames (2,879,488 samples, scratch check); `caw_play_ahead_identity` checks every reference render.
 - **Not measured:** the phone itself (the app does not turn play-ahead on yet); the ahead thread's placement on a big core; the lead's cost in the callback (about twice the track's own for 85 ms once per handover).
