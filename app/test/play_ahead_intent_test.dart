@@ -99,6 +99,7 @@ void main() {
 
   test('a held key, a device edit, a MIDI-armed track and an armed input send intent', () {
     final (s, layer, e) = _state();
+    addTearDown(s.dispose);  // previewOn wakes the meter poller; stop it before the test ends
     s.previewOn('a', 7, 60, 0.8);
     expect(e.holds, {'a': 1});
     s.previewOff(7);
