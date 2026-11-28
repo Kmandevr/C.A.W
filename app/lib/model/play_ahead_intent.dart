@@ -36,6 +36,17 @@ class PlayAheadIntent {
     }
   }
 
+  /// The engine was replaced: it hears every hold the app has now (the old one's counts went with it).
+  void resend() {
+    final e = _engine();
+    if (e == null) return;
+    for (final ids in _held.values) {
+      for (final id in ids) {
+        e.playAheadIntent(id, AheadIntent.hold);
+      }
+    }
+  }
+
   /// A one-shot touch: an edit to [layerId]'s instrument or inserts is about to reach the engine.
   void edit(String? layerId) {
     if (layerId != null && layerId != masterLayerId) _engine()?.playAheadIntent(layerId, AheadIntent.edit);

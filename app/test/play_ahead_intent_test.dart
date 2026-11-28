@@ -85,6 +85,18 @@ void main() {
     expect(e.intents.where((x) => x.$2 == AheadIntent.edit), hasLength(1));
   });
 
+  test('a new engine hears the holds the app has now', () {
+    final (s, _, e) = _state();
+    s.aheadIntent.hold(#page, 'a');
+    s.aheadIntent.hold(#finger, 'a');
+    final next = IntentEngine();
+    s.engine = next;
+    expect(next.holds, {'a': 2});
+    s.aheadIntent.release(#page);
+    expect(next.holds, {'a': 1});
+    expect(e.holds, {'a': 2}, reason: 'the old engine hears nothing more');
+  });
+
   test('a held key, a device edit, a MIDI-armed track and an armed input send intent', () {
     final (s, layer, e) = _state();
     s.previewOn('a', 7, 60, 0.8);

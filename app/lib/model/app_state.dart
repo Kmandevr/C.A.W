@@ -173,7 +173,15 @@ class AppState extends ChangeNotifier implements StressHost {
   String? _openedDeviceId;
   StreamSubscription<void>? _routeSub;
 
-  Engine? engine;
+  /// The sound engine (null until it loads). A new one takes the play-ahead holds the app has now ([aheadIntent]).
+  Engine? get engine => _engine;
+  set engine(Engine? e) {
+    if (identical(e, _engine)) return;
+    _engine = e;
+    aheadIntent.resend();
+  }
+
+  Engine? _engine;
 
   /// The engine's tempo map and signatures (C API 31): the engine itself once its binding implements [TempoEngine],
   /// or a fake a test sets here. Null: the engine has only the project JSON's `bpm` and `beats_per_bar`.
