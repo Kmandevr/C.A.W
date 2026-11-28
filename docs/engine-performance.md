@@ -2,7 +2,7 @@
 title: Engine performance
 summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A8).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
-updated: 2026-11-27
+updated: 2026-11-28
 ---
 
 # Engine performance
@@ -597,14 +597,11 @@ Per-device costs and ceilings are in [engine](engine.md) and [performance](perfo
 - **Copies across lanes** (four copies in one vector instead of four frames): not built. After the reads above, each copy's sum into the voice is one vector add per four frames; across copies the four lanes must still be summed into each frame (a transpose or horizontal adds), more operations, and the sum order changes the bits. **[Inference]** no gain over the bit-identical change.
 - So the speed pass changed **no golden or reference render**; the chorus fix below re-records `stress.cawref` (no per-build set).
 
-**C (changes the sound; the owner's call), measured on Medusa unfrozen, not committed** (Track 2's Kestrel, mean µs per 256-frame callback, against 195.0 for this build in the same session):
+**C (changes the sound): tried on the owner's go-ahead (2026-11-28, "only if it can't be heard"), none shipped.** Measured on Medusa unfrozen (Track 2's Kestrel, mean µs per 256-frame callback):
 
-| Option | Kestrel | Change | What it changes |
-|---|---:|---:|---|
-| End a released voice at −96 dB (1.6e-5) instead of −120 dB | 175.5 | −10 % | Release tails cut 96 dB below the envelope's peak; against this build the renders differ by up to −84 dBFS peak (24 voices, FM patches) |
-| FM warp at 1x while its highest sideband, f × (1 + (index + 1) × ratio) at the top of the bend range, stays under 20 kHz (or 14 kHz) | 136.9 (135.4) | −30 % (−31 %) | Nearly every Medusa note qualifies; the 1x path is a different render (no decimator delay, more aliasing), up to +6 dBFS apart, so it needs an aliasing sweep like A6's before any crossover is chosen |
-| End a releasing voice when its output is 120 dB below the instrument's (its peak over a period under 1e-6 × the last period's output peak) | 186.5 | −4 % | Up to −108 dBFS peak apart (Tonewheel organ, 24 voices) |
-| All three | 126.2 | −35 % | |
+- **End a released voice at −96 dB instead of −120 dB:** a plain cut was −10 % but left up to −73 dBFS out (24 loud voices releasing together into the drive). Bounded so that everything left out stays under −96 dBFS at the instrument's output (each voice's loudest output per unit of envelope, a decaying sum of the tails already cut, times what the effects can raise), it was −5 %. An audio review then found the bound broken by the bitcrusher (not Lipschitz), a resonant shared filter, effect knobs raised after the tails were cut, the reverb's long decays and level modulation during a release. Covering those left **−1 %** (244 of 280 test renders no longer ended any voice early), while a hand-turned knob after the cut could still lift a cut tail to about −70 dBFS. Dropped; the code was reverted.
+- **FM warp at 1× under a crossover (up to −30 %):** an aliasing sweep (MIDI 24–108, FM ratios 1–16, amounts 0.2–1.0, Kaiser β20, off-harmonic power against the 2× path) found the 1× path adding more than −96 dBc on the sine above MIDI 50–72 at ratio 1 (35–49 from ratio 5) and on the Basic table at every note from MIDI 36, which Medusa's FM oscillator reads. No crossover is inaudible; dropped.
+- **End a voice relative to the instrument's output (−4 %):** not built.
 
 **The chorus's sweep (fixed 2026-11-27, an intended change of sound; owner informed):** Kestrel's chorus advanced its sweep only in `lib::Chorus::control()`, which `configureEffects` called only when a knob, the tempo or the quality moved, a slot moved an instrument-wide knob, or a knob ramped. With every knob still the sweep's last step ran on (`step()` adds `stepL_` each frame), so the delay drifted in a straight line until `read()` held it at the line's end, and the chorus stopped sweeping. `control()` now moves the sweep on every control period while the chorus is on, whatever else moved (`flagship/modulation.inc`), and the effects are configured only when something they read moved (the ramp workaround is gone). It changes every render with Kestrel's chorus on and its knobs still: of the 675 null renders, the 35 of `all_fx` and the presets with the chorus on (Additive organ, Comb choir, Macro sweep keys, Noise breath pad, Smeared air pad, Tonewheel organ), peak differences up to +12 dBFS (Tonewheel organ, a full wet chorus now sweeping). Ramps with the chorus on (`ramp_medusa2_cutoff_chorus`) render as before. Re-recorded: `stress.cawref` (`flagship_heavy`, `flagship_heavy16`: every effect on; loudness moved 0.13 and 0.19 dB). No per-build reference set changed: `stress_chaotic`, `curlew_tails` and `nightingale_overlap` pass unchanged on x64, so the Reference sets workflow need not run. The Chorus effect (`org.caw.chorus`, `builtin_components.cpp`) calls `control()` every 16 frames itself and never had the bug. Tested by `the_flagship_s_chorus_sweeps_with_its_knobs_still`.
 
