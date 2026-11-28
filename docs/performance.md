@@ -44,6 +44,7 @@ Auto, before → after, mean / p99 / worst µs (pooled after):
 | Medusa live | 350 / 608 / 668 → 340 / 607 / 681 (4 %) | 468 / 815 / 858 → 461 / 811 / 867 (0 %) | 205 / 339 / 442 → 178 / 438 / 564 (64 %) | 326 / 572 / 745 → 342 / 613 / 805 (74 %) |
 
 - **What it shows:** light projects stay serial at both scales (single_synth, and Medusa at ×1: 0 % pooled), as asked. At ×8 Medusa frozen, a 1.6 % mean on the VM that the old rule never pooled, now runs its kick bursts on the pool: mean −28 %, p99 −27 % at 192 frames (−27 % and −24 % at 256), worst unchanged. Medusa live and the multi-track songs at ×8 move within the VM's noise (Medusa live's p99 +29 % at 192 frames and its mean −13 %); song8 and song16 were already pooled by the old rule at ×8 (their mean ×8 is over 0.4). every_effect at ×8 ran serial after the pool's own wait rule turned it off (0 % pooled).
+- **Measured before the audio review's changes (2026-11-28):** peaks now also need 15 ms over the threshold, none count for 0.25 s after Play, and a peak-only pool holds off 1 s after it goes off; not re-measured.
 - **At ×1 (a desktop)** a burst after Play or real peaks (every_effect's p99 is 64 % of the budget) turn the pool on; a pool that only the burst turned on goes off again after about 5–7 s (song8 34 %, song16 19–40 % of a 20 s run), as the follow-up fix intends.
 
 - **Pool against serial (Always against Never, 192 frames, the same VM, an earlier quieter run):** song8 351 / 572 / 601 → 262 / 319 / 367, song16 557 / 1,047 / 1,099 → 373 / 615 / 840, every_effect 479 / 1,758 / 2,325 → 385 / 1,110 / 1,637; Medusa frozen 57 / 186 / 249 → 54 / 184 / 249, Medusa live 214 / 449 / 623 → 181 / 410 / 575. So the pool cuts multi-track songs' peaks by 40 % here, and does little for Medusa, whose one heavy track (Track 2: Kestrel, then trancegate, Shape, EQ, multiband) is the critical path.
@@ -56,7 +57,7 @@ Auto, before → after, mean / p99 / worst µs (pooled after):
 
 **Idle sleep.** Bittern does sleep: after one short chord at its default registration and hall, its output is −116 dB at 4 s, −148 dB at 6 s, then exact zeros, and its slot stops running at about 6.2 s (scratch probe, 2026-11-27). The report's 4–5.5 s idle window caught a real tail; sleeping sooner would change the sound (class C), so nothing changed. Chorus variant 0 belongs to the effects pass.
 
-**Utilization clamp (probe).** Built, Android only ([engine](engine.md)): this VM's kernel has no uclamp (`sched_setattr` answers `EOPNOTSUPP`, reported `unsupported`), so its effect is unmeasured until the phone's Benchmark reports `audio_threads.util_clamp`.
+**Utilization clamp (probe).** Built, Android only ([engine](engine.md); after the audio review of 2026-11-28 set by a worker, never on the callback, and reset on a thread that turns real-time): this VM's kernel has no uclamp (`sched_setattr` answers `EOPNOTSUPP`, reported `unsupported`), so its effect is unmeasured until the phone's Benchmark reports `audio_threads.util_clamp`.
 
 ## The owner's Benchmark on the S22+, 1.1.3-alpha.1 (2026-11-25)
 
