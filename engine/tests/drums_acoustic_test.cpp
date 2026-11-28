@@ -23,6 +23,14 @@
 using namespace caw;
 using namespace caw::drums;
 
+#ifdef _WIN32
+#include <process.h>
+static long processId() { return static_cast<long>(_getpid()); }
+#else
+#include <unistd.h>
+static long processId() { return static_cast<long>(getpid()); }
+#endif
+
 namespace {
 
 using Values = std::vector<std::pair<std::string, double>>;
@@ -734,7 +742,8 @@ TEST(rook_kit_tools_tune_layer_finish_map_and_render_a_pad) {
     CHECK(!call("{\"tool\":\"nope\"}").boolean("ok", true));
     CHECK(!call("[1]").boolean("ok", true));
     // Render a pad to a sample: a WAV written, the pad now plays it.
-    const std::string path = "rook_render_pad_test.wav";
+    // Named per process: ctest runs the serial, parallel and play-ahead passes of a shard side by side.
+    const std::string path = "rook_render_pad_test_" + std::to_string(processId()) + ".wav";
     Json r = call("{\"tool\":\"render_pad\",\"pad\":0,\"path\":\"" + path + "\"," + entry + "}");
     CHECK(r.boolean("ok", false));
     CHECK(r.number("frames", 0) > 1000);
