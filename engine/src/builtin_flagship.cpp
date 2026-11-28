@@ -6,6 +6,7 @@
 #include "stereo_pair.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -77,6 +78,8 @@ namespace caw {
 
 namespace {
 
+std::atomic<bool> gTailEnd{true};  // setFlagshipTailEndForTest
+
 #include "flagship/params.inc"
 
 #include "flagship/wavetables.inc"
@@ -102,6 +105,7 @@ struct Voice {
     bool foldTwice[kOscs] = {};
     uint32_t seed = 0;
     double tailGain = 0.0;  // the releasing voice's loudest output per unit of envelope (render.inc, endTail)
+    float tailPeak = 0.0f;  // its loudest output since the last settle()
     double notePitch = 60.0, pitch = 60.0, velocity = 1.0, pressure = 0.0, timbre = 0.0;
     lib::Adsr env[kEnvs];
     lib::Lfo lfo[kLfos];  // the retriggered LFOs (a free one is the instrument's)
@@ -292,7 +296,7 @@ protected:
                     settle();  // the modulation envelopes release from this frame
                     v->held = false;
                     for (lib::Adsr& e : v->env) e.gateOff();
-                    v->tailGain = 0.0;
+                    v->tailGain = 0.0, v->tailPeak = 0.0f;
                 }
                 break;
             case NoteMessageType::Pitch:
@@ -369,7 +373,7 @@ protected:
         if (held_.empty()) {
             v->held = false;
             for (lib::Adsr& e : v->env) e.gateOff();
-            v->tailGain = 0.0;
+            v->tailGain = 0.0, v->tailPeak = 0.0f;
             return;
         }
         const HeldNotes::Held& back = *held_.top();  // back to the note held before, gliding, envelopes running on
@@ -529,6 +533,8 @@ ModuleProcessor* makeFlagship() noexcept { return new (std::nothrow) FlagshipIns
 }  // namespace
 
 void registerFlagshipSynth(ModuleRegistry& registry) { registry.add(flagshipDescriptor(), &makeFlagship); }
+
+void setFlagshipTailEndForTest(bool on) noexcept { gTailEnd.store(on, std::memory_order_relaxed); }
 
 int flagshipParameterIndex(std::string_view id) noexcept {
     const Params& p = params();
