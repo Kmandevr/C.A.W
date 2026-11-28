@@ -20,6 +20,12 @@ updated: 2026-11-27
 - **Why not `-ffast-math` or a compiler's own vectorization of the gather:** fast-math changes bits per build; no compiler vectorized the read loops (NEON has no gather instruction, and the warped stacks' single loop kept its reads inside).
 - **No new dependency** (compiler intrinsics only).
 
+## 2026-11-27: The effects pass keeps every bit; SIMD as two-lane Pairs in `simd_fx.h` (Claude, the owner's request)
+
+- **The owner (2026-11-27):** the DAW is too heavy (every_effect 327 % worst on the S22+, the 3-track project spiking on each kick); make every built-in effect and Rook's effect path faster without changing what it sounds like: bit-identical first (class A), then inaudible vectorization (class B, measured: below −120 dBFS against the old build at 44.1, 48 and 96 kHz), no algorithmic shortcuts (class C) without the owner.
+- **Chosen (built):** class A only, plus one class-B change (the EQ's grouped stereo bands settle tiny states at the control points instead of every sample, below −400 dBFS of difference). Every effect variant, preset and a knob-moving case renders the same bits as Main on x86-64 at 44.1, 48 and 96 kHz; on Arm64 (qemu) the worst is −186.6 dBFS (one phaser preset, a multiply-add fused differently), so no reference set needed re-recording ([performance](performance.md#effects-pass-2026-11-27)). Rook's code paths keep their bits (its compat tables pass unchanged).
+- **SIMD:** stereo_pair.h's two-lane `Pair` (GCC and Clang vector extensions: SSE2 on x86-64, NEON on Arm64; a plain struct elsewhere), with this pass's helpers in their own small header, `engine/src/simd_fx.h` (`SvfLanes`, `TruePeakPair`, `dbToGainPair`), so it can be unified with any wrapper the Kestrel work adds. No AVX dispatch (x86-64's baseline is SSE2; a wider path would need runtime dispatch and gives no other bits on x86-64 only) and no `-ffast-math`. Each lane runs the scalar arithmetic in its order, which is what keeps the bits.
+- **Not done, for the owner if wanted:** the reverb FDN in float lanes (the report's #8: about −110 to −120 dBFS, over the −120 dBFS bar), dropping the oversampler's per-stage flush (Rook shares the code: its bits would move), idle sleep for delays and Shimmer below −150 dBFS (class C), the release tail end at −96 dB (class C).
 
 ## 2026-11-27: MIDI senders: one portable core, a native thread on Windows, a Kotlin thread polling it on Android (Claude)
 

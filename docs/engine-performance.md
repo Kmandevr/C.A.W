@@ -606,3 +606,6 @@ Per-device costs and ceilings are in [engine](engine.md) and [performance](perfo
 
 **Found on the way [Fact, code read 2026-11-27]:** Kestrel's chorus advances its sweep only in `lib::Chorus::control()`, which `configureEffects` calls only when a knob, the tempo or the quality moved, a slot moves an instrument-wide knob, or (now as before) a knob ramps. With every knob still, the sweep's last step runs on unchanged (`step()` adds `stepL_` each frame), so the chorus delay drifts in a straight line until `read()` holds it at the line's ends, instead of following its LFO. Left as it is (fixing it changes the sound); a bug for the owner to schedule.
 
+### A9. Effects pass (2026-11-27)
+
+Every built-in effect and Rook's effect path made cheaper without changing their bits on x86-64 (one class-B change in the EQ, below −379 dBFS), in two-lane vectors where a stereo pair's channels run the same arithmetic (`engine/src/simd_fx.h`). Medusa unfrozen: the effects' time −28 % per callback, the callback's mean −11 %; frozen −17 % and −11 %; instructions inside `Engine::process` −9.0 % and −8.1 %, every_effect −2.5 %, song8 −2.6 %. The changes, the null depths (x86-64 and Arm64 at 44.1, 48 and 96 kHz), the per-effect table and the new ceilings (`caw_bench 0.5 324`) are in [performance](performance.md#effects-pass-2026-11-27).
