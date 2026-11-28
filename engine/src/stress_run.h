@@ -102,7 +102,7 @@ struct RunResult {
     std::string audioThreads;  // live: caw_audio_threads' JSON at the timed span's end (the hint, the callback's policy)
     double seconds = 0;      // audio timed
     // Play-ahead (RunRequest::playAhead): tracks ahead at the end, underruns in the timed span, and the ahead thread's
-    // render time per second of audio it rendered (µs), in the timed span.
+    // render time per second of audio played (µs, every ahead track together), in the timed span.
     int32_t aheadTracks = 0;
     uint64_t aheadUnderruns = 0;
     double aheadLoadUs = 0;
@@ -139,7 +139,7 @@ struct AheadMark {
     uint64_t underruns = 0, workNs = 0, workFrames = 0;
 };
 AheadMark aheadMark(const Engine& e) noexcept;
-void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, int rate) noexcept;
+void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, double playedSeconds) noexcept;
 struct RampOutcome {
     int32_t limit = 0;
     int32_t firstFailed = -1;

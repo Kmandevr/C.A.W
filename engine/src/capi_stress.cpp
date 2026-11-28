@@ -73,7 +73,7 @@ std::string resultJson(const Job& j) {
                     ",\"mix_active_workers\":" + std::to_string(r.mixActive) +
                     // The timed callbacks that ran a level on the pool (Auto on, and a level with two busy nodes).
                     ",\"mix_pooled_pct\":" + num(r.mixPooledPct) +
-                    // Play-ahead (API 49): tracks ahead at the end, underruns, the ahead thread's µs per second rendered.
+                    // Play-ahead (API 49): tracks ahead at the end, underruns, the ahead thread's µs per second played.
                     ",\"ahead_tracks\":" + std::to_string(r.aheadTracks) +
                     ",\"ahead_underruns\":" + std::to_string(r.aheadUnderruns) + ",\"ahead_load\":" + num(r.aheadLoadUs) +
                     ",\"warmup_xruns\":" + std::to_string(live ? j.warmupXruns : -1) +

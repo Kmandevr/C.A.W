@@ -128,8 +128,8 @@ public:
         int tracks = 0;          // tracks rendered ahead now
         uint64_t underruns = 0;  // since the Engine was made
         uint64_t drops = 0;      // rings dropped by a seek, loop, tempo or project change
-        uint64_t workNs = 0;     // the ahead thread's render time ...
-        uint64_t workFrames = 0; // ... for this many frames (load: workNs / 1000 per workFrames / sampleRate seconds)
+        uint64_t workNs = 0;     // the ahead thread's render time (tests: the callback's fills; not the lead) ...
+        uint64_t workFrames = 0; // ... for this many frames, summed over the tracks
     };
     AheadStats aheadStats() const noexcept;
     // Tests: every Engine made after this renders ahead with no thread: its rings are filled on the callback, each

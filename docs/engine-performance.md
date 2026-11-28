@@ -1,6 +1,6 @@
 ---
 title: Engine performance
-summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A8).
+summary: The CI bench suite (caw_bench SECONDS 500, the Bench workflow), its scenarios and targets, the baseline per target, and the speed phases' before/after tables (phases 1-5, A2-A10).
 covers: [engine/bench/, .github/workflows/bench.yml, engine/src/stress_scenarios.*]
 updated: 2026-11-28
 ---
@@ -610,3 +610,31 @@ Per-device costs and ceilings are in [engine](engine.md) and [performance](perfo
 Every built-in effect and Rook's effect path made cheaper without changing their bits on x86-64 (one class-B change in the EQ, below −379 dBFS), in two-lane vectors where a stereo pair's channels run the same arithmetic (`engine/src/simd_fx.h`). Medusa unfrozen: the effects' time −28 % per callback, the callback's mean −11 %; frozen −17 % and −11 %; instructions inside `Engine::process` −9.0 % and −8.1 %, every_effect −2.5 %, song8 −2.6 %. The changes, the null depths (x86-64 and Arm64 at 44.1, 48 and 96 kHz), the per-effect table and the new ceilings (`caw_bench 0.5 324`) are in [performance](performance.md#effects-pass-2026-11-27).
 
 **Which ceilings are measured:** `caw_fx_pass_cost` (`caw_bench 0.5 324`) and Shape's row in `caw_dynsplit_cost` are measured on Linux x64 only (about 1.4 times this VM's figure, 2026-11-27). Arm64 (NEON, fused multiply-adds, its own converts in `dbToGainPair`) and Windows clang-cl (where `Pair` is a scalar struct) run other code, so their ceilings are **provisional** until the first CI run on each runner (`bench/caw_bench.cpp`'s `kFxPassProvisional`, `bench/dynsplit_cost.cpp`'s `kShapeCeiling`): about 2.5 times the Linux x64 figure for the new mode, and Main's pre-pass 8,000 for Shape. Tighten each from that run's figures (1.4×) and mark it measured here.
+
+### A10. Play-ahead (2026-11-28)
+
+The first slice of play-ahead ([engine](engine.md#play-ahead-api-49)): untouched tracks render on their own thread up to 1 s ahead and the callback mixes them from rings. **[Fact, 2026-11-28, x86-64 GCC 13 Release, this 4-vCPU VM]** Measured on the owner's Medusa project as the engine gets it (the app's conversion from the 1.1.3-alpha speed pass; not in the repository), with a scratch harness that plays it in real time: each callback waits for its deadline (`sleep_until`), so the ahead thread has the time between callbacks as on a device; 5 s untimed (3 s untouched, then the lead), 40 s timed from bar 0, one run per row, shedding off, the mix pool off. "2 cores" pins the callback and the ahead thread to two vCPUs (`taskset -c 0,1`), so they compete as on a phone's busy cluster.
+
+**Unfrozen** (Track 2 is Kestrel with trancegate, Shape, EQ and multiband and its three automation lanes; all three tracks go ahead):
+
+| Buffer | Cores | Off: mean µs (%) | p99 µs (%) | worst µs (%) | On: mean µs (%) | p99 µs (%) | worst µs (%) | ahead_load µs/s |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 1024 | 4 | 1,462 (6.9) | 3,579 (16.8) | 5,731 (26.9) | 107 (0.50) | 231 (1.08) | 3,070 (14.4) | 62,203 |
+| 1024 | 2 | 1,388 (6.5) | 3,806 (17.8) | 8,494 (39.8) | 101 (0.47) | 207 (0.97) | 2,555 (12.0) | 62,369 |
+| 256 | 4 | 364 (6.8) | 784 (14.7) | 9,400 (176) | 34 (0.64) | 77 (1.43) | 3,111 (58.3) | 59,326 |
+| 256 | 2 | 400 (7.5) | 1,112 (20.9) | 4,212 (79.0) | 35 (0.66) | 69 (1.29) | 2,927 (54.9) | 62,951 |
+| 192 | 4 | 316 (7.9) | 704 (17.6) | 6,332 (158) | 34 (0.86) | 85 (2.13) | 2,967 (74.2) | 61,526 |
+| 192 | 2 | 293 (7.3) | 693 (17.3) | 6,081 (152) | 30 (0.75) | 67 (1.67) | 3,883 (97.1) | 62,217 |
+
+**Frozen** (as the app sends it: Track 2 is an audio clip, which stays live because the audio-track player is an input user; Rook and Track 3 go ahead), 4 cores:
+
+| Buffer | Off: mean µs (%) | p99 µs (%) | worst µs (%) | On: mean µs (%) | p99 µs (%) | worst µs (%) | ahead_load µs/s |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1024 | 288 (1.35) | 1,177 (5.52) | 3,224 (15.1) | 134 (0.63) | 269 (1.26) | 1,926 (9.0) | 8,572 |
+| 256 | 92 (1.72) | 371 (6.95) | 3,431 (64.3) | 48 (0.90) | 93 (1.73) | 2,041 (38.3) | 8,541 |
+
+- **What moves:** the callback's mean falls 11–14 times unfrozen and about 2 times frozen, and the p99 7–16 times and 4–5 times: with every heavy track ahead the callback only mixes rings, its master and the live tracks. The work does not go away: `ahead_load` (the thread's render time per second played, every ahead track together) is about 62 ms/s unfrozen, close to what the callback spent before (1,462 µs per 21.3 ms is 69 ms/s, the mix tail and master included), but it is spread over the ring's depth instead of each callback's deadline, so a kick's wake or a voice pile-up is absorbed by the ring.
+- **No underrun** in any run (`ahead_underruns` 0), including the two-core runs.
+- **Worst cases:** the worst callbacks off and on (2–9 ms) are this VM's scheduling (a callback woken late or preempted; the same jitter the 1.1.3 pass saw in single runs), not engine work; the method (one real-time run, no fastest-of-N filter, which play-ahead's thread can't be replayed under) cannot separate them. [Inference] On the phone, the gain at the peaks is the larger one: the S22+'s live spikes were the callback's own peaks on a low clock.
+- **Bits:** the same project's live render and its play-ahead render (rings filled on the callback) are bit for bit the same over 30 s at 1024 frames (2,879,488 samples, scratch check); `caw_play_ahead_identity` checks every reference render.
+- **Not measured:** the phone itself (the app does not turn play-ahead on yet); the ahead thread's placement on a big core; the lead's cost in the callback (about twice the track's own for 85 ms once per handover).

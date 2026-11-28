@@ -734,7 +734,7 @@ int runSuite(double secs, int argc, char** argv) {
             }
             if (playAhead) {
                 const Engine::AheadStats st = e.aheadStats();
-                const double rendered = static_cast<double>(st.workFrames - aheadFrom.workFrames) / kRate;
+                const double rendered = static_cast<double>(calls) * frames / kRate;  // per second played
                 std::fprintf(stderr, "%s: ahead_tracks %d ahead_underruns %llu ahead_load %.1f us/s\n", sc.id, st.tracks,
                              static_cast<unsigned long long>(st.underruns - aheadFrom.underruns),
                              rendered > 0 ? static_cast<double>(st.workNs - aheadFrom.workNs) / 1000.0 / rendered : 0.0);

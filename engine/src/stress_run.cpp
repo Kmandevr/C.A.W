@@ -423,7 +423,7 @@ RunResult run(const RunRequest& r, Progress& progress, LoadHistory* history, con
     out.mixWorkers = e.mixWorkers();
     out.mixActive = e.mixActiveWorkers();
     out.mixPooledPct = n > 0 ? 100.0 * static_cast<double>(e.mixPooledCallbacks() - pooledFrom) / static_cast<double>(n) : 0.0;
-    aheadDelta(e, aheadFrom, out, r.rate);
+    aheadDelta(e, aheadFrom, out, static_cast<double>(n) * r.frames / r.rate);
     e.setProfile(nullptr);
     if (n > 0) fill(out, us, n, r);
     if (profile && n > 0) {
@@ -443,12 +443,11 @@ AheadMark aheadMark(const Engine& e) noexcept {
     return {st.underruns, st.workNs, st.workFrames};
 }
 
-void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, int rate) noexcept {
+void aheadDelta(const Engine& e, const AheadMark& from, RunResult& out, double playedSeconds) noexcept {
     const Engine::AheadStats st = e.aheadStats();
     out.aheadTracks = st.tracks;
     out.aheadUnderruns = st.underruns - from.underruns;
-    const double frames = static_cast<double>(st.workFrames - from.workFrames);
-    out.aheadLoadUs = frames > 0 ? (static_cast<double>(st.workNs - from.workNs) / 1000.0) / (frames / rate) : 0.0;
+    out.aheadLoadUs = playedSeconds > 0 ? (static_cast<double>(st.workNs - from.workNs) / 1000.0) / playedSeconds : 0.0;
 }
 
 }  // namespace caw::stress

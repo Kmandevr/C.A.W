@@ -747,7 +747,7 @@ typedef struct CawAheadStats {
     uint64_t underruns;    /* since the engine was made */
     uint64_t drops;        /* rings dropped by Play, Stop, a seek, a tempo or loop change */
     uint64_t work_ns;      /* the ahead thread's render time ... */
-    uint64_t work_frames;  /* ... for this many frames */
+    uint64_t work_frames;  /* ... for this many frames, summed over the tracks */
 } CawAheadStats;
 CAW_API void caw_engine_set_play_ahead(CawEngine* e, int32_t on);
 CAW_API int32_t caw_engine_play_ahead(CawEngine* e);
@@ -1192,7 +1192,7 @@ typedef struct CawStressRequest {
    "steps", "seconds", "stop_reason": "done"|"over_budget"|"cancelled"|"error", "error", "callback_core",
    "requested_frames", "warmup_s", "first_callback_us", "slope_pct_per_min", "core_start", "core_end",
    "core_khz_start", "core_khz_end", "core_max_khz", "mix_workers", "mix_active_workers", "ahead_tracks", "ahead_underruns", "ahead_load" (play-ahead, API 49: tracks
-   ahead at the end, underruns while timed, the ahead thread's microseconds per second of audio it rendered),
+   ahead at the end, underruns while timed, the ahead thread's microseconds per second of audio played),
    "mix_pooled_pct" (the timed callbacks that
    ran a mix level on the pool, %), "warmup_xruns",
    "device_sizes", "budget_basis", "costs": [{"id", "ns", "pct", "ran_pct", "instances", "modulator"}]}. After Play an untimed
