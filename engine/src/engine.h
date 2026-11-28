@@ -356,9 +356,10 @@ public:
     // are what miss the deadline): callbacks over kMixPeakLoad, counted with a kMixPeakSeconds decay, above
     // kMixPeakCount (three such callbacks within about a second: two stalled callbacks, a preempted thread's, are not
     // enough); back to one thread once the load
-    // less the time the callback spent waiting for workers stays below kMixSerialLoad for kMixSerialSeconds with
-    // the count of callbacks over kMixPeakOffLoad under kMixPeakOffCount (the pool cuts the peaks it is on for, so
-    // the off test's peak is lower); Always; or Never. Any thread; read at
+    // less the time the callback spent waiting for workers stays below kMixSerialLoad (or, turned on by the peaks
+    // alone and the mean never over kMixParallelLoad since, at any mean) for kMixSerialSeconds with the count of
+    // callbacks over kMixPeakOffLoad under kMixPeakOffCount (the pool cuts the peaks it is on for, so the off
+    // test's peak is lower): a burst after Play does not keep a medium song on the pool; Always; or Never. Any thread; read at
     // each callback. Auto also sizes the pool from that wait (speed phase 5d): while the callback waits more than
     // kMixWaitShare of the budget and longer than the workers ran tasks (the pool costs more than it gives) for
     // kMixWaitSeconds, one worker fewer takes tasks; at none, one thread, not tried again for kMixRetrySeconds;
@@ -678,6 +679,7 @@ private:
     // Auto's peak counts (kMixPeak*): callbacks over kMixPeakLoad and over kMixPeakOffLoad, each decaying with
     // kMixPeakSeconds, and the decay for the last callback's length.
     double peakCount_ = 0, peakOffCount_ = 0, peakKeep_ = 0;
+    bool mixByPeaks_ = false;  // Auto turned on by the peaks alone (the mean under kMixParallelLoad)
     // Speed phase 5d (audio thread): Auto's workers and the wait it weighs (shares of the budget, averaged).
     uint32_t mixActive_ = 0;
     double waitAvg_ = 0, workAvg_ = 0, mixLosingSeconds_ = 0, mixGrowSeconds_ = 0, mixRetrySeconds_ = 0;

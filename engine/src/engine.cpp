@@ -2993,6 +2993,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         mixOverSeconds_ = mixUnderSeconds_ = mixLosingSeconds_ = mixGrowSeconds_ = mixSettleSeconds_ = 0;
         waitAvg_ = workAvg_ = 0;
         peakCount_ = peakOffCount_ = 0;
+        mixByPeaks_ = false;
         tailPool_ = tailPoolWeight_ = tailSerial_ = tailSerialWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;
     }
     // The Benchmark's profile: serial (setProfile), by the profile this call read, so a profile set or cleared
@@ -3204,11 +3205,13 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
     // song's bursts (a bar's first callbacks, a kick waking a drum chain) are too short and far apart to hold it
     // over kMixPeakCount for kMixParallelSeconds.
     const bool peaky = peakCount_ > kMixPeakCount;
+    if (mixAuto_ && loadAvg_ > kMixParallelLoad) mixByPeaks_ = false;  // the mean holds it on too now
     if (loadAvg_ > kMixParallelLoad || peaky) {
         mixUnderSeconds_ = 0;
         mixOverSeconds_ += dt;
         if ((mixOverSeconds_ >= kMixParallelSeconds - kSlackSeconds || peaky) && !mixAuto_ && mixRetrySeconds_ <= kSlackSeconds) {
             mixAuto_ = true;
+            mixByPeaks_ = !(loadAvg_ > kMixParallelLoad);  // on for its peaks alone: off again once they are gone
             // A pool starting on Auto: shedding holds off while it settles (below).
             if (pool_ && static_cast<MixParallel>(mixMode_.load(std::memory_order_relaxed)) == MixParallel::Auto)
                 mixSettleSeconds_ = kMixSettleSeconds;
@@ -3216,7 +3219,7 @@ void Engine::reportLoad(double load, int frames, int rendered) noexcept {
             mixLosingSeconds_ = mixGrowSeconds_ = 0;
             tailPool_ = tailPoolWeight_ = tailPoolSeconds_ = tailOverSeconds_ = 0;  // the pool's tail from now
         }
-    } else if (work < kMixSerialLoad && peakOffCount_ < kMixPeakOffCount) {
+    } else if ((work < kMixSerialLoad || mixByPeaks_) && peakOffCount_ < kMixPeakOffCount) {
         mixOverSeconds_ = 0;
         mixUnderSeconds_ += dt;
         if (mixUnderSeconds_ >= kMixSerialSeconds - kSlackSeconds) mixAuto_ = false;

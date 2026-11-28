@@ -823,6 +823,14 @@ TEST(mix_pool_engine_auto_goes_parallel_for_bursts_not_for_one_stall) {
     callbacks(0.02, 12 * second);
     e.process(l, r, 256);
     CHECK(!e.mixParallelForTest());
+    // A medium song (0.2: over kMixSerialLoad, under kMixParallelLoad) with a burst at Play only: on for the burst,
+    // back to one thread once it is gone (the mean alone would never have turned it on).
+    callbacks(0.9, 4);
+    e.process(l, r, 256);
+    CHECK(e.mixParallelForTest());
+    callbacks(0.2, 12 * second);
+    e.process(l, r, 256);
+    CHECK(!e.mixParallelForTest());
 }
 
 // The bt-clicks and speed-parallel merge (2026-11-13): while Auto turns the pool on, its first callbacks' cost is
