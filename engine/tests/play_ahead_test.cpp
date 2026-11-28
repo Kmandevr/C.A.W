@@ -454,3 +454,19 @@ TEST(play_ahead_intent_c_api) {
     CHECK_EQ(caw_engine_play_ahead_intent(e, "t", 3), 0);
     caw_engine_destroy(e);
 }
+
+// (i) A preview (an on-screen key or pad) aimed at an ahead track brings it back fast, as a device note does: the
+// ring fades out over 5 ms and the note plays from the next callback, not a ring's depth later.
+TEST(play_ahead_preview_brings_the_track_back_fast) {
+    AheadScope scope(30000);
+    Engine e(48000);
+    CHECK(ok(e.setProject(heavyProject())));
+    e.play();
+    std::vector<float> l(1000), r(1000);
+    for (int i = 0; i < 30; ++i) e.process(l.data(), r.data(), 1000);
+    CHECK_EQ(e.aheadStats().tracks, 3);
+    CHECK_EQ(e.noteOn("pad", 7, 64, 0.8), 1);
+    for (int i = 0; i < 2; ++i) e.process(l.data(), r.data(), 1000);
+    CHECK_EQ(e.aheadStats().tracks, 2);  // the pad is live after 2 callbacks, though its ring held 30000 frames more
+    CHECK_EQ(e.noteOff(7), 1);
+}
