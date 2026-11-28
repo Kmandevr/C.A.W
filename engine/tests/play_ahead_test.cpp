@@ -314,3 +314,83 @@ TEST(play_ahead_thread_renders_beside_the_callback) {
     std::printf("     %d ahead at the seek, %llu underruns, %llu drops\n", aheadAtSeek,
                 static_cast<unsigned long long>(e.aheadStats().underruns), static_cast<unsigned long long>(e.aheadStats().drops));
 }
+
+// A seek and a Stop while the ahead thread holds the track: what its ring holds fades out over 5 ms before the
+// command lands (never a cut to silence), and the track comes back with a fade in.
+TEST(play_ahead_thread_drop_fades_instead_of_cutting) {
+    AheadScope off(-1);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setPlayAhead(true);
+    CHECK(ok(e.setProject(dcProject())));
+    e.play();
+    std::vector<float> out, l(256), r(256);
+    auto play = [&](int calls) {
+        for (int i = 0; i < calls; ++i) {
+            e.process(l.data(), r.data(), 256);
+            out.insert(out.end(), l.begin(), l.end());
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+    };
+    play(48000 * 4 / 256);  // 3 s untouched, then the lead
+    CHECK_EQ(e.aheadStats().tracks, 1);
+    const float level = out.back();
+    const size_t from = out.size();
+    CHECK(e.play(4));  // a seek
+    play(100);
+    CHECK(e.aheadStats().drops >= 1);
+    {
+        size_t at = from;
+        for (size_t i = from; i < out.size(); ++i)
+            if (std::fabs(out[i] - out[i - 1]) > std::fabs(out[at] - out[at - 1])) at = i;
+        std::printf("     seek: level %g, largest step %g at %zu frames after it (%g -> %g)\n", level,
+                    std::fabs(out[at] - out[at - 1]), at - from, out[at - 1], out[at]);
+    }
+    CHECK(maxStep(out, from - 1, out.size()) <= level / 240.0f * 1.05f);
+    play(48000 * 4 / 256);  // ahead again
+    const size_t stopAt = out.size();
+    CHECK(e.stop());
+    play(100);
+    CHECK(maxStep(out, stopAt - 1, out.size()) <= level / 240.0f * 1.05f);
+    CHECK(out.back() == 0.0f);
+}
+
+// (10) A mute while ahead, then an unmute: the track comes back live as the live path does once its fader reached
+// silence (Silent: its instrument idles, the unmute starts it afresh and chases), so the bits are the live render's.
+TEST(play_ahead_mute_and_unmute_match_a_live_render) {
+    const ProjectSpec p = heavyProject();
+    auto renderWith = [&](int extra) {
+        AheadScope scope(extra);
+        Engine e(48000);
+        CHECK(ok(e.setProject(p)));
+        e.play();
+        std::vector<float> out, l(1000), r(1000);
+        for (int i = 0; i < 150; ++i) {
+            if (i == 40) e.setLayerMix("pad", 0.8, 0.0, true, false);
+            if (i == 75) e.setLayerMix("pad", 0.8, 0.0, false, false);
+            e.process(l.data(), r.data(), 1000);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        return out;
+    };
+    const std::vector<float> live = renderWith(-1), ahead = renderWith(3000);
+    CHECK(firstDiff(live, ahead) == SIZE_MAX);
+}
+
+// The lead (as with the thread: the callback renders a track's first 4096 frames itself, a little more each
+// callback) has the live bits too.
+TEST(play_ahead_lead_renders_the_live_bits) {
+    const ProjectSpec p = heavyProject();
+    const int64_t frames = 48000 * 4;
+    for (int block : {1024, 441}) {
+        const std::vector<float> live = render(p, -1, frames, block);
+        Engine::setPlayAheadLeadForTest(true);
+        for (int extra : {0, 3000}) {
+            Engine::AheadStats st;
+            const std::vector<float> ahead = render(p, extra, frames, block, &st);
+            CHECK(firstDiff(live, ahead) == SIZE_MAX);
+            CHECK(st.tracks >= 1);
+        }
+        Engine::setPlayAheadLeadForTest(false);
+    }
+}

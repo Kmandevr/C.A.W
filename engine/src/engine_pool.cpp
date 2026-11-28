@@ -189,6 +189,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     if (const int extra = playAheadForTest(); extra >= 0) {  // tests: play-ahead on, its rings filled on the callback
         aheadSyncExtra_ = extra;
+        aheadLeadForTest_ = playAheadLeadForTest();
         makePlayAhead(false);
         aheadOn_.store(true, std::memory_order_relaxed);
     }

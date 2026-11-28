@@ -968,6 +968,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native component update");
                 }
             } else if (wantsInserts && ls.inserts) {
+                aheadTouchCtl(ls.slot);  // play-ahead: new values are intent (the track comes back live)
                 ls.inserts->setValues(*w.components);
                 updateAutomation(ls.slot, *ls.inserts, w.id, ls.insertsAutomationKey);
                 ls.inserts->setArmed(w.armed);  // updateCompensation below follows its latency
@@ -991,6 +992,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native instrument update");
                 }
             } else if (pl.track && ls.instrument) {
+                aheadTouchCtl(ls.slot);
                 ls.instrument->setValues(instrumentSpecs(*w.instrument, w.midi));
                 updateAutomation(ls.slot, *ls.instrument, w.id, ls.instrumentAutomationKey);
             }
