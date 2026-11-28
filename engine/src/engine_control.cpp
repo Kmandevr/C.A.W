@@ -16,6 +16,21 @@ bool Engine::aheadTouchCtl(int slot) noexcept {
     return s.aheadOwned.load(std::memory_order_seq_cst);
 }
 
+bool Engine::playAheadIntent(const std::string& layerId, AheadIntent intent) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0 || !ctlTable_ || it->second.slot >= ctlTable_->capacity) return false;
+    LayerState& ls = it->second;
+    Slot& s = ctlSlot(ls.slot);
+    if (intent == AheadIntent::Hold) ++ls.aheadHolds;
+    if (intent == AheadIntent::Release && ls.aheadHolds > 0) --ls.aheadHolds;
+    s.aheadHeld.store(ls.aheadHolds > 0, std::memory_order_relaxed);
+    // Every form is a touch: the audio thread drains the slot if it is ahead and starts its quiet time again (a release
+    // too, so the 3 s count from it). Nothing is allocated or waited for on either side.
+    s.aheadTouch.fetch_add(1, std::memory_order_seq_cst);
+    return true;
+}
+
 int Engine::aheadEdit(const std::string& layerId, ComponentChain* chain, uint32_t at, int kind, int param, double value,
                       bool flag, const std::string& paramId) {
     if (layerId.empty() || !ahead_ || !ctlTable_) return -1;

@@ -1145,6 +1145,22 @@ class Engine implements TempoEngine, MidiSenderHost, MidiClockEngine {
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
   bool releaseTouches() => _b.releaseTouches(_handle) == 1;
 
+  /// Play-ahead (docs/engine.md "Play-ahead"): untouched tracks render ahead on the engine's own thread. The app turns
+  /// it on at start; exports and offline renders make engines of their own, with it off.
+  void setPlayAhead(bool on) => _b.setPlayAhead(_handle, on ? 1 : 0);
+
+  /// The app's intent on [layerId] (API 50; through [PlayAheadIntent], never directly): [AheadIntent.hold] while a
+  /// finger is down on one of its controls or its page is open (counted; one [AheadIntent.release] each), and
+  /// [AheadIntent.edit] before an edit, so the track is live before the value changes.
+  void playAheadIntent(String layerId, AheadIntent intent) {
+    final l = layerId.toNativeUtf8();
+    try {
+      _b.playAheadIntent(_handle, l, intent.index);
+    } finally {
+      calloc.free(l);
+    }
+  }
+
   /// Runs [frames] of audio with no device and returns the left channel: for tests, which play the transport without
   /// a sound card. Never call it while the device is on.
   Float32List pullForTest(int frames) {
@@ -1535,3 +1551,6 @@ Future<Map<String, dynamic>> _assetAnalysis(int address, String path, bool slice
         calloc.free(o);
       }
     });
+
+/// caw_engine_play_ahead_intent's intents, in CAW_AHEAD_RELEASE, _HOLD, _EDIT order.
+enum AheadIntent { release, hold, edit }

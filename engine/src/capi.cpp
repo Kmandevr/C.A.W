@@ -639,6 +639,13 @@ extern "C" void caw_engine_set_play_ahead(CawEngine* e, int32_t on) try {
 
 extern "C" int32_t caw_engine_play_ahead(CawEngine* e) { return e && e->engine && e->engine->playAhead() ? 1 : 0; }
 
+extern "C" int32_t caw_engine_play_ahead_intent(CawEngine* e, const char* layer_id, int32_t intent) try {
+    if (!e || !e->engine || !layer_id || intent < CAW_AHEAD_RELEASE || intent > CAW_AHEAD_EDIT) return 0;
+    return e->engine->playAheadIntent(layer_id, static_cast<caw::Engine::AheadIntent>(intent)) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
 extern "C" int32_t caw_engine_play_ahead_stats(CawEngine* e, CawAheadStats* out) {
     if (!e || !e->engine || !out) return 0;
     const caw::Engine::AheadStats st = e->engine->aheadStats();

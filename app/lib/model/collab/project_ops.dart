@@ -882,6 +882,7 @@ extension ProjectOps on AppState {
         },
     };
     if (index == null) return;
+    aheadIntent.edit(layerId);  // play-ahead: the track is live before the value changes
     if (param != null) {
       engine?.setComponentParam(layerId, index, param, use.params[param] ?? 0);
     } else if (field == OpField.bypass) {
